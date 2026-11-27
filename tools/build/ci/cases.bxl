@@ -18,6 +18,7 @@
 #                  toolchains per platform, the macOS selection, the checks of
 #                  the Python tests' suite (python/tests/families.bzl), the
 #                  python macros' platform default (python_platform_cases.bzl),
+#                  the rust macros' platform default (rust_platform_cases.bzl),
 #                  and the common-task examples' one root of the check set
 #                  (tasks_cases.bzl, over python/docs/task_tree_fixture/).
 #
@@ -30,6 +31,7 @@ load("//release:darwin_libs.bzl", "DARWIN_PACKAGES")
 load(":darwin_cases.bzl", "darwin_answer_cases", "darwin_real_cases", "darwin_table_cases")
 load(":heavy_cases.bzl", "heavy_cases")
 load(":python_platform_cases.bzl", "python_platform_cases")
+load(":rust_platform_cases.bzl", "rust_platform_cases")
 load(":tasks_cases.bzl", "task_tree_cases")
 load(":rules.bzl", "EXCLUDED", "INERT", "WIDEN")
 load(":affected.bxl", "CONFIG")
@@ -781,7 +783,7 @@ def _root_file_cases():
     return out
 
 def _run(ctx):
-    table = _root_file_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _shipped_config_cases() + heavy_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _proto_toolchain_cases(ctx) + _adopted_darwin_cases(ctx) + darwin_table_cases() + python_tests_cases() + python_platform_cases(ctx)
+    table = _root_file_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _shipped_config_cases() + heavy_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _proto_toolchain_cases(ctx) + _adopted_darwin_cases(ctx) + darwin_table_cases() + python_tests_cases() + python_platform_cases(ctx) + rust_platform_cases(ctx)
     real = _real_cases(ctx) + darwin_real_cases(ctx, DARWIN_PACKAGES, "komira//release:mopm_darwin_libs") + darwin_answer_cases(DARWIN_PACKAGES, "komira//release:mopm_darwin_libs") + task_tree_cases(ctx)
     failures = table + real
     if failures:
