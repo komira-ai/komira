@@ -840,15 +840,18 @@ def komira_register_csv(
     has_header: Int32,
     all_varchar: Int32,
 ) abi("C") -> Int32:
-    """Register the CSV file at `path` in the session as the table `name`.
+    """Register the CSV file at `path`, or every file the glob pattern `path`
+    matches, in the session as the table `name`.
 
-    The table is what `read_csv` reads for the same file and dialect: its
-    schema is inferred here from a bounded prefix of an uncompressed file (a
-    compressed file is read whole), and every later query reads the file at
-    that schema. `has_header` and `all_varchar` are `int32_t`; any non-zero
+    The table is what `read_csv` reads for the same path and dialect: its
+    schema is inferred here from a bounded prefix of each uncompressed file (a
+    compressed file is read whole) and merged across the files, and every
+    later query reads the files at that schema. `has_header` and `all_varchar` are `int32_t`; any non-zero
     value is true. Returns `KOMIRA_ERR_NULL_CTX` for a NULL `ctx`,
     `KOMIRA_ERR_NULL_ARG` for a NULL `name` or `path`, and `KOMIRA_ERR_ENGINE`
-    with a last error for a file that cannot be read or inferred, an empty
+    with a last error for a file that cannot be read or inferred, a pattern
+    that matches no file (`CSV_GLOB_NO_MATCH`), files whose columns differ
+    (`CSV_FILES_SCHEMA_MISMATCH`), an empty
     name (`TABLE_NAME_EMPTY`) and a name the session already holds
     (`TABLE_ALREADY_REGISTERED`); nothing is registered then.
     """
@@ -876,12 +879,14 @@ def komira_register_csv(
 
 @export
 def komira_register_json(ctx: Handle, name: CStr, path: CStr) abi("C") -> Int32:
-    """Register the newline-delimited JSON file at `path` in the session as
-    the table `name`.
+    """Register the newline-delimited JSON file at `path`, or every file the
+    glob pattern `path` matches, in the session as the table `name`.
 
-    The table is what `read_json` reads for the same file: its schema is
-    inferred here from the leading records. Errors are those of
-    `komira_register_csv`.
+    The table is what `read_json` reads for the same path: its schema is
+    inferred here from the leading records of each file, with the keys of all
+    of them. Errors are those of `komira_register_csv`, with
+    `JSON_GLOB_NO_MATCH` and `JSON_FILES_SCHEMA_MISMATCH` (a key two files
+    type apart).
     """
     if Int(ctx) == 0:
         return KOMIRA_ERR_NULL_CTX

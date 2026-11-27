@@ -8,9 +8,10 @@ error. Nothing here holds a pointer.
 
 - `register_parquet`: bind Parquet files (one file, a glob or a directory)
   into a session's engine under a name, after reading their footers.
-- `register_csv`, `register_json`: bind one CSV or newline-delimited JSON
-  file into a session's engine under a name, schema inferred now, as
-  `read_csv` and `read_json` bind it.
+- `register_csv`, `register_json`: bind a CSV or newline-delimited JSON
+  file, or every file a glob pattern matches, into a session's engine under
+  a name, schema inferred now across the files, as `read_csv` and
+  `read_json` bind it.
 - `register_arrow`: bind a table already in memory (what
   `komira_register_arrow_stream` drained from an Arrow C stream) into a
   session's engine under a name, replacing a table of that name;
@@ -42,9 +43,7 @@ from arrow.arrow_types import ArrowType
 from aws_core import AwsClock
 from arrow.table import Table
 from arrow.write_target import WriteTarget
-from byte_buffer.file_identity import FileIdentity
 from compression.codec_libraries import probe_codec_libraries
-from csv.csv_options import QUOTE_STYLE_TAG_RFC4180
 from http_core.transport.io_stream import Connector
 from parquet_footers.parquet_files import resolve_parquet_source
 from plan_ir.logical_plan import LogicalPlan
@@ -55,8 +54,6 @@ from plan_wire import (
     plan_from_bytes,
     schema_to_bytes,
 )
-from scan_source.csv_source import CsvSource
-from scan_source.json_source import JsonSource
 from scan_source.source_variant import SourceVariant
 from sdk.parquet_footer import read_parquet_footer
 from sdk_exec.arrow_result import ArrowResult, arrow_result
@@ -65,7 +62,15 @@ from sdk_exec.engine_context import RegisteredTable
 from sdk_exec.engine_sql import STEP_BIND, STEP_EXECUTE, run_sql_with
 from sdk_exec.run_control import RunControl
 from sql.sql_ast import HIVE_PARTITIONING_AUTO, TvfOptions
-from sql.sql_tvf_bind import csv_tvf_schema, json_tvf_schema
+from sql.sql_tvf_bind import (
+    csv_file_sources,
+    csv_files_schema,
+    csv_tvf_schema,
+    json_file_sources,
+    json_files_schema,
+    json_tvf_schema,
+)
+from sql.sql_tvf_files import CSV_GLOB_NO_MATCH, JSON_GLOB_NO_MATCH, tvf_files
 
 from .bindings import forget_table, store_opener
 from .session import Session, step_number
@@ -119,10 +124,14 @@ def register_csv(
     has_header: Bool,
     all_varchar: Bool,
 ) raises:
-    """Bind the CSV file at `path` into `session`'s engine as the table `name`.
+    """Bind the CSV file at `path`, or every file the pattern `path` matches,
+    into `session`'s engine as the table `name`.
 
-    The table is the scan `read_csv` builds for the same file and dialect
-    (`csv_binding_bytes` holds the same source): the schema is inferred now
+    `path` is one file or a pattern of `read_parquet`'s syntax (`*`, `?`,
+    `[...]`, `{a,b}`, one `**`); a pattern's files are read in sorted order
+    as one table, their schemas merged (`sql.sql_tvf_files`). The table is the
+    scan `read_csv` builds for the same name and dialect (for one file,
+    `csv_binding_bytes` holds the same source): the schema is inferred now
     from a bounded prefix of an uncompressed file (a compressed one is read
     whole), `delimiter` and `has_header` are the dialect the file is read
     with, and `all_varchar` makes every column a string. A query on the
@@ -135,34 +144,40 @@ def register_csv(
         `TABLE_NAME_EMPTY` for an empty `name`; `TABLE_ALREADY_REGISTERED`
         when the session already holds a table of that name (of any kind);
         the inference's own error for a file that is missing, unreadable or
-        has no column; `compression: cannot load <soname>: <loader error>`
+        has no column; `CSV_GLOB_NO_MATCH` for a pattern that matches no
+        file; `CSV_FILES_SCHEMA_MISMATCH` for files whose columns differ;
+        `compression: cannot load <soname>: <loader error>`
         when a codec library cannot be loaded. Nothing is registered then.
     """
     probe_codec_libraries()
     _check_name_free(session, name)
-    session.engine.catalog.add_source(
-        name, _csv_source(path, delimiter, has_header, all_varchar)
+    session.engine.catalog.add_sources(
+        name, _csv_sources(path, delimiter, has_header, all_varchar)
     )
 
 
 def register_json(mut session: Session, name: String, path: String) raises:
-    """Bind the newline-delimited JSON file at `path` into `session`'s engine
-    as the table `name`.
+    """Bind the newline-delimited JSON file at `path`, or every file the
+    pattern `path` matches, into `session`'s engine as the table `name`.
 
-    The table is the scan `read_json` builds for the same file
-    (`json_binding_bytes` holds the same source): the schema is inferred now
-    from the leading records. A query on the session then reads it by name,
+    `path` is one file or a pattern, as for `register_csv`. The table is the
+    scan `read_json` builds for the same name (for one file,
+    `json_binding_bytes` holds the same source): the schema is inferred now
+    from the leading records of each file, the keys of all of them in the
+    order first seen. A query on the session then reads it by name,
     found without regard to case.
 
     Raises:
         As `register_csv`, with the JSON inference's own error for a file
-        that is missing, unreadable or holds no object, and `compression:
+        that is missing, unreadable or holds no object, `JSON_GLOB_NO_MATCH`
+        for a pattern that matches no file, `JSON_FILES_SCHEMA_MISMATCH` for a
+        key two files type apart, and `compression:
         cannot load <soname>: <loader error>` when a codec library cannot be
         loaded. Nothing is registered then.
     """
     probe_codec_libraries()
     _check_name_free(session, name)
-    session.engine.catalog.add_source(name, _json_source(path))
+    session.engine.catalog.add_sources(name, _json_sources(path))
 
 
 def register_arrow(mut session: Session, name: String, var table: Table) raises:
@@ -225,39 +240,58 @@ def _check_name_free(session: Session, name: String) raises:
         )
 
 
-def _csv_source(
-    path: String, delimiter: UInt8, has_header: Bool, all_varchar: Bool
-) raises -> SourceVariant:
-    """The source of a CSV file, as `read_csv` binds it: the inferred schema
-    (every column a string with `all_varchar`), the file's mtime as its
-    snapshot, and the dialect it is read with."""
+def _csv_options(
+    delimiter: UInt8, has_header: Bool, all_varchar: Bool
+) -> TvfOptions:
+    """The `read_csv` options of a registration's dialect."""
     var opts = TvfOptions()
     opts.delimiter = delimiter
     opts.has_header = has_header
     opts.all_varchar = all_varchar
-    var schema = csv_tvf_schema(path, opts)
-    var source = CsvSource(
-        String(path),
-        schema^,
-        mtime_ns=UInt64(FileIdentity.stat_path(path).mtime_ns),
-        quote_style_tag=QUOTE_STYLE_TAG_RFC4180,
-        delimiter=delimiter,
-        has_header=has_header,
-    )
-    return SourceVariant(source^)
+    return opts^
+
+
+def _csv_sources(
+    path: String, delimiter: UInt8, has_header: Bool, all_varchar: Bool
+) raises -> List[SourceVariant]:
+    """The sources of the CSV files `path` names (one file, or every file a
+    pattern matches, sorted), as `read_csv` binds them: one schema inferred
+    across the files (every column a string with `all_varchar`), each file's
+    mtime as its snapshot, and the dialect they are read with."""
+    var opts = _csv_options(delimiter, has_header, all_varchar)
+    var files = tvf_files(path, CSV_GLOB_NO_MATCH)
+    var schema = csv_files_schema(files, opts)
+    return csv_file_sources(files, schema, opts)
+
+
+def _json_sources(path: String) raises -> List[SourceVariant]:
+    """The sources of the newline-delimited JSON files `path` names (one file,
+    or every file a pattern matches, sorted), as `read_json` binds them: one
+    schema inferred across the files' leading records, and each file's mtime
+    as its snapshot."""
+    var files = tvf_files(path, JSON_GLOB_NO_MATCH)
+    var schema = json_files_schema(files)
+    return json_file_sources(files, schema)
+
+
+def _csv_source(
+    path: String, delimiter: UInt8, has_header: Bool, all_varchar: Bool
+) raises -> SourceVariant:
+    """The source of the one CSV file `path`, as `read_csv` binds it."""
+    var opts = _csv_options(delimiter, has_header, all_varchar)
+    var files = List[String]()
+    files.append(path.copy())
+    var sources = csv_file_sources(files, csv_tvf_schema(path, opts), opts)
+    return sources.pop(0)
 
 
 def _json_source(path: String) raises -> SourceVariant:
-    """The source of a newline-delimited JSON file, as `read_json` binds it:
-    the schema inferred from the leading records and the file's mtime as its
-    snapshot."""
-    var schema = json_tvf_schema(path)
-    var source = JsonSource(
-        String(path),
-        schema^,
-        mtime_ns=UInt64(FileIdentity.stat_path(path).mtime_ns),
-    )
-    return SourceVariant(source^)
+    """The source of the one newline-delimited JSON file `path`, as
+    `read_json` binds it."""
+    var files = List[String]()
+    files.append(path.copy())
+    var sources = json_file_sources(files, json_tvf_schema(path))
+    return sources.pop(0)
 
 
 def parquet_schema_bytes(path: String) raises -> List[UInt8]:

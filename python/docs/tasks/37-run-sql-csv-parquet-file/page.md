@@ -65,7 +65,7 @@ Output:
 
 ## Notes
 
-- `FROM '<path>'` picks the reader from the extension (`.csv`, `.parquet`, `.json`, `.jsonl` or `.ndjson`; any other extension, such as `.tsv` or `.csv.gz`, is refused by name, so spell the reader out) and names the table after the file, so `FROM 'sales.csv'` is also `sales`. `read_csv('<path>')`, `read_parquet('<path>')` and `read_json('<path>')` say the same by name; `read_parquet` also takes a glob.
+- `FROM '<path>'` picks the reader from the extension (`.csv`, `.parquet`, `.json`, `.jsonl` or `.ndjson`; any other extension, such as `.tsv` or `.csv.gz`, is refused by name, so spell the reader out) and names the table after the file, so `FROM 'sales.csv'` is also `sales`. `read_csv('<path>')`, `read_parquet('<path>')` and `read_json('<path>')` say the same by name; each also takes a glob pattern (`FROM 'sales/*.csv'`), whose files read as one table.
 - A registered table is the same file under a name you choose; use it when a query reads the file more than once or joins it with another.
 - `AVG` over an integer column answers a float, and `MAX` an integer, as in the output above.
 - The DataFrame part is the limit. The SQL sees files and registered tables only: there is no `register_frame` and no `SELECT * FROM df` that finds a Python variable. `probe_dataframe_in_sql.py` beside this page tries that and must fail with the line in `probe_dataframe_in_sql.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it. komira-ai/komira#2391 tracks it.

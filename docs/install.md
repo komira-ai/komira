@@ -188,8 +188,9 @@ The package's [README](../python/README.md), which is also its PyPI description,
   back), or a Mojo runtime of another build already loaded in the process (by Mojo code built with
   another Mojo version: one process holds one Mojo runtime), are the usual causes.
 - **`komira.BindError`** from `register_parquet`, `register_csv` or `register_json`: the file is
-  missing, empty, or not a file of that format the engine can read, or (for CSV and JSON) the
-  session already has a table of that name. The message is the engine's; for `register_parquet` it
+  missing, empty, or not a file of that format the engine can read, a glob pattern matches no file,
+  the files of a pattern have different columns, or (for CSV and JSON) the session already has a
+  table of that name. The message is the engine's; for `register_parquet` it
   names the file by its absolute path, a relative path resolved against the working directory.
 - **`komira.ParseError`** from `sql`: a syntax error. The message starts with `parse: ` and ends with
   `at line <L>, column <C>`, where the statement stopped parsing (newer than 0.1.1623). Other

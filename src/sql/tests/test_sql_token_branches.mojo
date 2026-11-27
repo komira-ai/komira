@@ -31,8 +31,9 @@
 #      another character (the mismatch arm).
 #      (mutants caught: any arm's kind or width changed; `~~*` / `!~~*`
 #      flavours swapped)
-#   8. The refusals: `|`, `:` and an unexpected character, each with its own
-#      message, mid-input and at the end.
+#   8. The refusals: `|`, `:`, `[` (a list, named with its pattern form) and
+#      an unexpected character, each with its own message, mid-input and at
+#      the end.
 #      (mutant caught: a refusal message changed, or a refusal that lexes)
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -238,6 +239,12 @@ def test_refusals_name_what_they_refuse() raises:
     assert_equal(_error_of("a # b"), "SQL syntax error: unexpected character '#'")
     assert_equal(_error_of("!a"), "SQL syntax error: unexpected character '!'")
     assert_equal(_error_of("!"), "SQL syntax error: unexpected character '!'")
+    assert_equal(
+        _error_of("select * from read_csv(['a.csv', 'b.csv'])"),
+        "SQL not supported: a list `[...]`, such as the list of files of"
+        " `read_csv(['a.csv', 'b.csv'])`, is not implemented; name the files"
+        " with a glob pattern, as `read_csv('dir/*.csv')`",
+    )
 
 
 def test_token_fields() raises:

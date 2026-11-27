@@ -120,11 +120,17 @@ class Session:
         header: bool = True,
         all_varchar: bool = False,
     ) -> None:
-        """Registers the local CSV file at `path` as the table `name`, the
-        table SQL's `read_csv` makes of the same file with the same options.
+        """Registers the local CSV file at `path`, or every file the glob
+        pattern `path` matches, as the table `name`, the table SQL's
+        `read_csv` makes of the same path with the same options.
 
-        The engine infers the column names and types now, from the start of
-        the file, and every later query reads the file with them. `delimiter`
+        A pattern takes `*`, `?`, `[...]`, `{a,b}` and one `**` (the folder and
+        every folder below it), as `register_parquet` does; its files, listed in
+        sorted order, are read as one table, and must have the same columns in the
+        same order. The engine infers the column names and types now, from
+        the start of each file (BIGINT in one file and DOUBLE in another make
+        DOUBLE, any other two types VARCHAR), and every later query reads the
+        files with them. `delimiter`
         is the one ASCII character between fields; `header` says whether the
         first line holds the column names; `all_varchar=True` makes every
         column a string. A query on a table registered with `header=False`
@@ -132,7 +138,9 @@ class Session:
         header=false)` does: the engine does not yet name the columns of a
         file without a header.
 
-        A missing, empty or unreadable file, or a `name` the session already
+        A missing, empty or unreadable file, a pattern that matches no file
+        (code `CSV_GLOB_NO_MATCH`), files whose columns differ (code
+        `CSV_FILES_SCHEMA_MISMATCH`), or a `name` the session already
         has a table under (of any kind, in any case), raises `KomiraError`
         with the engine's message, status -3, and registers nothing. A
         relative `path` is resolved against the working directory now and `~`
@@ -150,13 +158,17 @@ class Session:
 
     def register_json(self, name: str, path: str | os.PathLike[str]) -> None:
         """Registers the local newline-delimited JSON file at `path` (one
-        object per line) as the table `name`, the table SQL's `read_json`
-        makes of the same file.
+        object per line), or every file the glob pattern `path` matches, as
+        the table `name`, the table SQL's `read_json` makes of the same path.
 
         The engine infers the column names and types now, from the leading
-        records, and every later query reads the file with them; a key a
-        record lacks is NULL. Failures, paths and argument checks are those
-        of `register_csv`. Needs libkomira ABI 1.5.
+        records of each file, and every later query reads the files with
+        them; the table has the keys of every file, and a key a record lacks
+        is NULL. A pattern is that of `register_csv`; one that matches no file
+        has code `JSON_GLOB_NO_MATCH`, and a key two files give types no type
+        holds (other than BIGINT and DOUBLE, which make DOUBLE) code
+        `JSON_FILES_SCHEMA_MISMATCH`. Other failures, paths and argument checks
+        are those of `register_csv`. Needs libkomira ABI 1.5.
         """
         _check_name(name)
         path = _local_path(path)

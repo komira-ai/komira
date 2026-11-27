@@ -112,6 +112,7 @@ mojo_library(
         "tests/test_sql_token_branches.mojo",
         "tests/test_sql_token_number_shapes.mojo",
         "tests/test_sql_tvf_bind_direct.mojo",
+        "tests/test_sql_tvf_patterns.mojo",
     ],
     visibility = ["PUBLIC"],
 )

@@ -562,8 +562,9 @@ class Native:
         header: bool,
         all_varchar: bool,
     ) -> None:
-        """Registers the CSV file at `path` in the context as the table
-        `name`, read with `delimiter` and, when `header`, its first line as
+        """Registers the CSV file at `path`, or the files the glob pattern
+        `path` matches, in the context as the table `name`, read with
+        `delimiter` and, when `header`, its first line as
         the column names; `all_varchar` makes every column a string. The
         library infers the schema now."""
         op = "komira_register_csv"
@@ -573,8 +574,9 @@ class Native:
         self._check(op, ctx, fn(ctx, c_name, c_path, d, h, a))
 
     def register_json(self, ctx: int, name: str, path: str | os.PathLike[str]) -> None:
-        """Registers the newline-delimited JSON file at `path` in the context
-        as the table `name`. The library infers the schema now."""
+        """Registers the newline-delimited JSON file at `path`, or the files
+        the glob pattern `path` matches, in the context as the table `name`.
+        The library infers the schema now."""
         op = "komira_register_json"
         fn = self._fn(op)
         self._check(op, ctx, fn(ctx, _c_string("name", name), _c_path(path)))
