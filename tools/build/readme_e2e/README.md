@@ -166,7 +166,7 @@ its `.conda` and do not run.
 
 The release workflow (`.github/workflows/release.yml`; [docs/ci.md](../../../docs/ci.md#the-mopm-jobs))
 builds `//release/readme_e2e/verify:all` with `-c komira_release.staged=stage` at the version of its run
-four times, on four sets, each written into `release/staged_set` on the runner and uploaded to the farm,
+five times, in five jobs, on three kinds of set, each written into `release/staged_set` on the runner and uploaded to the farm,
 which has no network:
 
 | job | the set | the README the examples come from |

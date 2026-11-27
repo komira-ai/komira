@@ -634,7 +634,7 @@ jobs:
         if: always()
         run: ./buck2 kill || true
 
-  # THE PROD PUBLISH, in six jobs (see the header). Every one runs only on a
+  # THE PROD PUBLISH, in six jobs and the served check (see the header). Every one runs only on a
   # push to main (a manual run never reaches the environment `prod`), and
   # `prod-stage` needs the set `mopm-stage` tried and passed the README e2e on, and
   # `beta-commit`, so a set that did not pass, or that beta did not commit, is never staged

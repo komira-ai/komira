@@ -117,7 +117,7 @@ test "a served job that is missing, twice, or under another needs, gate, environ
         try wf.expectRefused(ar, try wf.replaced(ar, text, "  prod-stage:\n", "  " ++ name ++ ":\n" ++ runs ++ "\n  prod-stage:\n"), name ++ " is defined more than once");
         // after its own registry's commit: not before it, not after the other's
         const other = comptime if (std.mem.eql(u8, r, "beta")) "prod" else "beta";
-        for ([_][]const u8{ "    needs: " ++ r ++ "-test\n", "    needs: " ++ other ++ "-commit\n", "    needs: [" ++ r ++ "-commit, release]\n", "" }) |w|
+        inline for ([_][]const u8{ "    needs: " ++ r ++ "-test\n", "    needs: " ++ other ++ "-commit\n", "    needs: [" ++ r ++ "-commit, release]\n", "" }) |w|
             try wf.expectRefused(ar, try wf.replaced(ar, text, head, "  " ++ name ++ ":\n" ++ w ++ head[("  " ++ name ++ ":\n    needs: " ++ r ++ "-commit\n").len..]), name ++ ": needs is not exactly `needs: " ++ r ++ "-commit`");
         // a push to main and nothing else
         for ([_][]const u8{ "    if: always()\n", "    if: github.event_name == 'push'\n", "" }) |w|
@@ -139,7 +139,7 @@ test "each edit of a served job's steps that breaks the contract is refused with
     inline for (SERVED_REGISTRIES) |r| {
         const name = r ++ "-served-readmes";
         const other = comptime if (std.mem.eql(u8, r, "beta")) "prod" else "beta";
-        const run = servedRun(r);
+        const run = comptime servedRun(r);
         const served_step = "      - name: download what " ++ r ++ " serves and check it against the plan\n" ++ run ++ nl;
         const e2e_step = "      - name: the README e2e against what " ++ r ++ " serves\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ wf.PROD_E2E_RUN ++ nl ++ wf.E2E_ASSERT ++ nl;
         const download = "          name: mopm-staged-${{ github.sha }}\n          path: ${{ runner.temp }}/" ++ r ++ "-served\n";
