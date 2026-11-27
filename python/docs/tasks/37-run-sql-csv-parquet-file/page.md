@@ -75,7 +75,7 @@ Output:
 ## Related
 
 - [How do I read a CSV file?](../1-read-csv-file/page.md) (rank 1, works)
-- How do I read a Parquet file? (rank 15, works; no page yet)
+- [How do I read a Parquet file?](../15-read-parquet-file/page.md) (rank 15, works)
 - [How do I join two tables on a key?](../10-join-two-tables-on-key/page.md) (rank 10, works)
 - [How do I group by a column and sum another column?](../4-group-by-column-and-sum/page.md) (rank 4, works)
 - [How do I write a table to Parquet?](../27-write-table-parquet/page.md) (rank 27, partial)

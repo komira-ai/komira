@@ -97,4 +97,4 @@ Output:
 - How do I rank rows within a group? (rank 49, works; no page yet)
 - How do I filter rows by a date range? (rank 83, works)
 - How do I add days to a date or take the difference between dates? (rank 79, partial; no page yet)
-- How do I read a Parquet file? (rank 15, works; no page yet)
+- [How do I read a Parquet file?](../15-read-parquet-file/page.md) (rank 15, works)
