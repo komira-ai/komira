@@ -1,7 +1,8 @@
-// The quickstart runs as a user runs it: saved as quickstart.mjs in an empty
-// project directory whose node_modules holds the package by its name (the
-// staged package directory, with dist/, the pinned apache-arrow and the
-// linux-x64 platform package as npm lays them out), and started there with
+// The quickstart runs as a user's program does: saved as quickstart.mjs in an
+// empty project directory whose node_modules/@komira-ai/komira is a link to
+// the staged package directory (package.json and dist/, with the pinned
+// apache-arrow and the linux-x64 platform package in its own node_modules,
+// where the package resolves them), and started there with
 // `node quickstart.mjs`. What it prints is examples/quickstart.expected with
 // the package's version, the ABI table's version and the directory's real
 // path put in.
@@ -12,16 +13,16 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { copyFileSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { scratch } from "../helpers.ts";
 import { fill } from "./shown.ts";
 import { EXAMPLE, EXPECTED, MANIFEST, ROOT, abiVersion, staged } from "./staged.ts";
 
 test("node quickstart.mjs in a new project prints the expected output", () => {
-  const project = realpathSync(mkdtempSync(path.join(tmpdir(), "komira-quickstart-")));
+  const project = realpathSync(scratch());
   const installed = path.join(project, "node_modules", MANIFEST.name);
   mkdirSync(path.dirname(installed), { recursive: true });
   symlinkSync(ROOT, installed, "dir");

@@ -98,6 +98,8 @@ test("fill puts in each value wherever its placeholder stands, and leaves the ot
     "0.1.9\n1009 <cwd>/x 0.1.9\n",
   );
   assert.equal(fill("<cwd>", {}), "<cwd>");
+  // A value is put in as it is: `$&` and `$$` are not replacement patterns.
+  assert.equal(fill("<cwd>/x", { cwd: "/d/$&/$$" }), "/d/$&/$$/x");
 });
 
 test("abiVersionOf reads major * 1000 + minor from the table's first line, and refuses any other first line", () => {

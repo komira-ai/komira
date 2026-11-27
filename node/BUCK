@@ -518,10 +518,11 @@ node_binding_test(
     },
 )
 
-# The example runs as a user runs it (tests/quickstart/run.test.ts): `node
-# quickstart.mjs` in a new project whose node_modules holds the package by its
-# name, the compiled dist/ with the pinned apache-arrow and the platform
-# package as npm lays them out, and what it prints is the expected output.
+# The example runs as a user's program does (tests/quickstart/run.test.ts):
+# `node quickstart.mjs` in a new project whose node_modules/@komira-ai/komira
+# links to the staged package (package.json and the compiled dist/, with the
+# pinned apache-arrow and the platform package in its own node_modules), and
+# what it prints is the expected output.
 # The package loads libkomira as it does for a user, reading the host's real
 # /proc/cpuinfo, so this is an integration test of the farm's Linux x64 hosts.
 node_binding_test(
@@ -534,7 +535,7 @@ node_binding_test(
         _PLATFORM + "package.json": "tests/fixtures/platform_package.json",
     } | {
         s: s
-        for s in _QUICKSTART_SRCS
+        for s in _QUICKSTART_SRCS + ["tests/helpers.ts"]
     },
     deps = ["//third_party/node:apache-arrow"],
 )

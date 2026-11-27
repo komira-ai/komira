@@ -148,8 +148,8 @@ Node.js 24.
 This program is [`node/examples/quickstart.mjs`](../node/examples/quickstart.mjs), and what it
 prints is [`quickstart.expected`](../node/examples/quickstart.expected). On every pull request,
 `//node:quickstart_integration` runs it with `node quickstart.mjs` in a new project directory whose
-`node_modules` holds the package, its platform package and `apache-arrow` as npm lays them out, and
-compares every line it prints with `quickstart.expected` (the version, the ABI version and the
+`node_modules/@komira-ai/komira` is the built package (with its platform package and `apache-arrow`
+in the package's own `node_modules`), and compares every line it prints with `quickstart.expected` (the version, the ABI version and the
 directory put in). The two blocks above are those files, the second with the ABI version filled in,
 and `//node:quickstart_test` fails when they differ.
 
@@ -198,12 +198,13 @@ session's own, so the event loop never waits on the engine. The package's
 ## When something goes wrong
 
 - **`npm error code E404`** for `@komira-ai/komira`: nothing is published yet (above).
-- **`km.LibraryLoadError`** with `komira has no native package for ...`: this machine is not a
-  [supported platform](#what-it-needs).
+- **`km.LibraryLoadError`** with `komira has no native package for ...`: this machine is not one the
+  package has a platform package for (Windows, macOS on Intel, Linux with musl).
 - **`km.LibraryLoadError`** with `... which holds libkomira for this platform, is not installed`: npm
   left the platform package out, after `npm install --omit=optional` for example, or the
   `node_modules` was copied from another kind of machine. Install `@komira-ai/komira` again on this
-  machine, without that option.
+  machine, without that option. On Linux arm64 and macOS on Apple silicon the same message means
+  their platform packages are not built yet (specified), and installing again does not help.
 - **`km.UnsupportedCpuError`**: the CPU lacks a feature of x86-64-v3. The message lists the missing
   flags as `/proc/cpuinfo` spells them. komira raises it before it opens the engine, instead of
   letting the engine stop on an illegal instruction.

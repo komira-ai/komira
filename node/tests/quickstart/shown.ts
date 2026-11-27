@@ -68,10 +68,10 @@ export function docShowsBlock(shown: Shown, docText: string, wantText: string): 
   return `${head}line ${best.agree + 1} of the closest block reads '${best.have}', ${shown.source}'s reads '${best.want}'`;
 }
 
-/** `text` with every `<key>` of `values` replaced by its value; other placeholders are left as written. */
+/** `text` with every `<key>` of `values` replaced by its value, taken literally; other placeholders are left as written. */
 export function fill(text: string, values: Readonly<Record<string, string>>): string {
   let out = text;
-  for (const [key, value] of Object.entries(values)) out = out.replaceAll(`<${key}>`, value);
+  for (const [key, value] of Object.entries(values)) out = out.replaceAll(`<${key}>`, () => value);
   return out;
 }
 
