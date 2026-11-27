@@ -94,6 +94,7 @@ CORPUS_TABLES = {
     "numeric_envelope": ["t"],
     "ops_controls": ["T", "U", "C", "B"],
     "order_by_limit": ["T", "U"],
+    "pivot_unpivot": ["SALES", "P", "Q", "W", "EMPTY"],
     "predicates_three_valued": ["T", "S"],
     "range_frames": ["R", "Q"],
     "scalar_fn": ["T", "E"],

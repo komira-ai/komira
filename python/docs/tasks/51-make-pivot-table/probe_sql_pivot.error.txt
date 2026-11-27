@@ -1,1 +1,0 @@
-UnsupportedOperation: parse: SQL not supported: PIVOT (reshaping a relation between long and wide form). at line 1, column 21

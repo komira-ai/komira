@@ -1,6 +1,6 @@
 # How do I reshape long data to wide?
 
-Group by the row key and take one `max(CASE WHEN ... THEN value END)` per new column in SQL, or merge one filtered frame per new column on the pandas-shaped frame; komira has no `PIVOT` or `pivot` yet.
+In SQL, `PIVOT (max(score) FOR quarter IN ('q1', 'q2', 'q3'))` makes one column per listed value, grouped by the other columns; on the pandas-shaped frame, merge one filtered frame per new column. komira has no pandas-shaped `pivot` yet.
 
 <!-- include example.py -->
 ```python
@@ -19,10 +19,18 @@ Path("scores.csv").write_text(
     "Cy,q2,2\n"
 )
 
-# SQL: one aggregate over CASE WHEN per new column, grouped by the row key.
-# A name with no row for a quarter gets NULL.
+# SQL PIVOT: one column per listed quarter, one row per name. A name with
+# no row for a quarter gets NULL.
 with komira.Session() as s:
     s.register_csv("scores", "scores.csv")
+    wide = s.sql(
+        "SELECT * FROM scores PIVOT (max(score) FOR quarter IN ('q1', 'q2', 'q3'))"
+        " ORDER BY name"
+    )
+    print(wide.to_arrow().to_pylist())
+
+    # The same table by hand: one aggregate over CASE WHEN per new column,
+    # grouped by the row key.
     wide = s.sql(
         "SELECT name,"
         " max(CASE WHEN quarter = 'q1' THEN score END) AS q1,"
@@ -47,14 +55,15 @@ Output:
 ```text
 [{'name': 'Ana', 'q1': 10, 'q2': 20, 'q3': 30}, {'name': 'Bo', 'q1': 5, 'q2': None, 'q3': 7}, {'name': 'Cy', 'q1': 1, 'q2': 2, 'q3': None}]
 [{'name': 'Ana', 'q1': 10, 'q2': 20, 'q3': 30}, {'name': 'Bo', 'q1': 5, 'q2': None, 'q3': 7}, {'name': 'Cy', 'q1': 1, 'q2': 2, 'q3': None}]
+[{'name': 'Ana', 'q1': 10, 'q2': 20, 'q3': 30}, {'name': 'Bo', 'q1': 5, 'q2': None, 'q3': 7}, {'name': 'Cy', 'q1': 1, 'q2': 2, 'q3': None}]
 ```
 
 ## Notes
 
-- `max(CASE WHEN quarter = 'q1' THEN score END)` picks the `q1` score of each name, and NULL where the name has no `q1` row (`Bo` has no `q2`, `Cy` has no `q3`). With more than one row per name and quarter, use `sum` or another aggregate in place of `max`.
-- The pandas-shaped form starts from the distinct row keys and does a left `merge` of each quarter's rows, so a missing quarter is a null too.
-- The new column names are spelled out in the query. komira has no `PIVOT` clause and no `pivot` that reads them from the data: komira-ai/komira#2399 (SQL) and komira-ai/komira#2400 (the frames). `probe_pivot.py` (SQL) and `probe_pivot_method.py` (pandas-shaped) beside this page try those forms and must fail with the lines in `probe_pivot.error.txt` and `probe_pivot_method.error.txt`. The day one of them runs, this page's check goes red, and the page and the catalogue status change with it.
-- An aggregate's `FILTER (WHERE ...)` clause is refused today, so `CASE WHEN` is the form to use.
+- `PIVOT` groups by every column it does not name (`name`; `quarter` is the FOR column and `score` is inside the aggregate) and names each new column by its value. A name with no row for a quarter gets NULL (`Bo` has no `q2`, `Cy` has no `q3`). With more than one row per name and quarter, use `sum` or another aggregate in place of `max`.
+- The new column names are the values listed after `IN`; komira does not read them from the data, so the statement form `PIVOT scores ON quarter USING max(score)` is refused. The value pivoted must be a BIGINT or a DOUBLE: over a text value, `max` is refused by name.
+- `max(CASE WHEN quarter = 'q1' THEN score END)` per column is the same table by hand. An aggregate's `FILTER (WHERE ...)` clause is refused today, so `CASE WHEN` is the form to use there.
+- The pandas-shaped form starts from the distinct row keys and does a left `merge` of each quarter's rows, so a missing quarter is a null too. komira has no pandas-shaped `pivot` that reads the columns from the data yet: komira-ai/komira#2400. `probe_pivot_method.py` beside this page tries it and must fail with the line in `probe_pivot_method.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
 - Rows come back in no promised order unless the query sorts them: add `ORDER BY` or `sort_values`.
 
 ## Related

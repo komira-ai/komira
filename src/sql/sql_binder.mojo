@@ -12,7 +12,7 @@ from plan_ir.logical_plan import (
 from sql.sql_ast import (
     FROM_LESS_RELATION, JK_ANTI, JK_CROSS, JK_FULL, JK_LEFT, JK_RIGHT, JK_SEMI,
     STMT_COPY, STMT_CREATE_TABLE_AS, STMT_QUERY, SUBQ_DERIVED, SUBQ_NOT_IN, SUBQ_SCALAR,
-    SUBQ_EXCEPT, SUBQ_INTERSECT, SUBQ_UNION, SUBQ_UNION_ALL, SX_COLUMN, SelectStmt, SqlStatement,
+    SUBQ_EXCEPT, SUBQ_INTERSECT, SUBQ_PIVOT, SUBQ_UNION, SUBQ_UNION_ALL, SUBQ_UNPIVOT, SX_COLUMN, SelectStmt, SqlStatement,
     _UNION_RESULT_ALIAS,
 )
 from sql.sql_bind_aggregate import (
@@ -38,6 +38,7 @@ from sql.sql_bind_corr_scalar import (
     scalar_body_is_correlated, scalar_outer_of,
 )
 from sql.sql_bind_set_op import _bind_select_with_union
+from sql.sql_bind_pivot import bind_pivot
 from sql.sql_bind_window_order import (
     _has_window, _bind_window_projection, _order_key_name, _OK_COLUMN, _OK_OUTPUT,
     _classify_order_keys, _order_output_column, _bind_order,
@@ -212,6 +213,15 @@ def _bind_query(
                     rename.append(Expr.alias(Expr.col_ref(orig), sd.col_names[ci]))
                 dplan = LogicalPlan.project(rename^, dplan^)
             cte_scope.add(sd.derived_alias, dplan^)
+            prebound.append(Expr.literal(ScalarValue.from_int64(0)))  # placeholder
+        elif sd.kind == SUBQ_PIVOT or sd.kind == SUBQ_UNPIVOT:
+            # `FROM <relation> PIVOT / UNPIVOT (...)`: a derived relation
+            # registered under its key, lowered by `sql_bind_pivot`. Its
+            # relation is a lower-index entry when it is itself derived.
+            var pplan = bind_pivot(
+                sd, catalog, cte_scope, prebound, sd.kind == SUBQ_UNPIVOT
+            )
+            cte_scope.add(sd.derived_alias, pplan^)
             prebound.append(Expr.literal(ScalarValue.from_int64(0)))  # placeholder
         elif (
             sd.kind == SUBQ_UNION_ALL

@@ -1,0 +1,6 @@
+region	p	v
+	pen	2
+east	ink	5
+east	pen	10
+north	ink	9
+west	pen	10
