@@ -249,9 +249,10 @@ project and import the package by its name. Each pinned Node.js line, 22.23.5, 2
 `:install_test_macos_arm64` is the same test on macOS arm64, on a macOS worker, in npm.yml's macOS
 job only: npm installs `:package_with_macos_arm64`, resolves its platform package to
 `:package_macos_arm64` (the only one whose `os` and `cpu` match), and the same files run on the
-macOS Node.js of each line, run by the macOS build of `node_act`. The load of the ad-hoc-signed addon
-and `libkomira.dylib` from the files npm wrote is the check that npm left them no quarantine
-attribute for the loader to refuse.
+macOS Node.js of each line, run by the macOS build of `node_act`. They load the ad-hoc-signed addon
+and `libkomira.dylib` from the files npm wrote, which the loader refuses if it will not run them (an
+invalid signature, or a quarantine Gatekeeper rejects): the load is the test of those files, not a
+read of their attributes.
 
 | file | what it proves |
 |---|---|

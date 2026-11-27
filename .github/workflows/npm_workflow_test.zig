@@ -11,12 +11,13 @@
 //!    runner ubuntu-24.04;
 //!  - each job's exact `if:` (a push to main; for `publish` also `build` and `test` passed and the gate's
 //!    output `true`, and for `smoke` the publish passed, whatever the macOS job did), its exact `needs`
-//!    (`test` and `build-macos-arm64` need `build`, `publish` needs those three, `smoke` needs `build`, the
-//!    macOS job and `publish`), its environment (`build` for the three farm jobs, `npm` for `publish` alone,
+//!    (`test` and `build-macos-arm64` need `build`, `publish` needs those three, `smoke` needs `build` and
+//!    `publish`), its environment (`build` for the three farm jobs, `npm` for `publish` alone,
 //!    none for `smoke`) and its exact permissions (`contents: read` and `id-token: write` for the farm jobs
 //!    and `publish`, `{}` for `smoke`);
-//!  - the macOS package: `publish` and `smoke` take the set with the macOS package exactly when
-//!    `build-macos-arm64` succeeded, and the set without it otherwise, and only that job keeps that set, after
+//!  - the macOS package: `publish` takes the set with the macOS package exactly when `build-macos-arm64`
+//!    succeeded, and the set without it otherwise, and hands that choice on as its output `set`, which
+//!    `smoke` downloads (so a re-run cannot point the smoke at another set); only that job keeps that set, after
 //!    its install test (//node:install_test_macos_arm64) and then the set's build, with no step it may skip or
 //!    pass over (no `continue-on-error`, no step condition but the `always()` of Stop buck2): so the main
 //!    package names the macOS package only when its install test passed;
@@ -58,8 +59,12 @@ const GATE_OUTPUT = "      publish: ${{ steps.gate.outputs.publish }}";
 const PUBLISH_RUN = "        run: '\"$RUNNER_TEMP/npm/tools/npm_smoke\" publish --set \"$RUNNER_TEMP/npm/set/npm_set.json\" --dir \"$RUNNER_TEMP/npm/set\" --node \"$RUNNER_TEMP/npm/tools/node/bin/node\" --npm \"$RUNNER_TEMP/npm/tools/npm\" --work \"$RUNNER_TEMP/npm/publish\"'";
 const PUBLISH_WORD = "npm_smoke\" publish";
 
-/// The set `publish` and `smoke` download: the one with the macOS package exactly when the macOS job succeeded.
-const SET_CHOICE = "          name: ${{ needs.build-macos-arm64.result == 'success' && format('npm-set-macos-arm64-{0}', github.sha) || format('npm-set-{0}', github.sha) }}";
+/// The set `publish` downloads: the one with the macOS package exactly when the macOS job succeeded; its
+/// output `set`, the same choice; and the smoke's download of that output.
+const CHOICE = "${{ needs.build-macos-arm64.result == 'success' && format('npm-set-macos-arm64-{0}', github.sha) || format('npm-set-{0}', github.sha) }}";
+const SET_CHOICE = "          name: " ++ CHOICE;
+const SET_OUTPUT = "      set: " ++ CHOICE;
+const SMOKE_SET = "          name: ${{ needs.publish.outputs.set }}";
 /// The macOS job's install test, the set it then builds, and the artifact it keeps, in that order.
 const MAC_INSTALL_TEST = "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 -c komira_release.mac_tree=true -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} //node:install_test_macos_arm64";
 const MAC_SET_BUILD = "          args: build -c komira_release.mac_tree=true -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} //release:npm_packages_macos_arm64 --out ${{ runner.temp }}/npm/macos-set";
@@ -92,7 +97,7 @@ const WANT = [_]Want{
     .{ .name = "test", .needs = "    needs: build", .gate = PUSH_GATE, .environment = "build", .permissions = &FARM_PERMISSIONS, .permissions_text = "contents: read and id-token: write", .farmless = false },
     .{ .name = MACOS_JOB, .needs = "    needs: build", .gate = PUSH_GATE, .environment = "build", .permissions = &FARM_PERMISSIONS, .permissions_text = "contents: read and id-token: write", .farmless = false },
     .{ .name = "publish", .needs = "    needs: [build, test, build-macos-arm64]", .gate = PUBLISH_GATE, .environment = "npm", .permissions = &FARM_PERMISSIONS, .permissions_text = "contents: read and id-token: write", .farmless = true },
-    .{ .name = "smoke", .needs = "    needs: [build, build-macos-arm64, publish]", .gate = SMOKE_GATE, .environment = null, .permissions = &NO_PERMISSIONS, .permissions_text = "{}", .farmless = true },
+    .{ .name = "smoke", .needs = "    needs: [build, publish]", .gate = SMOKE_GATE, .environment = null, .permissions = &NO_PERMISSIONS, .permissions_text = "{}", .farmless = true },
 };
 
 fn isComment(line: []const u8) bool {
@@ -250,11 +255,12 @@ pub fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
         if (std.mem.eql(u8, w.name, "smoke") and !mentions(job, SMOKE_WORD)) return "npm.yml: smoke does not run npm_smoke smoke";
         // the set with the macOS package: taken by the publish and the smoke exactly when the macOS job
         // succeeded, and kept by that job alone
-        const takes = std.mem.eql(u8, w.name, "publish") or std.mem.eql(u8, w.name, "smoke");
-        if (takes and !has(job, SET_CHOICE)) return try std.fmt.allocPrint(ar, "npm.yml: {s} does not take the set with the macOS package exactly when build-macos-arm64 succeeded, and the set without it otherwise", .{w.name});
+        const takes = std.mem.eql(u8, w.name, "publish");
+        if (takes and !(has(job, SET_CHOICE) and has(job, SET_OUTPUT))) return "npm.yml: publish does not take the set with the macOS package exactly when build-macos-arm64 succeeded, and the set without it otherwise, and hand that choice on as its output set";
+        if (std.mem.eql(u8, w.name, "smoke") and !has(job, SMOKE_SET)) return "npm.yml: smoke does not download the set the publish took (needs.publish.outputs.set)";
         for (job) |line| {
             if (std.mem.indexOf(u8, line, MAC_SET_WORD) == null) continue;
-            const ok = if (takes) std.mem.eql(u8, line, SET_CHOICE) else std.mem.eql(u8, w.name, MACOS_JOB) and std.mem.eql(u8, line, MAC_KEEP);
+            const ok = if (takes) std.mem.eql(u8, line, SET_CHOICE) or std.mem.eql(u8, line, SET_OUTPUT) else std.mem.eql(u8, w.name, MACOS_JOB) and std.mem.eql(u8, line, MAC_KEEP);
             if (!ok) return try std.fmt.allocPrint(ar, "npm.yml: {s} names the set with the macOS package other than as its keeper (build-macos-arm64) or the publish's choice", .{w.name});
         }
     }
@@ -379,7 +385,7 @@ test "publish and smoke run only when the gate is true, and each job's needs are
     try expectRefused(ar, try editJob(ar, text, "test", PUSH_GATE ++ "\n", PUBLISH_GATE ++ "\n"), "npm.yml: the condition of test is not `" ++ PUSH_GATE[4..] ++ "`");
     // the publish without the install test, the smoke before the publish
     try expectRefused(ar, try editJob(ar, text, "publish", "    needs: [build, test, build-macos-arm64]\n", "    needs: [build, build-macos-arm64]\n"), "npm.yml: publish does not have `needs: [build, test, build-macos-arm64]`");
-    try expectRefused(ar, try editJob(ar, text, "smoke", "    needs: [build, build-macos-arm64, publish]\n", "    needs: [build, test]\n"), "npm.yml: smoke does not have `needs: [build, build-macos-arm64, publish]`");
+    try expectRefused(ar, try editJob(ar, text, "smoke", "    needs: [build, publish]\n", "    needs: [build, test]\n"), "npm.yml: smoke does not have `needs: [build, publish]`");
     // the publish not waiting for the macOS job, whose result chooses the set
     try expectRefused(ar, try editJob(ar, text, "publish", "    needs: [build, test, build-macos-arm64]\n", "    needs: [build, test]\n"), "npm.yml: publish does not have `needs: [build, test, build-macos-arm64]`");
     try expectRefused(ar, try editJob(ar, text, MACOS_JOB, "    needs: build\n", ""), "npm.yml: build-macos-arm64 does not have `needs: build`");
@@ -412,19 +418,26 @@ test "each job's environment and permissions are exact: npm and id-token for the
     try expectRefused(ar, try editJob(ar, text, MACOS_JOB, "    environment: build\n", "    environment: npm\n"), "npm.yml: build-macos-arm64 does not run in the environment build");
 }
 
-test "the publish and the smoke take the set with the macOS package exactly when build-macos-arm64 succeeded" {
+test "the publish takes the set with the macOS package exactly when build-macos-arm64 succeeded, and the smoke reads its choice" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try read(ar);
     // always the set with the macOS package: a failed macOS job would leave the publish nothing to take,
     // and a main package naming a package whose install test failed
-    try expectRefused(ar, try editJob(ar, text, "publish", SET_CHOICE ++ "\n", "          name: npm-set-macos-arm64-${{ github.sha }}\n"), "npm.yml: publish does not take the set with the macOS package exactly when build-macos-arm64 succeeded, and the set without it otherwise");
+    const refused = "npm.yml: publish does not take the set with the macOS package exactly when build-macos-arm64 succeeded, and the set without it otherwise, and hand that choice on as its output set";
+    try expectRefused(ar, try editJob(ar, text, "publish", SET_CHOICE ++ "\n", "          name: npm-set-macos-arm64-${{ github.sha }}\n"), refused);
     // the set with it unless the macOS job failed: a cancelled or skipped one would still choose it
     const not_failed = "          name: ${{ needs.build-macos-arm64.result != 'failure' && format('npm-set-macos-arm64-{0}', github.sha) || format('npm-set-{0}', github.sha) }}\n";
-    try expectRefused(ar, try editJob(ar, text, "publish", SET_CHOICE ++ "\n", not_failed), "npm.yml: publish does not take the set with the macOS package exactly when build-macos-arm64 succeeded, and the set without it otherwise");
-    // the smoke always on the set without it: it would hold the registry to another set than the publish's
-    try expectRefused(ar, try editJob(ar, text, "smoke", SET_CHOICE ++ "\n", "          name: npm-set-${{ github.sha }}\n"), "npm.yml: smoke does not take the set with the macOS package exactly when build-macos-arm64 succeeded, and the set without it otherwise");
+    try expectRefused(ar, try editJob(ar, text, "publish", SET_CHOICE ++ "\n", not_failed), refused);
+    // the choice not handed on, or another choice handed on than the one the publish took
+    try expectRefused(ar, try editJob(ar, text, "publish", SET_OUTPUT ++ "\n", ""), refused);
+    try expectRefused(ar, try editJob(ar, text, "publish", SET_OUTPUT ++ "\n", "      set: npm-set-${{ github.sha }}\n"), refused);
+    // the smoke always on the set without it, or choosing again from the macOS job's result, which a re-run
+    // of failed jobs can change after the publish: it would hold the registry to another set than the publish's
+    const smoke_refused = "npm.yml: smoke does not download the set the publish took (needs.publish.outputs.set)";
+    try expectRefused(ar, try editJob(ar, text, "smoke", SMOKE_SET ++ "\n", "          name: npm-set-${{ github.sha }}\n"), smoke_refused);
+    try expectRefused(ar, try editJob(ar, text, "smoke", SMOKE_SET ++ "\n", SET_CHOICE ++ "\n"), smoke_refused);
     // a second keeper of the set with the macOS package
     const keep = "      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n" ++ MAC_KEEP ++ "\n          path: x\n      - name: Stop buck2\n";
     try expectRefused(ar, try editJob(ar, text, "test", "      - name: Stop buck2\n", keep), "npm.yml: test names the set with the macOS package other than as its keeper (build-macos-arm64) or the publish's choice");

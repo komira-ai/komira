@@ -1690,7 +1690,7 @@ kept, so two runs never publish at once.
 | `test` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm: downloads the two artifacts, builds `//release:npm_packages[npm_set.json]` again with the build job's stamp, and runs `npm_smoke verify --built`: the kept directory is its record, and the record is the one this stamp builds, so the tarballs the install test installs (built from the same stamp, reproducible) are the kept ones. Then builds `//node:install_test` with the same stamp: npm installs the tarballs into an empty project and the package's tests import it by its name, on Node.js 22, 24 and 26. No npm identity. |
 | `build-macos-arm64` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm with its macOS workers, beside `test`, with the build job's stamp ([below](#the-macos-package-in-npmyml)): builds `//node:install_test_macos_arm64` for darwin-arm64, then `//release:npm_packages_macos_arm64`, holds the directory to its record (`npm_smoke verify`), and keeps it as `npm-set-macos-arm64-<sha>` for 14 days. No npm identity. |
 | `publish` | `npm` | `contents: read`, `id-token: write` (trusted publishing) | only when `build`'s output `publish` is `true`, after `build` and `test` passed and `build-macos-arm64` ended, whatever its result (a cancelled run publishes nothing); no checkout, no farm, no build, no token. Downloads the set with the macOS package (`npm-set-macos-arm64-<sha>`) when `build-macos-arm64` succeeded and the set without it (`npm-set-<sha>`) otherwise, and the tools, and runs `npm_smoke publish`: holds the directory to `npm_set.json` again, then, for each platform package and last the main package (which names them in its `optionalDependencies`), asks the registry for that version and runs `npm publish <file> --access public` when it is absent. |
-| `smoke` | none | none | only when `publish` ran and succeeded, with the set `publish` took; no checkout, no identity. Runs `npm_smoke smoke`: installs `@komira-ai/komira` at exactly the set's version from the registry into an empty project (`npm install --ignore-scripts --engine-strict`, tried up to five times, 30 seconds apart, while the registry catches up), holds the `integrity` npm recorded in `package-lock.json` for each package to `npm_set.json`, and, with no step between, runs `SELECT 1 AS n` through the installed package, which must print the set's version, `n` and `1`. The one job whose test reaches the network, and it reaches only the npm registry. |
+| `smoke` | none | none | only when `publish` ran and succeeded, with the set `publish` took (its output `set`); no checkout, no identity. Runs `npm_smoke smoke`: installs `@komira-ai/komira` at exactly the set's version from the registry into an empty project (`npm install --ignore-scripts --engine-strict`, tried up to five times, 30 seconds apart, while the registry catches up), holds the `integrity` npm recorded in `package-lock.json` for each package to `npm_set.json`, and, with no step between, runs `SELECT 1 AS n` through the installed package, which must print the set's version, `n` and `1`. The one job whose test reaches the network, and it reaches only the npm registry. |
 
 **The set and its record.** `//release:npm_packages` ([release/npm_packages.bzl](../release/npm_packages.bzl))
 is one directory: each package's tarball, under the name `npm pack` gives it, and `npm_set.json`, which
@@ -1754,8 +1754,8 @@ farm-connect passes it the macOS worker set and hosts (`FARM_DARWIN_ARM64_PROPER
    package to the macOS one by `os` and `cpu`, and `node/install/`'s tests import it by its name on the
    macOS Node.js 22, 24 and 26 (`//third_party/node:node_22_macos_arm64` and the others, unpacked by the
    macOS build of `node_act`). The tests load the addon and `libkomira.dylib`, ad-hoc signed by the linker
-   and nothing else, from the files npm wrote: npm sets no quarantine attribute, so the loader refuses
-   nothing, and the load is what checks it.
+   and nothing else, from the files npm wrote; the loader refuses a library it will not run (an invalid
+   signature, or a quarantine Gatekeeper rejects), so the load is the test of those files.
 2. `//release:npm_packages_macos_arm64` from the same stamp: the macOS package configured for darwin-arm64 by
    the set's transition, as step 1 configured it, so its tarball is the one step 1 installed; the linux-x64
    package and the main package are built on the Linux workers. `npm_smoke verify` holds the directory to
@@ -1765,7 +1765,10 @@ farm-connect passes it the macOS worker set and hosts (`FARM_DARWIN_ARM64_PROPER
 package names the linux-x64 package alone) otherwise: when the install test failed, the build failed, or the
 job ran out of its 120 minutes, nothing was kept, and the main package of the release does not name the
 macOS package. The Linux packages are published whatever the Macs did; `publish` waits for the job to end. A
-failed macOS job turns the run red. Both steps build with `-c komira_release.mac_tree=true`, the gate of the
+failed macOS job turns the run red. `publish` hands its choice on as its output `set`, which `smoke` reads,
+so a re-run of failed jobs that re-runs the macOS job but not `publish` cannot point the smoke at another set
+than the one published; a re-run of `publish` itself after the macOS job's result changed stops at the main
+package (the registry holds that version with other bytes), and the next code commit publishes again. Both steps build with `-c komira_release.mac_tree=true`, the gate of the
 targets that need the macOS execution platform; pr.yml's last step configures and analyses the macOS package,
 its install test and the set with it (`release/darwin_analysis.bxl`), running no action, so a change that
 leaves them unanalysable fails its pull request.

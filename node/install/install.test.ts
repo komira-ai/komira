@@ -4,9 +4,11 @@
 // npm_install_test), and this file, in that project, imports the package by
 // its name: what it loads is what npm laid out under node_modules, and nothing
 // of the repository. It runs on each pinned Node.js line, on Linux x64 and on
-// macOS arm64 (:install_test_macos_arm64, on a macOS worker), where the load
-// of the ad-hoc-signed addon and libkomira from the files npm wrote is the
-// check that npm left them no quarantine for the loader to refuse.
+// macOS arm64 (:install_test_macos_arm64, on a macOS worker), where it loads
+// the ad-hoc-signed addon and libkomira from the files npm wrote: the loader
+// refuses a library it will not run (an invalid signature, or a quarantine
+// Gatekeeper rejects), so the load is the test of those files, not a read of
+// their attributes.
 
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, realpathSync } from "node:fs";
