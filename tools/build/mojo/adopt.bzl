@@ -27,7 +27,9 @@ With a `readme`, the README's examples are compiled and run as a `mojo_library`'
 example fails that target. The examples compile against `lib`, the gated file, so they run once the
 package's tests have passed; the package's tests are not run again, and the README gate does not
 gate `lib` or the dependents (it is part of `[tests]`, as in a `mojo_library`). The `readme_tool`
-is set by this macro, as `mojo_library`'s is.
+is set by this macro, as `mojo_library`'s is. A source-first README lists its example files with
+`readme_examples = glob(["examples/*.mojo"])`, as a `mojo_library`'s does: each file is then its own
+welded test against `lib`, and the README is held to the files (`readme.bzl`).
 
 What it does not carry, because buildrules' rules do not: the branch coverage gate, the coverage runs
 of the README and the mutation sub-targets of a `mojo_library`. A library adopted here has none of
@@ -271,15 +273,11 @@ def _impl(ctx):
     gate = readme_gate(ctx, ctx.attrs.toolchain[MojoToolchainInfo], import_name, pkgs, adopt_link_tail(c_link), run_args([], system_libs), True, adopt_readme_test, owner = bool(native.c_direct), rerun = rerun_env(ctx))
     test_subtargets = {}
     if gate != None:
-        markers = markers + [gate[0]]
+        markers = markers + [gate.marker]
         test_subtargets["readme"] = [DefaultInfo(
-            default_output = gate[0],
-            other_outputs = [gate[1]],
-            sub_targets = {
-                "file": [DefaultInfo(default_output = ctx.attrs.readme)],
-                "generated": [DefaultInfo(default_output = gate[1])],
-                "objects": [DefaultInfo(default_output = gate[3])],
-            },
+            default_output = gate.marker,
+            other_outputs = [gate.generated],
+            sub_targets = gate.sub_targets,
         )]
     return [
         DefaultInfo(
@@ -319,6 +317,8 @@ _adopted = rule(
         "native": attrs.option(attrs.label(), default = None),
         "native_static": attrs.bool(default = False),
         "readme": attrs.option(attrs.source(), default = None),
+        # A source-first README's example files (readme.bzl).
+        "readme_examples": attrs.option(attrs.list(attrs.source()), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
         "srcs": attrs.list(attrs.source()),
         "test_optimization_level": attrs.string(default = TEST_OPT_LEVEL),
@@ -338,6 +338,8 @@ def _mojo_adopted_library(**kwargs):
         if "readme_tool" in kwargs:
             fail("{}: `readme_tool` is set by mojo_adopted_library with the README; do not pass it".format(kwargs.get("name", "mojo_adopted_library")))
         kwargs["readme_tool"] = _README_TOOL
+    elif kwargs.get("readme_examples") != None:
+        fail("{}: `readme_examples` lists the files a README shows, and there is no `readme`".format(kwargs.get("name", "mojo_adopted_library")))
     _adopted(**kwargs)
 
 mojo_adopted_library = declares_docs(_mojo_adopted_library)
