@@ -538,9 +538,10 @@ for the owner's ruling while they land.
   `extension/icu/icu_extension.cpp` at the [v1.5.6 tag](https://github.com/duckdb/duckdb/tree/v1.5.6).
 - DuckDB documentation, "Timestamp with time zone functions", "Timestamp types" and "Time zones"
   ([1.5 documentation](https://duckdb.org/docs/1.5/sql/functions/timestamptz.html)).
-- pandas documentation, [`Series.dt.tz_localize`](https://pandas.pydata.org/docs/reference/api/pandas.Series.dt.tz_localize.html)
-  and [`Series.dt.tz_convert`](https://pandas.pydata.org/docs/reference/api/pandas.Series.dt.tz_convert.html).
-- polars documentation, [`Expr.dt.replace_time_zone`](https://docs.pola.rs/api/python/stable/reference/expressions/api/polars.Expr.dt.replace_time_zone.html)
-  and [`Expr.dt.convert_time_zone`](https://docs.pola.rs/api/python/stable/reference/expressions/api/polars.Expr.dt.convert_time_zone.html).
+- pandas documentation (3.0), the API reference pages `pandas.Series.dt.tz_localize` and
+  `pandas.Series.dt.tz_convert`.
+- polars documentation (1.44), the API reference pages `polars.Expr.dt.replace_time_zone` and
+  `polars.Expr.dt.convert_time_zone`; polars source `crates/polars-expr/src/dispatch/temporal.rs` at the
+  [py-1.44.2 tag](https://github.com/pola-rs/polars/tree/py-1.44.2).
 - Arrow [`format/Schema.fbs`](https://github.com/apache/arrow/blob/main/format/Schema.fbs), the `Timestamp` table.
 - RFC 8536 and RFC 9636 (TZif); the IANA tz database, release 2026e.
