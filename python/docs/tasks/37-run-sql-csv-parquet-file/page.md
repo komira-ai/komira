@@ -70,7 +70,7 @@ Output:
 - `AVG` over an integer column answers a float, and `MAX` an integer, as in the output above.
 - The DataFrame part is the limit. The SQL sees files and registered tables only: there is no `register_frame` and no `SELECT * FROM df` that finds a Python variable. `probe_dataframe_in_sql.py` beside this page tries that and must fail with the line in `probe_dataframe_in_sql.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it. komira-ai/komira#2391 tracks it.
 - The workaround is the last block of the program: run the frame (`materialize()`), write the Arrow table with `pyarrow.parquet.write_table`, and register that file. A pandas or polars DataFrame in memory goes the same way, through `pyarrow.Table.from_pandas` or `polars.DataFrame.write_parquet`; neither is installed for this page's check, so it is not run here.
-- Files on `s3://`, `gs://` and `az://` URLs, and on `https://`, are not read yet: komira-ai/komira#2337 and komira-ai/komira#2345.
+- Parquet objects on `s3://` and Azure Blob are bound to a name with `Session.add_sql_binding` and `komira.files` ([rank 31](../31-read-parquet-csv-files-s3/page.md)); a URL written in the SQL text, `gs://` and `https://` are not read yet: komira-ai/komira#2337 and komira-ai/komira#2345.
 
 ## Related
 

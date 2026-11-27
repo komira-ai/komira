@@ -8,7 +8,8 @@ take. Building any of them does no I/O and calls no library: nothing is sent to
 the catalog until a statement that binds it names one of its tables.
 
 Nothing public takes one yet: the names here are private until
-`Session.add_sql_binding` and `read_table`, which bind them, export them.
+`Session.add_sql_binding` and `read_table` can bind them (the library binds
+only file sources today), which exports them.
 
 Arguments are checked when the value is built: a wrong type raises
 `TypeError`, and a wrong value raises `ValueError`. A credential that does not

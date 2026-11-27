@@ -180,6 +180,39 @@ package, and each compares what it prints with that file, every line.
   - A missing, empty or unreadable file raises `komira.KomiraError` with the
     engine's message, which names the file. So does a name the session
     already has a table under, in any case, and nothing is registered.
+- `Session.add_sql_binding(name, source)` binds the SQL name `name` to a
+  source, which `sql` then reads as a table (newer than 0.1.1623). A source
+  is `komira.files(location, *, credential=komira.AMBIENT, endpoint=None,
+  region=None, url_style=None)`: Parquet files at a local path or glob, or
+  Parquet objects of an object store, one key or a glob of keys.
+  - `s3://bucket/key` (`s3a://` too) is read with
+    `komira.AwsKeys(name, *, key_id, secret, session_token=None)` and a
+    `region`; `az://container/blob` (`abfs://`, `abfss://`) with
+    `komira.AzureKey(name, *, account, key)` or
+    `komira.AzureSas(name, *, account, sas)`. `endpoint` reaches a store
+    that is not the provider's (`http://` for an emulator, in plaintext), and
+    `url_style` is `"vhost"` or `"path"`, as DuckDB's S3 settings are named.
+  - A credential has a name of your choice. Binding seals the credential's
+    value on the session under that name, then binds the source, which the
+    library is given with the name only; every table bound under that name
+    reads with the value sealed last. The footers are read, and a glob
+    listed, when the source is bound.
+  - A secret never reaches a log record or an error message, `repr` shows
+    it as `<set>`, and a credential or a source refuses `pickle` and `copy`.
+  - Binding a name again replaces its table, of any kind. A refused binding
+    binds nothing and leaves the name's table as it was, with the engine's
+    named refusal: `CredentialsError` for `AMBIENT` on an object store
+    (`CREDENTIALS_NOT_FOUND`: the engine does not read the process's own
+    identity yet) or a credential the engine refuses, `UnsupportedOperation`
+    for a location no store reads (`STORAGE_URL_REFUSED`: `gs://` among
+    them), `StorageError` for an S3 source with no region, `BindError` for
+    the rest (`ANONYMOUS` or `AwsProfile` on `s3://`, a location ending in
+    `/`, a bucket another table reads with other settings).
+  - A credential of another store than the location's, and a setting or a
+    credential other than `AMBIENT` on a local path, raise `ValueError` when
+    the source is built.
+  - The page [How do I read Parquet or CSV files from S3?](https://github.com/komira-ai/komira/blob/main/python/docs/tasks/31-read-parquet-csv-files-s3/page.md)
+    shows a complete program, which the pull request check runs.
 - `Session.sql(query)` runs one SQL statement over the session's tables and
   returns a `komira.Result`. The engine turns the text into a plan before
   `sql` returns, so a syntax error, an unknown table or column, or a construct
@@ -315,6 +348,10 @@ by `import komira`.
   has and lacks is recorded in
   [docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md).
 - Iceberg tables: reading one, and writing to one by its name in a catalog.
+- Of object stores: `gs://` and `https://` locations, CSV or JSON objects,
+  a URL written in the SQL text (`FROM 's3://...'`), the DataFrame readers
+  on a URL, `COPY ... TO` a URL, the process's own identity (`AMBIENT`), and
+  `ANONYMOUS` or `AwsProfile` on `s3://` (komira-ai/komira#2337).
 
 The DataFrame verbs not built yet come in later releases of this same package.
 
@@ -339,16 +376,17 @@ The package's layout and API are designed in
 | `komira/_accessors.py` | `s.str` and `s.dt`: each method one expression node (`StringFn`, `StringOp`, `StringFnN`, `Substring`, `Regexp`, `Extract`) over the Series' node |
 | `komira/_refusals.py` | the refusal tables of the frame, the GroupBy, the Series, the `.str` and `.dt` accessors and the module ([docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md)) |
 | `komira/_capture/` | the capture of Python user functions (private; no query runs them yet): `udf`, the decorator that records a function's call shape (`scalar`, `map_batches_column`, `row`, `map_batches_frame`), its return type (`return_dtype=`, `schema=` or the type hints) and, for `row` and `map_batches_frame`, its read set (`columns=`, a `TypedDict` or dataclass annotation, or for `row` a scan of the function's bytecode, refused with `UDF_READ_SET_REQUIRED` when the reads are not bounded); `Udf.spec()`, the `UdfSpec` the plan encodes, with the function's code as a bundle named by its sha256 or as a reference into an installed distribution; and `write_code`, which writes each code object under its digest. Calling a decorated function calls the function, which is how the komira/python worker runs it. It imports no `ctypes` |
-| `komira/_credentials.py` | the credential objects (private; nothing public takes one yet): `AwsKeys`, `AwsProfile`, `GcpServiceAccount`, `GcpToken`, `AzureKey`, `AzureSas`, `BearerToken` and `OAuth2ClientCredentials`, each a name and its fields, checked when built (the name's grammar and reserved names; each value a non-empty `str` of at most 4096 bytes of UTF-8), with every secret shown as `<set>` by `repr` and no pickle or copy; and the built-in `AMBIENT` and `ANONYMOUS` ([docs/design/credentials_and_writes.md](https://github.com/komira-ai/komira/blob/main/docs/design/credentials_and_writes.md), decision 1) |
+| `komira/_credentials.py` | the credential objects, which `komira.files` takes (public: those a file source takes; `BearerToken` and `OAuth2ClientCredentials`, for a catalog, stay private): `AwsKeys`, `AwsProfile`, `GcpServiceAccount`, `GcpToken`, `AzureKey`, `AzureSas`, `BearerToken` and `OAuth2ClientCredentials`, each a name and its fields, checked when built (the name's grammar and reserved names; each value a non-empty `str` of at most 4096 bytes of UTF-8), with every secret shown as `<set>` by `repr` and no pickle or copy; and the built-in `AMBIENT` and `ANONYMOUS` ([docs/design/credentials_and_writes.md](https://github.com/komira-ai/komira/blob/main/docs/design/credentials_and_writes.md), decision 1) |
 | `komira/_iceberg.py` | the Iceberg sources (private; nothing public takes one yet): `iceberg(uri, *, warehouse=None, credential=AMBIENT, signing=None, access_delegation="vended-credentials")`, an `IcebergCatalog`; `catalog.table(name)`, an `IcebergTable`, with `name` as `"namespace.table"` or a tuple of namespace levels and the table; and `SigV4(region, service)`. Each is checked when built (an http or https URI with a host and no user, password, query or fragment; a credential that fits the catalog: `AMBIENT` or `AwsKeys` with SigV4, and `AMBIENT`, `ANONYMOUS`, `BearerToken` or `OAuth2ClientCredentials` without; `access_delegation` `vended-credentials` or `none`), does no I/O and loads no library; a catalog or a table shows its credential's secrets as `<set>` and refuses pickle and copy ([docs/design/iceberg_tables.md](https://github.com/komira-ai/komira/blob/main/docs/design/iceberg_tables.md), "What the user sees") |
 | `komira/_arrow.py` | the Arrow C stream of a query: `ArrowArrayStream`, the C struct for `ctypes`, and `import_stream`, which hands a filled stream to pyarrow's public `RecordBatchReader.from_stream` through a PyCapsule with no destructor, and releases it itself if pyarrow did not take it |
 | `komira/_errors.py` | `KomiraError`, its subclasses, and `error_class`, which picks one from an engine refusal's code and step |
-| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.8 (`sql_stream`, `register_csv`, `register_json`, the run handle calls `run_new`, `run_cancel`, `run_progress` and `sql_stream_run` of 1.6, the last error's code and step, and `plan_stream`, the plan door of 1.8, among them) |
+| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.10 (`sql_stream`, `register_csv`, `register_json`, the run handle calls `run_new`, `run_cancel`, `run_progress` and `sql_stream_run` of 1.6, the last error's code and step, `plan_stream`, the plan door of 1.8, and `add_sql_binding` of 1.10 among them) |
 | `komira/_run.py` | `run_sql`, which `Session.sql` runs a query with on ABI 1.6: the call `komira_sql_stream_run` on a helper thread under a run handle of its own, while the calling thread waits, reads the handle's progress for the `progress` callback, and cancels the handle when anything is raised on it (a Ctrl-C's `KeyboardInterrupt`, the callback's exception) |
 | `komira/_plan/` | the plan encoder: `encode_plan`, a plan of `komira/_ops` as the `komira.plan.v1` `WirePlanEnvelope` the plan door takes, every node with the output schema the engine derives for it and every scan reading a source libkomira described (`parquet_source`, `binding_source`); calls of user functions (`UdfCall`, `MapBatches`) as `WireUdfApply` and `WireMapBatchesNode` over the envelope's `UdfRef` list, one per distinct function, each with the komira/python descriptor; `encode_expr`, an expression node as a `WireExpr`; and `expr_field`, the output field the engine derives for it. It writes no SQL text. It imports the generated plan modules, which the wheel ships at `komira/plan/v1/`; `import komira` does not import it |
 | `komira/pl/` | `komira.pl`, the polars-shaped DataFrame surface ([docs/design/dataframe_surface.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface.md)): lazy frames and expressions over a plan of `komira/_ops`; `collect()` encodes it with `komira/_plan` and runs it through `komira_plan_stream`. It writes no SQL text and imports no polars. A name it does not define raises `AttributeError`, with the refusal tables' message for theirs. Its verbs are described, one page each, in `python/docs/pl/` |
 | `komira/_runtime.py` | `check_loaded_runtime`, called before libkomira is opened: it compares the Mojo runtime libraries already loaded in the process with komira's copies by build id, and the GNU build id reader it uses |
-| `komira/_session.py` | `Session` with `register_parquet`, `register_csv`, `register_json` and `sql`, `Result` (whose notebook display reads its stream at most one batch past the tenth row and puts back a reader that replays those batches before the rest, so the result stays unread), and the session's private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal`; the private calls a frame makes (`_parquet_schema`, `_csv_binding`, `_json_binding`, `_plan_stream`, `_plan_render`), each under the session's lock; and `default_session()`, the process's default session |
+| `komira/_sources.py` | `files(location, *, credential=AMBIENT, endpoint=None, region=None, url_style=None)`, a file source: checked when built (types; a credential that fits the location's store; no setting on a local path, which is made absolute), its credential's secrets shown as `<set>`, no pickle or copy, and `_wire()`, its `WireBoundSource` bytes (src/plan_proto/bound_source.proto), which carry the credential's name and never a value |
+| `komira/_session.py` | `Session` with `register_parquet`, `register_csv`, `register_json`, `add_sql_binding` (which seals the source's credential, then calls `komira_add_sql_binding`, under one hold of the lock) and `sql`, `Result` (whose notebook display reads its stream at most one batch past the tenth row and puts back a reader that replays those batches before the rest, so the result stays unread), and the session's private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal`; the private calls a frame makes (`_parquet_schema`, `_csv_binding`, `_json_binding`, `_plan_stream`, `_plan_render`), each under the session's lock; and `default_session()`, the process's default session |
 | `komira/py.typed` | the PEP 561 marker |
 | `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the tests that encode or run a plan; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |
@@ -514,7 +552,8 @@ How the loader behaves:
   parses the message to choose the class.
 - **Private calls.** `parquet_schema`, `csv_binding`, `json_binding`,
   `plan_render`, `plan_stream`, `credential_add`, `credential_set` and
-  `credential_seal` exist only on `_native.Native`. They have no public API and no stability
+  `credential_seal` exist only on `_native.Native`, and so does
+  `Native.add_sql_binding`, which the public `Session.add_sql_binding` makes. They have no public API and no stability
   promise.
 
 The tests run on Linux x86_64 as build actions, so building a test's target

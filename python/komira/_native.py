@@ -2,7 +2,7 @@
 
 `load` opens the library from a directory, once per process, checks that its
 ABI major version is the one this package was written for, and binds the
-calls of `_FUNCTIONS` (the newest from ABI 1.8); every failure is a `LibraryLoadError` that says which
+calls of `_FUNCTIONS` (the newest from ABI 1.10); every failure is a `LibraryLoadError` that says which
 library and why. `Native` holds the bound calls and turns their status codes
 into `KomiraError`, with the context's last error, read with the two-call
 protocol, as the message, and, from ABI 1.7, its code and step as the error's
@@ -59,6 +59,9 @@ DataFrame's terminal sends (komira/_frame.py). The run handle calls of ABI 1.6 (
 `run_cancel`, `run_progress`) and `sql_stream_run`, which runs a statement
 under a handle that another thread cancels and reads the progress of, are what
 `_run.run_sql` makes; `has` says whether the library has a call.
+`add_sql_binding` (ABI 1.10) binds a SQL name to the bytes of a
+`WireBoundSource`, which `Session.add_sql_binding` makes of a `komira.files`
+source after it seals the source's credential.
 """
 
 from __future__ import annotations
@@ -87,7 +90,8 @@ KOMIRA_ERR_BUFFER_TOO_SMALL = -4
 # A run stopped by komira_run_cancel (ABI 1.6).
 KOMIRA_ERR_CANCELLED = -6
 
-# The scope a credential is sealed in: the session (src/so/abi/komira.tsv).
+# The scope a credential is sealed in and a source is bound in: the session
+# (src/so/abi/komira.tsv).
 KOMIRA_BIND_SESSION = 1
 
 # The step of a refusal, komira_last_error_step's answer, as the name the
@@ -163,6 +167,11 @@ _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
         8,
         ctypes.c_int32,
         [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64, ctypes.POINTER(_arrow.ArrowArrayStream)],
+    ),
+    "komira_add_sql_binding": (
+        10,
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint64, ctypes.c_int32],
     ),
 }
 
@@ -688,6 +697,16 @@ class Native:
         stream = _arrow.ArrowArrayStream()
         self._check(op, ctx, fn(ctx, data, len(data), ctypes.byref(stream)))
         return stream
+
+    def add_sql_binding(self, ctx: int, name: str, source: bytes, scope: int = KOMIRA_BIND_SESSION) -> None:
+        """Binds the SQL name `name` on the context to the source `source`,
+        the bytes of a `WireBoundSource` (which may hold NUL bytes), in
+        `scope`, replacing any table of that name. Needs ABI 1.10."""
+        op = "komira_add_sql_binding"
+        fn = self._fn(op)
+        if not isinstance(source, bytes):
+            raise TypeError("source must be bytes, not {}".format(type(source).__name__))
+        self._check(op, ctx, fn(ctx, _c_string("name", name), source, len(source), scope))
 
     def _out(self, op: str, ctx: int, call: Callable[[ctypes._CFuncPtr, object, int, object], int]) -> bytes:
         """The bytes of the two-call `op`, or its KomiraError."""
