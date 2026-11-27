@@ -209,14 +209,14 @@ GRAPH_JSON_MOJO_1_2_0 = r'''{
       "kind": "lib",
       "root": "src/zlib/src/zlib",
       "srcs": [
-        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "d16afac82d5c8ca46ec620dd671830a2bbaf654ecb3e465f6b2ff299a160584f"},
-        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "e51ec456ca1df8df4f608883c118665a6f1cede91d55fa4dfdfd3301e90df148"}
+        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "0119e9a7efc28400ab692b924492d62e240245938f6d92ae6367d7e39891360e"},
+        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "99b80cc1871cce189c06c41127710fe0506af933ea56d2e628c8dfac54d61132"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["zlib.mojoc"],
-      "key": "b9f45f370b42bdbfd49250010fd2b7c0db9d10de149dfb6e7880eb9928bd0799"
+      "key": "de3b091ed5a5acf6ba2f1266977c99e8730a39c8759b31facd32e35075740f35"
     },
     {
       "id": "komira-ai/zlib@0.1.0#mojo1.2.0/test:src/zlib/tests/test_zlib_into.mojo",
@@ -232,7 +232,7 @@ GRAPH_JSON_MOJO_1_2_0 = r'''{
       "loads": ["libzlib"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_zlib_into.pass"],
-      "key": "dedc31833edc9bff6b5444eb372adeb038a99e7af585689444cdcd802071f257"
+      "key": "e2ef0eb05f259dd1ed9b9176c03e8c6ab84c21cb655fe5a7b622110e9ce98814"
     }
   ]
 }
@@ -265,14 +265,14 @@ GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
       "kind": "lib",
       "root": "src/zlib/src/zlib",
       "srcs": [
-        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "d16afac82d5c8ca46ec620dd671830a2bbaf654ecb3e465f6b2ff299a160584f"},
-        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "e51ec456ca1df8df4f608883c118665a6f1cede91d55fa4dfdfd3301e90df148"}
+        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "0119e9a7efc28400ab692b924492d62e240245938f6d92ae6367d7e39891360e"},
+        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "99b80cc1871cce189c06c41127710fe0506af933ea56d2e628c8dfac54d61132"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["zlib.mojoc"],
-      "key": "0885a1d4044fefa0cb9b625b450769fe379ef5c8f1747c6e5552b05b7dce5646"
+      "key": "2622b4470b4904531b746319715aa170d1351c9ab8d007e654cb39441818c580"
     },
     {
       "id": "komira-ai/zlib@0.1.0#mojo1.2.0/test:src/zlib/tests/test_zlib_into.mojo",
@@ -288,7 +288,7 @@ GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
       "loads": ["libzlib"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_zlib_into.pass"],
-      "key": "4e939896b53e69573ea6123547c8327b19ef517a67be5e84d9c19ffd8962e1bf"
+      "key": "bf3474eb727c088567bc04847375f732229a148d7d83506908568d90bca3e5df"
     }
   ]
 }
@@ -319,14 +319,14 @@ GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
       "kind": "lib",
       "root": "src/zlib/src/zlib",
       "srcs": [
-        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "d16afac82d5c8ca46ec620dd671830a2bbaf654ecb3e465f6b2ff299a160584f"},
-        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "e51ec456ca1df8df4f608883c118665a6f1cede91d55fa4dfdfd3301e90df148"}
+        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "0119e9a7efc28400ab692b924492d62e240245938f6d92ae6367d7e39891360e"},
+        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "99b80cc1871cce189c06c41127710fe0506af933ea56d2e628c8dfac54d61132"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["zlib.mojoc"],
-      "key": "e403cad3cfcd827bbfae4f5580e614eb0f303b1cd8d82ebb219a6296f99839b2"
+      "key": "7a2c0127ea8af30cea376933564b8ce0d2d7f53a1fce3fe88029e1c544344498"
     },
     {
       "id": "komira-ai/zlib@0.1.0#mojo1.2.0/test:src/zlib/tests/test_zlib_into.mojo",
@@ -342,7 +342,7 @@ GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
       "loads": ["libzlib"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_zlib_into.pass"],
-      "key": "a46becea96ed5c562b7fc76265d127dc39ce96c43f097815061a4ee0c1f9e577"
+      "key": "2797de09a56084842b2300a22ac26d4f1f109028c4897a13a745ed8bc53543aa"
     }
   ]
 }

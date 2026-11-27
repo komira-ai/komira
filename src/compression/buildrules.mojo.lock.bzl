@@ -703,7 +703,7 @@ GRAPH_JSON_MOJO_1_2_0 = r'''{
       "srcs": [
         {"path": "src/compression/src/compression/__init__.mojo", "sha256": "1d998f4a5eb72de170aada59404bed9815a32a2279fda2c954e9c8cb43cc0be3"},
         {"path": "src/compression/src/compression/bzip2_buffer.mojo", "sha256": "73329b584862a26d85aafb6494164d15837c551fe153fec6007749ceb27fcc09"},
-        {"path": "src/compression/src/compression/codec_libraries.mojo", "sha256": "ba0c966271aa54b030a7db55d33460d3d143460aa30be9ded425ec8d67d20402"},
+        {"path": "src/compression/src/compression/codec_libraries.mojo", "sha256": "c49687fe72cd9491cd10992513754b98fd438aa87a03058b8dfa7ac0786e3daf"},
         {"path": "src/compression/src/compression/compression.mojo", "sha256": "45282e0a07889b28421fac9deaeb66c36d513ebce24afb59ac3854aebc862386"},
         {"path": "src/compression/src/compression/compression_codecs.mojo", "sha256": "c0c9dfcbc589d78f648711c911489b63e6b11229a9d984f4b22febe7808f9d91"},
         {"path": "src/compression/src/compression/lz4.mojo", "sha256": "b9c820b88939315dbe45dce540e932336a0ad7abedab895b9a92e9def1e06744"},
@@ -800,7 +800,7 @@ GRAPH_JSON_MOJO_1_2_0 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/compression/tests/test_codec_libraries.mojo", "sha256": "78b8514b84d5cf351b6af9d44ec84c92715cfeebc5672546de7fb061216a5a99"}
+        {"path": "src/compression/tests/test_codec_libraries.mojo", "sha256": "3937668bfd963d3ec344aca84866bed8e9c8f74039ceeecba4ad01421ba54e86"}
       ],
       "deps": ["komira-ai/compression@0.1.0#mojo1.2.0/lib"],
       "natives": [
@@ -921,7 +921,7 @@ GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
       "srcs": [
         {"path": "src/compression/src/compression/__init__.mojo", "sha256": "1d998f4a5eb72de170aada59404bed9815a32a2279fda2c954e9c8cb43cc0be3"},
         {"path": "src/compression/src/compression/bzip2_buffer.mojo", "sha256": "73329b584862a26d85aafb6494164d15837c551fe153fec6007749ceb27fcc09"},
-        {"path": "src/compression/src/compression/codec_libraries.mojo", "sha256": "ba0c966271aa54b030a7db55d33460d3d143460aa30be9ded425ec8d67d20402"},
+        {"path": "src/compression/src/compression/codec_libraries.mojo", "sha256": "c49687fe72cd9491cd10992513754b98fd438aa87a03058b8dfa7ac0786e3daf"},
         {"path": "src/compression/src/compression/compression.mojo", "sha256": "45282e0a07889b28421fac9deaeb66c36d513ebce24afb59ac3854aebc862386"},
         {"path": "src/compression/src/compression/compression_codecs.mojo", "sha256": "c0c9dfcbc589d78f648711c911489b63e6b11229a9d984f4b22febe7808f9d91"},
         {"path": "src/compression/src/compression/lz4.mojo", "sha256": "b9c820b88939315dbe45dce540e932336a0ad7abedab895b9a92e9def1e06744"},
@@ -1018,7 +1018,7 @@ GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/compression/tests/test_codec_libraries.mojo", "sha256": "78b8514b84d5cf351b6af9d44ec84c92715cfeebc5672546de7fb061216a5a99"}
+        {"path": "src/compression/tests/test_codec_libraries.mojo", "sha256": "3937668bfd963d3ec344aca84866bed8e9c8f74039ceeecba4ad01421ba54e86"}
       ],
       "deps": ["komira-ai/compression@0.1.0#mojo1.2.0/lib"],
       "natives": [
@@ -1137,7 +1137,7 @@ GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
       "srcs": [
         {"path": "src/compression/src/compression/__init__.mojo", "sha256": "1d998f4a5eb72de170aada59404bed9815a32a2279fda2c954e9c8cb43cc0be3"},
         {"path": "src/compression/src/compression/bzip2_buffer.mojo", "sha256": "73329b584862a26d85aafb6494164d15837c551fe153fec6007749ceb27fcc09"},
-        {"path": "src/compression/src/compression/codec_libraries.mojo", "sha256": "ba0c966271aa54b030a7db55d33460d3d143460aa30be9ded425ec8d67d20402"},
+        {"path": "src/compression/src/compression/codec_libraries.mojo", "sha256": "c49687fe72cd9491cd10992513754b98fd438aa87a03058b8dfa7ac0786e3daf"},
         {"path": "src/compression/src/compression/compression.mojo", "sha256": "45282e0a07889b28421fac9deaeb66c36d513ebce24afb59ac3854aebc862386"},
         {"path": "src/compression/src/compression/compression_codecs.mojo", "sha256": "c0c9dfcbc589d78f648711c911489b63e6b11229a9d984f4b22febe7808f9d91"},
         {"path": "src/compression/src/compression/lz4.mojo", "sha256": "b9c820b88939315dbe45dce540e932336a0ad7abedab895b9a92e9def1e06744"},
@@ -1234,7 +1234,7 @@ GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/compression/tests/test_codec_libraries.mojo", "sha256": "78b8514b84d5cf351b6af9d44ec84c92715cfeebc5672546de7fb061216a5a99"}
+        {"path": "src/compression/tests/test_codec_libraries.mojo", "sha256": "3937668bfd963d3ec344aca84866bed8e9c8f74039ceeecba4ad01421ba54e86"}
       ],
       "deps": ["komira-ai/compression@0.1.0#mojo1.2.0/lib"],
       "natives": [
