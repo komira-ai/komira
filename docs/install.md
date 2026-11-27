@@ -2,7 +2,8 @@
 
 komira's Python package is `komira` on PyPI. This page covers installing it, what it needs, the first
 program, what it does not do yet, and what to do when something goes wrong. To build komira from a clone
-instead, see [getting started](getting-started.md).
+instead, see [getting started](getting-started.md); for Node.js, see
+[installing komira for Node.js](install_node.md).
 
 > **This is an early release.** It registers Parquet files as tables and runs SQL over them, with each
 > answer read as pyarrow, or as a pandas or polars frame. Parts of the pandas-shaped DataFrame and

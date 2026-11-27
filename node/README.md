@@ -1,4 +1,134 @@
-# node: the Node.js package and its addon over libkomira
+# komira for Node.js
+
+komira is a SQL query engine that runs in your process. This package, `@komira-ai/komira`, is its
+Node.js binding, written in TypeScript: it carries `libkomira`, the engine as one shared library, in a
+platform package npm installs beside it, and calls it through a Node-API addon. It registers Parquet
+files as tables, runs SQL over them, and answers with `apache-arrow` Tables.
+
+> **Not on npm yet (specified).** The package is built and tested on every pull request, but no
+> release has been published to npm. The name `@komira-ai/komira` is the one the
+> [design](../docs/design/typescript_package.md#d1-the-npm-name) recommends and can still change
+> before the first release.
+
+## Install
+
+```sh
+npm install @komira-ai/komira
+```
+
+npm installs `apache-arrow`, the peer dependency, and the platform package for your machine with it.
+The package needs Linux on x86_64 with glibc 2.35 or newer and an x86-64-v3 CPU, and Node.js 22.12
+or newer (the tests run 24.21.0).
+[Installing komira for Node.js](../docs/install_node.md) has the details and what to do when
+something goes wrong.
+
+## What works
+
+Save this as `quickstart.mjs`, and run it with `node quickstart.mjs`:
+
+```js
+import { writeFileSync } from "node:fs";
+
+import * as km from "@komira-ai/komira";
+
+console.log(km.version); // the installed version
+console.log(km.abiVersion()); // the engine's C ABI version: 1009 is 1.9
+
+// Six days of weather in three cities, as a CSV file.
+writeFileSync(
+  "weather.csv",
+  "city,temp,rain\nOslo,3,1.5\nLima,18,0.0\nOslo,1,2.5\nPune,31,4.0\nLima,20,0.5\nOslo,5,1.0\n",
+);
+
+const s = new km.Session();
+try {
+  // COPY writes it as the Parquet file to query and answers the rows it wrote.
+  const copied = await s.sql("COPY (SELECT * FROM read_csv('weather.csv')) TO 'weather.parquet'");
+  console.log((await copied.toArrow()).toArray().map((row) => row.toJSON()));
+  await s.registerParquet("weather", "weather.parquet");
+
+  // An answer is an apache-arrow Table; a BIGINT reads as a JavaScript bigint.
+  const total = await s.sql("SELECT count(*) AS days, sum(rain) AS rain FROM weather");
+  console.log((await total.toArrow()).toArray().map((row) => row.toJSON()));
+
+  // A group-by with an aggregate and an order, and the answer's schema.
+  const grouped = await s.sql(
+    "SELECT city, count(*) AS days, avg(temp) AS mean, max(temp) AS hottest" +
+      " FROM weather GROUP BY city ORDER BY city",
+  );
+  const table = await grouped.toArrow();
+  for (const field of table.schema.fields) {
+    console.log(`${field.name}: ${field.type}${field.nullable ? "" : " not null"}`);
+  }
+  for (const row of table) {
+    console.log(row.toJSON());
+  }
+
+  // Batch by batch, with for await.
+  const hot = await s.sql("SELECT city, temp FROM weather WHERE temp > 10 ORDER BY temp DESC");
+  const cities = [];
+  for await (const batch of hot) {
+    cities.push(...batch.getChild("city"));
+  }
+  console.log(cities);
+
+  // A mistake rejects with a km.KomiraError, naming the file or the place.
+  try {
+    await s.registerParquet("missing", "no_such_file.parquet");
+  } catch (e) {
+    if (!(e instanceof km.KomiraError)) throw e;
+    console.log(e.message);
+  }
+  try {
+    await s.sql("SELECT city, count(*) FROM weather GROUP city");
+  } catch (e) {
+    if (!(e instanceof km.KomiraError)) throw e;
+    console.log(e.message);
+  }
+} finally {
+  s.close();
+}
+console.log(s.closed); // true: the session is freed
+```
+
+It prints:
+
+```text
+<version>
+1009
+[ { Count: 6n } ]
+[ { days: 6n, rain: 9.5 } ]
+city: Utf8
+days: Int64 not null
+mean: Float64
+hottest: Int64
+{ city: 'Lima', days: 2n, mean: 19, hottest: 20n }
+{ city: 'Oslo', days: 3n, mean: 3, hottest: 5n }
+{ city: 'Pune', days: 1n, mean: 31, hottest: 31n }
+[ 'Pune', 'Lima', 'Lima' ]
+parquet footer '<cwd>/no_such_file.parquet': no such file, or it cannot be read
+parse: SQL syntax error: expected keyword 'by' at line 1, column 42
+true
+```
+
+`<version>` is the version you installed and `<cwd>` the directory it ran in. This program is
+[`examples/quickstart.mjs`](examples/quickstart.mjs) and what it prints
+[`examples/quickstart.expected`](examples/quickstart.expected); `:quickstart_integration` runs it
+on every pull request, and `:quickstart_test` fails when the two blocks above differ from them
+([Tests](#tests)).
+
+## What does not work yet
+
+- Installing from npm: no release is published yet.
+- Linux on arm64 and macOS on Apple silicon (specified); macOS on Intel, Windows and musl.
+- `registerCsv` and `registerNdjson`, which reject with `UnsupportedOperation`; `read_csv` in SQL
+  works.
+- DataFrames and plans, cancelling a query, and UDFs.
+- Surviving a crash inside the engine: an abort inside it ends the Node.js process.
+
+## Working on the package
+
+Most readers can skip this section. It describes the source tree and its tests.
 
 Two layers, the package over the addon:
 
@@ -16,7 +146,7 @@ Both are tested with the pinned Node's own runner (`node_binding_test`). Nothing
 the package is `"private": true`, and Node.js is test-only in this repository
 ([third_party/node](../third_party/node/README.md)).
 
-## The TypeScript package
+### The TypeScript package
 
 ESM only, for Node 22.12 and later (which loads an ES module through `require`, so CommonJS users
 need no second build), with `apache-arrow ^21.2.0` as its peer dependency. The name
@@ -45,7 +175,7 @@ is synchronous: it refuses later calls at once, and the context is freed after t
 made have run; `await using` (`Symbol.asyncDispose`) settles once it is freed. A wrong argument type
 is a `TypeError` and a wrong value a `RangeError`, both before the library is called.
 
-### How it finds libkomira
+#### How it finds libkomira
 
 Importing the package loads nothing. The first `Session`, `registerParquet`, `sql` or `abiVersion` of
 a JavaScript environment:
@@ -69,7 +199,7 @@ leaves nothing loaded. No environment variable, no search of the working directo
 path is read. A worker thread loads the same library again through the process-wide addon, and has
 its own default session.
 
-## The calls
+### The calls
 
 | call | does |
 |---|---|
@@ -92,7 +222,7 @@ Everything else in the C ABI (`komira_last_error`, `komira_last_error_code` and
 `komira_json_binding`, the run handle of `komira_sql_stream_run` and
 `komira_plan_stream` have no call yet) is outside this addon.
 
-## The Arrow import
+### The Arrow import
 
 `apache-arrow` has no importer for the Arrow C Data Interface, so the addon
 reads an Arrow C stream itself ([`arrow_import.c`](arrow_import.c)) and a
@@ -138,7 +268,7 @@ dependency at `^21.2.0`, the range the tests run: they use the pinned 21.2.0
 the package like the others, compiled into `dist/` and type-checked by
 `:typecheck`; `:arrow_test` measures its coverage.
 
-## Why `dlopen` at `load`, not a NEEDED dependency
+### Why `dlopen` at `load`, not a NEEDED dependency
 
 `libkomira` is a Mojo shared library: it needs the Mojo runtime and its native
 owners beside it in `lib/` (its run path is `$ORIGIN/lib`). The build offers it
@@ -152,7 +282,7 @@ every failure is a JavaScript `Error`. The library is never `dlclose`d: the
 Mojo runtime does not support being unloaded, and a session finalizer may run
 late.
 
-## The session thread
+### The session thread
 
 Each session owns one native thread, started by its first call. A call on a
 session checks its arguments, queues itself and returns a Promise; the thread
@@ -170,7 +300,7 @@ context is never destroyed under a running call; the calls made before it
 still run and settle, then its Promise settles. A session that made no call is
 destroyed before `freeSession` returns.
 
-## Errors
+### Errors
 
 A call whose status is not zero rejects with an `Error` with `status` (the number),
 `code` (`KOMIRA_ERR_ENGINE`, ...), `lastError` (the session's last error text,
@@ -198,7 +328,7 @@ column (`column "a.b": buffer 1 is NULL`, `the batch: ...` for the batch itself)
 A closed result is `KOMIRA_ARROW_CLOSED`. A value that is not a capsule or a
 result, and a capsule imported before, are `TypeError`s `KOMIRA_ARG`.
 
-## The session
+### The session
 
 A session is an external over a heap box that holds the context handle and its
 thread's queue. The external is tagged, so a value another addon made is
@@ -209,7 +339,7 @@ context is destroyed once. When an environment is torn down (a worker that is
 terminated, the process at exit) while a call runs, the teardown waits for the
 call to return, then destroys the context.
 
-## The npm packages
+### The npm packages
 
 `:package` (`@komira-ai/komira`: `dist/`, `LICENSE` and `NOTICE`) and `:package_linux_x64`
 (`@komira-ai/komira-linux-x64-gnu`: the addon, `//src/so:libkomira[dist]` as it is at `native/`,
@@ -222,7 +352,7 @@ stamped: unstamped, as in a pull request, it is `0.0.0` and stays private; the r
 `0.1.<N>`, the wheel's version, on the package and on every optional dependency. Nothing publishes
 them yet.
 
-## Tests
+### Tests
 
 `:package_test` runs the package's behaviour tests, [`tests/*.test.ts`](tests/), with node stripping
 their types; each file is its own process. Its covered sources are `src/*.ts` but
@@ -260,6 +390,14 @@ through `Session.sql` on the real engine and holds each answer to the one the pi
 committed, or to its line in the corpus's `refusals.tsv` or `differences.tsv`; with it, the runner's
 own tests and a fixture corpus with one wrong answer that must fail the run
 ([`tests/conformance`](tests/conformance/README.md)).
+
+The quickstart ([What works](#what-works)) has two targets, over the files of
+[`tests/quickstart`](tests/quickstart/):
+
+| target | what it proves |
+|---|---|
+| `:quickstart_test` ([`docs.test.ts`](tests/quickstart/docs.test.ts), [`shown.test.ts`](tests/quickstart/shown.test.ts)) | the `js` block of this README and of [docs/install_node.md](../docs/install_node.md) is [`examples/quickstart.mjs`](examples/quickstart.mjs) byte for byte, and the `text` block is [`examples/quickstart.expected`](examples/quickstart.expected) with the ABI version of `src/so/abi/komira.tsv` put in (`<version>` and `<cwd>` left as written); both install `package.json`'s `name` in an `sh` block and the example imports it, so a rename of the package fails here until every one of them says the new name. The check itself ([`shown.ts`](tests/quickstart/shown.ts), whose lines and branches must each be at least 99% covered), on documents its tests write: an equal block passes after other text and fences and with no final line feed; a block with a line different (a trailing space included), a line more or a line less, one never closed, the closest of several, no line that is exactly the fence (none, another fence, CRLF line ends), and a file without a final line feed are each refused with the whole message naming the line; the placeholders and the ABI table's first line, each malformed first line refused by its message |
+| `:quickstart_integration` ([`run.test.ts`](tests/quickstart/run.test.ts)) | `node quickstart.mjs`, in a new project directory whose `node_modules` holds the package by its name with `dist/`, the pinned `apache-arrow` and the linux-x64 platform package as npm lays them out, exits 0 and prints exactly `examples/quickstart.expected` with the package's version, the ABI version and the directory's real path put in. It loads the real library as a user's program does, reading the host's own `/proc/cpuinfo`, so it is an integration test of the build farm's Linux x64 hosts |
 
 The addon's own tests:
 

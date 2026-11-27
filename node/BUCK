@@ -186,11 +186,24 @@ _CONFORMANCE_TESTS = [
 
 _CONFORMANCE_MODULES = ["tests/conformance/staged.ts"]
 
+# The quickstart's checks (tests/quickstart/): the block check the docs are
+# held to, which :quickstart_test measures, its tests and the docs' own, the
+# run of the example (:quickstart_integration), and the module they share.
+_QUICKSTART_SRCS = ["tests/quickstart/shown.ts"]
+
+_QUICKSTART_TESTS = [
+    "tests/quickstart/docs.test.ts",
+    "tests/quickstart/run.test.ts",
+    "tests/quickstart/shown.test.ts",
+]
+
+_QUICKSTART_MODULES = ["tests/quickstart/staged.ts"]
+
 # Every source and test, type-checked with strict on.
 tsc_check(
     name = "typecheck",
     modules = _DEVTOOLS,
-    srcs = _SRCS + _TESTS + _TEST_MODULES + _CONFORMANCE_SRCS + _CONFORMANCE_TESTS + _CONFORMANCE_MODULES + ["package.json", "tsconfig.json"],
+    srcs = _SRCS + _TESTS + _TEST_MODULES + _CONFORMANCE_SRCS + _CONFORMANCE_TESTS + _CONFORMANCE_MODULES + _QUICKSTART_SRCS + _QUICKSTART_TESTS + _QUICKSTART_MODULES + ["package.json", "tsconfig.json"],
     data = _ARROW_TYPES,
 )
 
@@ -469,6 +482,59 @@ node_binding_test(
     } | {
         m: m
         for m in _SRCS + _CONFORMANCE_MODULES + ["tests/helpers.ts"]
+    },
+    deps = ["//third_party/node:apache-arrow"],
+)
+
+# ---- The quickstart (docs/install_node.md, "The first program") -----------
+#
+# examples/quickstart.mjs is the first program of the install page and of the
+# README, and examples/quickstart.expected what it prints. The files each
+# check reads, at the places tests/quickstart/staged.ts names.
+_QUICKSTART_FILES = {
+    "examples/quickstart.expected": "examples/quickstart.expected",
+    "examples/quickstart.mjs": "examples/quickstart.mjs",
+    "fixtures/komira.tsv": "komira//src/so:abi/komira.tsv",
+    "package.json": "package.json",
+} | {
+    m: m
+    for m in _QUICKSTART_MODULES
+}
+
+# The docs show the quickstart (tests/quickstart/docs.test.ts): the js block of
+# docs/install_node.md and of README.md is the example byte for byte, the text
+# block what it prints with the ABI table's version put in, and the install
+# line and the example's import name package.json's `name`; and the block
+# check itself, on documents its tests write (shown.test.ts), with
+# tests/quickstart/shown.ts measured: at least 99% of its lines and branches
+# covered.
+node_binding_test(
+    name = "quickstart_test",
+    srcs = ["tests/quickstart/docs.test.ts", "tests/quickstart/shown.test.ts"],
+    covered_srcs = _QUICKSTART_SRCS,
+    data = _QUICKSTART_FILES | {
+        "README.md": "README.md",
+        "install_node.md": "komira//:docs/install_node.md",
+    },
+)
+
+# The example runs as a user runs it (tests/quickstart/run.test.ts): `node
+# quickstart.mjs` in a new project whose node_modules holds the package by its
+# name, the compiled dist/ with the pinned apache-arrow and the platform
+# package as npm lays them out, and what it prints is the expected output.
+# The package loads libkomira as it does for a user, reading the host's real
+# /proc/cpuinfo, so this is an integration test of the farm's Linux x64 hosts.
+node_binding_test(
+    name = "quickstart_integration",
+    srcs = ["tests/quickstart/run.test.ts"],
+    data = _QUICKSTART_FILES | {
+        "dist": ":dist",
+        _PLATFORM + "komira_addon.node": ":komira_addon",
+        _PLATFORM + "native": "komira//src/so:libkomira[dist]",
+        _PLATFORM + "package.json": "tests/fixtures/platform_package.json",
+    } | {
+        s: s
+        for s in _QUICKSTART_SRCS
     },
     deps = ["//third_party/node:apache-arrow"],
 )
