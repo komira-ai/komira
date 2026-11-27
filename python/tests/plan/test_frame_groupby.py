@@ -85,8 +85,11 @@ def refuses(call, cls, message):
     assert type(e) is cls and e.args[0] == message, repr(e)
 
 
-# A bool summed with min_count=0: True is 1, False and a missing value 0.
-TRUE_IS_ONE = When(((Compare("eq", ColRef("ok"), Lit(True)), Lit(1)),), Lit(0))
+# A bool summed: True is 1 and False 0, a missing value skipped. With
+# min_count=0 the CASE above the aggregate makes a sum of nothing 0. A cast,
+# not a comparison with true: the engine compares no computed bool with a
+# bool literal, and the column may be one (df.isna().sum()).
+TRUE_IS_ONE = Cast(ColRef("ok"), "int64")
 
 
 def not_null(*keys):

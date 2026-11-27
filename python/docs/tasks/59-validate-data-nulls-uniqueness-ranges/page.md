@@ -54,7 +54,7 @@ FAIL id repeated: 1
 - Each check is a plain `count(*)` with a `WHERE` (nulls, ranges) or a `GROUP BY ... HAVING count(*) > 1` (uniqueness); a count of 0 means the rule holds. A comparison such as `age < 0` is never true for a NULL age, so nulls are counted by their own rule.
 - The id 3 appears twice, so the uniqueness rule counts one repeated id; the final query lists the rows that break the null and range rules, ordered by `id, name`.
 - To stop a pipeline on a failure, test the counts in Python (`assert bad == 0`) or exit when any rule prints `FAIL`.
-- The pandas-shaped frame can filter by a range (`df[(df["age"] < 0) | (df["age"] > 120)]`), but has no `isna()` (komira-ai/komira#2362) or `duplicated()` yet, so the null and uniqueness rules are written in SQL.
+- The pandas-shaped frame can filter by a range (`df[(df["age"] < 0) | (df["age"] > 120)]`), and find the nulls (`df[df["name"].isna()]`), but has no `duplicated()` yet, so the rules here are written in SQL.
 
 ## Related
 
