@@ -375,7 +375,7 @@ def test_arguments():
     expect(lambda: files(url, credential="raw-etl"), TypeError, "credential= must be a komira credential, not str")
     expect(lambda: files(url, credential=keys, region=1), TypeError, "region= must be a str or None, not int")
     expect(lambda: files(url, credential=keys, endpoint=""), ValueError, "endpoint= is empty")
-    expect(lambda: files(url, credential=keys, endpoint="http://h\ud800"), ValueError, "endpoint= is not valid UTF-8")
+    expect(lambda: files(url, credential=keys, endpoint="http://store.example.com\ud800"), ValueError, "endpoint= is not valid UTF-8")
     expect(
         lambda: files(url, credential=keys, url_style="Path"),
         ValueError,
@@ -422,13 +422,13 @@ def test_arguments():
 
     # The exact WireBoundSource: files = 1 { location = 1, access = 2 {
     # credential = 1, endpoint = 2, region = 3, addressing = 4 } }.
-    full = files(url, credential=keys, endpoint="http://h:1", region=REGION, url_style="vhost")
+    full = files(url, credential=keys, endpoint="http://store.example.com:1", region=REGION, url_style="vhost")
     assert full._wire() == (
-        b"\x0a\x33"
+        b"\x0a\x43"
         + b"\x0a\x13s3://lake/a.parquet"
-        + b"\x12\x1c"
+        + b"\x12\x2c"
         + b"\x0a\x01k"
-        + b"\x12\x0ahttp://h:1"
+        + b"\x12\x1ahttp://store.example.com:1"
         + b"\x1a\x09eu-west-1"
         + b"\x20\x01"
     ), full._wire()
