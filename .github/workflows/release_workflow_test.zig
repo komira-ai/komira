@@ -359,6 +359,7 @@ const PROD_GROUP = group.Group{
     .build_verify = PROD_BUILD_VERIFY,
     .verify_run = PROD_VERIFY_RUN,
     .e2e_run = PROD_E2E_RUN,
+    .e2e_next_run = PROD_E2E_NEXT,
     .commit_run = PROD_COMMIT_RUN,
     .abort_cmd = PROD_ABORT_CMD,
 };
