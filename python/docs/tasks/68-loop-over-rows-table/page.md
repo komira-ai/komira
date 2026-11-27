@@ -63,4 +63,4 @@ Cy
 - How do I turn a table into a list of dicts? (rank 67, works)
 - How do I count the rows of a table? (rank 62, works)
 - How do I take the first or last N rows? (rank 65, works)
-- How do I turn a query result into pandas, polars or Arrow? (rank 33, works; no page yet)
+- [How do I turn a query result into pandas, polars or Arrow?](../33-turn-query-result-pandas-polars-arrow/page.md) (rank 33, works)

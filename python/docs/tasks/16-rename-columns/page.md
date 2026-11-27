@@ -67,5 +67,5 @@ Output:
 
 - [How do I change a column's data type?](../12-change-column-data-type/page.md) (rank 12, works)
 - [How do I apply a function to every value in a column?](../17-apply-function-value-column/page.md) (rank 17, partial)
-- How do I select or drop columns? (rank 34, works; no page yet)
+- [How do I select or drop columns?](../34-select-drop-columns/page.md) (rank 34, partial)
 - How do I lowercase, trim and replace text in a column? (rank 42, works; no page yet)
