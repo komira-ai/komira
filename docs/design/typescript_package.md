@@ -719,8 +719,9 @@ the one build action that runs npm.
 
 The SQL cases are data already: `src/tests/conformance/komira_sql_conformance/cases/<corpus>/`
 holds `tables.sql`, `<case>.sql` and the committed DuckDB answer `<case>.tsv`
-([README](../../src/tests/conformance/komira_sql_conformance/README.md)). Nothing runs komira on
-them yet. A Python end-to-end runner over them is planned but not built. The Mojo package
+([README](../../src/tests/conformance/komira_sql_conformance/README.md)). The Node runner,
+`//node:sql_conformance_test` ([node/tests/conformance](../../node/tests/conformance/README.md)), runs
+every case through `Session.sql`. A Python end-to-end runner over them is planned but not built. The Mojo package
 `src/tests/e2e/sql_e2e` holds komira's SQL to DuckDB through `so.sql_result` over a corpus of its
 own, on `komira_test_oracle`'s datasets and its own regression tables; its `test_sql_<capability>`
 targets fill the `sql` cells of the matrix. The Node runner reads **the same files through Buck2 targets**,
@@ -731,7 +732,9 @@ and copies none of them.
   empty cell, `""`, shortest round-trip floats, `nan`/`inf`, decimals at their scale), sort when
   the case says `order: rows`, and compare text with the header.
 - **Refusals.** The cases komira refuses by name sit in one list both runners read, with the
-  refusal each expects, so the two languages cannot disagree on what is supported.
+  refusal each expects, so the two languages cannot disagree on what is supported. The cases komira
+  answers otherwise than DuckDB sit in a second list beside it, `differences.tsv`, each with how its
+  answer differs, so every case is held to exactly one outcome and a fix shows as a removed line.
 - **Negatives.** A fixture corpus with one wrong committed answer must fail the Node runner, the
   negative case of rule T15.
 - **The matrix.** The `sql` cells of `tests/surface_capability_matrix.bzl` are filled by the

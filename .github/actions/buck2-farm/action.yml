@@ -9,18 +9,23 @@
 # run fails and every failure in its output is a cut connection to the farm
 # (buck2's `Error:` line with `RE channel error: code:` in each failed action
 # or test, for a test cut before it started in its stderr right after buck2's
-# `Remote Execution Error on Execute` line, and no other error), it runs the
-# same command once more, keeps the first output as buck2-farm.first.log
-# beside the log, and says so in the job summary; a second failure is final.
-# The second line reads the file the last run wrote. The caller builds the
-# tool first and passes its path; the cases of this file, run against recorded
-# buck2 output, are //:buck2_farm_cases.
+# `Remote Execution Error on Execute` line, and no other error), it waits for
+# the farm's port to answer (tools/build/ci/assert_remote/farm_wait.zig), at
+# most as long as farm-connect's `farm-wait-minutes`, which it reads from the
+# machine buckconfig farm-connect wrote, and runs the same command again. It
+# keeps the cut run's output as buck2-farm.first.log (buck2-farm.second.log
+# after a second cut) beside the log and writes one line to the job summary
+# saying how long the farm was unreachable. A step runs at most three times;
+# when the farm does not answer within the wait, or the third run is cut too,
+# the step fails. The second line reads the file the last run wrote. The
+# caller builds the tool first and passes its path; the cases of this file,
+# run against recorded buck2 output, are //:buck2_farm_cases.
 #
 # `args` is split on spaces by the shell and is never a shell script: a
 # pattern is `//path:name`, a list of them is `@file` or `$(cat file)` made
 # by the caller before this step. It reaches the step through `env:` only.
 name: buck2-farm
-description: Run one ./buck2 command (once more after a cut connection to the farm) and fail unless buck2 succeeded and no action ran locally.
+description: Run one ./buck2 command (again after a cut connection to the farm, once the farm answers, at most three runs) and fail unless buck2 succeeded and no action ran locally.
 
 inputs:
   args:
@@ -44,7 +49,7 @@ runs:
         # step log names what a stalled build waits on. It is what buck2 picks
         # without a terminal; set here so a runner's terminal never changes it.
         BUCK_CONSOLE: simple
-      run: '"$ASSERT_REMOTE" run --log "$BUCK2_LOG" --summary "$GITHUB_STEP_SUMMARY" -- ./buck2 $BUCK2_ARGS'
+      run: '"$ASSERT_REMOTE" run --log "$BUCK2_LOG" --summary "$GITHUB_STEP_SUMMARY" --farm-config "$HOME/.buckconfig.d/farm.buckconfig" -- ./buck2 $BUCK2_ARGS'
     - name: assert the run was remote
       shell: bash
       env:
