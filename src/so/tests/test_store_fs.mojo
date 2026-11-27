@@ -1,5 +1,6 @@
 # =============================================================================
-# StoreFs and StoreScanFs: S3 and Azure Blob behind one file system, over the
+# StoreFs and StoreScanFs: S3 and Azure Blob behind one file system (the GCS
+# arm is test_gcs_store_fs's), over the
 # fakes (no socket, no network)
 # =============================================================================
 #
@@ -31,7 +32,7 @@
 #   * test_a_handle_of_the_other_store_is_refused_by_name: a read or write
 #     handle of one store given to the file system of another is
 #     STORE_FS_HANDLE, for every verb that takes a handle, both ways (the GCS
-#     arm's are test_gcs_binding's).
+#     arm's are test_gcs_store_fs's).
 #   * test_an_opener_serves_the_buckets_it_was_told_of: serves and
 #     open_scan_fs for S3 and Azure, and what they do not serve.
 #   * test_an_opener_refuses_what_it_does_not_serve_word_for_word:
@@ -178,7 +179,7 @@ def _mk_azure_tls() raises -> FakeAzureConnector:
 
 
 def _mk_gcs(access: GcsAccess) raises -> FakeGcsStorageBackend:
-    """An empty bucket: the GCS arm is test_gcs_binding's."""
+    """An empty bucket: the GCS arm is test_gcs_store_fs's."""
     return FakeGcsStorageBackend()
 
 

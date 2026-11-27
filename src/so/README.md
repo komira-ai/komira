@@ -678,7 +678,8 @@ and a local file the reader refuses. Then the source's own refusals, each
 `<CODE>: add_sql_binding name=<name>: <reason>`: `STORAGE_URL_REFUSED` (user
 information in a location or endpoint, a query or fragment, an endpoint that is
 not `http://` or `https://`, a `gs://` endpoint that is not
-`https://host[:port]` with a port from 1 to 65535 and no path, and every scheme
+`https://host[:port]` with a DNS name or IPv4 address as the host, a port
+from 1 to 65535 and no path, and every scheme
 but those above), `BIND_SOURCE_UNSUPPORTED` (a signing service, Hive
 partitioning on an object store, an endpoint, region or addressing on a local
 path, a region on Azure, a region or addressing on GCS, `anonymous` or an

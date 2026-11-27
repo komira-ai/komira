@@ -104,6 +104,21 @@ def _parse_port(digits: String) -> Int:
     return n
 
 
+def _is_host_name(host: String) -> Bool:
+    """Whether every byte of `host` is a letter, a digit, `.` or `-`, so the
+    name the TLS handshake checks is the name the request is sent to."""
+    var bytes = host.as_bytes()
+    for i in range(len(bytes)):
+        var b = Int(bytes[i])
+        var letter = (b >= ord("a") and b <= ord("z")) or (
+            b >= ord("A") and b <= ord("Z")
+        )
+        var digit = b >= ord("0") and b <= ord("9")
+        if not (letter or digit or b == ord(".") or b == ord("-")):
+            return False
+    return True
+
+
 def _parse_gcs_endpoint(endpoint: String) -> _GcsEndpoint:
     """`endpoint` as `https://host[:port][/]`; "" is Google's own."""
     if endpoint.byte_length() == 0:
@@ -133,6 +148,11 @@ def _parse_gcs_endpoint(endpoint: String) -> _GcsEndpoint:
         )
     if host.byte_length() == 0:
         return _bad_endpoint("a gs:// endpoint names no host")
+    if not _is_host_name(host):
+        return _bad_endpoint(
+            "a gs:// endpoint's host must be a DNS name or an IPv4 address:"
+            " letters, digits, '.' and '-'"
+        )
     if port < 0:
         return _bad_endpoint(
             "a gs:// endpoint's port must be a number from 1 to 65535"
@@ -143,8 +163,9 @@ def _parse_gcs_endpoint(endpoint: String) -> _GcsEndpoint:
 def gcs_endpoint_refusal(endpoint: String) -> String:
     """Why `endpoint` is not a GCS endpoint this library reads, or "" when it
     is: "" (Google's own) or `https://host[:port]` with an optional final
-    `/`, no path, user information, query or fragment, and a port from 1 to
-    65535 (443 when absent). The reason never echoes the endpoint."""
+    `/`, no path, user information, query or fragment, a host of letters,
+    digits, `.` and `-` (no IPv6 literal), and a port from 1 to 65535 (443
+    when absent). The reason never echoes the endpoint."""
     return _parse_gcs_endpoint(endpoint).problem.copy()
 
 

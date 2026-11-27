@@ -36,8 +36,9 @@
 #     endpoint that does not serve it is NOT_FOUND.
 #   * test_an_endpoint_is_https_host_and_port: what GcsAccess.at reads (the
 #     default, a port, a final `/`, the scheme in any case, ports 1 and
-#     65535) and every refusal of gcs_endpoint_refusal word for word, none
-#     echoing the endpoint.
+#     65535, an IPv4 address) and every refusal of gcs_endpoint_refusal word
+#     for word (a host byte outside letters, digits, `.` and `-` among them),
+#     none echoing the endpoint.
 #   * test_the_backend_is_built_on_its_first_verb: LazyGcsBackend builds
 #     nothing until a verb, passes all six verbs through, and keeps nothing
 #     when its factory fails; GcsFs's own clone factory is refused by name.
@@ -501,8 +502,15 @@ def test_an_endpoint_is_https_host_and_port() raises:
         assert_equal(
             gcs_endpoint_refusal("https://gcs.emulator.test:" + port), _BAD_PORT
         )
-    # An IPv6 literal is not read: its first `:` is taken for the port's.
-    assert_equal(gcs_endpoint_refusal("https://[::1]:4443"), _BAD_PORT)
+    # Only letters, digits, `.` and `-` name a host: no IPv6 literal, and no
+    # byte that could make the name checked differ from the one dialed.
+    for host in [String("[::1]"), String("gcs\\emulator.test"), String("gcs emulator.test"), String("gcs%2eemulator.test")]:
+        assert_equal(
+            gcs_endpoint_refusal("https://" + host + ":4443"),
+            "a gs:// endpoint's host must be a DNS name or an IPv4 address:"
+            " letters, digits, '.' and '-'",
+        )
+    assert_equal(gcs_endpoint_refusal("https://192.0.2.10:4443"), "")
     with assert_raises(contains="STORAGE_URL_REFUSED: gcs endpoint: " + _NO_HOST):
         _ = GcsAccess.at("https://", _TOKEN)
 

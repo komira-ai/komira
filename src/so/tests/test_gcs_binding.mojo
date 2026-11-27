@@ -26,7 +26,7 @@
 #   * test_a_gcs_glob_reads_every_matching_object: a glob binds the objects
 #     it matches and no other; a glob matching nothing is PARQUET_GLOB_NO_MATCH.
 #   * test_an_endpoint_of_the_sources_own_is_read: gs://emu at the emulator's
-#     endpoint answers its rows, gcs:// reads as gs://, and gs://emu at
+#     endpoint answers its rows, gcs:// and GS:// read as gs://, and gs://emu at
 #     Google's endpoint is the store's NOT_FOUND at the binding.
 #   * test_one_statement_reads_gcs_and_s3: a UNION ALL of a GCS table and an
 #     S3 table answers both objects' rows.
@@ -421,6 +421,8 @@ def test_an_endpoint_of_the_sources_own_is_read() raises:
     _same(_ints(_sql(s, "SELECT id FROM emu_a ORDER BY id")), _range(500, 3), "emu")
     _bind(s, "alias_b", _source("gcs://raw/t/b.parquet"))
     _same(_ints(_sql(s, "SELECT id FROM alias_b ORDER BY id")), _range(100, 9), "gcs://")
+    _bind(s, "upper_b", _source("GS://raw/t/b.parquet"))
+    _same(_ints(_sql(s, "SELECT id FROM upper_b ORDER BY id")), _range(100, 9), "GS://")
     # Google's endpoint does not serve `emu`: the endpoint reached the store.
     var refused = _refused(s, "x", _source("gs://emu/t/a.parquet"))
     assert_true(
