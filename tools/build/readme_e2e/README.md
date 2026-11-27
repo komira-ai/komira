@@ -208,6 +208,11 @@ reaches the farm: `stage` names `//release/staged_set:taken`, whose only action 
 over made-up wirings first (`stage` naming `:set`, a second action, a copy buck2 makes itself,
 the source passed through), each of which it must refuse.
 
+[`release/README_COVERAGE.md`](../../../release/README_COVERAGE.md) starts from the other side: every
+`src/<name>/README.md`, with or without a `mopm.toml`, and whether this e2e, a README gate of the
+build, both or nobody runs its examples. The graph check `//release:readme_coverage` writes it from
+the build graph and fails when the committed file is stale.
+
 ## Tests
 
 Every one is a build action; the tool (`:readme_e2e`) is built only when they pass.

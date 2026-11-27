@@ -60,5 +60,5 @@ Output:
 ## Related
 
 - [How do I select columns and filter rows?](../2-select-columns-filter-rows/page.md) (rank 2, works)
-- How do I filter rows where a text column contains a substring? (rank 41, works; no page yet)
+- [How do I filter rows where a text column contains a substring?](../41-filter-rows-text-column-contains-substring/page.md) (rank 41, works)
 - How do I filter rows by a date range? (rank 83, works; no page yet)

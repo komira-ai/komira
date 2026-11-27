@@ -1,0 +1,1 @@
+UnsupportedOperation: bind: SQL not supported: a window function `f(...) OVER (...)` must be a top-level SELECT item (it cannot be nested inside an expression)

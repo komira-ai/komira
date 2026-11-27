@@ -1,0 +1,4 @@
+{'id': 1, 'first': 'Ana', 'last': 'Smith'}
+{'id': 2, 'first': 'Bo', 'last': 'Lee'}
+{'id': 3, 'first': 'Cy', 'last': ''}
+[{'id': 1, 'full_name': 'Ana Smith', 'first': 'Ana', 'last': 'Smith'}, {'id': 2, 'full_name': 'Bo Lee', 'first': 'Bo', 'last': 'Lee'}, {'id': 3, 'full_name': 'Cy', 'first': 'Cy', 'last': ''}]

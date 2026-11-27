@@ -21,7 +21,8 @@ GraphCheckInfo = provider(
         # the check reads, as strings, each keyed by the path its cell has
         # in the repository ("" for the check's own cell).
         "trees": provider_field(dict[str, str], default = {}),
-        # More files the check reads (the dotfiles a doc_tree's glob skips),
+        # More files the check reads (python_closure: the dotfiles a
+        # doc_tree's glob skips; readme_coverage: its ledger),
         # keyed by their path in the repository.
         "files": provider_field(dict[str, typing.Any], default = {}),
         # The allowlist of python_closure: `surface` holds package paths

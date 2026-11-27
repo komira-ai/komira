@@ -507,7 +507,7 @@ tests, which no pull request builds. The rest of this section is about `release-
   `cquery` of `attrregexfilter(exec_compatible_with, "macos", deps(//ci:pr))` is
   empty, and the same query for `--target-platforms
   komira//tools/build/platforms:darwin-arm64` over a library is not.
-  `//:release_macos_cases` holds the workflows and the shards of `ci/targets/` to it (the lines of
+  `//:release_macos_cases` holds the workflows and the root files of `ci/` (`ci/roots/`, `ci/test_roots/`) to it (the lines of
   `pr.yml`'s macOS part, `PR_MACOS_PART`, exactly as written, and where each stands), and holds
   `pypi.yml` (the macOS wheel's jobs are in it) to not running on a pull request or a merge group. The five targets of the macOS wheel
   (`//python:komira_wheel_macos_arm64`, `//python:wheel_install_test_macos_arm64`,
@@ -635,7 +635,7 @@ tests (komira-ai/komira#2206, komira-ai/komira#2207), the ELF-only native shared
 The proposal keeps this set built, in the same way as the mopm set:
 
 - **One named target, generated.** `//release:darwin_src_libs` is a generated list, like the
-  shards of `ci/targets/`, with a guard that fails when the list is stale. It holds every
+  root files of `ci/`, with a guard that fails when the list is stale. It holds every
   library target of `//src` except a `DARWIN_SRC_EXCLUDED` table. Each row of that table names
   a target and the issue above that keeps it out. A row is deleted in the pull request that
   closes its issue. When a new library is added under `//src`, it joins the set when the list
@@ -827,6 +827,16 @@ last word.
 keeps a row for a deleted directory, keeps a row that names a published library as the one it waits for, or holds a
 row that does not parse, rows out of order, or counts that are not the table's. So the
 pull request that publishes a library deletes its row, and the one that adds a library adds a row.
+
+**Every README says who runs its examples.** [`release/README_COVERAGE.md`](../release/README_COVERAGE.md) lists
+every `src/<name>/README.md`: whether the package has a `mopm.toml`, whether `//release/readme_e2e/verify:<name>`
+exists, which README gate (`mojo_adopted_library` or `mojo_library`) runs its examples in the build, whether it holds
+an example, and so who runs them (the release e2e, a build gate, both, or nobody). The graph check
+`//release:readme_coverage`, run by the pull request check as `checks.bxl:check` like every graph check, writes that
+text from the build graph (a `uquery` of `//src/...` and `//release/readme_e2e/verify:`) and the READMEs (read by
+the README examples tool's own reader) and fails when the committed file is not it byte for byte, printing each line
+that differs with the line it must be. So a pull request that adds a README, moves a package to mopm, or gives a
+README its first example (or takes its last away) changes the row in the same change.
 
 **The release declaration and the release set agree, and one so package.** `//release:release_checks_cases`
 holds `release/artifacts.textproto` to `tools/build/package/release_set.txt`: the same metapackage, the same
@@ -1669,7 +1679,7 @@ not run kci (retired).
 | job | the one job `check`, for every merge group and for a pull request only from a branch of this repository (`github.event_name == 'merge_group' \|\| github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here; a merge group's event has no `pull_request`, and without its own term the job would be skipped there, which counts as passed), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
 | runner | `runs-on: ubuntu-24.04`, written as that plain scalar: a GitHub-hosted machine, fresh per job. A self-hosted label, label list, runner group, expression (`${{ vars.X }}`) or quoted value is refused, so a pull request's code never reaches a runner that keeps state between jobs |
 | permissions | its own `permissions:` mapping, `contents: read` and `id-token: write` (for the farm connection, [farm-connect](#how-it-reaches-the-farm), only); no environment, no secret (no value of the job, nor of the workflow-level `env:`, names `secrets` other than `secrets.GITHUB_TOKEN`), no publish step |
-| steps | the pinned full-history checkout of the merge commit (a merge group: its head commit), `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change, written by `//tools/build/ci:change` (built on the farm like the assertion, run on the runner in the checkout, with the event, the merge group's `base_sha` and the output directory as flags; `tools/build/ci/change/change.zig` says what it runs and refuses, and its cases run its choice of base against a fake git): `git diff --name-only <base>...HEAD` and the coverage holds of both sides. A pull request's base is HEAD^1, the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. A merge group's base is its `merge_group.base_sha`, the commit the group's head was built on (the step stops when it is not an ancestor of HEAD); the head is a squash commit on top of it, not a merge commit. Any other event stops the step. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system; the heavy checks of `HEAVY` in `tools/build/ci/rules.bzl`, today none since only `komira_base` reaches them, only when the change touches paths that row owns, so a change that owns none builds `//ci:pr_default` in place of `//ci:pr`), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, `default_guard.bxl:check` that `//ci:pr_default` is `//ci:pr` without the roots of `HEAVY` and nothing else, `lock_graphs.bxl:check` that each package's `buildrules.mojo.lock.bzl` holds a unit graph for every platform subdir its `mopm.lock` records and that a package which loads a native shared library pins it in `system_libs` of that lock, `cases.bxl:run`, and `readme_e2e/cases.bxl:run`, the cases of the README e2e's completeness guard), and `test` of the list's targets that are not of the tests cell. Then [the macOS part](#the-macos-part-of-the-check): `tools/build/ci/darwin.bxl:select` over that list, its labels written by `//tools/build/ci:darwin_targets` (built on the farm like the change tool), and, when there is one, `build --config-file $RUNNER_TEMP/darwin.buckconfig --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going` of its labels (bounded at 60 minutes), skipped when an earlier step failed. Last, the analysis of the whole macOS set (`release/darwin_analysis.bxl:check`). A pull request that adds or deletes a package needs no edit to any release file; adding a target to the check set means regenerating `ci/targets.bzl` and its shards `ci/targets/shard_<n>.bzl` in one step (the guard fails, naming the command, when they are out of date or a shard nears the 1000-line limit). Nothing ships. |
+| steps | the pinned full-history checkout of the merge commit (a merge group: its head commit), `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change, written by `//tools/build/ci:change` (built on the farm like the assertion, run on the runner in the checkout, with the event, the merge group's `base_sha` and the output directory as flags; `tools/build/ci/change/change.zig` says what it runs and refuses, and its cases run its choice of base against a fake git): `git diff --name-only <base>...HEAD` and the coverage holds of both sides. A pull request's base is HEAD^1, the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. A merge group's base is its `merge_group.base_sha`, the commit the group's head was built on (the step stops when it is not an ancestor of HEAD); the head is a squash commit on top of it, not a merge commit. Any other event stops the step. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system; the heavy checks of `HEAVY` in `tools/build/ci/rules.bzl`, today none since only `komira_base` reaches them, only when the change touches paths that row owns, so a change that owns none builds `//ci:pr_default` in place of `//ci:pr`), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, `default_guard.bxl:check` that `//ci:pr_default` is `//ci:pr` without the roots of `HEAVY` and nothing else, `lock_graphs.bxl:check` that each package's `buildrules.mojo.lock.bzl` holds a unit graph for every platform subdir its `mopm.lock` records and that a package which loads a native shared library pins it in `system_libs` of that lock, `cases.bxl:run`, and `readme_e2e/cases.bxl:run`, the cases of the README e2e's completeness guard), and `test` of the list's targets that are not of the tests cell. Then [the macOS part](#the-macos-part-of-the-check): `tools/build/ci/darwin.bxl:select` over that list, its labels written by `//tools/build/ci:darwin_targets` (built on the farm like the change tool), and, when there is one, `build --config-file $RUNNER_TEMP/darwin.buckconfig --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going` of its labels (bounded at 60 minutes), skipped when an earlier step failed. Last, the analysis of the whole macOS set (`release/darwin_analysis.bxl:check`). A pull request that adds or deletes a package needs no edit to any release file; adding a root to the check set means adding its one empty file, `ci/roots/<cell>/<package>:<name>` (`ci/test_roots/...` for a test), and a new target that depends on an old root deletes the old root's file, so two pull requests that add targets never edit the same file (the guard fails, naming each file to add or delete and the command that writes them all, when they are out of date: [tools/build/ci/README.md](../tools/build/ci/README.md#the-aggregate-cipr)). Nothing ships. |
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.
@@ -1677,6 +1687,32 @@ The repository's branch settings require the check **`pr / check`**.
 trigger, the job's condition, the concurrency group, that the change step runs
 the change tool with the event and the group base, and the job's bound below the
 queue's check timeout, and that no other workflow has a job `check`.
+
+### Adding a target: one file per root
+
+`//ci:pr` lists its roots as literal labels, so they are committed, one empty
+file per root named by its label (`ci/roots/komira/src/avro:avro_conda`;
+`ci/test_roots/...` for a test; [tools/build/ci/README.md](../tools/build/ci/README.md#the-aggregate-cipr)).
+Before, they were rows of eight sorted shard files, so two pull requests that
+added targets near each other in one shard (any two task-example batches did,
+in one package) conflicted, and each had to merge `main` and regenerate after
+every other merge. With one file per root, two such pull requests add
+different files and merge in either order. The ways weighed, with what each costs:
+
+| | Merges of two pull requests that add targets | The check's time | What the guard proves |
+|---|---|---|---|
+| one file per root (this) | no conflict, in one package or two | as before: `ci/BUCK` globs about 1300 empty files | as before: every root has its file and every file is a root's, both ways, each named by its path |
+| one committed file per top-level package | a conflict still, for two in one package (`src/` holds most rows) | as before | as before |
+| the lists made in the check from the graph, none committed | no file to conflict | a query of the whole graph before the build (the guard asks it already) | nothing about a list: the list is the graph's by construction, and `./buck2 build //ci:pr` with no committed list is no longer one target a person or a step can name |
+
+A pull request opened before this layout conflicts once: each shard file it
+edited (`ci/targets/shard_<n>.bzl`) is a modify/delete conflict with `main`,
+which deleted them all (the files it did not edit are deleted with no conflict).
+Merge `main`, take the deletion of whatever is left
+(`git rm -qf --ignore-unmatch ci/targets.bzl 'ci/targets/shard_*.bzl'`), and write the roots
+from the graph (the command in the README), or add the one file the guard names
+for each root the pull request adds. From then on the pull request merges with
+the others with no second round.
 
 ## The merge queue
 

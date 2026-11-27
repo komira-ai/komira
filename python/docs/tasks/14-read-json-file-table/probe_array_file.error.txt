@@ -1,0 +1,1 @@
+UnsupportedOperation: read_json(lines=False) reads one JSON document, which komira does not read: write one object per line and pass lines=True

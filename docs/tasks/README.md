@@ -89,10 +89,10 @@ These targets in `python/docs/tasks/BUCK` are all in the pull request's check:
 - `//python/docs/tasks:<rank>-<slug>__probe_<name>`, one per probe, runs the probe the same way. It
   is red when the probe runs to the end, or raises another line than its `.error.txt`.
 - `//python/docs/tasks:examples` builds every one of those runs. It is the package's one row for
-  them in the check set's generated list (`ci/targets.bzl` and its shards): each run is its
+  them in the check set's committed roots (its one file, `ci/roots/komira/python/docs/tasks:examples`): each run is its
   dependency, declared from the directories by `task_examples` (`python/task_examples.bzl`), so a
   pull request that adds or removes a task directory changes no file outside the directory and
-  needs no regeneration of that list. A run that fails is still named by its own label,
+  adds no root file. A run that fails is still named by its own label,
   `//python/docs/tasks:<rank>-<slug>`.
 - Four targets prove that these runs can fail. Each passes only when its run fails with the exact
   line:

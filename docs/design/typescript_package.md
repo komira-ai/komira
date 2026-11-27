@@ -132,7 +132,7 @@ Fixed before this design, and not reopened here:
     with their codes and steps) and over a stand-in of ABI 1.9
     ([tests/fake_sql.c](../../node/tests/fake_sql.c)) whose `komira_sql_stream` answers fixed
     queries.
-- **EXISTS** The tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
+- **EXISTS** The tests are in the pull request's check set (`ci/roots/komira/node:*`).
   - `node_binding_test` runs `node --test` as a build action, under `env -i`, with no network.
   - It passes only if TAP reports tests, all passed, and none skipped
     ([tools/build/node/README.md](../../tools/build/node/README.md)).
@@ -146,12 +146,14 @@ Fixed before this design, and not reopened here:
 
 ### Toolchain
 
-- **EXISTS** One Node pin: 24.21.0, linux-x64 only (`third_party/node/pins.bzl`).
+- **EXISTS** One Node pin for every node rule: 24.21.0, linux-x64 only (`third_party/node/pins.bzl`).
+  The install test of §5 also has 22.23.5 and 26.13.1 (`:node_22`, `:node_26`), and npm 11.20.0
+  (`:npm`), visible to `//node` alone.
   - The addon is compiled by `c_shared_lib` with
     `zig cc -target x86_64-linux-gnu.2.34 -shared -Wl,-z,undefs`, so the `napi_*` symbols resolve
     against `node` at load.
   - `node_dist` keeps only `bin/node`, `include/node` and `LICENSE` from the archive. npm, npx and
-    corepack are left out, so the repository has no npm CLI.
+    corepack are left out; the one npm CLI is the pin of §4, which only `//node:install_test` runs.
   - The "Limits" section of [tools/build/node/README.md](../../tools/build/node/README.md) lists
     what macOS needs: a `darwin-arm64` pin, the macOS execution platform, and
     `-undefined dynamic_lookup`. None of it exists yet. linux-arm64 has neither a
@@ -430,8 +432,8 @@ the host.
   - 26 became the active LTS on 2026-10-28;
   - 20 is past its end of life.
 
-  `third_party/node` still calls 24 the active line and 26 not an LTS line. Its README is updated
-  when the 26 pin lands.
+  `third_party/node` pins 22.23.5 and 26.13.1 beside 24.21.0 for the install test, and its README
+  names each line as the release index does.
   - 22.12 is the first 22 that loads an ES module through `require`, so CommonJS users need no
     second build.
   - The package is ESM only, with an `exports` map and `types`.
@@ -441,9 +443,8 @@ the host.
   - It needs nothing newer: externals with type tags (8), thread-safe functions (4), async work
     and external `ArrayBuffer`s (1).
   - N-API is ABI-stable, so one `.node` per platform serves every Node major.
-- **Only what is true.** The install test runs on pins of Node 22, 24 and 26 (§5). Until it does,
-  the README claims only the majors it runs. Today there is one pin, 24.21.0. Electron, Deno and
-  Bun are not claimed.
+- **Only what is true.** The install test runs on pins of Node 22, 24 and 26 (§5): 22.23.5, 24.21.0
+  and 26.13.1. The README claims only the majors it runs. Electron, Deno and Bun are not claimed.
 
 ### Types
 
@@ -602,9 +603,10 @@ top. Its jobs:
    - Provenance is generated automatically for a public repository and a public package.
    - The CLI must be npm 11.5.1 or later, under Node 22.14 or later (npm's trusted-publishing page,
      read 2026-11-20).
-   - The repository has no npm today, so the CLI is a new pin, by URL and SHA-256 (rule B10). It is
-     the npm tarball from the registry, run by the pinned Node, and visible only to this job's
-     target.
+   - The CLI is a pin, by URL and SHA-256 (rule B10). It is the npm tarball from the registry, run
+     by the pinned Node, and visible only to the install test's target. **EXISTS**:
+     `//third_party/node:npm`, npm 11.20.0 (the npm Node 26.13.1 bundles), which
+     `//node:install_test` runs.
 4. **smoke** (no identity): one named Zig tool, `//release/ci:npm_smoke`, run as one step (rule
    B4).
    - It installs the exact version from the registry into an empty directory, compares each
@@ -692,23 +694,35 @@ linux-x86_64.
 ### From the installed package, on each platform
 
 `//node:install_test` installs the built tarballs into an empty project with the pinned npm of §4
-(`npm ci --ignore-scripts --offline`, from `file:` tarballs and the pinned `apache-arrow`). It is
-the one build action that runs npm.
+(`npm install --offline --ignore-scripts --engine-strict`, from `file:` tarballs and the pinned
+`apache-arrow`). It is the one build action that runs npm. **EXISTS** (`npm_install_test`,
+[tools/build/node/README.md](../../tools/build/node/README.md)).
+- The project's `package.json` names `@komira-ai/komira` alone, a `file:` tarball, and overrides
+  every other name to its tarball: the platform package, `apache-arrow` and the packages it
+  depends on. npm resolves the rest itself, as for a user.
+- It is `npm install` and not `npm ci`: `npm ci` refuses a lock that lacks an optional dependency
+  (`Missing: @komira-ai/komira-darwin-arm64@ from lock file`), and while the main package names
+  platform packages that are not built here, an offline npm cannot write one that has them. With no
+  lock, npm skips an optional package it cannot get, as it does for a user.
 - It uses npm rather than the Zig `npm_modules`, because the test is that npm itself installs the
   package: the `optionalDependencies` and `os`/`cpu`/`libc` selection, and the peer dependency.
-- `--ignore-scripts` holds that the package needs no install script.
+- `--ignore-scripts` holds that the package needs no install script, and a package npm's
+  `package-lock.json` marks `hasInstallScript` (a script, or a `binding.gyp`) fails the test.
 - It then runs behaviour tests that import `@komira-ai/komira` by its name, never by a path into
   the repository:
   - the version;
   - the public names;
   - the load of `libkomira` from the installed platform package alone, with no Mojo toolchain, no
-    `mojo-compiler` and no library path in the test's environment, which is what a user's machine
-    has;
+    `mojo-compiler` and no library path in the test's environment but the one naming node's own
+    C++ runtime (`libstdc++`, `libgcc_s`, and `libatomic` for Node 26, which a user's system has and the build workers do
+    not), which is what a user's machine has;
   - `SELECT 1`;
-  - a `GROUP BY` over Parquet, CSV and NDJSON fixtures, once those registrations exist;
+  - a `GROUP BY` over Parquet, CSV and NDJSON fixtures: the Parquet one registered, the CSV and
+    NDJSON ones through `read_csv` and `read_json` until those registrations exist;
   - an `apache-arrow` `instanceof` check on the result;
   - a `require()` of the package from CommonJS.
-- It runs once per pinned Node: 22, 24 and 26 on linux-x64.
+- It runs once per pinned Node: 22, 24 and 26 on linux-x64, each its own action
+  (`//node:install_test[node_22]` and so on).
 - The test stages no runtime of its own: the runtime is whatever the platform tarball holds, so the
   test runs the bytes that are published.
 - On macos-arm64 and linux-arm64 the same target runs in the release workflows only, never in a
@@ -896,7 +910,7 @@ Each part is its own change, with its tests:
 6. the package rule and the release set, consuming the self-contained directory of the libkomira
    target (`//src/so:libkomira[dist]`, which the wheel already uses);
 7. the macOS and linux-arm64 builds;
-8. the install tests;
+8. the install tests (the linux-x64 one **EXISTS**: `//node:install_test`);
 9. `npm.yml`;
 10. the SQL conformance runner.
 
