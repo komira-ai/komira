@@ -25,6 +25,7 @@ from std.memory import bitcast
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from arrow.string_array import StringArray
+from byte_buffer.heap_region import HeapRegion
 
 from kernels.cast_string_to_number import (
     _FloatText,
