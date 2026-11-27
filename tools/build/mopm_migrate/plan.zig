@@ -16,7 +16,7 @@
 //!    `--dev-dependencies`, a package that has a `src/` or `generated/` directory already.
 //!
 //! What it leaves to the farm (`Plan.farm`): `buildrules.mojo.bzl` and `buildrules.mojo.lock.bzl`
-//! (`buildrules mojo sync`), `coverage_floor.txt` (a measure) and the regeneration of the `ci/targets`
+//! (`buildrules mojo sync`), `coverage_floor.txt` (a measure) and the regeneration of the `ci/roots`
 //! rows (generated, so the tool does not edit them).
 const std = @import("std");
 const sl = @import("starlark.zig");
@@ -646,8 +646,8 @@ pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
     var farm = std.ArrayList([]const u8).empty;
     try farm.append(c.a, try fmt(c, "generate the tables: `buildrules mojo sync` for src/{s} on the farm (recipe step 4); copy buildrules.mojo.bzl and buildrules.mojo.lock.bzl into src/{s}", .{ n, n }));
     try farm.append(c.a, try fmt(c, "measure: ./buck2 build //src/{s}:coverage --show-full-output, write coverage_floor.txt ('lines NN.NN', 'branches NN.NN'), then build //src/{s}:coverage_floor", .{ n, n }));
-    if (repo.has("ci/targets/shard_0.bzl")) {
-        try farm.append(c.a, "regenerate the check roots (ci/targets.bzl and its shards are generated; the tool does not edit them; the form refuses an empty or missing generator output, which a bare \"$(...)\"/. would turn into a copy of /): out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d \"$out\" ] && [ \"$out\" != / ] && cp -rL --no-preserve=mode \"$out\"/. ci/ ; then ./buck2 bxl komira//tools/build/ci/guard.bxl:check");
+    if (repo.has("tools/build/ci/roots.bzl")) {
+        try farm.append(c.a, "regenerate the check roots (ci/roots/ and ci/test_roots/ hold one empty file per root, tools/build/ci/roots.bzl; the tool does not write them; the form refuses an empty or missing generator output, which a bare \"$(...)\"/. would turn into a copy of /, and deletes the old files only after the generator succeeded): out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d \"$out\" ] && [ \"$out\" != / ] && git rm -rqf --ignore-unmatch ci/roots ci/test_roots && git clean -fdq -- ci/roots ci/test_roots && cp -rL --no-preserve=mode \"$out\"/. ci/ && git add ci/roots ci/test_roots ; then ./buck2 bxl komira//tools/build/ci/guard.bxl:check");
     } else {
         try farm.append(c.a, "regenerate the check roots (ci/targets.bzl is generated; the tool does not edit it): ./buck2 bxl komira//tools/build/ci/targets.bxl:generate > ci/targets.bzl ; then ./buck2 bxl komira//tools/build/ci/guard.bxl:check");
     }

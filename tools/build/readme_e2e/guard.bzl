@@ -55,7 +55,7 @@ def mopm_findings(mopm, first_with_overlay, excluded):
     has_overlay = first_with_overlay != None and _mopm_version(mopm) >= _mopm_version(first_with_overlay)
     row = EXCLUDED_PATTERN in excluded
     if has_overlay and row:
-        return "MOPM ({}) has --overlay (first: {}), and EXCLUDED of tools/build/ci/rules.bzl still leaves {} out of //ci:pr. Delete that row, then regenerate ci/targets.bzl".format(mopm, first_with_overlay, EXCLUDED_PATTERN)
+        return "MOPM ({}) has --overlay (first: {}), and EXCLUDED of tools/build/ci/rules.bzl still leaves {} out of //ci:pr. Delete that row, then write the roots of //ci:pr again (tools/build/ci/README.md)".format(mopm, first_with_overlay, EXCLUDED_PATTERN)
     if not has_overlay and not row:
         return "MOPM ({}) has no --overlay (first: {}), and EXCLUDED of tools/build/ci/rules.bzl has no row for {}: the pull request check would build targets that fail at their install step. Restore the row, or pin a mopm that has --overlay and set FIRST_MOPM_WITH_OVERLAY in release/readme_e2e/packages.bzl".format(mopm, first_with_overlay, EXCLUDED_PATTERN)
     return ""

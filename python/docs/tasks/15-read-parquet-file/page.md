@@ -70,4 +70,4 @@ int64 string float64
 - [How do I read a CSV file?](../1-read-csv-file/page.md) (rank 1, works)
 - [How do I read a JSON file and write the records to a database?](../22-read-json-file-write-records-database/page.md) (rank 22, partial)
 - [How do I read many files matching a pattern into one table?](../19-read-many-files-matching-pattern-table/page.md) (rank 19, partial)
-- How do I look at the first rows, row count and columns of a dataset? (rank 5, works; no page yet)
+- [How do I look at the first rows, row count and columns of a dataset?](../5-look-at-first-rows-and-columns/page.md) (rank 5, works)

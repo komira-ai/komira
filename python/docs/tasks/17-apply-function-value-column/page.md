@@ -62,4 +62,4 @@ Output:
 
 - [How do I change a column's data type?](../12-change-column-data-type/page.md) (rank 12, works)
 - [How do I rename columns?](../16-rename-columns/page.md) (rank 16, works)
-- How do I add a new column computed from other columns? (rank 3, works; no page yet)
+- [How do I add a new column computed from other columns?](../3-add-computed-column/page.md) (rank 3, works)

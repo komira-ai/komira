@@ -1,0 +1,1 @@
+UnsupportedOperation: bind: SQL not supported: DATE +/- INTERVAL needs a constant DATE (`DATE 'YYYY-MM-DD'`, possibly already shifted by another INTERVAL); a column or other non-constant operand is refused because the INTERVAL is folded at bind time

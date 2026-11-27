@@ -63,4 +63,4 @@ Output:
 - [How do I read many files matching a pattern into one table?](../19-read-many-files-matching-pattern-table/page.md) (rank 19, partial)
 - [How do I remove duplicate rows?](../13-remove-duplicate-rows/page.md) (rank 13, partial)
 - [How do I rename columns?](../16-rename-columns/page.md) (rank 16, works)
-- How do I join two tables on a key? (rank 10, works; no page yet)
+- [How do I join two tables on a key?](../10-join-two-tables-on-key/page.md) (rank 10, works)

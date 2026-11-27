@@ -72,7 +72,7 @@ Output:
 
 ## Related
 
-- How do I drop rows with missing values? (rank 7, works; no page yet)
-- How do I count how many times each value appears? (rank 9, works; no page yet)
+- [How do I drop rows with missing values?](../7-drop-rows-missing-values/page.md) (rank 7, works)
+- [How do I count how many times each value appears?](../9-count-each-value/page.md) (rank 9, works)
 - [How do I concatenate (stack) tables with the same columns?](../18-concatenate-tables-same-columns/page.md) (rank 18, works)
-- How do I validate data: nulls, uniqueness, ranges? (rank 59, works; no page yet)
+- [How do I validate data: nulls, uniqueness, ranges?](../59-validate-data-nulls-uniqueness-ranges/page.md) (rank 59, works)

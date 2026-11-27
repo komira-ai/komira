@@ -891,7 +891,7 @@ test "the scanner reads every module of an import list" {
     try t.expectEqual(@as(usize, 2), bad.line);
 }
 
-test "the plan does not edit ci/targets: no write for it, and the farm step names the generator for the layout" {
+test "the plan does not edit the check roots: no write for them, and the farm step names the generator for the layout" {
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
@@ -903,20 +903,20 @@ test "the plan does not edit ci/targets: no write for it, and the farm step name
     };
     try t.expect(single != null);
     try t.expect(std.mem.indexOf(u8, single.?, "> ci/targets.bzl") != null);
-    // the sharded layout: the same plan, the copy form
-    const sharded = try planOf(a, try mini(a, .{ .extra = &.{.{ .path = "ci/targets/shard_0.bzl", .text = "TARGETS = []\n" }} }), mini_options);
+    // the layout of one file per root (tools/build/ci/roots.bzl): the same plan, the copy form
+    const per_root = try planOf(a, try mini(a, .{ .extra = &.{.{ .path = "tools/build/ci/roots.bzl", .text = "ROOTS_DIR = \"roots\"\n" }} }), mini_options);
     var copy: ?[]const u8 = null;
-    for (sharded.farm) |f| if (std.mem.indexOf(u8, f, "targets.bxl:generate") != null) {
+    for (per_root.farm) |f| if (std.mem.indexOf(u8, f, "targets.bxl:generate") != null) {
         copy = f;
     };
     try t.expect(copy != null);
-    try t.expect(std.mem.indexOf(u8, copy.?, "cp -rL --no-preserve=mode") != null);
-    // The copy runs only when the generator printed an existing directory that is not `/`: an
-    // empty output would make the bare form copy `/` into ci/.
-    try t.expect(std.mem.indexOf(u8, copy.?, "out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d \"$out\" ] && [ \"$out\" != / ] && cp -rL --no-preserve=mode \"$out\"/. ci/") != null);
+    // The copy runs only when the generator printed an existing directory that is not `/` (an
+    // empty output would make the bare form copy `/` into ci/), and the old files are deleted,
+    // tracked or not, only after that.
+    try t.expect(std.mem.indexOf(u8, copy.?, "out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d \"$out\" ] && [ \"$out\" != / ] && git rm -rqf --ignore-unmatch ci/roots ci/test_roots && git clean -fdq -- ci/roots ci/test_roots && cp -rL --no-preserve=mode \"$out\"/. ci/ && git add ci/roots ci/test_roots") != null);
     try t.expect(std.mem.indexOf(u8, copy.?, "\"$(./buck2") == null);
     try t.expect(std.mem.indexOf(u8, copy.?, "> ci/targets.bzl") == null);
-    for (sharded.writes) |w| try t.expect(std.mem.indexOf(u8, w.path, "ci/targets") == null);
+    for (per_root.writes) |w| try t.expect(std.mem.indexOf(u8, w.path, "ci/roots") == null and std.mem.indexOf(u8, w.path, "ci/test_roots") == null);
 }
 
 test "refuses a library that loads a shared library at run time, and ignores the name in a comment" {

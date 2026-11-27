@@ -1,0 +1,1 @@
+AttributeError: .pivot_table() is not supported yet: the plan has no node for it

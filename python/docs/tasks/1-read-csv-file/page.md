@@ -61,4 +61,4 @@ int64 float64
 - [How do I read a Parquet file?](../15-read-parquet-file/page.md) (rank 15, works)
 - [How do I read many files matching a pattern into one table?](../19-read-many-files-matching-pattern-table/page.md) (rank 19, partial)
 - How do I read a CSV with an odd delimiter, no header or extra lines? (rank 100, partial; no page yet)
-- How do I look at the first rows, row count and columns of a dataset? (rank 5, works; no page yet)
+- [How do I look at the first rows, row count and columns of a dataset?](../5-look-at-first-rows-and-columns/page.md) (rank 5, works)
