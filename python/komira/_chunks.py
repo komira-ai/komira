@@ -33,12 +33,13 @@ more columns) and then converted to its column's type by the engine's rules:
   0000 is NULL (Python has no such date), and a float is the correctly
   rounded double (the engine's can differ in the last bit).
 
-A row with another number of fields than the header has, or a quote that is
-never closed, raises `KomiraError` ("read_csv: reading '<path>' stopped: "
-and pyarrow's message) and closes the reader. The file is read in
-blocks of `_BLOCK_BYTES`; a block's rows are parsed when the reader first
-needs one of them, so that error comes from the call that reads the block
-holding the row, and every chunk of the rows before that block has arrived.
+A row pyarrow cannot split, such as one with another number of fields than
+the header has, raises `KomiraError` ("read_csv: reading '<path>' stopped: "
+and pyarrow's message); it and any other exception while a block is read
+close the reader, and the rows read and not handed out are dropped. The file is read in blocks of
+`_BLOCK_BYTES`; a block's rows are parsed when the reader first needs one of
+them, so that error comes from the call that reads the block holding the row,
+and every chunk whose rows all lie before that block arrives first.
 
 Chunk sizes: the blocks give batches of any size, and the reader re-slices
 them. It keeps the rows read and not yet handed out; a chunk of `n` rows reads
@@ -172,16 +173,21 @@ class TextFileReader:
         try:
             if self._reader is None:
                 self._reader = _open_csv(self._file, *self._open)
-            batch = self._reader.read_next_batch()
-        except StopIteration:
-            self._end = True
-            return
+            try:
+                batch = self._reader.read_next_batch()
+            except StopIteration:
+                self._end = True
+                return
+            if batch.num_rows:
+                self._pending.append(self._convert(batch))
+                self._rows += batch.num_rows
         except pa.ArrowInvalid as e:
             self.close()
             raise self._error(e) from e
-        if batch.num_rows:
-            self._pending.append(self._convert(batch))
-            self._rows += batch.num_rows
+        except BaseException:
+            # Any other failure, a Ctrl-C among them, releases the file too.
+            self.close()
+            raise
 
     def _take(self, n: int) -> pyarrow.Table:
         import pyarrow as pa

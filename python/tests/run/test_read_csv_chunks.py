@@ -17,7 +17,10 @@ engine infers from the start of the file:
 - close(), leaving a `with` block and reaching the end release the file, and
   a closed reader refuses a chunk with ValueError;
 - iterator=True with get_chunk(size), size 0 and size None;
-- header=None and sep="|";
+- header=None and sep="|"; a UTF-8 BOM, CRLF line ends and blank lines
+  (skipped with two columns, a NULL row with one), as the engine reads them;
+- a malformed row in the first read block raises from the first chunk, and
+  any exception while a block is read closes the reader and its file;
 - a chunksize of 0, negative, fractional, a bool or a str raises pandas'
   ValueError before the file is touched; get_chunk(-1) and iterator="yes"
   are refused; a missing file raises BindError at read_csv as without
@@ -303,6 +306,61 @@ def test_refusals(s, work):
     assert type(e) is TypeError and "'nrows'" in str(e), repr(e)
 
 
+def test_dialect_as_the_engine_reads_it(s, work):
+    """A UTF-8 BOM, CRLF line ends, a blank line in a file of two columns
+    (skipped) and in a file of one column (a NULL row), read with header=0,
+    give the engine's rows."""
+    cases = [
+        ("bom_crlf.csv", "\ufeffid,v\r\n1,a\r\n2,\r\n3,c\r\n", 2),
+        ("blank_two.csv", "id,v\n1,a\n\n2,b\n", 3),
+        ("blank_one.csv", "id\n1\n\n3\n", 3),
+    ]
+    for name, text, n in cases:
+        path = write(work, name, text)
+        chunks = list(komira.read_csv(path, header=0, chunksize=n, session=s))
+        s.register_csv(name.split(".")[0], path)
+        want = s.sql("SELECT * FROM {}".format(name.split(".")[0])).to_arrow().to_pylist()
+        assert rows(chunks) == want, (name, rows(chunks), want)
+        assert [c.num_rows for c in chunks][0] == min(n, len(want)), name
+    assert len(rows(list(komira.read_csv(os.path.join(work, "blank_one.csv"), chunksize=9, session=s)))) == 3
+
+
+def test_bad_row_in_first_block(s, work):
+    """A malformed row past the start the engine samples, inside the first
+    read block: read_csv returns the reader, and the first chunk raises."""
+    good = "".join("{},{}\n".format(i, i) for i in range(1, 40001))
+    path = write(work, "bad_first.csv", "id,v\n" + good + "40001\n" + good)
+    assert 300 * 1024 < len(good) < (1 << 20)
+    reader = komira.read_csv(path, chunksize=10, session=s)
+    e = raised(reader.get_chunk)
+    assert type(e) is KomiraError and str(e).startswith("read_csv: reading '{}' stopped: ".format(path)), repr(e)
+    assert type(raised(reader.get_chunk)) is ValueError
+
+
+def test_failure_while_converting_releases_the_file(s, work):
+    """Any exception while a block is read, not only a malformed row,
+    closes the reader and releases its file."""
+    from komira import _chunks
+
+    path = write(work, "five.csv", FIVE)
+    typed = _chunks._typed
+
+    def failing(text, target):
+        raise RuntimeError("conversion failed")
+
+    def make():
+        reader = komira.read_csv(path, chunksize=2, session=s)
+        _chunks._typed = failing
+        try:
+            e = raised(reader.get_chunk)
+        finally:
+            _chunks._typed = typed
+        assert type(e) is RuntimeError and str(e) == "conversion failed", repr(e)
+        assert type(raised(reader.get_chunk)) is ValueError
+
+    assert unreleased(make) == []
+
+
 TESTS = [
     test_chunks_of_two_over_five_rows,
     test_chunksize_larger_than_file,
@@ -313,6 +371,9 @@ TESTS = [
     test_close_releases_the_file,
     test_iterator_true_get_chunk,
     test_header_none_and_sep,
+    test_dialect_as_the_engine_reads_it,
+    test_bad_row_in_first_block,
+    test_failure_while_converting_releases_the_file,
     test_refusals,
 ]
 
