@@ -61,4 +61,4 @@ FAIL id repeated: 1
 - [How do I find (not drop) duplicate rows?](../57-find-duplicate-rows/page.md) (rank 57, works)
 - How do I find and fill missing values? (rank 6, works; no page yet)
 - [How do I convert a column to numbers, turning bad values into null?](../60-convert-column-to-numbers/page.md) (rank 60, partial)
-- [How do I detect outliers?](../56-detect-outliers/page.md) (rank 56, partial)
+- [How do I detect outliers?](../56-detect-outliers/page.md) (rank 56, works)

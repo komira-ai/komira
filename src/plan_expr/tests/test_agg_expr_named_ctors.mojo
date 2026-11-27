@@ -12,7 +12,7 @@ with no error. So each bivariate case below is built from two DIFFERENTLY
 NAMED columns and asserts which name lands in which slot — a constructor that
 forgot the swap is red here by name, not merely "a bivariate aggregate".
 
-⚠ THE COVERAGE LOOP IS BOUNDED BY `AGG_KURTOSIS_POP` (36), the highest tag
+⚠ THE COVERAGE LOOP IS BOUNDED BY `AGG_QUANTILE_CONT` (38), the highest tag
 today. A new tag added without a constructor is NOT caught here unless this
 bound moves with it — `plan_wire_vocabulary.agg_fn_is_declared` is where the
 declared tag range lives.
@@ -29,6 +29,8 @@ from plan_expr.agg_expr import (
     AGG_KAHAN_SUM,
     AGG_KURTOSIS,
     AGG_KURTOSIS_POP,
+    AGG_QUANTILE_CONT,
+    AGG_UDF,
     AGG_REGR_AVGX,
     AGG_REGR_AVGY,
     AGG_REGR_COUNT,
@@ -61,6 +63,7 @@ from plan_expr.agg_expr import (
     median,
     min as agg_min,
     product,
+    quantile_cont,
     regr_avgx,
     regr_avgy,
     regr_count,
@@ -118,6 +121,17 @@ def test_one_input_constructors() raises:
     _assert_unary(kurtosis_pop(col("x")), AGG_KURTOSIS_POP, "kurtosis_pop")
 
 
+def test_quantile_cont_constructor_holds_the_value_and_a_float_fraction() raises:
+    var a = quantile_cont(col("x"), 0.25)
+    assert_equal(a.func, AGG_QUANTILE_CONT)
+    assert_equal(a.child.value().col_ref_name(), String("x"))
+    assert_equal(a.child1.value().literal_value().float_val, 0.25)
+    assert_false(
+        agg_is_bivariate(AGG_QUANTILE_CONT),
+        "quantile_cont's second slot is a constant fraction, not a paired column",
+    )
+
+
 def test_bivariate_constructors_take_sql_order_and_swap() raises:
     _assert_sql_order(covar_pop(col("y"), col("x")), AGG_COVAR_POP, "covar_pop")
     _assert_sql_order(covar_samp(col("y"), col("x")), AGG_COVAR_SAMP, "covar_samp")
@@ -143,7 +157,7 @@ def test_the_aliased_bivariate_keeps_both_slots() raises:
 
 
 def test_every_tag_has_a_named_constructor() raises:
-    """One named constructor per tag, 0 ..= AGG_KURTOSIS_POP."""
+    """One named constructor per tag, 0 ..= AGG_QUANTILE_CONT."""
     var funcs = List[UInt8]()
     funcs.append(agg_sum(col("x")).func)
     funcs.append(count().func)
@@ -182,8 +196,12 @@ def test_every_tag_has_a_named_constructor() raises:
     funcs.append(skewness(col("x")).func)
     funcs.append(kurtosis(col("x")).func)
     funcs.append(kurtosis_pop(col("x")).func)
-    var hi = Int(AGG_KURTOSIS_POP)
-    assert_equal(len(funcs), hi + 1, "one constructor per tag 0..=36")
+    # Tag 37 is the user-defined aggregate: it has no named constructor, its
+    # argument is a call of a `UdfRef`.
+    funcs.append(AGG_UDF)
+    funcs.append(quantile_cont(col("x"), 0.5).func)
+    var hi = Int(AGG_QUANTILE_CONT)
+    assert_equal(len(funcs), hi + 1, "one constructor per tag 0..=38")
     for t in range(hi + 1):
         var seen = 0
         for i in range(len(funcs)):
@@ -196,6 +214,7 @@ def test_every_tag_has_a_named_constructor() raises:
 
 def main() raises:
     test_one_input_constructors()
+    test_quantile_cont_constructor_holds_the_value_and_a_float_fraction()
     test_bivariate_constructors_take_sql_order_and_swap()
     test_the_aliased_bivariate_keeps_both_slots()
     test_every_tag_has_a_named_constructor()

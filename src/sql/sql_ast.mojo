@@ -404,6 +404,11 @@ def sql_call_is_aggregate(name: String) -> Bool:
         or name == "skewness"
         or name == "kurtosis"
         or name == "kurtosis_pop"
+        # `quantile_cont(x, q)` is the one name with a CONSTANT second argument
+        # that is not a column: `_bind_agg_from_sx_call` folds it to a FLOAT64
+        # literal in slot 1. `quantile` and `quantile_disc` stay refused (they
+        # return the input's own type), so they are NOT here.
+        or name == "quantile_cont"
     )
 
 

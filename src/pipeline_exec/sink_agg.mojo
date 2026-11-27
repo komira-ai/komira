@@ -3,7 +3,8 @@
 # =============================================================================
 #
 # The ungrouped aggregation sink: SUM, COUNT, COUNT(*), COUNT(DISTINCT), MIN,
-# MAX and AVG over a morsel stream, one output row. The plan's aggregate
+# MAX, AVG, STDDEV_SAMP, STDDEV_POP, VAR_SAMP, VAR_POP, MEDIAN and
+# QUANTILE_CONT over a morsel stream, one output row. The plan's aggregate
 # arguments are expressions (`AggSinkData.agg_exprs`); the sink registers them
 # once and each worker runs them as a projection (`MapOp`) over every morsel it is handed, under the
 # morsel's selection mask: a projection of expressions that can raise sees only
@@ -35,7 +36,11 @@
 #
 # COUNT(DISTINCT x) keeps the distinct non-NULL values of x a worker saw
 # (`count_distinct`, all under group 0) instead of a cell; `combine` merges
-# them and the merged cell's count is the number of distinct values.
+# them and the merged cell's count is the number of distinct values. MEDIAN
+# and QUANTILE_CONT keep every non-NULL value beside their cell
+# (`agg_values`, under group 0, charged as they are kept); `combine` merges
+# them and writes the answer into the merged cell. The variance family folds
+# into its cell (`agg_fold`).
 #
 # The cells are fixed in size, so a worker draws them from the segment pool
 # once (`segment_pool`), when it takes its first morsel, and gives them back at
@@ -44,7 +49,9 @@
 #
 # Refused when the sink is built: group-by expressions (this is the sink of
 # the key-less row), an aggregate this sink does not serve (anything but SUM,
-# COUNT, COUNT(DISTINCT), MIN, MAX and AVG), an aggregate without the argument it needs, an
+# COUNT, COUNT(DISTINCT), MIN, MAX, AVG, STDDEV_SAMP, STDDEV_POP, VAR_SAMP,
+# VAR_POP, MEDIAN and QUANTILE_CONT), an aggregate without the arguments it
+# needs (a QUANTILE_CONT's fraction a FLOAT64 constant in [0, 1]), an
 # output schema that does not list one column per aggregate, and an output
 # column of a type the aggregate cannot produce. `AggSinkData.presorted` and
 # `estimated_groups` are for grouped sinks and are ignored.
@@ -67,18 +74,17 @@ from phase_timers.phase_timers import (
     pt_record,
 )
 from physical_plan.physical_plan import AggSinkData
-from plan_expr.agg_expr import (
-    AGG_COUNT,
-    AGG_COUNT_DISTINCT,
-    AGG_MAX,
-    AGG_MEAN,
-    AGG_MIN,
-    AGG_SUM,
-)
+from plan_expr.agg_expr import AGG_COUNT_DISTINCT
 from plan_expr.expr_id import ExprId
 from plan_expr.expr_pool import ExprPool
 
-from .agg_fold import AggCell, agg_name, fold_column, merge_cell
+from .agg_fold import AggCell, agg_name, fold_column, keeps_values, merge_cell
+from .agg_values import (
+    ValueMerge,
+    ValueSlot,
+    check_agg_args,
+    keep_column_values,
+)
 from .agg_output import agg_result_column, check_declared_type
 from .position_order import position_order
 from .count_distinct import (
@@ -118,6 +124,7 @@ struct _AggSlot(Movable):
     var map: Optional[MapOp]
     var reservation: WorkerReservation
     var distinct: DistinctSlot
+    var values: ValueSlot
     var started: Bool
 
     def __init__(out self, n_aggs: Int, var reservation: WorkerReservation):
@@ -126,6 +133,7 @@ struct _AggSlot(Movable):
         self.map = None
         self.reservation = reservation^
         self.distinct = DistinctSlot(n_aggs)
+        self.values = ValueSlot(n_aggs)
         self.started = False
 
 
@@ -180,6 +188,8 @@ struct AggSink(MorselSinkImpl):
     var _seg_id: Int
     var _where: String
     var _funcs: List[UInt8]
+    # The fraction of each MEDIAN or QUANTILE_CONT (0.0 for the others).
+    var _fractions: List[Float64]
     var _arg_col: List[Int]
     var _labels: List[String]
     var _schema: Schema
@@ -232,6 +242,7 @@ struct AggSink(MorselSinkImpl):
         self._seg_id = seg_id
         self._where = where_
         self._funcs = List[UInt8]()
+        self._fractions = List[Float64]()
         self._arg_col = List[Int]()
         self._labels = List[String]()
         self._expr_ids = List[ExprId]()
@@ -240,26 +251,9 @@ struct AggSink(MorselSinkImpl):
         for i in range(n):
             ref agg = data.agg_exprs[i]
             var func = agg.func
-            if (
-                func != AGG_SUM
-                and func != AGG_COUNT
-                and func != AGG_COUNT_DISTINCT
-                and func != AGG_MIN
-                and func != AGG_MAX
-                and func != AGG_MEAN
-            ):
-                raise Error(
-                    where_
-                    + " does not serve aggregate tag "
-                    + String(Int(func))
-                    + " (SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)"
-                )
             var label = agg_name(func) + " (output column " + String(i) + ")"
-            if agg.num_children() > 1:
-                raise Error(where_ + ": " + label + " takes one argument")
+            self._fractions.append(check_agg_args(agg, where_, label))
             if not agg.child:
-                if func != AGG_COUNT:
-                    raise Error(where_ + ": " + label + " has no argument")
                 self._arg_col.append(-1)
             else:
                 self._arg_col.append(len(self._expr_ids))
@@ -370,24 +364,37 @@ struct AggSink(MorselSinkImpl):
                         self._pool,
                         slot.reservation,
                     )
-            elif g >= 0:
-                fold_column(
-                    slot.grains[g].cells[i],
-                    self._funcs[i],
-                    dense,
-                    self._arg_col[i],
-                    selected,
-                    self._labels[i],
-                )
             else:
-                fold_column(
-                    slot.cells[i],
-                    self._funcs[i],
-                    dense,
-                    self._arg_col[i],
-                    selected,
-                    self._labels[i],
-                )
+                if g >= 0:
+                    fold_column(
+                        slot.grains[g].cells[i],
+                        self._funcs[i],
+                        dense,
+                        self._arg_col[i],
+                        selected,
+                        self._labels[i],
+                    )
+                else:
+                    fold_column(
+                        slot.cells[i],
+                        self._funcs[i],
+                        dense,
+                        self._arg_col[i],
+                        selected,
+                        self._labels[i],
+                    )
+                if keeps_values(self._funcs[i]):
+                    keep_column_values(
+                        slot.values,
+                        i,
+                        0,
+                        dense,
+                        self._arg_col[i],
+                        selected,
+                        slot.reservation,
+                        self._where,
+                        self._pool,
+                    )
         pt_record[PH_SINK_FOLD](t_fold)
 
     def combine(mut self, mut pipeline: PipelineExecution) raises -> None:
@@ -396,6 +403,7 @@ struct AggSink(MorselSinkImpl):
         for _ in range(n):
             merged.append(AggCell())
         var distinct = DistinctMerge(n, WorkerReservation(self._pool.share()))
+        var values = ValueMerge(n, WorkerReservation(self._pool.share()))
         var only_group = List[Int]()
         only_group.append(0)
         if self._by_position:
@@ -418,12 +426,17 @@ struct AggSink(MorselSinkImpl):
                 self._labels,
                 self._pool,
             )
-            # This worker is merged: free its distinct values and return its
-            # memory.
+            values.merge_worker(slot.values, only_group, self._where, self._pool)
+            # This worker is merged: free its distinct and kept values and
+            # return its memory.
             slot.distinct = DistinctSlot(n)
+            slot.values = ValueSlot(n)
             slot.grains = List[_Grain]()
             slot.reservation.give_back_all()
         distinct.finish()
+        values.finish(
+            merged, self._funcs, self._fractions, 1, self._where, self._pool
+        )
         self._merged = merged^
         self._combined = True
 

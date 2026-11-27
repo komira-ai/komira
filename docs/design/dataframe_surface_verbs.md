@@ -119,7 +119,7 @@ These verbs have no capability of their own. Each one builds the plan of the row
 | fill missing values | `fillna(v)` or `fillna({col: v})` | `fill_null(v)`; `fill_nan(v)` not built | `computed_column` |
 | count values per key | `df.groupby(c).size().sort_values("size", ascending=False)`: `s.value_counts()` is refused by name, since pandas gives a `Series` indexed by value and a komira `Series` has no index (rules section 8, ruling 1) | `lf.group_by(c).len()` | `group_by`, `sort` |
 | distinct count | `nunique()` | `n_unique()` | `aggregate`, `group_by` |
-| median, standard deviation, variance | `median()`, `std()`, `var()` (`ddof=1`); other `ddof` refused | `median()`, `std()`, `var()` (`ddof=1`) | `aggregate`, `group_by` |
+| median, standard deviation, variance | `median()`, `std()`, `var()` (`ddof=1` the sample one, `ddof=0` the population one; other `ddof` refused by name); `Series.quantile(q)`, which runs at once and returns a float | `median()`, `std()`, `var()` (`ddof=1` or `0`; other `ddof` refused by name) | `aggregate`, `group_by` |
 | last rows of an ordered frame | `tail(n)` | `tail(n)` | `topn` (rules section 7) |
 | copy | `df.copy()` returns an equal frame | none: frames are values | none |
 | render the plan | `explain()` | `explain()` | none |

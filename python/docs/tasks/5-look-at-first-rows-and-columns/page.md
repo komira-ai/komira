@@ -76,6 +76,6 @@ int64 int64 float64
 ## Related
 
 - [How do I sort rows by one or more columns?](../8-sort-rows-by-columns/page.md) (rank 8, works)
-- How do I compute summary statistics of a column? (rank 24, works; no page yet)
+- [How do I compute summary statistics of a column?](../24-compute-summary-statistics-column/page.md) (rank 24, partial)
 - [How do I count the rows of a table?](../62-count-rows-table/page.md) (rank 62, works)
 - [How do I take the first or last N rows?](../65-take-first-last-n-rows/page.md) (rank 65, works)

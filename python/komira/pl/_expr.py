@@ -107,6 +107,8 @@ _STATISTICS = {
     "std": "stddev_samp",
     "var": "var_samp",
 }
+# The engine aggregate of `std` and `var` for ddof=0, the population ones.
+_POPULATION = {"std": "stddev_pop", "var": "var_pop"}
 
 
 def _lower_value(value: object, scope) -> Node:
@@ -508,12 +510,19 @@ class Expr:
         return Expr(lower, name, True)
 
     def _statistic(self, verb: str, ddof: object = None) -> Expr:
-        if ddof is not None and (isinstance(ddof, bool) or ddof != 1):
-            raise UnsupportedOperation(f"{verb}: ddof={ddof!r} is not supported; only ddof=1 is")
+        func = _STATISTICS[verb]
+        if ddof is not None:
+            if isinstance(ddof, bool) or ddof not in (0, 1):
+                raise UnsupportedOperation(
+                    f"{verb}: ddof={ddof!r} is not supported; use ddof=1, the sample {verb}, "
+                    f"or ddof=0, the population {verb}"
+                )
+            if ddof == 0:
+                func = _POPULATION[verb]
 
         def build(arg, found):
             finish = (lambda ref: Cast(ref, "float32")) if found == "float32" else _same
-            return Agg(_STATISTICS[verb], (_wide(arg, found),)), finish
+            return Agg(func, (_wide(arg, found),)), finish
 
         return self._aggregate(verb, build)
 
@@ -526,11 +535,13 @@ class Expr:
         return self._statistic("median")
 
     def std(self, ddof: int = 1) -> Expr:
-        """The sample standard deviation (`ddof=1`)."""
+        """The standard deviation: the sample one (`ddof=1`) or the population
+        one (`ddof=0`); null over no values, and over one value for ddof=1."""
         return self._statistic("std", ddof)
 
     def var(self, ddof: int = 1) -> Expr:
-        """The sample variance (`ddof=1`)."""
+        """The variance: the sample one (`ddof=1`) or the population one
+        (`ddof=0`); null over no values, and over one value for ddof=1."""
         return self._statistic("var", ddof)
 
     # ---- windows (komira/pl/_window.py) ---------------------------------------------

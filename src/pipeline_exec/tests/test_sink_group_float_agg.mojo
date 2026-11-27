@@ -792,8 +792,11 @@ def test_an_unserved_argument_type_is_refused_naming_the_type() raises:
                 "pipeline_exec: SUM (output column 1) is not served over this"
                 " column type ("
                 + String(ArrowType.STRING)
-                + "): SUM and AVG take signed integers, DECIMAL128, FLOAT32"
-                " and FLOAT64, MIN and MAX also DATE32",
+                + "): SUM, AVG, STDDEV_SAMP, STDDEV_POP, VAR_SAMP and VAR_POP"
+                " take signed integers, DECIMAL128, FLOAT32 and FLOAT64; MIN"
+                " and MAX also DATE32; MEDIAN and QUANTILE_CONT signed"
+                " integers, FLOAT32 and FLOAT64 (over a DECIMAL128 DuckDB's"
+                " answer is a DECIMAL, not the DOUBLE the plan declares)",
             )
 
 

@@ -192,7 +192,7 @@ def _bind_coalesce(sx: SqlExpr, dsg: UInt8, schema: Schema, scope: BindScope, ca
     if dsg == DSG_IFNULL:
         if n != 2:
             raise Error(
-                "SQL bind error: ifnull() expects exactly 2 arguments — got "
+                "SQL bind error: ifnull() expects exactly 2 arguments: got "
                 + String(n)
             )
     elif n < 1:

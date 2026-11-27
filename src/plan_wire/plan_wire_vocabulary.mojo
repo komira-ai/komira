@@ -58,7 +58,7 @@ in the generator. A repository lint fails if you do.
 comptime PLAN_WIRE_UNSPECIFIED_VALUE: Int32 = 0
 """Wire 0, in every space. Never a valid tag."""
 
-comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 359
+comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 360
 """Total published members across all 33 spaces. A drift tripwire a test can pin."""
 
 comptime PLAN_WIRE_SPACE_COUNT: Int = 33
@@ -445,19 +445,19 @@ def expr_tag_wire_name(wire: Int32) -> String:
 # Declared in: src/plan_expr/agg_expr.mojo
 # ==========================================================================
 
-comptime AGG_FN_WIRE_MEMBERS: Int = 38
+comptime AGG_FN_WIRE_MEMBERS: Int = 39
 comptime AGG_FN_ENGINE_MIN: UInt8 = 0
-comptime AGG_FN_ENGINE_MAX: UInt8 = 37
+comptime AGG_FN_ENGINE_MAX: UInt8 = 38
 comptime AGG_FN_WIRE_MIN: Int32 = 1
-comptime AGG_FN_WIRE_MAX: Int32 = 38
+comptime AGG_FN_WIRE_MAX: Int32 = 39
 
 
 def agg_fn_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this AggFn value?
 
-    Runs: [(0, 37)]. Total, never raising.
+    Runs: [(0, 38)]. Total, never raising.
     """
-    return engine_tag <= 37
+    return engine_tag <= 38
 
 
 def agg_fn_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -621,6 +621,9 @@ def write_agg_fn_wire_name[W: Writer](mut writer: W, wire: Int32):
         return
     if wire == 38:
         writer.write("AGG_UDF")
+        return
+    if wire == 39:
+        writer.write("AGG_QUANTILE_CONT")
         return
     writer.write("AggFn#", Int(wire))
 

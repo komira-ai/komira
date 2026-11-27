@@ -471,6 +471,7 @@ struct AggFn(ProtoEnum, Copyable, Movable, ImplicitlyCopyable):
     comptime AGG_KURTOSIS: Int = 36
     comptime AGG_KURTOSIS_POP: Int = 37
     comptime AGG_UDF: Int = 38
+    comptime AGG_QUANTILE_CONT: Int = 39
 
     def __eq__(self, other: Self) -> Bool:
         return self.value == other.value
@@ -562,6 +563,8 @@ struct AggFn(ProtoEnum, Copyable, Movable, ImplicitlyCopyable):
             return String("AGG_KURTOSIS_POP")
         elif self.value == 38:
             return String("AGG_UDF")
+        elif self.value == 39:
+            return String("AGG_QUANTILE_CONT")
         return String(self.value)
 
     @staticmethod
@@ -652,6 +655,8 @@ struct AggFn(ProtoEnum, Copyable, Movable, ImplicitlyCopyable):
             return Self(37)
         if s == "AGG_UDF":
             return Self(38)
+        if s == "AGG_QUANTILE_CONT":
+            return Self(39)
         return Self(0)
 
     @staticmethod
@@ -735,6 +740,8 @@ struct AggFn(ProtoEnum, Copyable, Movable, ImplicitlyCopyable):
             return True
         if s == "AGG_UDF":
             return True
+        if s == "AGG_QUANTILE_CONT":
+            return True
         return False
 
     @staticmethod
@@ -743,4 +750,4 @@ struct AggFn(ProtoEnum, Copyable, Movable, ImplicitlyCopyable):
         vocabulary, for a refusal that says what IS accepted. ERROR PATH
         ONLY: it allocates.
         """
-        return String("AGG_WIRE_UNSPECIFIED,AGG_SUM,AGG_COUNT,AGG_MIN,AGG_MAX,AGG_MEAN,AGG_COUNT_DISTINCT,AGG_FIRST,AGG_LAST,AGG_STDDEV_SAMP,AGG_CORR,AGG_MEDIAN,AGG_LARGEST_K,AGG_VAR_SAMP,AGG_COVAR_POP,AGG_COVAR_SAMP,AGG_REGR_AVGX,AGG_REGR_AVGY,AGG_REGR_COUNT,AGG_REGR_SXX,AGG_REGR_SXY,AGG_REGR_SYY,AGG_REGR_SLOPE,AGG_REGR_INTERCEPT,AGG_REGR_R2,AGG_VAR_POP,AGG_STDDEV_POP,AGG_SEM,AGG_COUNT_IF,AGG_BOOL_AND,AGG_BOOL_OR,AGG_PRODUCT,AGG_ANY_VALUE,AGG_KAHAN_SUM,AGG_KAHAN_AVG,AGG_SKEWNESS,AGG_KURTOSIS,AGG_KURTOSIS_POP,AGG_UDF")
+        return String("AGG_WIRE_UNSPECIFIED,AGG_SUM,AGG_COUNT,AGG_MIN,AGG_MAX,AGG_MEAN,AGG_COUNT_DISTINCT,AGG_FIRST,AGG_LAST,AGG_STDDEV_SAMP,AGG_CORR,AGG_MEDIAN,AGG_LARGEST_K,AGG_VAR_SAMP,AGG_COVAR_POP,AGG_COVAR_SAMP,AGG_REGR_AVGX,AGG_REGR_AVGY,AGG_REGR_COUNT,AGG_REGR_SXX,AGG_REGR_SXY,AGG_REGR_SYY,AGG_REGR_SLOPE,AGG_REGR_INTERCEPT,AGG_REGR_R2,AGG_VAR_POP,AGG_STDDEV_POP,AGG_SEM,AGG_COUNT_IF,AGG_BOOL_AND,AGG_BOOL_OR,AGG_PRODUCT,AGG_ANY_VALUE,AGG_KAHAN_SUM,AGG_KAHAN_AVG,AGG_SKEWNESS,AGG_KURTOSIS,AGG_KURTOSIS_POP,AGG_UDF,AGG_QUANTILE_CONT")

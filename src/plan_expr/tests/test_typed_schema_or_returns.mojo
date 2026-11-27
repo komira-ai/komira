@@ -22,7 +22,7 @@ from plan_expr.agg_expr import (
     AGG_VAR_POP, AGG_STDDEV_POP, AGG_SEM,
     AGG_COUNT_IF, AGG_BOOL_AND, AGG_BOOL_OR, AGG_PRODUCT, AGG_ANY_VALUE,
     AGG_KAHAN_SUM, AGG_KAHAN_AVG,
-    AGG_SKEWNESS, AGG_KURTOSIS, AGG_KURTOSIS_POP,
+    AGG_SKEWNESS, AGG_KURTOSIS, AGG_KURTOSIS_POP, AGG_QUANTILE_CONT,
 )
 from plan_expr.typed_schema import (
     TYPE_UNKNOWN, TYPE_INT8, TYPE_INT16, TYPE_INT32, TYPE_INT64,
@@ -124,7 +124,7 @@ def test_agg_output_type_finalized_statistics_are_float64() raises:
         AGG_REGR_SXX, AGG_REGR_SXY, AGG_REGR_SYY, AGG_REGR_SLOPE,
         AGG_REGR_INTERCEPT, AGG_REGR_R2,
         AGG_KAHAN_SUM, AGG_KAHAN_AVG, AGG_SKEWNESS, AGG_KURTOSIS,
-        AGG_KURTOSIS_POP,
+        AGG_KURTOSIS_POP, AGG_QUANTILE_CONT,
     ]
     for i in range(len(funcs)):
         assert_equal(

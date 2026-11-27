@@ -4,7 +4,9 @@ columns (docs/design/dataframe_surface.md).
 A Series is bound to the frame it was taken from, and to that frame's plan at
 the time: it holds an expression node of the private node tree (komira/_ops)
 over the frame's columns and the field the engine derives for it. It runs
-nothing. It is used inside its own frame's verbs: `df[s]` filters by it and
+nothing, with one exception: `quantile` runs a one-row aggregate of its frame
+now and returns a Python float (komira/_series.py, `Series.quantile`). Otherwise
+it is used inside its own frame's verbs: `df[s]` filters by it and
 `df.assign(name=s)` and `df["name"] = s` make a column of it.
 
 - A Series of another frame, or of a frame whose plan `df["x"] = ...` replaced
@@ -32,6 +34,11 @@ nothing. It is used inside its own frame's verbs: `df[s]` filters by it and
   so `s * 2` and `2 * s` have the type of an int32 `s`. The engine's
   arithmetic runs on int64 and float64, so an operator over a narrower type
   is computed there and cast back to that type.
+- `quantile(q, interpolation="linear")` is the one method that runs a query: it
+  is pandas' scalar answer, a float, so it reads the rows at once, through a
+  one-row AGGREGATE of `quantile_cont` over the frame's plan. `q` is one number
+  in [0, 1]; a list of them, and an interpolation other than "linear", are
+  refused by name.
 - No dunder runs a query: `bool`, `len`, `iter`, `__array__` and the Arrow
   stream raise `UnsupportedOperation`. A name the class does not define raises
   `AttributeError` (komira/_refusals.py), and no attribute can be set.
@@ -39,10 +46,12 @@ nothing. It is used inside its own frame's verbs: `df[s]` filters by it and
 
 from __future__ import annotations
 
+from numbers import Real
 from typing import TYPE_CHECKING
 
 from . import _accessors, _cast, _ops, _refusals, _windows
 from ._errors import UnsupportedOperation
+from ._groupby import _NUMERIC_TYPES
 from ._windows import Windows, merged
 
 if TYPE_CHECKING:
@@ -273,6 +282,52 @@ class Series:
             _ops.Compare("eq", *self._widened(self._node, _literal(v, "isin()"), self._windows)) for v in values
         )
         return self._derive(_ops.or_all(tests) if tests else _ops.Lit(False))
+
+    # ---- quantile (the one method that runs) ----------------------------
+
+    def quantile(self, q: float = 0.5, interpolation: str = "linear") -> float:
+        """The `q` quantile of the values that are not missing, as a Python
+        float, by linear interpolation between the two nearest values (SQL's
+        `quantile_cont`); NaN when the Series has no values. `q` is one number
+        from 0 to 1 (0.5 is the median); a list of fractions, and any
+        `interpolation` other than "linear", are refused by name.
+
+        This is the first Series method that runs: pandas gives a scalar, so
+        it runs a one-row aggregate over the Series' frame now, as
+        `.materialize()` runs a frame, and returns its value. The Series must
+        be numeric or boolean (a boolean counts as 0 and 1)."""
+        self._check_current()
+        if isinstance(q, (list, tuple, set, range)) or hasattr(q, "__array__"):
+            raise UnsupportedOperation(
+                "quantile() of several fractions gives a Series indexed by them in pandas, and a komira Series "
+                "has no index: ask for one fraction at a time, as s.quantile(0.25)"
+            )
+        if isinstance(q, bool) or not isinstance(q, Real):
+            raise TypeError(f"quantile q must be a number from 0 to 1, not {type(q).__name__}")
+        if not 0 <= q <= 1:
+            raise ValueError("percentiles should all be in the interval [0, 1]")
+        if interpolation != "linear":
+            raise UnsupportedOperation(
+                f"quantile(interpolation={interpolation!r}) is not supported: only 'linear' is, which is "
+                "SQL's quantile_cont"
+            )
+        if self._windows:
+            raise UnsupportedOperation(
+                "quantile() of a Series that reads windows is not supported: assign it as a column first, "
+                'as df.assign(x=...), then take df["x"]'
+            )
+        dtype = self._type
+        if dtype not in _NUMERIC_TYPES:
+            raise UnsupportedOperation(
+                f"quantile() needs a numeric or boolean Series, and this one is {dtype}"
+            )
+        node = _ops.Cast(self._node, "float64") if dtype == "bool" else self._node
+        plan = _ops.aggregate(
+            self._frame._plan, (), (("q", _ops.Agg("quantile_cont", (node, _ops.Lit(float(q))))),)
+        )
+        table = self._frame._derive(plan).materialize().to_arrow()
+        value = table.column(0).to_pylist()[0]
+        return float("nan") if value is None else float(value)
 
     # ---- windows (komira/_windows.py) -----------------------------------
 

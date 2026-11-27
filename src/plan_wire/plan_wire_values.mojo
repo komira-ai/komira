@@ -269,6 +269,7 @@ from plan_expr.agg_expr import (
     AGG_KURTOSIS,
     AGG_KURTOSIS_POP,
     AGG_UDF,
+    AGG_QUANTILE_CONT,
     agg_is_bivariate,
 )
 from plan_ir.logical_plan import (
@@ -2405,8 +2406,8 @@ def _agg_arg_slots(func: UInt8) raises -> Int:
     """How many argument slots THIS BUILD's aggregate `func` READS.
 
     ⚠ TOTAL OVER THE VOCABULARY, WITH A REFUSING TAIL. `agg_fn_from_wire`
-    admits engine tags 0..23 and nothing else, so every arm below is reachable
-    and the `raise` is not — until a twenty-fifth aggregate is declared without
+    admits the declared engine tags and nothing else, so every arm below is
+    reachable and the `raise` is not — until a new aggregate is declared without
     extending this table, at which point the door SAYS SO instead of guessing.
     Neither guess is safe: 1 would refuse a legitimate new bivariate, and 4
     would silently re-open the defect `PLAN_WIRE_AGG_ARG_DROPPED` names.
@@ -2471,6 +2472,10 @@ def _agg_arg_slots(func: UInt8) raises -> Int:
         or func == AGG_UDF
     ):
         return 1
+    if func == AGG_QUANTILE_CONT:
+        # The value expression in slot 0 and the FLOAT64 literal fraction in
+        # slot 1. Not a bivariate: no row pairing, so it is named on its own.
+        return 2
     raise Error(
         PLAN_WIRE_AGG_ARG_DROPPED
         + ": aggregate function tag "

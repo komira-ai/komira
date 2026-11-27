@@ -62,7 +62,7 @@ def _statistical_names() -> List[String]:
         "regr_syy", "var_pop", "stddev_pop", "sem", "count_star", "count_if",
         "countif", "bool_and", "bool_or", "product", "any_value", "arbitrary",
         "first", "last", "fsum", "kahan_sum", "sumkahan", "favg", "skewness",
-        "kurtosis", "kurtosis_pop",
+        "kurtosis", "kurtosis_pop", "quantile_cont",
     ]
 
 
@@ -72,7 +72,7 @@ def _fast_path_names() -> List[String]:
 
 def test_every_statistical_aggregate_name() raises:
     var names = _statistical_names()
-    assert_equal(len(names), 37)
+    assert_equal(len(names), 38)
     for i in range(len(names)):
         assert_true(sql_call_is_aggregate(names[i]), names[i])
     assert_false(sql_call_is_aggregate("upper"))
@@ -80,6 +80,11 @@ def test_every_statistical_aggregate_name() raises:
     # The match is exact: no prefix, no case folding (callers pass folded text).
     assert_false(sql_call_is_aggregate("medians"))
     assert_false(sql_call_is_aggregate("MEDIAN"))
+    # `quantile_cont` is served; its two siblings stay refused by the
+    # function table and are not aggregate names here.
+    assert_true(sql_call_is_aggregate("quantile_cont"))
+    assert_false(sql_call_is_aggregate("quantile"))
+    assert_false(sql_call_is_aggregate("quantile_disc"))
 
 
 def test_fast_path_aggregate_codes() raises:

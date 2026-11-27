@@ -142,7 +142,7 @@ def test_greatest_least_coalesce() raises:
     )
     _check(
         "SELECT ifnull(k) FROM t",
-        "ERR: SQL bind error: ifnull() expects exactly 2 arguments — got 1"
+        "ERR: SQL bind error: ifnull() expects exactly 2 arguments: got 1"
     )
     _check(
         "SELECT coalesce() FROM t",

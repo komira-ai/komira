@@ -125,7 +125,9 @@ Import each module by name; the package root exports nothing.
   had.
 - `sink_agg`, `agg_fold`, `agg_output`: the ungrouped aggregation sink
   `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`: SUM, COUNT, COUNT(*),
-  COUNT(DISTINCT), MIN, MAX and AVG (`count_distinct` below). The aggregate arguments (`AggSinkData.agg_exprs`) are run by each
+  COUNT(DISTINCT), MIN, MAX, AVG (`count_distinct` below), STDDEV_SAMP,
+  STDDEV_POP, VAR_SAMP, VAR_POP, MEDIAN and QUANTILE_CONT (`agg_values`
+  below). The aggregate arguments (`AggSinkData.agg_exprs`) are run by each
   worker as a projection over the morsel, under its selection mask; the state
   of a worker is one cell per aggregate, a count, one 128-bit integer and one
   double. The folds over signed integers, DECIMAL128 (the unscaled value; the
@@ -138,6 +140,14 @@ Import each module by name; the package root exports nothing.
   is a DOUBLE: one conversion of the exact sum (`decimal_to_float64` for a
   decimal) divided by the count. Over no non-NULL row SUM, MIN, MAX and AVG
   are NULL and COUNT is zero, in one row of the declared schema.
+  STDDEV_SAMP, STDDEV_POP, VAR_SAMP and VAR_POP fold each value as DuckDB's
+  DOUBLE (an integer converted, a decimal converted and divided by 10 to its
+  scale) with DuckDB's Welford update into a mean and a sum of squared
+  distances kept in the cell, and merge with its parallel (Chan) combine; the
+  answer is a DOUBLE, NULL over no value and, for the sample forms, over one
+  (the population forms answer 0.0), and an answer that is not finite is
+  refused by name, as DuckDB refuses it. Their last bits depend on the order
+  of the merges, as a float SUM's do.
   `AggSinkData.presorted` and `estimated_groups` belong to grouped sinks and
   are ignored.
 
@@ -231,10 +241,21 @@ Import each module by name; the package root exports nothing.
   MIN or MAX is up to which of -0.0 and 0.0 is kept, so the groups and their
   values are the ones without a spill; a float SUM or AVG can differ in its
   last bits, as between worker counts. The spill files are deleted at the end
-  of `combine` or when the sink is dropped. A sink with COUNT(DISTINCT) does
-  not spill and says so in its refusal; the string-keyed sinks and the sort do
+  of `combine` or when the sink is dropped. A sink with COUNT(DISTINCT), MEDIAN
+  or QUANTILE_CONT does not spill and says so in its refusal; a variance's
+  state goes to disk with its cell; the string-keyed sinks and the sort do
   not spill. `AnyAggSink` is the
   one slot of the sink variant that holds the grouped or the ungrouped sink.
+- `agg_values`: the values MEDIAN and QUANTILE_CONT keep. Every non-NULL
+  value of such an aggregate (a signed integer or a float, as a double; a
+  DECIMAL128 is refused by name, DuckDB's answer there being a DECIMAL) is
+  kept beside the cells with its worker group, charged to the worker's
+  reservation; `combine` moves each worker's values under the merged group,
+  then sorts each group's values and interpolates DuckDB's way: the values at
+  `floor((n - 1) * q)` and `ceil((n - 1) * q)`, `lo * (1 - d) + hi * d`
+  between them, NaN above every value and counted. MEDIAN is QUANTILE_CONT at
+  0.5; the fraction of QUANTILE_CONT is its second argument, a FLOAT64
+  constant in [0, 1], checked when the sink is built.
 - `group_positions`: the grouped sinks' float folds by source position. A
   FLOAT32 or FLOAT64 argument folds into a double as in the ungrouped sink
   (SUM from +0.0, MIN and MAX in DuckDB's order of floats). Folded into each

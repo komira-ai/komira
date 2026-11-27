@@ -138,6 +138,7 @@ from arrow.schema import Field, Schema, SchemaBuilder
 from containers.slab import Slab
 from plan_expr.agg_expr import (
     AGG_UDF,
+    AGG_QUANTILE_CONT,
     AggExpr, AGG_SUM, AGG_COUNT, AGG_MIN, AGG_MAX, AGG_MEAN,
     AGG_COUNT_DISTINCT, AGG_FIRST, AGG_LAST, AGG_STDDEV_SAMP, AGG_CORR,
     AGG_MEDIAN, AGG_LARGEST_K, AGG_VAR_SAMP,
@@ -2287,16 +2288,19 @@ def test_every_agg_fn_member_round_trips() raises:
         # argument is a call of a `UdfRef` (test_plan_wire_udf_plans.mojo);
         # here it is the expression form, whose child is any expression.
         AGG_UDF,
+        # ⭐ `quantile_cont(x, q)` (38): the value in slot 0, a FLOAT64
+        # literal fraction in slot 1.
+        AGG_QUANTILE_CONT,
     ]
     assert_equal(
-        len(ops), 38,
+        len(ops), 39,
         "the corpus does not carry thirteen AggFn members. The engine has no"
         + " count constant for this space, so this list IS the enumeration and"
         + " a short one silently stops testing the members it omits.",
     )
     assert_equal(
-        AGG_FN_WIRE_MEMBERS, 38,
-        "the DERIVED AggFn vocabulary no longer has thirty-eight members, and this"
+        AGG_FN_WIRE_MEMBERS, 39,
+        "the DERIVED AggFn vocabulary no longer has thirty-nine members, and this"
         + " corpus still enumerates thirteen. `agg_expr.mojo` declares its"
         + " AGG_* constants free-standing with NO count constant — the stated"
         + " drift hazard — so this literal is the only thing that notices. Add"
@@ -2305,7 +2309,7 @@ def test_every_agg_fn_member_round_trips() raises:
     for i in range(len(ops)):
         assert_equal(
             Int(ops[i]), i,
-            "AggFn engine values are not 0..37 in declaration order. The wire"
+            "AggFn engine values are not 0..38 in declaration order. The wire"
             + " number is engine+1, so a renumbering silently retypes every"
             + " encoded aggregate; it must not happen quietly.",
         )

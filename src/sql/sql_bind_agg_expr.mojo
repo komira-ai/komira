@@ -10,7 +10,7 @@ from plan_expr.agg_expr import (
     AGG_ANY_VALUE, AGG_BOOL_AND, AGG_BOOL_OR, AGG_CORR, AGG_SUM, AGG_COUNT, AGG_COUNT_DISTINCT,
     AGG_COUNT_IF, AGG_COVAR_POP, AGG_COVAR_SAMP, AGG_FIRST, AGG_KAHAN_AVG,
     AGG_KAHAN_SUM, AGG_KURTOSIS, AGG_KURTOSIS_POP, AGG_LAST, AGG_MEDIAN, AGG_PRODUCT,
-    AGG_REGR_AVGX, AGG_REGR_AVGY, AGG_REGR_COUNT, AGG_REGR_INTERCEPT, AGG_REGR_R2,
+    AGG_QUANTILE_CONT, AGG_REGR_AVGX, AGG_REGR_AVGY, AGG_REGR_COUNT, AGG_REGR_INTERCEPT, AGG_REGR_R2,
     AGG_REGR_SLOPE, AGG_REGR_SXX, AGG_REGR_SXY, AGG_REGR_SYY, AGG_SEM, AGG_SKEWNESS,
     AGG_STDDEV_POP, AGG_STDDEV_SAMP, AGG_VAR_POP, AGG_VAR_SAMP, AggExpr,
 )
@@ -153,6 +153,48 @@ def _bivariate_agg_tag(name: String) -> UInt8:
     return _NO_BIVARIATE_AGG
 
 
+comptime QUANTILE_FRACTION_RANGE_REFUSAL = (
+    "SQL bind error: QUANTILE can only take parameters in the range [0, 1]"
+)
+comptime QUANTILE_FRACTION_LIST_REFUSAL = (
+    "SQL not supported: quantile_cont with a list of fractions"
+    " (quantile_cont(x, [0.25, 0.75])); pass one constant fraction"
+)
+comptime QUANTILE_FRACTION_NOT_CONSTANT_REFUSAL = (
+    "SQL not supported: the fraction of quantile_cont must be a constant"
+    " number (an integer or decimal literal, optionally negated), not a"
+    " column or an expression"
+)
+
+
+def _quantile_fraction_magnitude(sx: SqlExpr) raises -> Float64:
+    """An unsigned number literal as a Float64; a list of fractions is refused
+    by name and anything else that is not a number literal as not constant."""
+    if sx.tag == SX_INT:
+        if _sx_is_big_int(sx):
+            raise Error(QUANTILE_FRACTION_RANGE_REFUSAL)
+        return Float64(Int(sx.int_val))
+    if sx.tag == SX_FLOAT:
+        return sx.float_val
+    if sx.tag == SX_CALL and (sx.text == "list_value" or sx.text == "list_pack"):
+        raise Error(QUANTILE_FRACTION_LIST_REFUSAL)
+    raise Error(QUANTILE_FRACTION_NOT_CONSTANT_REFUSAL)
+
+
+def _quantile_fraction(sx: SqlExpr) raises -> Float64:
+    """The FLOAT64 value of `quantile_cont`'s second argument: an integer or a
+    decimal number literal, optionally negated, and inside [0, 1]; a value
+    outside it raises DuckDB's own words."""
+    var q: Float64
+    if sx.tag == SX_UNARY and sx.op == SXUN_NEGATE:
+        q = -_quantile_fraction_magnitude(sx._agg.value().arg[])
+    else:
+        q = _quantile_fraction_magnitude(sx)
+    if not (q >= 0.0 and q <= 1.0):
+        raise Error(QUANTILE_FRACTION_RANGE_REFUSAL)
+    return q
+
+
 def _bind_agg_from_sx_call(sx: SqlExpr, schema: Schema, scope: BindScope, out_name: String, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> AggExpr:
     """Bind a statistical-aggregate SX_CALL node (median, stddev, var_pop,
     corr, regr_*, ...) -> an `AggExpr`, forcing its output name to `out_name`
@@ -171,6 +213,20 @@ def _bind_agg_from_sx_call(sx: SqlExpr, schema: Schema, scope: BindScope, out_na
             raise Error("SQL bind error: median() expects exactly 1 argument")
         var arg = _bind_scalar(args[0], schema, scope, catalog, cte_scope, prebound)
         return AggExpr(AGG_MEDIAN, Optional(arg^), out_alias^)
+    # `quantile_cont(x, q)`: the fraction is a constant, folded here to a
+    # FLOAT64 literal in slot 1 whatever number spelling the query used, so the
+    # plan never carries an integer or decimal fraction.
+    if sx.text == "quantile_cont":
+        if len(args) != 2:
+            raise Error(
+                "SQL bind error: quantile_cont() expects exactly 2 arguments"
+                " — quantile_cont(x, q) with q a constant in [0, 1]"
+            )
+        var qx = _bind_scalar(args[0], schema, scope, catalog, cte_scope, prebound)
+        var q = _quantile_fraction(args[1])
+        var qxo: Optional[Expr] = qx^
+        var qlit: Optional[Expr] = Expr.literal(ScalarValue.from_float(q))
+        return AggExpr(AGG_QUANTILE_CONT, qxo^, qlit^, out_alias^)
     if sx.text == "stddev" or sx.text == "stddev_samp":
         if len(args) != 1:
             raise Error(

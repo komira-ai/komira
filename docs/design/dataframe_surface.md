@@ -124,6 +124,10 @@ runs only at a **terminal**:
   `Series` aggregate works inside `assign`, inside `df[...]` and inside `agg`. The number comes from a
   terminal: `df.agg(total=("v", "sum")).materialize()`. This is a departure from pandas (section 8,
   ruling 1).
+  The one exception is `Series.quantile(q)`: pandas gives a number, so it runs a one-row aggregate
+  of `quantile_cont` over the Series' frame at once and returns a Python float (NaN when the Series
+  has no values). It takes one `q` in [0, 1] and `interpolation="linear"`; a list of fractions and
+  another interpolation are refused by name.
 - **`explain()` returns the engine's render of the plan** (`komira_plan_render`) as text. No SQL text
   exists anywhere on this path (section 3).
 - **The schema is known at every step.** A reader reads the file's schema when it is called, through

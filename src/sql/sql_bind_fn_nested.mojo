@@ -479,7 +479,7 @@ def _bind_nullif(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCata
     ref nargs = sx._call.value().args
     if len(nargs) != 2:
         raise Error(
-            "SQL bind error: nullif() expects exactly 2 arguments — got "
+            "SQL bind error: nullif() expects exactly 2 arguments: got "
             + String(len(nargs))
         )
     var na = _bind_scalar(nargs[0], schema, scope, catalog, cte_scope, prebound)

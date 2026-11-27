@@ -37,8 +37,13 @@ equal (`frame_duckdb_test`, CPython 3.13, the real libkomira).
 - the frame's own reductions and agg, one row each (float sums, means, mins
   and maxes too, and a mean of a bool, the share of its trues), also over no
   rows (a sum of 0, a count of 0, a missing mean and max);
-- the reductions the engine does not run yet (median, std, var, min and
-  max of a string or a bool, nunique of a bool)
+- median, std and var (ddof=1 and ddof=0), grouped and of the frame, of an
+  int, a float and a bool, over an odd and an even count, with NULLs, one
+  row (a missing sample variance, a population one of 0), no rows and
+  all-missing values; and Series.quantile of those columns, each against
+  quantile_cont; and a variance of values with a large mean and a small spread;
+- the reductions the engine does not run yet (min and max of a string or a
+  bool, nunique of a bool)
   build their plan and are refused at materialize() with the engine's step;
 - drop_duplicates of whole rows over one and several columns, with NULLs,
   keep="last", a subset naming every column, and keep=False (only the rows
@@ -895,6 +900,66 @@ REDUCTIONS = [
         "SELECT AVG(CAST(flag AS INTEGER)) AS flag FROM t",
     ),
     Case(
+        "median, std and var of the frame's float, with NULLs",
+        lambda d: d[["v"]].agg(m=("v", "median"), sd=("v", "std"), va=("v", "var")),
+        "SELECT MEDIAN(v) AS m, STDDEV_SAMP(v) AS sd, VAR_SAMP(v) AS va FROM t",
+    ),
+    Case(
+        "median of the frame's ints, over an odd count",
+        lambda d: d[d["n"] > 3][["n"]].median(),
+        "SELECT MEDIAN(n) AS n FROM t WHERE n > 3",
+    ),
+    Case(
+        "median of the frame's ints, over an even count",
+        lambda d: d[d["n"] > 4][["n"]].median(),
+        "SELECT MEDIAN(n) AS n FROM t WHERE n > 4",
+    ),
+    Case(
+        "std of the frame's ints and floats, sample",
+        lambda d: d[["k", "v", "n"]].std(),
+        "SELECT STDDEV_SAMP(k) AS k, STDDEV_SAMP(v) AS v, STDDEV_SAMP(n) AS n FROM t",
+    ),
+    Case(
+        "var of the frame's ints and floats, sample",
+        lambda d: d[["k", "v", "n"]].var(),
+        "SELECT VAR_SAMP(k) AS k, VAR_SAMP(v) AS v, VAR_SAMP(n) AS n FROM t",
+    ),
+    Case(
+        "std of the frame with ddof=0 is the population one",
+        lambda d: d[["v", "n"]].std(ddof=0),
+        "SELECT STDDEV_POP(v) AS v, STDDEV_POP(n) AS n FROM t",
+    ),
+    Case(
+        "var of the frame with ddof=0 is the population one",
+        lambda d: d[["v", "n"]].var(ddof=0),
+        "SELECT VAR_POP(v) AS v, VAR_POP(n) AS n FROM t",
+    ),
+    Case(
+        "std of one row: the sample one is missing",
+        lambda d: d[d["k"] == 100][["n"]].std(),
+        "SELECT STDDEV_SAMP(n) AS n FROM t WHERE k = 100",
+    ),
+    Case(
+        "var of one row with ddof=0 is 0",
+        lambda d: d[d["k"] == 100][["n"]].var(ddof=0),
+        "SELECT VAR_POP(n) AS n FROM t WHERE k = 100",
+    ),
+    Case(
+        "median, std and var of a column whose values are all missing are missing",
+        lambda d: d[d["k"] == -90][["v"]].agg(m=("v", "median"), sd=("v", "std"), vp=("v", "var")),
+        "SELECT MEDIAN(v) AS m, STDDEV_SAMP(v) AS sd, VAR_SAMP(v) AS vp FROM t WHERE k = -90",
+    ),
+    Case(
+        "median, std and var of no rows are missing",
+        lambda d: d[d["k"] > 1000][["n"]].agg(m=("n", "median"), sd=("n", "std"), vp=("n", "var")),
+        "SELECT MEDIAN(n) AS m, STDDEV_SAMP(n) AS sd, VAR_SAMP(n) AS vp FROM t WHERE k > 1000",
+    ),
+    Case(
+        "median and var of a bool read as 0 and 1",
+        lambda d: d[["flag"]].agg(m=("flag", "median"), va=("flag", "var")),
+        "SELECT MEDIAN(CAST(flag AS DOUBLE)) AS m, VAR_SAMP(CAST(flag AS DOUBLE)) AS va FROM t",
+    ),
+    Case(
         "mean of the frame's numbers",
         lambda d: d[["k", "v", "n"]].mean(),
         "SELECT AVG(k) AS k, AVG(v) AS v, AVG(n) AS n FROM t",
@@ -930,6 +995,36 @@ REDUCTIONS = [
         "SELECT AVG(v) AS v FROM t",
     ),
     Case(
+        "groupby median, std and var of an int, by an int key: one-row groups have a missing sample variance",
+        lambda d: d.groupby("k")["n"].agg(med="median", sd="std", va="var"),
+        "SELECT k, MEDIAN(n) AS med, STDDEV_SAMP(n) AS sd, VAR_SAMP(n) AS va " + GROUPED_BY_K,
+        ("k",),
+    ),
+    Case(
+        "groupby median, std and var of a float with NULLs, by a string key",
+        lambda d: d.groupby("s")["v"].agg(med="median", sd="std", va="var"),
+        "SELECT s, MEDIAN(v) AS med, STDDEV_SAMP(v) AS sd, VAR_SAMP(v) AS va " + GROUPED_BY_S,
+        ("s",),
+    ),
+    Case(
+        "groupby std with ddof=0 is the population one, 0 for a one-row group",
+        lambda d: d.groupby("k")[["n"]].std(ddof=0),
+        "SELECT k, STDDEV_POP(n) AS n " + GROUPED_BY_K,
+        ("k",),
+    ),
+    Case(
+        "groupby var with ddof=0 is the population one, 0 for a one-row group",
+        lambda d: d.groupby("k")[["v", "n"]].var(ddof=0),
+        "SELECT k, VAR_POP(v) AS v, VAR_POP(n) AS n " + GROUPED_BY_K,
+        ("k",),
+    ),
+    Case(
+        "groupby median and var of a bool read as 0 and 1",
+        lambda d: d.groupby("k")["flag"].agg(med="median", va="var"),
+        "SELECT k, MEDIAN(CAST(flag AS DOUBLE)) AS med, VAR_SAMP(CAST(flag AS DOUBLE)) AS va " + GROUPED_BY_K,
+        ("k",),
+    ),
+    Case(
         "agg of no rows: a sum of 0, a count of 0, a missing mean and max",
         lambda d: d[d["k"] > 1000].agg(total=("v", "sum"), rows=("v", "size"), m=("v", "mean"), hi=("k", "max")),
         "SELECT COALESCE(SUM(v), 0) AS total, COUNT(*) AS rows, AVG(v) AS m, MAX(k) AS hi FROM t WHERE k > 1000",
@@ -946,12 +1041,6 @@ REDUCTIONS = [
 # (docs/design/dataframe_surface.md, section 6). When the engine runs one,
 # its check here fails and the program moves to the cases above.
 ENGINE_REFUSED = [
-    ("a grouped median", lambda d: d.groupby("k")["n"].median()),
-    ("a grouped std", lambda d: d.groupby("k")["n"].std()),
-    ("a grouped var", lambda d: d.groupby("k")["n"].var()),
-    ("a median", lambda d: d[["v"]].median()),
-    ("a std", lambda d: d[["v"]].std()),
-    ("a var", lambda d: d[["n"]].var()),
     ("a min of a string", lambda d: d[["s"]].min()),
     ("a grouped max of a bool", lambda d: d.groupby("k")["flag"].max()),
     ("an nunique of a bool", lambda d: d[["flag"]].nunique()),
@@ -1027,6 +1116,54 @@ def test_frame_reductions_equal_duckdb_aggregates_of_one_row(path):
 
 def test_drop_duplicates_equals_duckdb_distinct(path):
     run_cases(path, DISTINCTS)
+
+
+QUANTILE_CASES = [
+    ("a float with NULLs, the median", "v", lambda d: d["v"], 0.5, "v", ""),
+    ("a float with NULLs, a quartile", "v", lambda d: d["v"], 0.25, "v", ""),
+    ("an int, an odd count", "n", lambda d: d[d["n"] > 3]["n"], 0.5, "n", "WHERE n > 3"),
+    ("an int, an even count", "n", lambda d: d[d["n"] > 4]["n"], 0.5, "n", "WHERE n > 4"),
+    ("an int, the 0.9 quantile", "n", lambda d: d["n"], 0.9, "n", ""),
+    ("an int64 with NULLs, the minimum", "k", lambda d: d["k"], 0.0, "k", ""),
+    ("an int64 with NULLs, the maximum", "k", lambda d: d["k"], 1, "k", ""),
+    ("a computed column", "k", lambda d: d["v"] * 2, 0.75, "v * 2", ""),
+    ("a bool read as 0 and 1", "flag", lambda d: d["flag"], 0.4, "CAST(flag AS DOUBLE)", ""),
+    ("one row", "n", lambda d: d[d["k"] == 100]["n"], 0.3, "n", "WHERE k = 100"),
+]
+
+
+def test_series_quantile_equals_duckdb_quantile_cont(path):
+    con = duckdb_for(path)
+    with komira.Session() as session:
+        base = komira.read_parquet(path, session=session)
+        for name, _, program, q, expr, where in QUANTILE_CASES:
+            want = con.execute("SELECT QUANTILE_CONT({}, {}) FROM t {}".format(expr, float(q), where)).fetchone()[0]
+            got = program(base).quantile(q)
+            assert isinstance(got, float), "{}: {!r} is not a float".format(name, got)
+            assert math.isclose(got, want, rel_tol=1e-12), "{}: komira {}, DuckDB {}".format(name, got, want)
+        # No values: NaN, as pandas gives; DuckDB gives NULL.
+        none = base[base["k"] > 1000]["n"].quantile(0.5)
+        assert math.isnan(none), none
+        assert con.execute("SELECT QUANTILE_CONT(n, 0.5) FROM t WHERE k > 1000").fetchone()[0] is None
+        # All values missing.
+        assert math.isnan(base[base["k"] == -90]["v"].quantile())
+
+
+def test_variance_of_a_large_mean_and_a_small_spread_is_exact(path):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    big = os.path.join(os.path.dirname(path), "large_mean.parquet")
+    pq.write_table(pa.table({"x": pa.array([1e9 + 1, 1e9 + 2, 1e9 + 3], pa.float64())}), big)
+    con = duckdb_for(big)
+    with komira.Session() as session:
+        frame = komira.read_parquet(big, session=session)
+        got = answer_of(frame.agg(va=("x", "var"), sd=("x", "std")).materialize().to_arrow())
+        want = duckdb_answer(con, "SELECT VAR_SAMP(x) AS va, STDDEV_SAMP(x) AS sd FROM t")
+        assert differences(got, want) is None, (got, want)
+        assert got[2] == [(1.0, 1.0)], got
+        pop = answer_of(frame[["x"]].var(ddof=0).materialize().to_arrow())
+        assert pop[2] == [(2.0 / 3.0,)], pop
 
 
 def test_aggregates_the_engine_does_not_run_yet_are_refused_at_the_terminal(path):
@@ -1170,6 +1307,8 @@ WITH_FILE = [
     test_a_frame_answers_alike_after_other_frames_derive_from_it,
     test_groupby_reductions_equal_duckdb_group_by,
     test_frame_reductions_equal_duckdb_aggregates_of_one_row,
+    test_series_quantile_equals_duckdb_quantile_cont,
+    test_variance_of_a_large_mean_and_a_small_spread_is_exact,
     test_drop_duplicates_equals_duckdb_distinct,
     test_aggregates_the_engine_does_not_run_yet_are_refused_at_the_terminal,
 ]

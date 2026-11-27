@@ -30,7 +30,9 @@ an empty file of the same columns:
   column and appends one;
 - every aggregate, the types polars gives a sum, mean and count over int32,
   float32, uint16 and bool, expressions over aggregates, and the aggregates
-  of the empty file (a sum of nothing is 0);
+  of the empty file (a sum of nothing is 0); median, std and var (ddof 1
+  and 0) over ints and floats with nulls, over a Float32 column, over an odd
+  and an even count, over one value and over no value;
 - int literals beside an int32 column and alone (Int32, as in polars), and
   fill_null and when/then over int32, int64, float64 and string columns;
 - concat of two frames of the file.
@@ -39,9 +41,9 @@ And the edges the oracle does not cover: collect() twice runs the plan
 twice; collect() calls the plan entry and never the SQL entry; explain()
 renders the plan; a missing file is refused at the reader with the engine's
 message; frames of two sessions are refused by concat; a CSV scan, with a
-semicolon separator and an empty field, gives polars' frame; and median, std,
-var and the min of a string column, which the engine's aggregation sinks do not
-serve yet, are refused at the terminal at execute.
+semicolon separator and an empty field, gives polars' frame; and the min of a
+string column, which the engine's aggregation sinks do not serve yet, is
+refused at the terminal at execute.
 
 The test is of the `pl_oracle/` family (python/tests/BUCK): CPython 3.13
 alone, the one minor with a pinned polars (1.44.2), on the real libkomira, with
@@ -352,6 +354,62 @@ CASES = [
         ),
         False,
     ),
+    (
+        "median_std_and_var_of_ints_and_floats_with_nulls",
+        lambda P, lf: lf.select(
+            P.col("x").median().alias("x_median"),
+            P.col("x").std().alias("x_std"),
+            P.col("x").var().alias("x_var"),
+            P.col("y").median().alias("y_median"),
+            P.col("y").std().alias("y_std"),
+            P.col("y").var().alias("y_var"),
+            P.col("i32").median().alias("i32_median"),
+            P.col("u16").std().alias("u16_std"),
+        ),
+        False,
+    ),
+    (
+        "std_and_var_with_ddof_0_are_the_population_ones",
+        lambda P, lf: lf.select(
+            P.col("x").std(ddof=0).alias("x_std"),
+            P.col("y").var(ddof=0).alias("y_var"),
+            P.col("y").std(0).alias("y_std"),
+            P.col("x").var(ddof=1).alias("x_var"),
+        ),
+        False,
+    ),
+    (
+        "median_std_and_var_of_a_float32_column_are_float32",
+        lambda P, lf: lf.select(
+            P.col("f32").median().alias("median"), P.col("f32").std().alias("std"), P.col("f32").var().alias("var")
+        ),
+        False,
+    ),
+    (
+        "median_of_an_odd_count_is_the_middle_value",
+        lambda P, lf: lf.filter(P.col("id") < 5).select(P.col("id").median().alias("median")),
+        False,
+    ),
+    (
+        "median_of_an_even_count_is_the_mean_of_the_middle_two",
+        lambda P, lf: lf.filter(P.col("id") < 4).select(P.col("id").median().alias("median")),
+        False,
+    ),
+    (
+        "std_and_var_of_one_value_are_null_for_ddof_1_and_zero_for_ddof_0",
+        lambda P, lf: lf.filter(P.col("id") == 3).select(
+            P.col("x").std().alias("sample"), P.col("x").std(ddof=0).alias("population"),
+            P.col("x").median().alias("median"),
+        ),
+        False,
+    ),
+    (
+        "median_std_and_var_of_a_column_with_no_values_are_null",
+        lambda P, lf: lf.filter(P.col("id") == 1).select(
+            P.col("y").median().alias("median"), P.col("y").std().alias("std"), P.col("y").var(ddof=0).alias("var")
+        ),
+        False,
+    ),
     ("aggregate_after_filter", lambda P, lf: lf.filter(P.col("x") > 100).select(P.col("x").sum(), P.len()), False),
     ("aggregate_after_sort", lambda P, lf: lf.sort("id").select(P.col("id").max()), False),
     ("concat", lambda P, lf: P.concat([lf.filter(P.col("x") > 0), lf.filter(P.col("x") <= 0)]), False),
@@ -468,12 +526,11 @@ def test_two_sessions_never_meet(session, path):
 
 
 def test_statistics_the_engine_does_not_serve_are_refused_at_the_terminal(session, path):
-    """median, std and var, and min of a string column, build the plan's own
-    aggregates (the engine's to refuse, rules section 6); the engine's
-    aggregation sinks serve none of them yet, so collect() raises its refusal
-    at execute."""
+    """min of a string column builds the plan's own aggregate (the engine's to
+    refuse, rules section 6); the engine's aggregation sinks do not serve it
+    yet, so collect() raises its refusal at execute."""
     lf = kpl.scan_parquet(path, session=session)
-    for expr in (kpl.col("y").median(), kpl.col("y").std(), kpl.col("y").var(), kpl.col("s").min()):
+    for expr in (kpl.col("s").min(),):
         frame = lf.select(expr)
         e = raised(frame.collect)
         assert isinstance(e, KomiraError), repr(e)

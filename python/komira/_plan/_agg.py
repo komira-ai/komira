@@ -5,6 +5,8 @@ under its item name (`alias_name`), as the SQL binder names every aggregate.
 Its arguments fill the child slots in order, except that the regression and
 covariance functions take `(y, x)`, the SQL order, and the engine's slots hold
 x first (`AggExpr`, src/plan_expr/agg_expr.mojo). `count()` fills no slot.
+`quantile_cont(x, q)` fills slot 0 with x and slot 1 with q, a float literal
+in [0, 1].
 
 The output is the keys' fields, then one field per aggregate, typed by the
 engine's rules (`_infer_agg_field`, src/plan_ir/logical_plan.mojo):
@@ -27,7 +29,7 @@ Every aggregate but the counts may be NULL (an empty group).
 from __future__ import annotations
 
 from komira._errors import UnsupportedOperation
-from komira._ops._expr import ColRef
+from komira._ops._expr import ColRef, Lit
 from komira._ops._rel import Agg, Aggregate
 
 from ._expr import encode_expr
@@ -65,6 +67,7 @@ _FLOAT64_RESULTS = frozenset(
         "skewness",
         "kurtosis",
         "kurtosis_pop",
+        "quantile_cont",
     }
 )
 
@@ -155,6 +158,14 @@ def _agg_expr(name: str, agg: Agg, schema, udfs) -> pb.WireAggExpr:
             f"largest_k keeps {_LARGEST_K}: use largest_k with k={_LARGEST_K}"
         )
     args = agg.args
+    if agg.func == "quantile_cont":
+        # The fraction fills slot 1 as a FLOAT64 literal, the one shape the engine reads.
+        q = args[1]
+        if not (isinstance(q, Lit) and type(q.value) is float and 0.0 <= q.value <= 1.0):
+            raise UnsupportedOperation(
+                f"the aggregate {name!r} is quantile_cont, whose second argument is the "
+                f"fraction: a float literal in [0, 1], not {q!r}"
+            )
     if agg.func in _X_FIRST:
         args = (args[1], args[0])
     out = pb.WireAggExpr(func=member("AGG_", agg.func))

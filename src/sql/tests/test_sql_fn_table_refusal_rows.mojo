@@ -2,7 +2,7 @@
 # Row pins: every REFUSAL row of sql_scalar_fn_spec, grouped by its reason
 # =============================================================================
 #
-# What it proves: each of the 538 refused names resolves to an FNK_REFUSED
+# What it proves: each of the 537 refused names resolves to an FNK_REFUSED
 # row that carries exactly its family's `_R_*` reason (77 families), lowers
 # to no node (so a UDF may take the name) and has op 0 and the open arity
 # sentinels. Every refused name is called, so every one of those rows is
@@ -15,6 +15,7 @@
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from sql.sql_fn_table import (
+    FNK_NONE,
     FNK_REFUSED,
     FN_ARITY_OWN,
     FN_ARITY_UNBOUNDED,
@@ -196,7 +197,7 @@ def test_refusal_families_1() raises:
     _refused(
         _R_AGGQUANTILE,
         [
-            "quantile", "quantile_cont", "quantile_disc",
+            "quantile", "quantile_disc",
         ],
     )
 
@@ -681,6 +682,27 @@ def test_refusal_families_7() raises:
         [
             "constant_or_null",
         ],
+    )
+
+
+def test_quantile_cont_has_no_refusal_row_and_its_siblings_keep_one() raises:
+    assert_equal(
+        Int(sql_scalar_fn_spec("quantile_cont").kind),
+        Int(FNK_NONE),
+        "quantile_cont is served as an aggregate, so the scalar table has no row",
+    )
+    assert_true(
+        "returns a value of the INPUT'S OWN TYPE"
+        in sql_scalar_fn_spec("quantile_disc").reason,
+        "quantile_disc's refusal says why: it returns the input's own type",
+    )
+    assert_true(
+        "alias of `quantile_disc`" in sql_scalar_fn_spec("quantile").reason,
+        "quantile's refusal says it is DuckDB's alias of quantile_disc",
+    )
+    assert_true(
+        "`quantile_cont(x, q)`" in sql_scalar_fn_spec("quantile").reason,
+        "the refusal names the served continuous quantile",
     )
 
 

@@ -70,7 +70,7 @@ from scan_source.json_source import JsonSource
 from scan_source.csv_source import CsvSource
 from byte_buffer.file_identity import FileIdentity
 from plan_expr.expr import Expr, EXPR_COL_REF, EXPR_ALIAS, EXPR_LITERAL, EXPR_BINARY_OP, EXPR_CAST, EXPR_WHEN, EXPR_STRING_OP, EXPR_STRING_FN, EXPR_UDF_CALL, EXPR_UDF_APPLY, string_fn_returns_int, EXPR_REGEXP, EXPR_SUBSTRING, EXPR_STRUCT_FIELD, EXPR_STRUCT_FIELD_IDX, EXPR_MAP_GET, EXPR_MATH_FN, EXPR_MATH_FN2, EXPR_IN_LIST, EXPR_BETWEEN, REGEXP_LIKE, REGEXP_MATCH, REGEXP_REPLACE, REGEXP_SPLIT_TO_ARRAY, REGEXP_EXTRACT_ALL, REGEXP_COUNT, REGEXP_INSTR, REGEXP_SUBSTR, REGEXP_FULL_MATCH, BIN_EQ, BIN_NE, BIN_LT, BIN_LE, BIN_GT, BIN_GE, BIN_AND, BIN_OR
-from plan_expr.agg_expr import AggExpr, AGG_SUM, AGG_COUNT, AGG_MIN, AGG_MAX, AGG_MEAN, AGG_COUNT_DISTINCT, AGG_FIRST, AGG_LAST, AGG_STDDEV_SAMP, AGG_VAR_SAMP, AGG_CORR, AGG_MEDIAN, AGG_LARGEST_K, AGG_COVAR_POP, AGG_COVAR_SAMP, AGG_REGR_AVGX, AGG_REGR_AVGY, AGG_REGR_COUNT, AGG_REGR_SXX, AGG_REGR_SXY, AGG_REGR_SYY, AGG_REGR_SLOPE, AGG_REGR_INTERCEPT, AGG_REGR_R2, AGG_VAR_POP, AGG_STDDEV_POP, AGG_SEM, AGG_COUNT_IF, AGG_BOOL_AND, AGG_BOOL_OR, AGG_PRODUCT, agg_is_bool_valued, AGG_ANY_VALUE, AGG_KAHAN_SUM, AGG_KAHAN_AVG, AGG_SKEWNESS, AGG_KURTOSIS, AGG_KURTOSIS_POP, AGG_UDF
+from plan_expr.agg_expr import AggExpr, AGG_SUM, AGG_COUNT, AGG_MIN, AGG_MAX, AGG_MEAN, AGG_COUNT_DISTINCT, AGG_FIRST, AGG_LAST, AGG_STDDEV_SAMP, AGG_VAR_SAMP, AGG_CORR, AGG_MEDIAN, AGG_LARGEST_K, AGG_COVAR_POP, AGG_COVAR_SAMP, AGG_REGR_AVGX, AGG_REGR_AVGY, AGG_REGR_COUNT, AGG_REGR_SXX, AGG_REGR_SXY, AGG_REGR_SYY, AGG_REGR_SLOPE, AGG_REGR_INTERCEPT, AGG_REGR_R2, AGG_VAR_POP, AGG_STDDEV_POP, AGG_SEM, AGG_COUNT_IF, AGG_BOOL_AND, AGG_BOOL_OR, AGG_PRODUCT, agg_is_bool_valued, AGG_ANY_VALUE, AGG_KAHAN_SUM, AGG_KAHAN_AVG, AGG_SKEWNESS, AGG_KURTOSIS, AGG_KURTOSIS_POP, AGG_UDF, AGG_QUANTILE_CONT
 from plan_expr.udf_type_field import udf_type_to_field
 from plan_expr.scalar_value import ScalarValue
 from plan_expr.null_order_policy import derived_nulls_first
@@ -2488,6 +2488,8 @@ def agg_func_base_name(func: UInt8) -> StaticString:
         return "corr"
     if func == AGG_MEDIAN:
         return "median"
+    if func == AGG_QUANTILE_CONT:
+        return "quantile_cont"
     if func == AGG_LARGEST_K:
         return "largest_k"
     # ⭐ the eleven BIVARIATE names. Each returns
@@ -2683,6 +2685,7 @@ def _infer_agg_field(agg: AggExpr, schema: Schema) -> Field:
         or agg.func == AGG_VAR_SAMP
         or agg.func == AGG_CORR
         or agg.func == AGG_MEDIAN
+        or agg.func == AGG_QUANTILE_CONT
         or agg.func == AGG_LARGEST_K
         # The ten FLOAT64 bivariates. All ten
         # finalize a ratio or a sum of squared/cross deviations off

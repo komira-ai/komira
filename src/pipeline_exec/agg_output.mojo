@@ -26,13 +26,22 @@
 #                  last bits follow the sum's (`agg_fold`)
 #   MIN, MAX       the input's own type: its integer type, DATE32, a
 #                  DECIMAL128 of the input's scale, FLOAT32 or FLOAT64
+#   STDDEV_SAMP, STDDEV_POP, VAR_SAMP, VAR_POP
+#                  FLOAT64: DuckDB's finalize of the Welford state, m2 / (n - 1)
+#                  for VAR_SAMP and m2 / n for VAR_POP, the square root for the
+#                  STDDEVs. The sample forms are NULL over one value, the
+#                  population forms 0.0; an answer that is not finite (an
+#                  infinite or NaN input) is refused by name, as DuckDB refuses
+#                  it ("out of range")
+#   MEDIAN, QUANTILE_CONT
+#                  FLOAT64: the interpolated value `agg_values` wrote
 #
 # The declared precision is the plan's (DuckDB declares DECIMAL(38,s) for a
 # decimal SUM): the sink takes it as given and checks only that the value has
 # no more digits.
 #
-# SUM, AVG, MIN and MAX over no non-NULL row are NULL, which the declared field
-# must be able to hold.
+# Every aggregate but the counts is NULL over no non-NULL row, which the
+# declared field must be able to hold.
 
 from arrow.arrow_types import ArrowType
 from arrow.column import Column
@@ -40,13 +49,18 @@ from arrow.decimal_array import Decimal128Array
 from arrow.primitive_array import PrimitiveArray
 from arrow.schema import Schema
 from byte_buffer.heap_region import HeapRegion
+from std.math import isfinite, sqrt
+
 from plan_expr.agg_expr import (
     AGG_COUNT,
     AGG_COUNT_DISTINCT,
     AGG_MAX,
     AGG_MEAN,
     AGG_MIN,
+    AGG_STDDEV_SAMP,
     AGG_SUM,
+    AGG_VAR_POP,
+    AGG_VAR_SAMP,
 )
 from scalar_arithmetic.decimal_arith import I128
 from scalar_arithmetic.decimal_avg import (
@@ -62,6 +76,8 @@ from .agg_fold import (
     IN_INT,
     IN_NONE,
     agg_name,
+    is_welford,
+    keeps_values,
 )
 
 
@@ -118,7 +134,7 @@ def check_declared_type(
             or t == ArrowType.DECIMAL128
             or t == ArrowType.FLOAT64
         )
-    elif func == AGG_MEAN:
+    elif func == AGG_MEAN or is_welford(func) or keeps_values(func):
         ok = t == ArrowType.FLOAT64
     elif func == AGG_MIN or func == AGG_MAX:
         ok = (
@@ -137,6 +153,32 @@ def check_declared_type(
             + " of column "
             + String(idx)
         )
+
+
+def welford_answer(
+    func: UInt8, ref cell: AggCell, ref label: String
+) raises -> Float64:
+    """The answer of the variance aggregate `func` over the state of `cell`,
+    which folded at least one value (two for the sample forms): DuckDB's
+    finalize, which refuses an answer that is not finite."""
+    var n = Float64(cell.count)
+    var out: Float64
+    if func == AGG_VAR_SAMP:
+        out = cell.m2 / (n - 1.0)
+    elif func == AGG_STDDEV_SAMP:
+        out = sqrt(cell.m2 / (n - 1.0))
+    elif func == AGG_VAR_POP:
+        out = cell.m2 / n if cell.count > 1 else 0.0
+    else:
+        out = sqrt(cell.m2 / n) if cell.count > 1 else 0.0
+    if not isfinite(out):
+        raise Error(
+            "pipeline_exec: "
+            + label
+            + " is out of range: the answer is not finite (an infinite or NaN"
+            " value, or one past the double range), which DuckDB refuses too"
+        )
+    return out
 
 
 def _null_or_value_error(ref label: String) -> Error:
@@ -220,10 +262,13 @@ def agg_result_column_rows(
     var t = schema.field_arrow_type(idx)
     var nullable = schema.field_nullable(idx)
     var counts = func == AGG_COUNT or func == AGG_COUNT_DISTINCT
+    var sample = func == AGG_STDDEV_SAMP or func == AGG_VAR_SAMP
     var nulls = List[Bool](capacity=rows)
     for r in range(rows):
         ref cell = cells[first + r * stride]
         var is_null = cell.count == 0 and not counts
+        if sample and cell.count == 1:
+            is_null = True
         if is_null and not nullable:
             raise _null_or_value_error(label)
         nulls.append(is_null)
@@ -235,6 +280,24 @@ def agg_result_column_rows(
             values.append(_wide(Int64(cells[first + r * stride].count)))
             no_nulls.append(False)
         return _int_column[DType.int64](values, no_nulls, t)
+
+    if is_welford(func):
+        var arr = PrimitiveArray[DType.float64].allocate_nullable(rows)
+        for r in range(rows):
+            if nulls[r]:
+                arr._set_null(r)
+            else:
+                arr.set(r, welford_answer(func, cells[first + r * stride], label))
+        return Column.from_primitive[DType.float64](arr^)
+
+    if keeps_values(func):
+        var arr = PrimitiveArray[DType.float64].allocate_nullable(rows)
+        for r in range(rows):
+            if nulls[r]:
+                arr._set_null(r)
+            else:
+                arr.set(r, cells[first + r * stride].fvalue)
+        return Column.from_primitive[DType.float64](arr^)
 
     if func == AGG_MEAN:
         var arr = PrimitiveArray[DType.float64].allocate_nullable(rows)

@@ -284,7 +284,7 @@ def test_statistical_aggregates() raises:
     )
     _check(
         "SELECT regr_slope(v) FROM t",
-        "ERR: SQL bind error: regr_slope() expects exactly 2 arguments — the SQL spelling is regr_slope(y, x), the DEPENDENT variable first"
+        "ERR: SQL bind error: regr_slope() expects exactly 2 arguments: the SQL spelling is regr_slope(y, x), the DEPENDENT variable first"
     )
     _check(
         "SELECT count_star(v) FROM t",
@@ -644,6 +644,64 @@ def test_having() raises:
         "  Filter(predicate=BinaryOp(EQ, ColRef(s), Literal(ScalarValue(utf8, \"A\"))))\n"
         "    Aggregate(group_by=[ColRef(s)], aggs=[COUNT(*).alias(\"count_star()\")])\n"
         "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def test_quantile_cont_binds_its_fraction_as_a_float_literal() raises:
+    var scan = "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    _check(
+        "SELECT quantile_cont(v, 0.25) FROM t",
+        "Project(exprs=[ColRef(quantile_cont(v, 0.25))])\n"
+        "  Aggregate(group_by=[], aggs=[QUANTILE_CONT(ColRef(v), Literal(ScalarValue(float64, 0.25))).alias(\"quantile_cont(v, 0.25)\")])\n"
+        + scan
+    )
+    _check(
+        "SELECT k, quantile_cont(v, 1) FROM t GROUP BY k",
+        "Project(exprs=[ColRef(k), ColRef(quantile_cont(v, 1))])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[QUANTILE_CONT(ColRef(v), Literal(ScalarValue(float64, 1.0))).alias(\"quantile_cont(v, 1)\")])\n"
+        + scan
+    )
+
+
+def test_quantile_cont_refuses_what_it_cannot_serve() raises:
+    _check(
+        "SELECT quantile_cont(v) FROM t",
+        "ERR: SQL bind error: quantile_cont() expects exactly 2 arguments"
+        " — quantile_cont(x, q) with q a constant in [0, 1]"
+    )
+    _check(
+        "SELECT quantile_cont(v, 0.5, 0.7) FROM t",
+        "ERR: SQL bind error: quantile_cont() expects exactly 2 arguments"
+        " — quantile_cont(x, q) with q a constant in [0, 1]"
+    )
+    _check(
+        "SELECT quantile_cont(v, 1.5) FROM t",
+        "ERR: SQL bind error: QUANTILE can only take parameters in the range [0, 1]"
+    )
+    _check(
+        "SELECT quantile_cont(v, -0.5) FROM t",
+        "ERR: SQL bind error: QUANTILE can only take parameters in the range [0, 1]"
+    )
+    _check(
+        "SELECT quantile_cont(v, 2) FROM t",
+        "ERR: SQL bind error: QUANTILE can only take parameters in the range [0, 1]"
+    )
+    _check(
+        "SELECT quantile_cont(v, g) FROM t",
+        "ERR: SQL not supported: the fraction of quantile_cont must be a constant"
+        " number (an integer or decimal literal, optionally negated), not a"
+        " column or an expression"
+    )
+    _check(
+        "SELECT quantile_cont(v, 0.5 + 0.25) FROM t",
+        "ERR: SQL not supported: the fraction of quantile_cont must be a constant"
+        " number (an integer or decimal literal, optionally negated), not a"
+        " column or an expression"
+    )
+    _check(
+        "SELECT quantile_cont(v, list_value(0.25, 0.75)) FROM t",
+        "ERR: SQL not supported: quantile_cont with a list of fractions"
+        " (quantile_cont(x, [0.25, 0.75])); pass one constant fraction"
     )
 
 

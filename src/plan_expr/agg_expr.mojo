@@ -415,6 +415,19 @@ comptime AGG_UDF: UInt8 = 37
 is that call's type (the `UdfRef`'s `return_type`). Nothing in this tree
 executes it yet: the UDF runtimes and lowering are later stages."""
 
+comptime AGG_QUANTILE_CONT: UInt8 = 38
+"""`quantile_cont(x, q)` — the continuous (linearly interpolated) quantile of
+`x` at fraction `q`, with `q` a constant in [0, 1].
+
+Two inputs, and they are NOT a bivariate pair: `child` is the value expression
+and `child1` is ALWAYS a FLOAT64 literal holding `q` (the SQL binder folds an
+integer or decimal constant into that float literal). `agg_is_bivariate` is
+false for it, so no row-pairing rule applies: a row is skipped when `x` is
+NULL, and `q` is read once, never per row.
+
+The output is a nullable FLOAT64 for every input type (like `AGG_MEDIAN`,
+which is `quantile_cont(x, 0.5)`); NULL over a group with no non-NULL value."""
+
 
 @always_inline
 def agg_is_kahan_compensated(func: UInt8) -> Bool:
@@ -1131,6 +1144,20 @@ def _bivariate_y_x(func: UInt8, y: ColExpr, x: ColExpr) -> AggExpr:
 
 
 @always_inline
+def quantile_cont(expr: ColExpr, q: Float64) -> AggExpr:
+    """Create a QUANTILE_CONT aggregation: `expr` in slot 0 and the fraction
+    `q` as a FLOAT64 literal in slot 1. `q` is a constant in [0, 1]; this
+    constructor does not range-check it (the SQL binder does). See
+    `AGG_QUANTILE_CONT`."""
+    return AggExpr(
+        AGG_QUANTILE_CONT,
+        expr.copy_expr(),
+        Expr.literal(ScalarValue.from_float(q)),
+        None,
+    )
+
+
+@always_inline
 def any_value(expr: ColExpr) -> AggExpr:
     """Create an ANY_VALUE aggregation — the first NON-NULL value per group, in
     input row order. NULL only when the group has no non-NULL row.
@@ -1363,5 +1390,7 @@ def _write_agg_func[W: Writer](mut writer: W, func: UInt8):
         writer.write("KURTOSIS_POP")
     elif func == AGG_UDF:
         writer.write("UDF")
+    elif func == AGG_QUANTILE_CONT:
+        writer.write("QUANTILE_CONT")
     else:
         writer.write("UNKNOWN")

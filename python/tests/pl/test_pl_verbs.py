@@ -428,7 +428,16 @@ def test_expression_refusals():
     )
     refused(lambda: kpl.lit(object()), TypeError, "a literal must be None, bool, int, float, str, bytes, a Decimal or a date, time or timedelta, not object")
     refused(lambda: kpl.col("x").alias(1), TypeError, "alias: the name must be a str, not int")
-    refused(lambda: kpl.col("x").std(ddof=0), UnsupportedOperation, "std: ddof=0 is not supported; only ddof=1 is")
+    refused(
+        lambda: kpl.col("x").std(ddof=2),
+        UnsupportedOperation,
+        "std: ddof=2 is not supported; use ddof=1, the sample std, or ddof=0, the population std",
+    )
+    refused(
+        lambda: kpl.col("x").var(ddof=True),
+        UnsupportedOperation,
+        "var: ddof=True is not supported; use ddof=1, the sample var, or ddof=0, the population var",
+    )
     refused(
         lambda: kpl.col("x").sum().sum(),
         UnsupportedOperation,
@@ -514,6 +523,20 @@ def test_sum_count_len_and_statistics_carry_polars_types():
             ("y", c(slots[5])),
         ),
     )
+
+
+def test_std_and_var_with_ddof_1_are_the_sample_aggregates_and_with_ddof_0_the_population_ones():
+    lf = frame().select(
+        kpl.col("y").std().alias("a"),
+        kpl.col("y").std(ddof=1).alias("b"),
+        kpl.col("y").std(ddof=0).alias("c"),
+        kpl.col("y").var().alias("d"),
+        kpl.col("y").var(0).alias("e"),
+        kpl.col("y").median().alias("f"),
+    )
+    funcs = ["stddev_samp", "stddev_samp", "stddev_pop", "var_samp", "var_pop", "median"]
+    assert lf._plan.child.aggs == tuple((f"__komira_agg_{i}", Agg(func, (c("y"),))) for i, func in enumerate(funcs))
+    assert list(lf.schema) == ["a", "b", "c", "d", "e", "f"]
 
 
 def test_the_sum_of_a_boolean_counts_its_trues():

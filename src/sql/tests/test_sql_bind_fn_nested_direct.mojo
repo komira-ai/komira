@@ -258,7 +258,7 @@ def test_even_fdiv_nullif_days_in_month() raises:
     )
     _check(
         "SELECT nullif(k) FROM t",
-        "ERR: SQL bind error: nullif() expects exactly 2 arguments — got 1"
+        "ERR: SQL bind error: nullif() expects exactly 2 arguments: got 1"
     )
     _check(
         "SELECT days_in_month(d) AS x FROM t",
