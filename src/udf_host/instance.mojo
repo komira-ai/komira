@@ -95,7 +95,7 @@ def _one_null_row(at: ArrowType) raises -> Column[HeapRegion]:
         data.set_length(0)
         var o = OwnedAlignedBuffer(16)
         o.zero()
-        o.set_length(16 if at == ArrowType.LARGE_STRING else 8)
+        o.set_length(Int64(16) if at == ArrowType.LARGE_STRING else Int64(8))
         offsets = Optional(o^)
     elif at == ArrowType.BOOL:
         data.set_length(1)

@@ -386,7 +386,7 @@ struct UdfBinding(Movable):
         """How many UDFs are loaded."""
         return len(self._refs)
 
-    def ref_at(self, index: Int) -> ref [self._refs] UdfRef:
+    def ref_at(self, index: Int) -> ref [origin_of(self._refs[index])] UdfRef:
         """The `UdfRef` of UDF `index` (0 <= index < count())."""
         return self._refs[index]
 
