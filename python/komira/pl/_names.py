@@ -24,6 +24,10 @@ _NO_NODE = ".{name}() is not supported yet: the plan has no node for it"
 _RUNS_AT = ".{name}() is not supported: komira runs a plan only at .collect()"
 _ORDERED_KEY = ".{name}() is not supported yet; use .min() or .max() of an ordered key"
 _PLAN = "a LazyFrame is a plan: run it with .collect(), then convert the Result"
+_EAGER_WRITE = (
+    ".{name}() is a method of polars' eager DataFrame, which komira.pl does not have: "
+    "a LazyFrame writes its rows with .{sink}(path)"
+)
 
 # The module `komira.pl`: name -> message.
 MODULE = {
@@ -57,6 +61,9 @@ TABLES = {
         "cache": _RUNS_AT,
         "profile": _RUNS_AT,
         "collect_async": _RUNS_AT,
+        "write_csv": _EAGER_WRITE.replace("{sink}", "sink_csv"),
+        "write_parquet": _EAGER_WRITE.replace("{sink}", "sink_parquet"),
+        "write_ndjson": _EAGER_WRITE.replace("{sink}", "sink_ndjson"),
     },
     "Expr": {
         "apply": "Expr.apply is not a polars verb; use map_elements(f, return_dtype=...)",
