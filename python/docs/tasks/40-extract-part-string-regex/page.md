@@ -48,6 +48,6 @@ Output:
 
 ## Related
 
-- How do I filter rows where a text column contains a substring? (rank 41, works; no page yet)
-- How do I lowercase, trim and replace text in a column? (rank 42, works; no page yet)
-- How do I split a string column into several columns? (rank 44, partial; no page yet)
+- [How do I filter rows where a text column contains a substring?](../41-filter-rows-text-column-contains-substring/page.md) (rank 41, works)
+- [How do I lowercase, trim and replace text in a column?](../42-lowercase-trim-replace-text-column/page.md) (rank 42, partial)
+- [How do I split a string column into several columns?](../44-split-string-column-columns/page.md) (rank 44, partial)

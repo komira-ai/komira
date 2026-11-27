@@ -6,8 +6,8 @@
 //! when they hold; otherwise prints each finding and exits 1. A check that
 //! read no fact fails too: it checked nothing.
 //!
-//! The python_closure check also takes --scan <dir>: the files its facts
-//! name as `scan`, at their paths in the repository.
+//! The python_closure and readme_coverage checks also take --scan <dir>: the
+//! files their facts name as `scan`, at their paths in the repository.
 //!
 //!   selftest_closure  the facts are labels, one per line: the closure of
 //!                     the self-test package. A label of <cell> under src/
@@ -16,8 +16,12 @@
 //!                     change to that library (docs/design/build_selftests.md,
 //!                     "Only a widened change reaches build_selftests").
 //!   python_closure    no Python outside the Python surface: python_closure.zig.
+//!   readme_coverage   release/README_COVERAGE.md is the text the build graph and
+//!                     the READMEs make: readme_coverage.zig (--scan holds the
+//!                     READMEs and the ledger).
 const std = @import("std");
 const python_closure = @import("python_closure.zig");
+const readme_coverage = @import("readme_coverage.zig");
 
 pub const Outcome = struct {
     facts: usize,
@@ -65,6 +69,7 @@ pub fn main() !void {
         fail("usage: graph_checks --check <name> --cell <cell> --label <target> --facts <file> [--scan <dir>] --out <file>", .{});
     const facts = std.fs.cwd().readFileAlloc(a, facts_path.?, 1 << 28) catch |e| fail("cannot read {s}: {s}", .{ facts_path.?, @errorName(e) });
     if (std.mem.eql(u8, check.?, "python_closure")) return pythonClosureMain(a, cell.?, label.?, facts, scan_dir, out_path.?);
+    if (std.mem.eql(u8, check.?, "readme_coverage")) return readmeCoverageMain(a, label.?, facts, scan_dir, out_path.?);
     if (!std.mem.eql(u8, check.?, "selftest_closure")) fail("{s}: no checker for the check `{s}`", .{ label.?, check.? });
     const o = try selftestClosure(a, cell.?, facts);
     if (o.facts == 0) fail("{s}: selftest_closure read no label: the closure query matched nothing, so it checked nothing", .{label.?});
@@ -78,18 +83,38 @@ pub fn main() !void {
     try f.deprecatedWriter().print("selftest_closure: {d} labels, none under {s}//src/\n", .{ o.facts, cell.? });
 }
 
-fn pythonClosureMain(a: std.mem.Allocator, cell: []const u8, label: []const u8, facts: []const u8, scan_dir: ?[]const u8, out_path: []const u8) !void {
-    // The files the facts name as `scan`, read from --scan.
+/// The text of each file the facts name as `scan`, read from --scan.
+fn scanned(a: std.mem.Allocator, label: []const u8, check: []const u8, facts: []const u8, scan_dir: ?[]const u8) !std.StringHashMap([]const u8) {
     var texts = std.StringHashMap([]const u8).init(a);
     var it = std.mem.splitScalar(u8, facts, '\n');
     while (it.next()) |line| {
         if (!std.mem.startsWith(u8, line, "scan\t")) continue;
         const path = line["scan\t".len..];
-        const dir = scan_dir orelse fail("{s}: python_closure: the facts name files to read ({s}) and no --scan directory was given", .{ label, path });
+        const dir = scan_dir orelse fail("{s}: {s}: the facts name files to read ({s}) and no --scan directory was given", .{ label, check, path });
         const full = try std.fs.path.join(a, &.{ dir, path });
-        const text = std.fs.cwd().readFileAlloc(a, full, 1 << 26) catch |e| fail("{s}: python_closure: cannot read {s}: {s}", .{ label, full, @errorName(e) });
+        const text = std.fs.cwd().readFileAlloc(a, full, 1 << 26) catch |e| fail("{s}: {s}: cannot read {s}: {s}", .{ label, check, full, @errorName(e) });
         try texts.put(path, text);
     }
+    return texts;
+}
+
+fn readmeCoverageMain(a: std.mem.Allocator, label: []const u8, facts: []const u8, scan_dir: ?[]const u8, out_path: []const u8) !void {
+    const texts = try scanned(a, label, "readme_coverage", facts, scan_dir);
+    const o = try readme_coverage.check(a, facts, &texts);
+    if (o.readmes == 0) fail("{s}: readme_coverage read no src/<name>/README.md: the tree held none, so it checked nothing", .{label});
+    if (o.gates == 0 or o.e2es == 0) fail("{s}: readme_coverage read {d} gate fact(s) naming a README and {d} e2e fact(s): a query of checks.bxl (the rule kinds, or the `readme` match) matched nothing, so every row would say none", .{ label, o.gates, o.e2es });
+    if (o.findings.len > 0) {
+        const w = std.fs.File.stderr().deprecatedWriter();
+        for (o.findings) |f| try w.print("{s}: readme_coverage: {s}\n", .{ label, f });
+        fail("{s}: readme_coverage: {d} finding(s) over {d} READMEs; {s} is written from the build graph and the READMEs, so copy the lines above into it", .{ label, o.findings.len, o.readmes, readme_coverage.LEDGER });
+    }
+    const f = std.fs.cwd().createFile(out_path, .{}) catch |e| fail("cannot create {s}: {s}", .{ out_path, @errorName(e) });
+    defer f.close();
+    try f.deprecatedWriter().print("readme_coverage: {d} READMEs; {s} is the text they and the build graph make\n", .{ o.readmes, readme_coverage.LEDGER });
+}
+
+fn pythonClosureMain(a: std.mem.Allocator, cell: []const u8, label: []const u8, facts: []const u8, scan_dir: ?[]const u8, out_path: []const u8) !void {
+    const texts = try scanned(a, label, "python_closure", facts, scan_dir);
     const o = try python_closure.pythonClosure(a, cell, facts, &texts);
     if (o.nodes == 0) fail("{s}: python_closure read no target: the closure query matched nothing, so it checked nothing", .{label});
     if (o.refused.len > 0) {
@@ -104,6 +129,7 @@ fn pythonClosureMain(a: std.mem.Allocator, cell: []const u8, label: []const u8, 
 
 test {
     _ = python_closure;
+    _ = readme_coverage;
 }
 
 test "a closure with no label under src/ holds" {

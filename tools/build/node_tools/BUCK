@@ -70,7 +70,7 @@ zig_test(
     exec_compatible_with = LINUX_X86_64,
     src = "node_act_test.zig",
     imports = ["node_act.zig"],
-    deps = ["//tools/build/act_util:act_util"],
+    deps = ["//tools/build/act_util:act_util", ":node_tartest"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
 )
