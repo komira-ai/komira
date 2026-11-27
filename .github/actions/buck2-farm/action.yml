@@ -1,4 +1,5 @@
-# Runs one `./buck2` command (build, test or bxl) and fails the step unless the
+# Runs one buck2 command (build, test or bxl; `./buck2` unless the `buck2`
+# input names another program) and fails the step unless the
 # run was on the farm: buck2 must succeed, and `assert_remote`
 # (//tools/build/ci:assert_remote, which says what it accepts) must find no
 # local execution in the run's output.
@@ -6,26 +7,35 @@
 # The logic is in that tool, not here. This file is two lines of invocation.
 # The first, `assert_remote run`, runs buck2 with its output copied to the job
 # log and to a file (tools/build/ci/assert_remote/farm_retry.zig): when the
-# run fails and every failure in its output is a cut connection to the farm
-# (buck2's `Error:` line with `RE channel error: code:` in each failed action
-# or test, for a test cut before it started in its stderr right after buck2's
-# `Remote Execution Error on Execute` line, and no other error), it waits for
-# the farm's port to answer (tools/build/ci/assert_remote/farm_wait.zig), at
-# most as long as farm-connect's `farm-wait-minutes`, which it reads from the
-# machine buckconfig farm-connect wrote, and runs the same command again. It
-# keeps the cut run's output as buck2-farm.first.log (buck2-farm.second.log
-# after a second cut) beside the log and writes one line to the job summary
-# saying how long the farm was unreachable. A step runs at most three times;
-# when the farm does not answer within the wait, or the third run is cut too,
-# the step fails. The second line reads the file the last run wrote. The
-# caller builds the tool first and passes its path; the cases of this file,
-# run against recorded buck2 output, are //:buck2_farm_cases.
+# run fails and every failure in its output is the farm's, a cut connection to
+# the farm or a job the farm failed to start because an input was unavailable
+# on its host (buck2's `Error:` line with `RE channel error: code:`, or its
+# `Error:` line ending `the job failed to start: input-unavailable)`, in each
+# failed action or test, for a test that never started in its stderr right
+# after buck2's `Remote Execution Error on Execute` line, and no other error),
+# it waits for the farm's port to answer
+# (tools/build/ci/assert_remote/farm_wait.zig), at most as long as
+# farm-connect's `farm-wait-minutes`, which it reads from the machine
+# buckconfig farm-connect wrote, and runs the same command again. It keeps the
+# failed run's output as buck2-farm.first.log (buck2-farm.second.log after a
+# second) beside the log and writes one line to the job summary naming the
+# farm's failure and how long the farm was unreachable. A step runs at most
+# three times; when the farm does not answer within the wait, or the third run
+# fails on the farm too, the step fails. While a run runs, a watchdog
+# (tools/build/ci/assert_remote/farm_watchdog.zig) reads the runner's TCP
+# connections to the farm from the kernel: when one has heard nothing from the
+# farm for longer than a live farm is ever silent (300 s; a run that hangs on a
+# dead connection), it ends buck2 and its daemon, says why in one line, and the
+# run counts as a cut, within the same three runs. The second line reads the
+# file the last run wrote. The caller builds the tool first and passes its
+# path; the cases of this file, run against recorded buck2 output and fake
+# farms on loopback ports, are //:buck2_farm_cases.
 #
 # `args` is split on spaces by the shell and is never a shell script: a
 # pattern is `//path:name`, a list of them is `@file` or `$(cat file)` made
 # by the caller before this step. It reaches the step through `env:` only.
 name: buck2-farm
-description: Run one ./buck2 command (again after a cut connection to the farm, once the farm answers, at most three runs) and fail unless buck2 succeeded and no action ran locally.
+description: Run one ./buck2 command (again after a cut connection to the farm, a job the farm failed to start for an unavailable input, or a run ended on a dead connection, once the farm answers, at most three runs) and fail unless buck2 succeeded and no action ran locally.
 
 inputs:
   args:
@@ -34,6 +44,10 @@ inputs:
   assert-remote:
     description: Path of the built //tools/build/ci:assert_remote executable.
     required: true
+  buck2:
+    description: The buck2 program to run, as a path. Left out, `./buck2`, the checkout's pinned launcher; a repository that installs its own pinned buck2 passes that path.
+    required: false
+    default: ./buck2
 
 runs:
   using: composite
@@ -43,13 +57,14 @@ runs:
       env:
         ASSERT_REMOTE: ${{ inputs.assert-remote }}
         BUCK2_ARGS: ${{ inputs.args }}
+        BUCK2_PROGRAM: ${{ inputs.buck2 }}
         BUCK2_LOG: ${{ runner.temp }}/buck2-farm.log
         # The simple console: plain lines, and every few seconds
         # `Waiting on <target> -- <action>, and N other actions`, so the live
         # step log names what a stalled build waits on. It is what buck2 picks
         # without a terminal; set here so a runner's terminal never changes it.
         BUCK_CONSOLE: simple
-      run: '"$ASSERT_REMOTE" run --log "$BUCK2_LOG" --summary "$GITHUB_STEP_SUMMARY" --farm-config "$HOME/.buckconfig.d/farm.buckconfig" -- ./buck2 $BUCK2_ARGS'
+      run: '"$ASSERT_REMOTE" run --log "$BUCK2_LOG" --summary "$GITHUB_STEP_SUMMARY" --farm-config "$HOME/.buckconfig.d/farm.buckconfig" -- "$BUCK2_PROGRAM" $BUCK2_ARGS'
     - name: assert the run was remote
       shell: bash
       env:

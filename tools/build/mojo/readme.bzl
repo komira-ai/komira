@@ -1,4 +1,4 @@
-"""Which library of a BUCK file takes the package's README.md (mojo_library's `readme`).
+"""Which library of a BUCK file takes the package's README.md (mojo_library's `readme`), and the README gate.
 
 A library takes its directory's README.md: the README's ```mojo examples run
 as its welded `[tests][readme]` test and its conda package installs the file
@@ -16,12 +16,30 @@ that library's `[tests][readme]` compile, and a README attached to several
 ships in each of their packages, so a package of several libraries gives
 `readme = False` to every library its README is not about.
 
-This module loads only providers.bzl, so defs.bzl can load it.
+A library whose README is source-first lists its examples' files, which the
+README shows through include markers (docs/design/documentation_tests.md):
+
+    readme_examples = glob(["examples/*.mojo"])
+
+Each file is compiled against the library and run as a welded test of its
+own, and the README is held to the files byte for byte (the gate below).
+`readme_examples` needs the README; `[]` is a source-first README that shows
+no example.
+
+This module loads providers.bzl, compile.bzl, test_runtime.bzl,
+test_limit.bzl, opt_level.bzl, system_libs.bzl, the doc tree and rerun
+modules: none of them loads defs.bzl, so defs.bzl can load it.
 """
 
-load(":providers.bzl", "ZigExeInfo")
-load(":test_limit.bzl", "hang_limit_flags")
+load(":compile.bzl", "build_executable", "c_link", "dep_closure", "link_tail")
+load(":opt_level.bzl", "TEST_OPT_LEVEL")
+load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo", "ZigExeInfo")
+load(":system_libs.bzl", "dep_system_libs", "run_args")
+load(":test_limit.bzl", "HANG_LIMIT_ATTRS", "hang_limit_flags")
+load(":test_runtime.bzl", "gate_mojo", "test_root")
 load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 # The README examples tool, a Zig executable: no Mojo library, so any
 # package, its own included, may hold a README.
@@ -30,19 +48,27 @@ _README_TOOL = "komira//tools/build/readme_examples:tool"
 def readme_kwargs(kwargs):
     """Replaces the macro's `readme` keyword in `kwargs` by the rule's
     `readme` (the README.md source) and `readme_tool` attributes, or by
-    neither when the library takes no README."""
+    neither when the library takes no README. `readme_examples` is passed
+    through, and refused without a README."""
     name = kwargs.get("name", "mojo_library")
     if "readme_tool" in kwargs:
         fail("{}: `readme_tool` is set by mojo_library with the README; do not pass it".format(name))
     want = kwargs.pop("readme", None)
     if want != None and type(want) != "bool":
         fail("{}: `readme` takes True, False or nothing (the package's README.md, if any), not {}".format(name, repr(want)))
+    listed = kwargs.get("readme_examples")
+    if listed != None and type(listed) != "list":
+        fail("{}: `readme_examples` is a list of the README's example files (glob([\"examples/*.mojo\"])), not {}".format(name, repr(listed)))
     if want == False:
+        if listed != None:
+            fail("{}: `readme_examples` lists the files a README shows, and `readme = False` takes no README".format(name))
         return
     found = glob(["README.md"])
     if not found:
         if want == True:
             fail("{}: `readme = True` and //{} holds no README.md".format(name, package_name()))
+        if listed != None:
+            fail("{}: `readme_examples` lists the files a README shows, and //{} holds no README.md".format(name, package_name()))
         return
     kwargs["readme"] = found[0]
     kwargs["readme_tool"] = _README_TOOL
@@ -60,19 +86,38 @@ def readme_kwargs(kwargs):
 # example is, its two modes, hidden lines, the refusals) is in that package
 # and in README.md here.
 #
-# Whether a README holds an example is in its bytes, which analysis cannot
-# read, so a dynamic action reads `examples`: for each example it compiles
-# that example's program alone against the UNGATED package and runs it
-# through the gate (gate_mojo) exactly as a `test_srcs` entry, labelled
-# `<target>:README.md:<line>`, and the marker joins their markers; with none
-# it compiles and runs nothing, and the marker records that no example
-# exists (never a PASS line). A refused README (an info string such as
-# `mojo skip`, a stray hidden-lines comment) fails `generate`, naming
-# README.md:<line>.
+# The inline model (no `readme_examples`): whether a README holds an example
+# is in its bytes, which analysis cannot read, so a dynamic action reads
+# `examples`: for each example it compiles that example's program alone
+# against the UNGATED package and runs it through the gate (gate_mojo)
+# exactly as a `test_srcs` entry, labelled `<target>:README.md:<line>`, and
+# the marker joins their markers; with none it compiles and runs nothing, and
+# the marker records that no example exists (never a PASS line). A refused
+# README (an info string such as `mojo skip`, a stray hidden-lines comment,
+# an include marker) fails `generate`, naming README.md:<line>.
+# `[tests][readme][migrated]` is the README made source-first by the tool's
+# `migrate` (its README.md and examples/), built only when asked for, and
+# proven by `migrate --verify` in the same build.
+#
+# Source-first (`readme_examples` listed): the list is the glob, so analysis
+# has the files and no dynamic action is needed. Each file is compiled
+# against the UNGATED package and run through the gate as its own welded
+# test, labelled `<target>:examples/<name>.mojo`, staged at its repository
+# path so a failure names `<package>/examples/<name>.mojo:<line>`; the
+# tool's `check` holds the README to the files (every listed file shown by
+# exactly one include, every ```mojo fence an include, each fence its file
+# byte for byte, the text-fence rule; include.zig), and the marker joins its
+# line and every file's marker. `[tests][readme][fill]` is the patch that
+# mends a stale README, which the author applies with `git apply`.
+# `generate` still runs (it reads an included fence as a whole program) for
+# `[generated]` and the coverage build.
 
 # zig's os of each toolchain os (MojoToolchainInfo.os): a triple names it as
 # its second dash-separated part (`x86_64-linux-musl`, `aarch64-macos.11.0`).
 _ZIG_OS = {"darwin": "macos", "linux": "linux"}
+
+# The sub-targets of `[tests][readme]` that are not an example's.
+_RESERVED = ["file", "fill", "generated", "migrated", "objects"]
 
 def _tool_os_refusal(tool, os):
     """Why the exec_dep `tool` cannot run in an action of a toolchain whose
@@ -91,45 +136,142 @@ def _tool_os_refusal(tool, os):
                 "an exec_dep must be built for the platform its action runs on").format(tool.label.raw_target(), info.target, os)
     return None
 
-def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, readme_test, owner = False, rerun = {}):
-    """(marker, generated directory, examples file, objects directory) of
-    the README's examples, or None without a README. With `owner` (the library
-    lists a C library among its `deps`: native_facts.bzl `c_direct`), the
-    objects directory holds each example's program as an
-    object file, `readme_<import name>_<line>.o`, whose undefined symbols
-    are the C it calls: `[tests][readme][objects]`, which the library's own
-    shared library reads for its README check (tools/build/native/shared.bzl,
-    `readme_calls`). It is empty for any other library and with no example.
+def _display(ctx, src):
+    """`src` as a message names it: its path from the cell root."""
+    return (ctx.label.package + "/" + src.short_path) if ctx.label.package else src.short_path
+
+def readme_file_test(ctx, tc, tool, example, stem, closure, link_tail_args, env_args, rerun, hang_flags, opt_level, owner = False, expect = None):
+    """One README example file as a welded test: `example` (a source of the
+    package) compiled against `closure` (a MojoPkgTSet) and run through the
+    gate as `<target>:<its short path>`. The file is staged at its path from
+    the cell root, so the compiler, and an assertion's location, name it so.
+    Returns (marker, object or None): with `owner`, the program also as an
+    object file (`[tests][readme][objects]`). With `expect`, the run must
+    FAIL with `expect` in its output: the marker is written only then (the
+    tool's `expect-failure`; mojo_readme_example_failure below)."""
+    prefix = (ctx.label.package + "/") if ctx.label.package else ""
+    exe = build_executable(ctx, tc, "tests/readme/bin/" + stem, [example], example, [closure], opt_level, "mojo_build_test", "readme_" + stem, None, link_extra = link_tail_args, src_prefix = prefix)
+    obj = None
+    if owner:
+        obj = build_executable(ctx, tc, "tests/readme/obj/" + stem + ".o", [example], example, [closure], opt_level, "mojo_readme_object", "readme_" + stem, None, emit_object = True, src_prefix = prefix)
+    root, staged = test_root(ctx, "tests/readme/root/" + stem, exe, {})
+    marker = ctx.actions.declare_output("tests/readme/{}.passed".format(stem))
+    label = "{}:{}".format(ctx.label.raw_target(), example.short_path)
+    if expect == None:
+        cmd = gate_mojo(tc, label, staged, marker.as_output(), hang_flags, env_args)
+        category = "mojo_gated_test"
+    else:
+        # The gate writes its marker only for a run that passed; this one must
+        # not pass, so its marker goes nowhere and the tool writes this one.
+        cmd = cmd_args(tool, "expect-failure", "--text", expect, "--out", marker.as_output(), "--", gate_mojo(tc, label, staged, "/dev/null", hang_flags, env_args))
+        category = "mojo_readme_expect_failure"
+    ctx.actions.run(
+        cmd_args(cmd, hidden = root),
+        env = salted(rerun),
+        category = category,
+        identifier = "readme_" + stem,
+    )
+    return marker, obj
+
+def _source_first(ctx, tc, import_name, closure, link_tail_args, env_args, rerun, owner, hang, display):
+    """The gate of a source-first README: (marker, objects directory, the
+    sub-targets of its examples, the fill patch)."""
+    readme = ctx.attrs.readme
+    tool = ctx.attrs.readme_tool[RunInfo]
+    readme_dir = readme.short_path.rpartition("/")[0]
+    markers = []
+    built = {}
+    subs = {}
+    listed = []
+    for f in ctx.attrs.readme_examples:
+        rel = f.short_path
+        if readme_dir:
+            if not rel.startswith(readme_dir + "/"):
+                fail("{}: readme_examples lists {}, which is not beside {}".format(ctx.label, f.short_path, readme.short_path))
+            rel = rel[len(readme_dir) + 1:]
+        if not regex_match("^examples/[a-z][a-z0-9_]*\\.mojo$", rel):
+            fail("{}: readme_examples lists {}: a README's example is examples/<name>.mojo beside the README, <name> lower-case letters, digits and underscores".format(ctx.label, f.short_path))
+        stem = rel[len("examples/"):-len(".mojo")]
+        if stem in _RESERVED:
+            fail("{}: readme_examples lists {}: `{}` names a sub-target of [tests][readme]; rename the file".format(ctx.label, f.short_path, stem))
+        if stem in subs:
+            fail("{}: readme_examples lists {} twice".format(ctx.label, f.short_path))
+        m, obj = readme_file_test(ctx, tc, tool, f, stem, closure, link_tail_args, env_args, rerun, hang, ctx.attrs.test_optimization_level, owner = owner)
+        markers.append(m)
+        subs[stem] = [DefaultInfo(default_output = m)]
+        if obj != None:
+            built["readme_{}_{}.o".format(import_name, stem)] = obj
+        listed.append(cmd_args("--example", cmd_args(rel, f, delimiter = "=")))
+    fresh = ctx.actions.declare_output("tests/readme/_fresh.passed")  # a stem starts with a letter
+    ctx.actions.run(
+        cmd_args(tool, "check", "--readme", readme, "--display", display, listed, "--out", fresh.as_output()),
+        env = salted(),
+        category = "mojo_readme_check",
+    )
+    patch = ctx.actions.declare_output("tests/readme/fill.patch")
+    ctx.actions.run(
+        cmd_args(tool, "fill", "--readme", readme, "--display", display, listed, "--out", patch.as_output()),
+        env = salted(),
+        category = "mojo_readme_fill",
+    )
+    marker = ctx.actions.declare_output("tests/readme.passed")
+    ctx.actions.run(
+        cmd_args(tc.act, "cat", marker.as_output(), [fresh] + markers),
+        env = salted(),
+        category = "mojo_readme_join",
+    )
+    objects = ctx.actions.copied_dir("tests/readme/objects", built)
+    return marker, objects, subs, patch
+
+def readme_gate(ctx, tc, import_name, ungated_tset, link_args, env_args, ships, readme_test, owner = False, rerun = {}):
+    """The README gate, or None without a README: a struct of `marker` (the
+    `[tests][readme]` marker), `generated` (the directory `generate` wrote),
+    `objects` and `sub_targets` (those of `[tests][readme]`). With `owner`
+    (the library lists a C library among its `deps`: native_facts.bzl
+    `c_direct`), the objects directory holds each example's program as an
+    object file, `readme_<import name>_<line or name>.o`, whose undefined
+    symbols are the C it calls: `[tests][readme][objects]`, which the
+    library's own shared library reads for its README check
+    (tools/build/native/shared.bzl, `readme_calls`). It is empty for any
+    other library and with no example.
     `ships`: the library's conda package installs the README, so a
     relative link in it is refused.
-    `link_tail`: the link arguments of the library's C closure (defs.bzl's
+    `link_args`: the link arguments of the library's C closure (defs.bzl's
     _link_tail); `readme_test`: defs.bzl's dynamic action that builds and
-    runs each example (it needs defs.bzl's _build_executable); `rerun`: the
-    environment each example's run adds (rerun.bzl's rerun_env)."""
+    runs each example of an inline README; `rerun`: the environment each
+    example's run adds (rerun.bzl's rerun_env). A source-first README (the
+    library lists `readme_examples`) runs its files instead (see above)."""
     readme = ctx.attrs.readme
+    listed = ctx.attrs.readme_examples
     if readme == None:
         if ctx.attrs.readme_tool != None:
             fail("{}: readme_tool is set and readme is not".format(ctx.label))
+        if listed != None:
+            fail("{}: readme_examples is set and readme is not".format(ctx.label))
         return None
     if ctx.attrs.readme_tool == None:
         fail("{}: readme is set and readme_tool is not; the mojo_library macro sets both".format(ctx.label))
     refusal = _tool_os_refusal(ctx.attrs.readme_tool, tc.os)
     if refusal:
         fail("{}: {}".format(ctx.label, refusal))
+    display = _display(ctx, readme)
+    tool = ctx.attrs.readme_tool[RunInfo]
     src = ctx.actions.declare_output("tests/readme/src", dir = True)
     examples = ctx.actions.declare_output("tests/readme/examples")
     ctx.actions.run(
         cmd_args(
-            ctx.attrs.readme_tool[RunInfo],
+            tool,
             "generate",
             "--readme",
             readme,
             "--display",
-            (ctx.label.package + "/" + readme.short_path) if ctx.label.package else readme.short_path,
+            display,
             "--package",
             import_name,
             "--links",
             "refuse" if ships else "allow",
+            "--includes",
+            "refuse" if listed == None else "allow",
             "--out-dir",
             src.as_output(),
             "--examples",
@@ -138,23 +280,94 @@ def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, 
         env = salted(),
         category = "mojo_readme_generate",
     )
-    marker = ctx.actions.declare_output("tests/readme.passed")
-    objects = ctx.actions.declare_output("tests/readme/objects", dir = True)
-    ctx.actions.dynamic_output_new(readme_test(
-        label = ctx.label,
-        gate_label = "{}:{}".format(ctx.label.raw_target(), readme.short_path),
-        examples = examples,
-        package = import_name,
-        src = src,
-        marker = marker.as_output(),
-        objects = objects.as_output(),
-        owner = owner,
-        tc = tc,
-        closure = ungated_tset,
-        opt_level = ctx.attrs.test_optimization_level,
-        link_tail = link_tail,
-        env_args = env_args,
-        rerun = rerun,
-        hang_flags = hang_limit_flags(str(ctx.label.raw_target()), ctx.attrs.test_hang_limit_s),
-    ))
-    return marker, src, examples, objects
+    hang = hang_limit_flags(str(ctx.label.raw_target()), ctx.attrs.test_hang_limit_s)
+    subs = {
+        "file": [DefaultInfo(default_output = readme)],
+        "generated": [DefaultInfo(default_output = src)],
+    }
+    if listed != None:
+        marker, objects, examples_subs, patch = _source_first(ctx, tc, import_name, ungated_tset, link_args, env_args, rerun, owner, hang, display)
+        subs.update(examples_subs)
+        subs["fill"] = [DefaultInfo(default_output = patch)]
+    else:
+        marker = ctx.actions.declare_output("tests/readme.passed")
+        objects = ctx.actions.declare_output("tests/readme/objects", dir = True)
+        ctx.actions.dynamic_output_new(readme_test(
+            label = ctx.label,
+            gate_label = "{}:{}".format(ctx.label.raw_target(), readme.short_path),
+            examples = examples,
+            package = import_name,
+            src = src,
+            marker = marker.as_output(),
+            objects = objects.as_output(),
+            owner = owner,
+            tc = tc,
+            closure = ungated_tset,
+            opt_level = ctx.attrs.test_optimization_level,
+            link_tail = link_args,
+            env_args = env_args,
+            rerun = rerun,
+            hang_flags = hang,
+        ))
+        migrated = ctx.actions.declare_output("tests/readme/migrated", dir = True)
+        ctx.actions.run(
+            cmd_args(tool, "migrate", "--readme", readme, "--display", display, "--out-dir", migrated.as_output()),
+            env = salted(),
+            category = "mojo_readme_migrate",
+        )
+        verified = ctx.actions.declare_output("tests/readme/migrated.verified")
+        ctx.actions.run(
+            cmd_args(tool, "migrate", "--verify", "--readme", readme, "--display", display, "--migrated", migrated, "--out", verified.as_output()),
+            env = salted(),
+            category = "mojo_readme_migrate_verify",
+        )
+        subs["migrated"] = [DefaultInfo(default_output = migrated, other_outputs = [verified])]
+    subs["objects"] = [DefaultInfo(default_output = objects)]
+    return struct(marker = marker, generated = src, objects = objects, sub_targets = subs)
+
+# ---- A README example that must fail ----------------------------------------------
+
+def _example_failure_impl(ctx):
+    tc = ctx.attrs.toolchain[MojoToolchainInfo]
+    refusal = _tool_os_refusal(ctx.attrs._tool, tc.os)
+    if refusal:
+        fail("{}: {}".format(ctx.label, refusal))
+    for d in ctx.attrs.deps:
+        if MojoInfo not in d:
+            fail("{}: dep {} provides no MojoInfo (a mojo_library or an adopted library)".format(ctx.label, d.label))
+    if ctx.attrs.expect == "":
+        fail("{}: `expect` is empty, which every output holds".format(ctx.label))
+    where = str(ctx.label.raw_target())
+    closure = ctx.actions.tset(MojoPkgTSet, children = dep_closure(ctx))
+    if not ctx.attrs.example.basename.endswith(".mojo"):
+        fail("{}: `example` {} is not a .mojo file".format(ctx.label, ctx.attrs.example.short_path))
+    stem = ctx.attrs.example.basename[:-len(".mojo")]
+    marker, _ = readme_file_test(
+        ctx,
+        tc,
+        ctx.attrs._tool[RunInfo],
+        ctx.attrs.example,
+        stem,
+        closure,
+        link_tail(c_link(ctx)),
+        run_args([], dep_system_libs(ctx.attrs.deps)),
+        rerun_env(ctx),
+        hang_limit_flags(where, ctx.attrs.test_hang_limit_s),
+        TEST_OPT_LEVEL,
+        expect = ctx.attrs.expect,
+    )
+    return [DefaultInfo(default_output = marker), rerun_info(ctx)]
+
+_example_failure = rule(
+    impl = _example_failure_impl,
+    doc = "A README example that must fail: `example` compiled against `deps` and run as a README example's welded test is (tools/build/mojo/readme.bzl, readme_file_test); the target builds only when the run fails with `expect` in its output (the README tool's `expect-failure`), so a broken example is shown to go red naming its file and line.",
+    attrs = {
+        "deps": attrs.list(attrs.dep(), default = []),
+        "example": attrs.source(),
+        "expect": attrs.string(),
+        "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+        "_tool": attrs.exec_dep(default = _README_TOOL, providers = [RunInfo]),
+    } | HANG_LIMIT_ATTRS | RERUN_ATTRS,
+)
+
+mojo_readme_example_failure = declares_docs(_example_failure)

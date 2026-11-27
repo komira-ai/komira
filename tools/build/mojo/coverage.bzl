@@ -466,8 +466,8 @@ def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, en
     return _cov_run(ctx.actions, tc, facts, label, where, t, t.short_path, stem, cov_bin, _dir_prefix(facts.pkg_dir) + t.short_path, data, env_args, solib)
 
 def coverage_readme(ctx, tc, build, readme, closure, link_tail, src_dir, import_name, root, env_args, bins, runs):
-    """With coverage, the README's examples as a test (`readme`, the
-    (marker, generated directory, examples) of readme.bzl's readme_gate): the
+    """With coverage, the README's examples as a test (`readme`, the struct
+    readme.bzl's readme_gate returns; its `generated` directory): the
     directory's runner, `readme_<import>.mojo`, which imports each example's
     program beside it and runs them all (with no example it prints that it
     ran nothing), built at -O0 with line tables against `closure` (the
@@ -478,7 +478,7 @@ def coverage_readme(ctx, tc, build, readme, closure, link_tail, src_dir, import_
     `buck-out/readme/<package>/readme_<import>[_<line>].mojo`: no repository
     file, which covcheck counts outside the repository, so only the
     library's lines they reached count."""
-    gen = readme[1]
+    gen = readme.generated
     runner = "readme_{}.mojo".format(import_name)
     main = gen.project(runner)
     bins["readme"] = build(ctx, tc, "cov/tests/readme/readme_" + import_name, [gen], main, [closure], "0", "mojo_build_cov_test", "readme", None, link_extra = link_tail, debug_link = coverage_link_dir(ctx))

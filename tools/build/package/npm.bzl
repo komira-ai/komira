@@ -16,7 +16,9 @@ Attributes:
                         The tarball's package.json is it stamped: the version
                         and every optional dependency become the stamp's
                         version, and a stamped package drops `private`.
-                        Every other key keeps its value and place
+                        Every other key keeps its value and place, but an
+                        optional dependency `optional_dependencies` does not
+                        name is dropped
     license             the manifest's `license` must be it
     files               {path in the package: file or directory}; a directory
                         adds each file under it at `<path>/<its path>`. Each
@@ -36,6 +38,13 @@ Attributes:
     max_glibcxx, max_cxxabi
                         the highest GLIBCXX_ and CXXABI_ versions a library
                         may need (unset: none may)
+    optional_dependencies
+                        the manifest's optional dependencies the package
+                        names (default none): each must be one the manifest
+                        lists, and the others are dropped (the key too, when
+                        none is named), so a main package whose manifest lists
+                        every platform package names only those released with
+                        it. Read back exactly
 
 The manifest's `repository.url` must be https://github.com/komira-ai/komira,
 which npm's trusted publishing requires. The version is the wheel's stamp
@@ -43,6 +52,10 @@ which npm's trusted publishing requires. The version is the wheel's stamp
 `-c komira.package_commit` and `-c komira.package_timestamp_ms`, `0.0.0` with
 none, any other mix refused. The file name is npm pack's:
 `<name without @, / as ->-<version>.tgz`.
+
+The provider NpmTarballInfo carries `package` and `optional_dependencies`,
+which the npm release set (release/npm_packages.bzl) holds to its platform
+packages.
 
 Sub-targets:
 
@@ -66,6 +79,14 @@ load(":wheel.bzl", "brace_refusal", "wheel_version")
 _NPM_OS = {"linux": "linux", "macos": "darwin"}
 _NPM_CPU = {"arm64": "arm64", "x86_64": "x64"}
 _ELF_ARCH = {"arm64": "aarch64", "x86_64": "x86_64"}
+
+NpmTarballInfo = provider(
+    doc = "An npm_tarball's npm name and the optional dependencies its package.json names.",
+    fields = {
+        "optional_dependencies": provider_field(list),
+        "package": provider_field(str),
+    },
+)
 
 def npm_file_name(package, version):
     """The file name `npm pack` gives package `package` at `version`."""
@@ -111,6 +132,8 @@ def _flags(ctx, manifest, files):
         out += ["--max-glibcxx", ctx.attrs.max_glibcxx]
     if ctx.attrs.max_cxxabi:
         out += ["--max-cxxabi", ctx.attrs.max_cxxabi]
+    for name in ctx.attrs.optional_dependencies:
+        out += ["--optional-dependency", name]
     for path, f in files:
         out.append(cmd_args("--file", cmd_args(f, format = path + "={}")))
     return out
@@ -188,16 +211,19 @@ def _npm_tarball_impl(ctx):
 
     tgz = gated_copy("out", checked)
     rel = gated_copy("release", release_checked)
-    return [DefaultInfo(
-        default_output = tgz,
-        other_outputs = [rel] if ctx.attrs.check_release else [],
-        sub_targets = {
-            "check": [DefaultInfo(default_output = checked)],
-            "release": [DefaultInfo(default_output = rel)],
-            "release_check": [DefaultInfo(default_output = release_checked)],
-            "twin": [DefaultInfo(default_output = twin.project(name))],
-        },
-    )]
+    return [
+        DefaultInfo(
+            default_output = tgz,
+            other_outputs = [rel] if ctx.attrs.check_release else [],
+            sub_targets = {
+                "check": [DefaultInfo(default_output = checked)],
+                "release": [DefaultInfo(default_output = rel)],
+                "release_check": [DefaultInfo(default_output = release_checked)],
+                "twin": [DefaultInfo(default_output = twin.project(name))],
+            },
+        ),
+        NpmTarballInfo(package = ctx.attrs.package, optional_dependencies = ctx.attrs.optional_dependencies),
+    ]
 
 _npm_tarball = rule(
     impl = _npm_tarball_impl,
@@ -212,6 +238,7 @@ _npm_tarball = rule(
         "manifest": attrs.source(),
         "max_cxxabi": attrs.option(attrs.string(), default = None),
         "max_glibcxx": attrs.option(attrs.string(), default = None),
+        "optional_dependencies": attrs.list(attrs.string(), default = []),
         "os_floor": attrs.option(attrs.string(), default = None),
         "package": attrs.string(),
         "platform": attrs.option(attrs.string(), default = None),

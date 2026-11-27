@@ -4,8 +4,9 @@ The runtime and the npm packages of the tests' hermetic Node.js
 ([tools/build/node](../../tools/build/node/README.md)), each pinned by
 sha256 and size in [`pins.bzl`](pins.bzl) and fetched like every other
 pinned download (`pinned_file`): on a remote-cache hit, nothing is fetched.
-Each package is one tarball, unpacked. npm runs in one test alone, the
-install test of komira's npm packages (`//node:install_test`), offline.
+Each package is one tarball, unpacked. npm runs in the install tests of
+komira's npm packages alone (`//node:install_test`, and on a macOS worker
+`//node:install_test_macos_arm64`), offline.
 
 | target | what |
 |---|---|
@@ -13,6 +14,7 @@ install test of komira's npm packages (`//node:install_test`), offline.
 | `:native_libs` | `libgcc_s.so.1` and `libstdc++.so.6` (GCC 15.3), unpacked from the conda-forge packages the [platform table](../../tools/build/platforms/table.bzl) pins for the toolchains; every `node` action names their directory in `LD_LIBRARY_PATH` |
 | `:<package>` | one npm package unpacked, named without the scope's `@` and with `/` as `_` (`:apache-arrow`, `:esbuild_linux-x64`); its `deps` are the packages it imports at run time |
 | `:node_22`, `:node_26` | Node.js 22.23.5 and 26.13.1, the other LTS lines, reduced as `:node` is: the runtimes `//node:install_test` installs and runs the npm packages on, besides `:node`. Node 26's `node` also links `libatomic.so.1`, so its library directory is `:native_libs_atomic`: `:native_libs` and that library, from the same pinned libgcc package |
+| `:node_22_macos_arm64`, `:node_macos_arm64`, `:node_26_macos_arm64` | the same three releases' `darwin-arm64` archives, reduced as `:node` is by the macOS build of `node_act` on a macOS worker (they run nowhere else): the runtimes `//node:install_test_macos_arm64` installs and runs the npm packages on. A macOS `node` links only the system's libraries, so they have no library directory |
 | `:npm` | the npm CLI 11.20.0, the registry's tarball unpacked (its dependencies are bundled in it), whose `bin/npm-cli.js` the pinned node runs |
 | `:npm-<file>.tgz` | each npm package's tarball as downloaded, which `//node:install_test` hands npm; `@types/node` and `undici-types` have only these (npm installs them beside apache-arrow; no test imports them) |
 
@@ -22,6 +24,7 @@ install test of komira's npm packages (`//node:install_test`), offline.
 |---|---|---|---|
 | node | 24.21.0 | | the runtime of every `node_test` |
 | node | 22.23.5, 26.13.1 | | the other runtimes of `//node:install_test` |
+| node (darwin-arm64) | 22.23.5, 24.21.0, 26.13.1 | | the runtimes of `//node:install_test_macos_arm64` |
 | npm | 11.20.0 | | `//node:install_test`: the npm that installs the built packages |
 | @esbuild/linux-x64 | 0.28.2 | | `esbuild_bundle` (esbuild's linux x86_64 executable) |
 | apache-arrow | 21.2.0 | flatbuffers, json-with-bigint, tslib | Arrow columns and IPC in JavaScript |
@@ -40,6 +43,10 @@ How each was checked when it was pinned:
   signature (`SHASUMS256.txt.asc`) verifies with a release key listed in
   Node's README. 22.23.5 and 26.13.1 are the newest releases of the 22
   ("Jod") and 26 ("Lithium") lines in the same index, checked the same way.
+  The darwin-arm64 archives are the same three releases: each sha256 is the
+  one that release's `SHASUMS256.txt` lists for
+  `node-v<version>-darwin-arm64.tar.gz` (the same file lists the linux-x64
+  sums pinned above), and each size is the download's.
 - **npm.** 11.20.0 is the `npm` the 26.13.1 release lists in that index (the
   npm it bundles). Trusted publishing needs npm 11.5.1 or later under Node
   22.14 or later; its `engines` (`^20.17.0 || >=22.9.0`) admit all three
@@ -90,7 +97,7 @@ package:
 
 - **Visibility.** `:node` and every npm package are visible only to the
   packages `_TEST_ONLY` in [`BUCK`](BUCK) lists (`:node_22`, `:node_26`,
-  `:npm` and the tarballs only to `//node`, `_INSTALL_TEST`): the test-only packages under
+  the macOS runtimes, `:npm` and the tarballs only to `//node`, `_INSTALL_TEST`): the test-only packages under
   `src/tests` (`//:src_layout` holds that directory to test-only packages) and
   [`node`](../../node/README.md), the addon over libkomira, which is built and
   tested here and not yet shipped. A

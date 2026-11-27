@@ -7,6 +7,9 @@ its failing cases (tools/build/tests/negative/node) take the same files.
     INSTALL_REGISTRY  the pinned tarballs npm resolves apache-arrow (the
                       peer), its dependencies and theirs to
     INSTALL_NODES     the Node.js lines the test runs on
+    INSTALL_NODES_MACOS
+                      the same lines' macOS arm64 Node.js, which the macOS
+                      install test (:install_test_macos_arm64) runs on
 """
 
 load("@komira//third_party/node:pins.bzl", "NPM", "NPM_INSTALL_ONLY")
@@ -37,4 +40,10 @@ INSTALL_NODES = [
     "komira//third_party/node:node_22",
     "komira//third_party/node:node",
     "komira//third_party/node:node_26",
+]
+
+INSTALL_NODES_MACOS = [
+    "komira//third_party/node:node_22_macos_arm64",
+    "komira//third_party/node:node_macos_arm64",
+    "komira//third_party/node:node_26_macos_arm64",
 ]

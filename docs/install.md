@@ -159,10 +159,14 @@ The package's [README](../python/README.md), which is also its PyPI description,
 
 ## What does not work yet
 
-- **Most of the DataFrame APIs**: the verbs of the pandas-shaped and polars-shaped frames that are
-  not built yet; the [capability table](design/dataframe_surface_verbs.md) lists each with
-  its state.
-- **Python UDFs.**
+- **The DataFrame verbs not built yet**, of the pandas-shaped and the polars-shaped frames: the
+  [capability table](design/dataframe_surface_verbs.md) marks each one "not built", and gives what the
+  engine does with each capability's plan. Among them: the ORC, Avro and Arrow IPC readers, the
+  readers on an object-store URL (`s3://`, `gs://`, `az://`; SQL reads `s3://` and `az://` Parquet
+  through `Session.add_sql_binding`), frames made from Arrow data, and the polars-shaped frame's
+  writers (`sink_parquet`, `sink_csv`, `sink_ndjson`); the pandas-shaped frame writes a local file
+  with `to_parquet`, `to_csv` and `to_json`.
+- **Python UDFs**: no verb takes a Python function yet, and `sql` runs none.
 - **Other platforms**: Linux on arm64, macOS on Intel, Windows, and Linux with musl (Alpine) have no
   wheel.
 - **Older systems**: on Linux, glibc older than 2.35 and CPUs older than x86-64-v3; macOS older than 11;
@@ -214,5 +218,6 @@ A pull request that changes what the package does, or what it needs, changes thi
 [README](../python/README.md) and the [quickstart](../python/examples/README.md) with it, and adds
 an entry, a file of [python/changelog.d/](../python/changelog.d/) that the release lists in
 its [changelog](../python/CHANGELOG.md) section ([how](../python/README.md#changelog-entries)): the
-releases that add the pandas-shaped and polars-shaped APIs and Linux on arm64 extend the first
-program and its output and move their lines out of [what does not work yet](#what-does-not-work-yet).
+releases that add more of the pandas-shaped and polars-shaped verbs, Python UDFs or Linux on arm64
+extend the first program and its output where they change it, and move their lines out of
+[what does not work yet](#what-does-not-work-yet).

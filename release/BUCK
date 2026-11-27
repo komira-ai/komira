@@ -15,7 +15,7 @@ load("@komira//tools/build/selftest:defs.bzl", "graph_check")
 load(":darwin_libs.bzl", "DARWIN_PACKAGES", "mopm_darwin_libs")
 load(":exec_tools.bzl", "exec_tool_cases")
 load(":mopm_artifacts.bzl", "merge_tree_cases", "mopm_artifacts", "mopm_release_artifacts", "native_ids_json", "release_packages_json")
-load(":npm_packages.bzl", "npm_packages")
+load(":npm_packages.bzl", "npm_names_json", "npm_packages", "npm_packages_macos")
 load(":plan_expectation.bzl", "mopm_plan_expectation", "plan_expectation_cases")
 load(":release_set.bzl", "release_set")
 load(":unpublished.bzl", "src_library_paths")
@@ -393,30 +393,59 @@ mopm_release_artifacts(
 
 # ---- The npm packages (docs/design/typescript_package.md, section 4) --------------------------------
 
+_NPM_MAIN = "@komira-ai/komira"
+
+_NPM_LINUX = {"@komira-ai/komira-linux-x64-gnu": "//node:package_linux_x64"}
+
+_NPM_MACOS_ARM64 = "@komira-ai/komira-darwin-arm64"
+
 # The npm release set (npm_packages.bzl): the tarballs of //node:package and //node:package_linux_x64
 # and npm_set.json, the record of each package's name, version, file, SHA-256 and sha512 integrity, in the
 # order .github/workflows/npm.yml publishes them (the platform package, then the main package, which names
-# it). npm.yml's build job builds it stamped (0.1.<N>, the wheel's version); the pull request builds it
-# unstamped (0.0.0), which checks everything but the stamp. Not a member of :release_set, whose members
-# are conda packages only.
+# it and no other). npm.yml's build job builds it stamped (0.1.<N>, the wheel's version), and publishes it
+# when the macOS package's install test did not pass; the pull request builds it unstamped (0.0.0), which
+# checks everything but the stamp. Not a member of :release_set, whose members are conda packages only.
 npm_packages(
     name = "npm_packages",
-    main = "@komira-ai/komira",
-    packages = {
-        "@komira-ai/komira": "//node:package",
-        "@komira-ai/komira-linux-x64-gnu": "//node:package_linux_x64",
-    },
+    main = _NPM_MAIN,
+    packages = {_NPM_MAIN: "//node:package"} | _NPM_LINUX,
     visibility = ["PUBLIC"],
 )
 
-# release/npm_names.txt is the set's names, so a package added to or dropped from :npm_packages changes
-# the list in the same change, and the owner knows which names to create on npm with their trusted
-# publisher (npm_names_test.zig says what each case catches).
+# The same set with the macOS arm64 package, //node:package_macos_arm64 (configured for darwin-arm64 by the
+# rule's transition, as npm.yml's macOS job configures its install test), and the main package that names
+# both platform packages, //node:package_with_macos_arm64. npm.yml's macOS job builds it stamped after
+# //node:install_test_macos_arm64 passed, and the publish takes it then and :npm_packages otherwise, so the
+# published main package names the macOS package only after its install test passed on a farm Mac. Built
+# only with the macOS execution platform registered: compatible only under `-c komira_release.mac_tree=true`
+# (:mac_tree above), which that job passes and darwin_analysis.buckconfig too, so //ci:pr leaves it out
+# (EXCLUDED of tools/build/ci/rules.bzl) and pr.yml's last step configures and analyses it, running no action.
+npm_packages_macos(
+    name = "npm_packages_macos_arm64",
+    main = _NPM_MAIN,
+    packages = {_NPM_MAIN: "//node:package_with_macos_arm64"} | _NPM_LINUX,
+    macos_arm64_name = _NPM_MACOS_ARM64,
+    macos_arm64 = "//node:package_macos_arm64",
+    target_compatible_with = select({":mac_tree": [], "DEFAULT": [":mac_tree_off"]}),  # komira-limit:release-mac-tree
+    visibility = ["PUBLIC"],
+)
+
+# The names of :npm_packages_macos_arm64, from the same list, written at analysis: the set itself is built
+# on the farm's macOS workers alone, and :npm_names_cases holds release/npm_names.txt to its names too.
+npm_names_json(
+    name = "npm_macos_arm64_names",
+    names = sorted([_NPM_MAIN, _NPM_MACOS_ARM64] + _NPM_LINUX.keys()),
+)
+
+# release/npm_names.txt is the sets' names, so a package added to or dropped from :npm_packages or
+# :npm_packages_macos_arm64 changes the list in the same change, and the owner knows which names to create
+# on npm with their trusted publisher (npm_names_test.zig says what each case catches).
 zig_test(
     name = "npm_names_cases",
     exec_compatible_with = LINUX_X86_64,
     src = "npm_names_test.zig",
     data = {
+        "npm_macos_arm64_names.json": ":npm_macos_arm64_names",
         "npm_names.txt": "npm_names.txt",
         "npm_set.json": ":npm_packages[npm_set.json]",
     },

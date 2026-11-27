@@ -5,9 +5,11 @@
 //! manifest, names another package or licence, has no repository or another
 //! repository.url, names another platform or one for a package with none,
 //! has no usable `files` list, has an install script, holds a number that is
-//! not an integer, or is not a JSON object; the package.json read back
-//! refused for another version, an optional dependency at another version,
-//! and `private` where the stamp says otherwise; which paths npm packs for a
+//! not an integer, or is not a JSON object; the optional dependencies kept
+//! exactly the rule's, and refused when the rule names one twice or one the
+//! source does not list; the package.json read back refused for another
+//! version, an optional dependency at another version, one the rule does not
+//! name or one it names missing, and `private` where the stamp says otherwise; which paths npm packs for a
 //! `files` list; and the text written for strings, empty and nested values.
 
 const std = @import("std");
@@ -17,7 +19,16 @@ const fixture = @import("testing.zig");
 const t = std.testing;
 const Alloc = std.mem.Allocator;
 
-const main_want = manifest.Want{ .name = "@komira-ai/komira", .version = fixture.version, .stamped = true, .license = "Apache-2.0" };
+const main_want = manifest.Want{ .name = "@komira-ai/komira", .version = fixture.version, .stamped = true, .license = "Apache-2.0", .optional = &.{"@komira-ai/komira-linux-x64-gnu"} };
+
+const darwin_pkg = "@komira-ai/komira-darwin-arm64";
+const linux_pkg = "@komira-ai/komira-linux-x64-gnu";
+
+/// The main fixture's source manifest listing the darwin-arm64 package before the linux-x64 one, as
+/// node/package.json lists every platform package.
+fn twoPlatforms(a: Alloc) ![]const u8 {
+    return edited(a, "\"optionalDependencies\": {\n", "\"optionalDependencies\": {\n    \"@komira-ai/komira-darwin-arm64\": \"0.0.0\",\n");
+}
 
 fn refusal(a: Alloc, source: []const u8, want: manifest.Want) ![]const u8 {
     var d = diag.Diag{};
@@ -66,6 +77,53 @@ test "the source is the development manifest: version 0.0.0, private, optional d
     try t.expectEqualStrings(not_private, try refusal(a, try edited(a, "\"private\": true", "\"private\": false"), main_want));
     try t.expectEqualStrings("manifest: the source manifest's optional dependency @komira-ai/komira-linux-x64-gnu is not at 0.0.0; the rule stamps it with the package's version", try refusal(a, try edited(a, "-gnu\": \"0.0.0\"", "-gnu\": \"^0.1.0\""), main_want));
     try t.expectEqualStrings("manifest: the manifest's `optionalDependencies` is not an object", try refusal(a, try edited(a, "\"optionalDependencies\": {\n    \"@komira-ai/komira-linux-x64-gnu\": \"0.0.0\"\n  }", "\"optionalDependencies\": []"), main_want));
+}
+
+test "optional: the package keeps exactly the rule's optional dependencies, in the source's order, and drops the key when it keeps none" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    const source = try twoPlatforms(a);
+    // Both kept, named in the other order: the source's order stays.
+    var both = main_want;
+    both.optional = &.{ linux_pkg, darwin_pkg };
+    const s = try manifest.stamp(a, &d, source, both);
+    const want_both = try std.mem.replaceOwned(u8, a, fixture.main_stamped, "\"optionalDependencies\": {\n", "\"optionalDependencies\": {\n    \"@komira-ai/komira-darwin-arm64\": \"0.1.57\",\n");
+    try t.expectEqualStrings(want_both, s.bytes);
+    _ = try manifest.checkWritten(a, &d, s.bytes, both);
+    // The linux-x64 package alone: the darwin-arm64 one is dropped, so a main package published without it
+    // names no package npm cannot find.
+    const one = try manifest.stamp(a, &d, source, main_want);
+    try t.expectEqualStrings(fixture.main_stamped, one.bytes);
+    _ = try manifest.checkWritten(a, &d, one.bytes, main_want);
+    // None kept: the key goes, and every other key stays in place.
+    var none = main_want;
+    none.optional = &.{};
+    const zero = try manifest.stamp(a, &d, source, none);
+    const want_zero = try std.mem.replaceOwned(u8, a, fixture.main_stamped, ",\n  \"optionalDependencies\": {\n    \"@komira-ai/komira-linux-x64-gnu\": \"0.1.57\"\n  }\n", "\n");
+    try t.expectEqualStrings(want_zero, zero.bytes);
+    _ = try manifest.checkWritten(a, &d, zero.bytes, none);
+    // Unstamped, the kept ones stay at 0.0.0 and the package private.
+    var dev = both;
+    dev.version = "0.0.0";
+    dev.stamped = false;
+    try t.expectEqualStrings(source, (try manifest.stamp(a, &d, source, dev)).bytes);
+}
+
+test "optional: the rule naming an optional dependency twice, or one the source does not list, is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var twice = main_want;
+    twice.optional = &.{ linux_pkg, darwin_pkg, linux_pkg };
+    try t.expectEqualStrings("optional: the rule names the optional dependency @komira-ai/komira-linux-x64-gnu twice", try refusal(a, try twoPlatforms(a), twice));
+    var unlisted = main_want;
+    unlisted.optional = &.{ linux_pkg, darwin_pkg };
+    try t.expectEqualStrings("optional: the rule names the optional dependency @komira-ai/komira-darwin-arm64, which the source manifest does not list", try refusal(a, fixture.main_manifest, unlisted));
+    // A source with no optionalDependencies lists none.
+    const bare = try edited(a, ",\n  \"optionalDependencies\": {\n    \"@komira-ai/komira-linux-x64-gnu\": \"0.0.0\"\n  }\n", "\n");
+    try t.expectEqualStrings("optional: the rule names the optional dependency @komira-ai/komira-linux-x64-gnu, which the source manifest does not list", try refusal(a, bare, main_want));
 }
 
 test "name and licence are the rule's" {
@@ -176,6 +234,14 @@ test "the package.json read back: another version, an optional dependency at ano
     const dep = try std.mem.replaceOwned(u8, a, fixture.main_stamped, "-gnu\": \"0.1.57\"", "-gnu\": \"0.1.56\"");
     try t.expectError(error.Refused, manifest.checkWritten(a, &d, dep, main_want));
     try t.expectEqualStrings("version: the package.json's optional dependency @komira-ai/komira-linux-x64-gnu is not at the package's version 0.1.57", d.msg);
+    // An optional dependency the rule does not name, and one it names that is missing.
+    const extra = try std.mem.replaceOwned(u8, a, fixture.main_stamped, "\"optionalDependencies\": {\n", "\"optionalDependencies\": {\n    \"@komira-ai/komira-darwin-arm64\": \"0.1.57\",\n");
+    try t.expectError(error.Refused, manifest.checkWritten(a, &d, extra, main_want));
+    try t.expectEqualStrings("optional: the package.json names the optional dependency @komira-ai/komira-darwin-arm64, which the rule does not", d.msg);
+    var with_darwin = main_want;
+    with_darwin.optional = &.{ darwin_pkg, linux_pkg };
+    try t.expectError(error.Refused, manifest.checkWritten(a, &d, fixture.main_stamped, with_darwin));
+    try t.expectEqualStrings("optional: the package.json does not name the optional dependency @komira-ai/komira-darwin-arm64, which the rule does", d.msg);
     const kept = try std.mem.replaceOwned(u8, a, fixture.main_stamped, "\"version\": \"0.1.57\",", "\"version\": \"0.1.57\",\n  \"private\": false,");
     try t.expectError(error.Refused, manifest.checkWritten(a, &d, kept, main_want));
     try t.expectEqualStrings("version: the stamped package.json keeps `private`, so npm would not publish it", d.msg);
