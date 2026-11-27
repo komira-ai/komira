@@ -1,0 +1,5 @@
+{'city': 'Lima', 'trips': 2, 'total': 20.0}
+{'city': 'Oslo', 'trips': 2, 'total': 48.0}
+{'city': 'Pune', 'trips': 1, 'total': 4.0}
+[{'trips': 3}]
+BindError ICEBERG_SNAPSHOT_NOT_FOUND

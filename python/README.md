@@ -347,7 +347,9 @@ by `import komira`.
 - The DataFrame verbs not built yet, for both skins: what each capability
   has and lacks is recorded in
   [docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md).
-- Iceberg tables: reading one, and writing to one by its name in a catalog.
+- Iceberg tables of a catalog: reading one by its name (`catalog.namespace.table`)
+  and writing to one (komira-ai/komira#2481). A local table is read with
+  `iceberg_scan` in SQL.
 - Of object stores: `gs://` and `https://` locations, CSV or JSON objects,
   a URL written in the SQL text (`FROM 's3://...'`), the DataFrame readers
   on a URL, `COPY ... TO` a URL, the process's own identity (`AMBIENT`), and

@@ -2,7 +2,9 @@
 
 Test-only. `iceberg_scan` through `run_sql`, held to the answers of the pinned
 DuckDB's Iceberg extension over one table written the way Iceberg Java
-writes one. Nothing depends on this package.
+writes one. No library depends on this package; the Python test
+`//python/tests:iceberg_scan_test` stages its table, `oracle/cases.sql` and
+`:answers` and runs the same cases through `Session.sql`.
 
 ```sql
 SELECT region, count(*) AS n
