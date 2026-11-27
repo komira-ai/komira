@@ -4,8 +4,9 @@ door (docs/design/credentials_and_writes.md, section 10).
 `write` wraps a plan in a `Write` root, encodes it and runs it on a session;
 `destination`, `text_codec` and `parquet_codec` check a terminal's arguments
 and name the path and the codec the engine is given, before the library is
-called. The frame's terminals (komira/_frame.py) use them with pandas' own
-parameter names.
+called. The terminals of the pandas-shaped frame (komira/_frame.py) use them
+with pandas' own parameter names, and `LazyFrame.sink_parquet`
+(komira/pl/_frame.py) with polars'.
 
 The engine writes the file all or nothing, and refuses a destination that is a
 URL (`STORAGE_URL_REFUSED`) or a codec the format does not take by name.
@@ -119,16 +120,20 @@ def text_codec(compression: object, dest: str, verb: str) -> str:
     raise TypeError(f"{verb} compression must be a str or None, not {type(compression).__name__}")
 
 
-def parquet_codec(compression: object) -> str:
-    """The codec of a Parquet file for `to_parquet`'s `compression`: "snappy",
-    "gzip", "zstd" and "lz4" are themselves, None is none; any other is refused."""
-    if compression is None:
+def parquet_codec(compression: object, verb: str = "to_parquet", off: str | None = None) -> str:
+    """The codec of a Parquet file for the `compression` of `verb`: "snappy",
+    "gzip", "zstd" and "lz4" are themselves, and `off`, the verb's word for no
+    compression (None for pandas' `to_parquet`, "uncompressed" for polars'
+    `sink_parquet`), is none; any other str is refused by name, and a value
+    that is neither a str nor `off` is a TypeError."""
+    if compression is off or (isinstance(off, str) and compression == off):
         return "uncompressed"
     if isinstance(compression, str):
         if compression in _PARQUET_NAMES:
             return compression
         raise UnsupportedOperation(
-            f"to_parquet(compression={compression!r}) is not a codec komira writes: "
-            "use 'snappy', 'gzip', 'zstd', 'lz4' or None"
+            f"{verb}(compression={compression!r}) is not a codec komira writes: "
+            f"use 'snappy', 'gzip', 'zstd', 'lz4' or {off!r}"
         )
-    raise TypeError(f"to_parquet compression must be a str or None, not {type(compression).__name__}")
+    allowed = "a str or None" if off is None else "a str"
+    raise TypeError(f"{verb} compression must be {allowed}, not {type(compression).__name__}")

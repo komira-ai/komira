@@ -231,7 +231,7 @@
     "question": "How do I write a table to Parquet?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2368"
+      "komira-ai/komira#2346"
     ]
   },
   {

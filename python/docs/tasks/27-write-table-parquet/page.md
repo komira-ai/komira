@@ -1,12 +1,13 @@
 # How do I write a table to Parquet?
 
-Run `COPY (SELECT ...) TO 'file.parquet' (FORMAT parquet)` through `Session.sql`; it writes one Parquet file and returns the row count. The pandas-shaped frame writes its own rows with `df.to_parquet(path)`.
+Run `COPY (SELECT ...) TO 'file.parquet' (FORMAT parquet)` through `Session.sql`; it writes one Parquet file and returns the row count. The pandas-shaped frame writes its own rows with `df.to_parquet(path)`, and a `komira.pl` frame with `lf.sink_parquet(path)`.
 
 <!-- include example.py -->
 ```python
 from pathlib import Path
 
 import komira
+import komira.pl as pl
 
 Path("orders.csv").write_text(
     "order_id,customer,amount\n"
@@ -32,6 +33,10 @@ with komira.Session() as s:
 # The pandas-shaped frame reads the new file too.
 df = komira.read_parquet("big_orders.parquet")
 print(df.groupby("customer").agg(total=("amount", "sum")).sort_values("customer").materialize().to_arrow().to_pylist())
+
+# A komira.pl frame writes its own rows: sink_parquet runs the plan and writes one file.
+pl.scan_csv("orders.csv").filter(pl.col("amount") >= 75).sort("order_id").sink_parquet("big_orders_pl.parquet")
+print(pl.scan_parquet("big_orders_pl.parquet").sort("order_id").collect().to_arrow().to_pylist())
 ```
 
 Output:
@@ -41,6 +46,7 @@ Output:
 rows written: 3
 [{'order_id': 1, 'customer': 'Ana', 'amount': 120}, {'order_id': 3, 'customer': 'Ana', 'amount': 75}, {'order_id': 4, 'customer': 'Cy', 'amount': 200}]
 [{'customer': 'Ana', 'total': 195}, {'customer': 'Cy', 'total': 200}]
+[{'order_id': 1, 'customer': 'Ana', 'amount': 120}, {'order_id': 3, 'customer': 'Ana', 'amount': 75}, {'order_id': 4, 'customer': 'Cy', 'amount': 200}]
 ```
 
 ## Notes
@@ -48,7 +54,7 @@ rows written: 3
 - `COPY` writes the rows of any query, so it also writes a whole table (`COPY (SELECT * FROM orders) TO ...`). Put an `ORDER BY` in the query when the file's row order matters.
 - The write returns a one-row result holding the number of rows written.
 - `df.to_parquet(path, compression="snappy")` runs the frame once and writes its rows to one Parquet file, the bytes `COPY` writes for the same rows, and returns `None`; `compression` is snappy (the default), gzip, zstd, lz4 or None.
-- `komira.pl` has no writer of its own yet: `lf.sink_parquet(path)` raises `AttributeError` (komira-ai/komira#2368). `probe_lazy_sink_parquet.py` beside this page tries it and must fail with the line in its `.error.txt` file. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
+- `lf.sink_parquet(path, compression="zstd")` of `komira.pl` runs the plan once and writes its rows to one Parquet file, in the frame's order when it is sorted, and returns `None`, as polars' `sink_parquet` does; `compression` is zstd (polars' default), snappy, gzip, lz4 or uncompressed. Every other option of polars' `sink_parquet` (`row_group_size`, `statistics`, `mkdir`, `lazy`, and the rest) raises `UnsupportedOperation` naming it.
 - One file per `COPY`: writing a directory of files partitioned by a column is not supported yet: komira-ai/komira#2346.
 
 ## Related

@@ -899,8 +899,8 @@ komira_last_error_step	Int32	Handle	1.7
 
 `komira_sql_stream` and `komira_plan_stream` are built. The pandas-shaped write terminals `to_parquet`,
 `to_csv` and `to_json` are **EXISTS**: each sends the plan through `komira_plan_stream` with
-`write_target` set and returns `None`. The polars-shaped `sink_parquet`, `sink_csv` and `sink_ndjson`
-of `komira.pl` are not built yet. `write_table` and the catalog statements are **PROPOSED**.
+`write_target` set and returns `None`, and so is the polars-shaped `sink_parquet` of `komira.pl`. Its
+`sink_csv` and `sink_ndjson` are not built yet. `write_table` and the catalog statements are **PROPOSED**.
 
 **One spelling per door.** The SQL door writes with `COPY` and, into a bound catalog, with
 `CREATE TABLE ... AS` and `INSERT`. The DataFrame door writes with the write terminals and, into a
@@ -1070,7 +1070,7 @@ var result = session.sql("SELECT * FROM sales_catalog.sales.orders LIMIT 10")
 | bindings | `komira_add_sql_binding`, `Session.add_sql_binding`, `sql` with call bindings and the unnamed source, `komira.files` for local files and frames, `BIND_NAME_UNBOUND`. `register_parquet` becomes `add_sql_binding` underneath, which fixes its re-registration defect |
 | object stores | credentials and their ABI calls; `WireSourceAccess` on the wire; the S3 read arm with `ambient`; `https://` reads; the S3 write arm; GCS and Azure reads |
 | catalogs | `komira.iceberg` and the Iceberg statements ([the Iceberg design](#reconciling-with-the-iceberg-design)) |
-| DataFrame surface | built: the pandas-shaped write terminals (`to_parquet`, `to_csv`, `to_json`) with `compression=`, through `komira_plan_stream`, which no longer refuses a write target. To come: the polars-shaped `sink_*` with `komira.pl`, `write_table`, and readers taking `komira.files` sources |
+| DataFrame surface | built: the pandas-shaped write terminals (`to_parquet`, `to_csv`, `to_json`) and the polars-shaped `sink_parquet` of `komira.pl`, with `compression=`, through `komira_plan_stream`, which no longer refuses a write target. To come: the polars-shaped `sink_csv` and `sink_ndjson`, `write_table`, and readers taking `komira.files` sources |
 | job manager | the resolver interface of decision 5, with its header check, kind check and endpoint allow-list; `DeclaredNeeds.credentials`; `PLAN_URL_QUERY_REFUSED` |
 
 Every step is additive:

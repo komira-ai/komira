@@ -164,8 +164,8 @@ The package's [README](../python/README.md), which is also its PyPI description,
   engine does with each capability's plan. Among them: the ORC, Avro and Arrow IPC readers, the
   readers on an object-store URL (`s3://`, `gs://`, `az://`; SQL reads `s3://` and `az://` Parquet
   through `Session.add_sql_binding`), frames made from Arrow data, and the polars-shaped frame's
-  writers (`sink_parquet`, `sink_csv`, `sink_ndjson`); the pandas-shaped frame writes a local file
-  with `to_parquet`, `to_csv` and `to_json`.
+  writers `sink_csv` and `sink_ndjson`; the pandas-shaped frame writes a local file with `to_parquet`,
+  `to_csv` and `to_json`, and the polars-shaped one a local Parquet file with `sink_parquet`.
 - **Python UDFs**: no verb takes a Python function yet, and `sql` runs none.
 - **Other platforms**: Linux on arm64, macOS on Intel, Windows, and Linux with musl (Alpine) have no
   wheel.
