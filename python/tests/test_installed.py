@@ -47,7 +47,8 @@ Then, in order:
   and an aggregate over `--readings` (`id` 1 to 5, `value` 10.5 to 50.5) is
   its one row of count, sum, min and max, read with the installed pyarrow;
 - a Parquet file the installed pyarrow wrote with zstd, and one it wrote
-  with lz4 (pyarrow's LZ4_RAW), each 1000 rows, are registered and read back
+  with lz4 (Parquet's LZ4_RAW, which pyarrow's metadata names LZ4), each
+  1000 rows, every column chunk of each in that codec, are registered and read back
   equal to what pyarrow wrote, and `COPY ... TO ... (FORMAT parquet,
   COMPRESSION zstd)` writes a file pyarrow reads back equal to its query,
   with every column chunk ZSTD: the codecs are linked into libkomira, so
@@ -253,11 +254,17 @@ def check_compressed_parquet(s):
 
     rows = [{"id": i, "word": "w{}".format(i % 7)} for i in range(1000)]
     table = pa.Table.from_pylist(rows, schema=pa.schema([("id", pa.int64()), ("word", pa.string())]))
-    for codec, stored in (("zstd", "ZSTD"), ("lz4", "LZ4_RAW")):
+    # The names pyarrow's metadata gives each codec of the footer. Parquet's
+    # LZ4_RAW (codec 7, what compression="lz4" writes) is reported by Arrow's
+    # name for it, LZ4, by the pyarrow releases the wheel tests install; LZ4_RAW
+    # is accepted too. Anything else (UNCOMPRESSED, SNAPPY, LZ4_HADOOP) means
+    # the file would not exercise the codec, and fails.
+    for codec, stored in (("zstd", ("ZSTD",)), ("lz4", ("LZ4", "LZ4_RAW"))):
         path = os.path.join(os.getcwd(), codec + ".parquet")
         pq.write_table(table, path, compression=codec)
-        written = pq.ParquetFile(path).metadata.row_group(0).column(0).compression
-        assert written == stored, "pyarrow wrote {} for compression={}, not {}".format(written, codec, stored)
+        meta = pq.ParquetFile(path).metadata
+        written = sorted({meta.row_group(g).column(c).compression for g in range(meta.num_row_groups) for c in range(meta.num_columns)})
+        assert len(written) == 1 and written[0] in stored, "pyarrow wrote column chunks {} for compression={}, not one of {}".format(written, codec, list(stored))
         s.register_parquet(codec + "_rows", path)
         got = s.sql("SELECT id, word FROM {}_rows ORDER BY id".format(codec)).to_arrow().to_pylist()
         assert got == rows, "the {} Parquet file read back {} rows, the first differing at {}".format(
