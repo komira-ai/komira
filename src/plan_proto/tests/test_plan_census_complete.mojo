@@ -4,8 +4,7 @@
 #
 # THE CENSUS IS COMPLETE: every field and every enum value `komira.plan.v1`
 # declares (plan.proto, plan_vocabulary.proto, optimized_plan.proto,
-# bound_source.proto) has a
-# row in one of the seven census ledgers, and every row names one that
+# bound_source.proto) has a row in one of the seven census ledgers, and every row names one that
 # exists. A field added to any of them without a census row fails here, so a
 # number no census pins cannot ship.
 #
@@ -51,14 +50,11 @@ from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
 from proto_codec import FieldKey, ProtoEnum, Serializable, WireDecoder
-from plan_proto.bound_source import (
-    AddressingStyleWire,
-    WireBoundSource,
-    WireFileSource,
-    WireSourceAccess,
-)
+from plan_proto.bound_source import AddressingStyleWire, WireBoundSource
+from plan_proto.bound_source import WireFileSource, WireSourceAccess
 from plan_proto.optimized_plan import (
     DeclaredNeeds,
+    DigestTrailer,
     ExchangeEdge,
     OptimizedPlan,
     OptimizedPlanBody,
@@ -161,6 +157,7 @@ from plan_proto.plan_vocabulary import (
     FrameBound,
     FrameUnits,
     JoinAlgo,
+    JoinBuildSide,
     JoinType,
     MathFn1,
     MathFn2,
@@ -541,6 +538,8 @@ def _fields_of(message: String) raises -> _Shape:
         return _vocabulary[PlanAdvice]()
     elif message == "ProducerStamp":
         return _vocabulary[ProducerStamp]()
+    elif message == "DigestTrailer":
+        return _vocabulary[DigestTrailer]()
     elif message == "RuntimeNeed":
         return _vocabulary[RuntimeNeed]()
     elif message == "ScanPin":
@@ -577,6 +576,8 @@ def _values_of(enum: String) raises -> String:
         return JoinType.known_json_names()
     elif enum == "JoinAlgo":
         return JoinAlgo.known_json_names()
+    elif enum == "JoinBuildSide":
+        return JoinBuildSide.known_json_names()
     elif enum == "AsofDirection":
         return AsofDirection.known_json_names()
     elif enum == "AsofToleranceKind":

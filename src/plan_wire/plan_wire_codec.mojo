@@ -346,14 +346,24 @@
 #       `TableStats` is pure data and CAN be encoded; it simply is not yet.
 #       Refused rather than dropped because stats steer join-order and a
 #       silently statless decoded plan is a silent plan change.
-#   `JoinData.build_side` when recorded, `JoinData.adaptive_allowed` when set,
-#   `AggregateData.mode` when recorded, `ScanData.boundedness` when UNBOUNDED
+#   `JoinData.adaptive_allowed` when set, `AggregateData.mode` when recorded,
+#   `ScanData.boundedness` when UNBOUNDED, and, in a RAW plan,
+#   `JoinData.build_side` when recorded
 #       The optimizer's recorded decisions (docs/design/optimized_plan.md
-#       §5.2). `plan.proto` has no field for any of them yet, so encoding one
-#       would decode as the default: a join that builds on the right, a single
-#       aggregate, a bounded scan. Refused, by
-#       `PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION`. A node holding the default
-#       (UNSET, False, UNSET, BOUNDED) encodes as before.
+#       §5.2). `plan.proto` has no field for the first three, so encoding one
+#       would decode as the default: a single aggregate, a bounded scan, a join
+#       that may not switch. A RAW plan has none for the build side either: it
+#       is the OPTIMIZED context's field (`WireJoinNode.build_side`, below).
+#       Refused, by `PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION`. A node holding
+#       the default (False, UNSET, BOUNDED, UNSET) encodes as before. On
+#       decode, RAW refuses a set `WireJoinNode.build_side` by the same token.
+#   WHAT THE OPTIMIZED CONTEXT CHANGES (plan_wire_optimized.mojo, which holds
+#   each rule once)
+#       `build_side` is required and written (LEFT / RIGHT; UNSET is
+#       `OPTIMIZED_JOIN_BUILD_SIDE_MISSING`); `estimated_groups` on an
+#       aggregate and a distinct is written and restored (RAW refuses it on
+#       decode); a scan's `row_count` and `table_stats` are refused, by
+#       `OPTIMIZED_FIELD_UNSUPPORTED` (RAW admits `row_count`).
 #
 # --- THE DECODE SIDE, WHICH DOES NOT CHOOSE ITS INPUT ------------------------
 #   Every narrowing from a wire type to an engine type is CHECKED and RAISES BY
@@ -453,6 +463,7 @@ from plan_proto.plan_vocabulary import (
     FrameBound,
     FrameUnits,
     JoinAlgo,
+    JoinBuildSide,
     JoinType,
     MathFn1,
     MathFn2,
@@ -661,6 +672,13 @@ from .plan_wire_values import (
     PLAN_WIRE_INCONSISTENT_COUNT,
     PLAN_WIRE_NEGATIVE_COUNT,
     PLAN_WIRE_UNCHECKED_VALUE_SITE,
+)
+from .plan_wire_optimized import (
+    optimized_estimated_groups_from_wire,
+    optimized_join_build_side_from_wire,
+    optimized_join_build_side_to_wire,
+    optimized_scan_row_count_refusal,
+    optimized_scan_statistics_refusal,
 )
 from .plan_wire_udf import _check_udf_ref, _udf_ref_from_wire, _udf_ref_to_wire
 from .plan_wire_udf_check import (
@@ -1474,7 +1492,7 @@ def _tolerance_from_wire(
 # =============================================================================
 
 
-def _expr_to_wire(e: Expr) raises -> WireExpr:
+def _expr_to_wire(e: Expr, optimized: Bool) raises -> WireExpr:
     # ⚠ THE ENGINE TAG PICKS THE ARM AND IS NOT ITSELF WRITTEN. `WireExpr.tag`
     # was a second copy of "which arm is set" and is retired (see the block
     # above `message WireExpr` in plan.proto). `arm` below IS the discriminator.
@@ -1528,9 +1546,9 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
     elif tag == EXPR_BINARY_OP:
         arm = 4
         var bl = List[WireExpr]()
-        bl.append(_expr_to_wire(e.binary_left()))
+        bl.append(_expr_to_wire(e.binary_left(), optimized))
         var br = List[WireExpr]()
-        br.append(_expr_to_wire(e.binary_right()))
+        br.append(_expr_to_wire(e.binary_right(), optimized))
         binary_op.append(
             WireBinaryOp(
                 BinaryOp(Int(binary_op_to_wire(e.binary_op()))), bl^, br^
@@ -1539,19 +1557,19 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
     elif tag == EXPR_UNARY_OP:
         arm = 5
         var uk = List[WireExpr]()
-        uk.append(_expr_to_wire(e.unary_child()))
+        uk.append(_expr_to_wire(e.unary_child(), optimized))
         unary_op.append(
             WireUnaryOp(UnaryOp(Int(unary_op_to_wire(e.unary_op()))), uk^)
         )
     elif tag == EXPR_ALIAS:
         arm = 6
         var ak = List[WireExpr]()
-        ak.append(_expr_to_wire(e.alias_child()))
+        ak.append(_expr_to_wire(e.alias_child(), optimized))
         alias_.append(WireAlias(ak^, e.alias_name()))
     elif tag == EXPR_IN_LIST:
         arm = 7
         var lk = List[WireExpr]()
-        lk.append(_expr_to_wire(e.in_list_child()))
+        lk.append(_expr_to_wire(e.in_list_child(), optimized))
         var vals = List[WireScalar]()
         for i in range(e.in_list_len()):
             vals.append(_scalar_to_wire(e.in_list_values_ref()[i]))
@@ -1565,7 +1583,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # `target_arrow` from `target` here instead of carrying it is the
         # `cast_preserving_arrow` bug, re-committed on the wire.
         var ck = List[WireExpr]()
-        ck.append(_expr_to_wire(e.cast_child()))
+        ck.append(_expr_to_wire(e.cast_child(), optimized))
         cast.append(
             WireCast(
                 ck^,
@@ -1592,7 +1610,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # `outer_refs=#<count>`, not the names. The IR-equality leg is what
         # compares either.
         var cs_inner = List[WirePlan]()
-        cs_inner.append(_plan_to_wire(corr_subq_inner_plan_ref(e)))
+        cs_inner.append(_plan_to_wire(corr_subq_inner_plan_ref(e), optimized))
         corr_subq.append(
             WireCorrelatedSubquery(
                 cs_inner^,
@@ -1622,12 +1640,12 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         var cases = List[WireWhenCase]()
         for i in range(e.when_num_cases()):
             var cc = List[WireExpr]()
-            cc.append(_expr_to_wire(e.when_case_condition_ref(i)))
+            cc.append(_expr_to_wire(e.when_case_condition_ref(i), optimized))
             var cr = List[WireExpr]()
-            cr.append(_expr_to_wire(e.when_case_result_ref(i)))
+            cr.append(_expr_to_wire(e.when_case_result_ref(i), optimized))
             cases.append(WireWhenCase(cc^, cr^))
         var dk = List[WireExpr]()
-        dk.append(_expr_to_wire(e.when_default_ref()))
+        dk.append(_expr_to_wire(e.when_default_ref(), optimized))
         when_.append(WireWhen(cases^, dk^))
     elif tag == EXPR_AGG_FN:
         # Arm ordinal, not field number — `agg_fn` is field 12 and arm 11.
@@ -1641,7 +1659,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # down, and AGG_SUM is engine value 0, which is exactly the value the
         # +1 wire offset exists to keep distinguishable from "absent".
         var gk = List[WireExpr]()
-        gk.append(_expr_to_wire(e.agg_fn_child_ref()))
+        gk.append(_expr_to_wire(e.agg_fn_child_ref(), optimized))
         agg_fn.append(
             WireAggFn(
                 AggFn(Int(agg_fn_to_wire(e.agg_fn_op()))), gk^
@@ -1657,7 +1675,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # take a raw `UInt8` — is REFUSED at encode rather than written as a
         # number the reader would have to invent a meaning for.
         var ek = List[WireExpr]()
-        ek.append(_expr_to_wire(e.extract_child_ref()))
+        ek.append(_expr_to_wire(e.extract_child_ref(), optimized))
         extract.append(
             WireExtract(
                 ExtractField(Int(extract_field_to_wire(e.extract_unit()))),
@@ -1668,7 +1686,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # Arm ordinal, not field number — `math_fn` is field 14 and arm 13.
         arm = 13
         var mk = List[WireExpr]()
-        mk.append(_expr_to_wire(e.math_fn_child_ref()))
+        mk.append(_expr_to_wire(e.math_fn_child_ref(), optimized))
         math_fn.append(
             WireMathFn(MathFn1(Int(math_fn1_to_wire(e.math_fn_op()))), mk^)
         )
@@ -1682,9 +1700,9 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # therefore a silent wrong-answer bug, which is why the corpus never
         # gives this arm two equal operands.
         var lk = List[WireExpr]()
-        lk.append(_expr_to_wire(e.math_fn2_left_ref()))
+        lk.append(_expr_to_wire(e.math_fn2_left_ref(), optimized))
         var rk = List[WireExpr]()
-        rk.append(_expr_to_wire(e.math_fn2_right_ref()))
+        rk.append(_expr_to_wire(e.math_fn2_right_ref(), optimized))
         math_fn2.append(
             WireMathFn2(
                 MathFn2(Int(math_fn2_to_wire(e.math_fn2_op()))), lk^, rk^
@@ -1700,7 +1718,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # would turn every open-ended substring into a zero-length one — a plan
         # that quietly returns empty strings, not one that fails.
         var sk = List[WireExpr]()
-        sk.append(_expr_to_wire(e.substring_child_ref()))
+        sk.append(_expr_to_wire(e.substring_child_ref(), optimized))
         substring.append(
             WireSubstring(
                 sk^, Int64(e.substring_start()), Int64(e.substring_length())
@@ -1714,7 +1732,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # written at wire 0 would be indistinguishable from a field nobody
         # wrote.
         var pk = List[WireExpr]()
-        pk.append(_expr_to_wire(e.string_op_child_ref()))
+        pk.append(_expr_to_wire(e.string_op_child_ref(), optimized))
         string_op.append(
             WireStringOp(
                 StringOp(Int(string_op_to_wire(e.string_op_type()))),
@@ -1738,7 +1756,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # `RegexProgram.group_index_for_name`, because the pattern is not
         # compiled until then.
         var rk = List[WireExpr]()
-        rk.append(_expr_to_wire(e.regexp_child_ref()))
+        rk.append(_expr_to_wire(e.regexp_child_ref(), optimized))
         regexp.append(
             WireRegexp(
                 RegexpOp(Int(regexp_op_to_wire(e.regexp_op()))),
@@ -1760,7 +1778,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # produce a plan that EXECUTES differently, and one that pinned a plan
         # to a schema it has not seen.
         var fk = List[WireExpr]()
-        fk.append(_expr_to_wire(e.struct_field_parent_ref()))
+        fk.append(_expr_to_wire(e.struct_field_parent_ref(), optimized))
         struct_field.append(
             WireStructField(fk^, e.struct_field_name())
         )
@@ -1775,7 +1793,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # diagnoses. Refusing it here would be this codec inventing a rule the
         # engine does not have — the same call the empty-CASE arm makes.
         var ik = List[WireExpr]()
-        ik.append(_expr_to_wire(e.struct_field_idx_parent_ref()))
+        ik.append(_expr_to_wire(e.struct_field_idx_parent_ref(), optimized))
         struct_field_idx.append(
             WireStructFieldIdx(ik^, Int64(e.struct_field_index()))
         )
@@ -1789,9 +1807,9 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # per-row one), so nothing about the shape distinguishes them. The
         # corpus never gives this arm two equal children.
         var mpk = List[WireExpr]()
-        mpk.append(_expr_to_wire(e.map_get_parent_ref()))
+        mpk.append(_expr_to_wire(e.map_get_parent_ref(), optimized))
         var mkk = List[WireExpr]()
-        mkk.append(_expr_to_wire(e.map_get_key_ref()))
+        mkk.append(_expr_to_wire(e.map_get_key_ref(), optimized))
         map_get.append(WireMapGet(mpk^, mkk^))
     elif tag == EXPR_JSON_EXTRACT:
         # Arm ordinal, not field number — field 22, arm 21.
@@ -1809,7 +1827,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # ⚠ THE PATH IS CARRIED AS SEGMENTS. A path joined on `.` cannot
         # represent `["a.b"]` distinctly from `["a", "b"]`.
         var jk = List[WireExpr]()
-        jk.append(_expr_to_wire(e.json_extract_parent_ref()))
+        jk.append(_expr_to_wire(e.json_extract_parent_ref(), optimized))
         json_extract.append(
             WireJsonExtract(
                 jk^,
@@ -1851,7 +1869,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # OUTPUT TYPE, not just the value: dropping it renders a `length` as an
         # `upper`, which is an INT64 column decoded as a Utf8 one.
         var fk = List[WireExpr]()
-        fk.append(_expr_to_wire(e.string_fn_child_ref()))
+        fk.append(_expr_to_wire(e.string_fn_child_ref(), optimized))
         string_fn.append(
             WireStringFn(
                 StringFn(Int(string_fn_to_wire(e.string_fn_op()))), fk^
@@ -1870,7 +1888,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # per-op and, for `concat`, unbounded.
         var sfnn_args = List[WireExpr]()
         for i in range(e.string_fn_n_num_args()):
-            sfnn_args.append(_expr_to_wire(e.string_fn_n_arg_ref(i)))
+            sfnn_args.append(_expr_to_wire(e.string_fn_n_arg_ref(i), optimized))
         string_fn_n.append(
             WireStringFnN(
                 StringFnN(Int(string_fn_n_to_wire(e.string_fn_n_op()))),
@@ -1917,7 +1935,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # offset — the same convention as `WireCast.target_arrow_type_id`, and
         # `_arrow_type_from_wire` is the same membership check on the way back.
         var uck = List[WireExpr]()
-        uck.append(_expr_to_wire(e.udf_call_child_ref()))
+        uck.append(_expr_to_wire(e.udf_call_child_ref(), optimized))
         udf_call.append(
             WireUdfCall(
                 e.udf_call_name(),
@@ -1934,7 +1952,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # (optimized_plan_udfs.md §10.5).
         var ua_args = List[WireExpr]()
         for i in range(e.udf_apply_num_args()):
-            ua_args.append(_expr_to_wire(e.udf_apply_arg_ref(i)))
+            ua_args.append(_expr_to_wire(e.udf_apply_arg_ref(i), optimized))
         udf_apply.append(WireUdfApply(UInt32(e.udf_apply_index()), ua_args^))
     else:
         raise Error(
@@ -2549,19 +2567,19 @@ def _expr_from_wire(w: WireExpr, ctx: _DecodeCtx) raises -> Expr:
 # slot 0 is the easy mistake this shape invites.
 
 
-def _agg_expr_to_wire(a: AggExpr) raises -> WireAggExpr:
+def _agg_expr_to_wire(a: AggExpr, optimized: Bool) raises -> WireAggExpr:
     var c0 = List[WireExpr]()
     var c1 = List[WireExpr]()
     var c2 = List[WireExpr]()
     var c3 = List[WireExpr]()
     if a.child:
-        c0.append(_expr_to_wire(a.child.value()))
+        c0.append(_expr_to_wire(a.child.value(), optimized))
     if a.child1:
-        c1.append(_expr_to_wire(a.child1.value()))
+        c1.append(_expr_to_wire(a.child1.value(), optimized))
     if a.child2:
-        c2.append(_expr_to_wire(a.child2.value()))
+        c2.append(_expr_to_wire(a.child2.value(), optimized))
     if a.child3:
-        c3.append(_expr_to_wire(a.child3.value()))
+        c3.append(_expr_to_wire(a.child3.value(), optimized))
     var has_alias = _present_str(a.alias_name)
     var alias_text = String("")
     if has_alias:
@@ -3093,7 +3111,7 @@ def _partition_expr_from_wire(w: WirePartitionExpr) raises -> PartitionExpr:
     )
 
 
-def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
+def _plan_to_wire(p: LogicalPlan, optimized: Bool) raises -> WirePlan:
     # ⚠ Same as `_expr_to_wire`: the engine tag picks the ARM, and the arm is
     # the only thing written. `WirePlan.tag` is retired — see plan.proto.
     var tag = p.tag
@@ -3123,6 +3141,8 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
     if tag == PLAN_SCAN:
         arm = 1
         ref d = p.scan_data_ref()
+        if optimized:
+            optimized_scan_statistics_refusal(d)
         if d.table_stats:
             raise Error(
                 PLAN_WIRE_UNSUPPORTED_TABLE_STATS + ": ScanData for '"
@@ -3145,7 +3165,7 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         var filt_present = _present_expr(d.filter)
         var filt = List[WireExpr]()
         if filt_present:
-            filt.append(_expr_to_wire(d.filter.value()))
+            filt.append(_expr_to_wire(d.filter.value(), optimized))
         var rc_present = _present_int(d.row_count)
         var rc = Int64(0)
         if rc_present:
@@ -3170,9 +3190,9 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         if d.udf:
             f_udf = Optional(_udf_to_wire(d.udf.value()[], "FilterData"))
         var pred = List[WireExpr]()
-        pred.append(_expr_to_wire(d.predicate))
+        pred.append(_expr_to_wire(d.predicate, optimized))
         var kid = List[WirePlan]()
-        kid.append(_plan_to_wire(d.child[]))
+        kid.append(_plan_to_wire(d.child[], optimized))
         filter.append(WireFilterNode(pred^, kid^, Bool(d.udf), f_udf^))
     elif tag == PLAN_PROJECT:
         arm = 3
@@ -3182,9 +3202,9 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
             pj_udf = Optional(_udf_to_wire(d.udf.value()[], "ProjectData"))
         var exprs = List[WireExpr]()
         for i in range(len(d.exprs)):
-            exprs.append(_expr_to_wire(d.exprs[i]))
+            exprs.append(_expr_to_wire(d.exprs[i], optimized))
         var kid = List[WirePlan]()
-        kid.append(_plan_to_wire(d.child[]))
+        kid.append(_plan_to_wire(d.child[], optimized))
         project.append(
             WireProjectNode(
                 exprs^, kid^, d.is_cse_introduced, Bool(d.udf), pj_udf^
@@ -3204,12 +3224,12 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
             ag_udf = Optional(_udf_to_wire(d.udf.value()[], "AggregateData"))
         var gb = List[WireExpr]()
         for i in range(len(d.group_by)):
-            gb.append(_expr_to_wire(d.group_by[i]))
+            gb.append(_expr_to_wire(d.group_by[i], optimized))
         var ax = List[WireAggExpr]()
         for i in range(len(d.agg_exprs)):
-            ax.append(_agg_expr_to_wire(d.agg_exprs[i]))
+            ax.append(_agg_expr_to_wire(d.agg_exprs[i], optimized))
         var kid = List[WirePlan]()
-        kid.append(_plan_to_wire(d.child[]))
+        kid.append(_plan_to_wire(d.child[], optimized))
         var eg_present = Bool(d.estimated_groups.__bool__())
         var eg = Int64(0)
         if eg_present:
@@ -3222,7 +3242,12 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
     elif tag == PLAN_JOIN:
         arm = 5
         ref d = p.join_data_ref()
-        if d.build_side != JOIN_BUILD_SIDE_UNSET:
+        var build_side = JoinBuildSide(0)
+        if optimized:
+            build_side = JoinBuildSide(
+                Int(optimized_join_build_side_to_wire(d.build_side))
+            )
+        elif d.build_side != JOIN_BUILD_SIDE_UNSET:
             raise Error(
                 _optimizer_decision_message(
                     "JoinData.build_side",
@@ -3234,26 +3259,26 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
                 _optimizer_decision_message("JoinData.adaptive_allowed", "")
             )
         var lk = List[WirePlan]()
-        lk.append(_plan_to_wire(d.left[]))
+        lk.append(_plan_to_wire(d.left[], optimized))
         var rk = List[WirePlan]()
-        rk.append(_plan_to_wire(d.right[]))
+        rk.append(_plan_to_wire(d.right[], optimized))
         var res_present = _present_expr_box(d.residual)
         var res = List[WireExpr]()
         if res_present:
-            res.append(_expr_to_wire(d.residual.value()[]))
+            res.append(_expr_to_wire(d.residual.value()[], optimized))
         join.append(
             WireJoinNode(
                 lk^, rk^, d.left_on.copy(), d.right_on.copy(),
                 JoinType(Int(join_type_to_wire(d.join_type))),
                 JoinAlgo(Int(join_algo_to_wire(d.algo_hint))),
-                res_present, res^,
+                res_present, res^, build_side,
             )
         )
     elif tag == PLAN_SORT:
         arm = 6
         ref d = p.sort_data_ref()
         var kid = List[WirePlan]()
-        kid.append(_plan_to_wire(d.child[]))
+        kid.append(_plan_to_wire(d.child[], optimized))
         sort.append(
             WireSortNode(
                 d.keys.copy(), d.descending.copy(), d.nulls_first.copy(), kid^
@@ -3263,7 +3288,7 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         arm = 7
         ref d = p.limit_data_ref()
         var kid = List[WirePlan]()
-        kid.append(_plan_to_wire(d.child[]))
+        kid.append(_plan_to_wire(d.child[], optimized))
         limit.append(WireLimitNode(Int64(d.n), Int64(d.offset), kid^))
     elif tag == PLAN_DISTINCT:
         arm = 8
@@ -3273,7 +3298,7 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         if cols_present:
             cols = d.columns.value().copy()
         var kid = List[WirePlan]()
-        kid.append(_plan_to_wire(d.child[]))
+        kid.append(_plan_to_wire(d.child[], optimized))
         var eg_present = Bool(d.estimated_groups.__bool__())
         var eg = Int64(0)
         if eg_present:
@@ -3285,7 +3310,7 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         arm = 9
         ref d = p.topn_data_ref()
         var kid = List[WirePlan]()
-        kid.append(_plan_to_wire(d.child[]))
+        kid.append(_plan_to_wire(d.child[], optimized))
         topn.append(
             WireTopNNode(
                 d.keys.copy(), d.descending.copy(), d.nulls_first.copy(),
@@ -3297,7 +3322,7 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         ref d = p.union_data_ref()
         var kids = List[WirePlan]()
         for i in range(len(d.children)):
-            kids.append(_plan_to_wire(d.children[i][]))
+            kids.append(_plan_to_wire(d.children[i][], optimized))
         union_all.append(WireUnionNode(kids^))
     elif tag == PLAN_PARTITION_BY:
         # Arm ordinal, not field number — `partition_by` is field 14, arm 11.
@@ -3323,7 +3348,7 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         for i in range(len(d.partition_exprs)):
             pxs.append(_partition_expr_to_wire(d.partition_exprs[i]))
         var kid = List[WirePlan]()
-        kid.append(_plan_to_wire(d.child[]))
+        kid.append(_plan_to_wire(d.child[], optimized))
         partition_by.append(
             WirePartitionByNode(
                 d.partition_keys.copy(), d.order_keys.copy(),
@@ -3348,7 +3373,7 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         # tests membership.
         ref d = p.partition_topn_data_ref()
         var kid = List[WirePlan]()
-        kid.append(_plan_to_wire(d.child[]))
+        kid.append(_plan_to_wire(d.child[], optimized))
         var rc_present = _present_str(d.output_rank_col_name)
         var rc_name = String("")
         if rc_present:
@@ -3376,9 +3401,9 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         # LEG 3 is the only comparison it has.
         ref d = p.asof_join_data_ref()
         var lk = List[WirePlan]()
-        lk.append(_plan_to_wire(d.left[]))
+        lk.append(_plan_to_wire(d.left[], optimized))
         var rk = List[WirePlan]()
-        rk.append(_plan_to_wire(d.right[]))
+        rk.append(_plan_to_wire(d.right[], optimized))
         asof_join.append(
             WireAsofJoinNode(
                 d.left_keys.copy(), d.right_keys.copy(),
@@ -3423,7 +3448,7 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         # genuinely checks on this arm.
         ref d = p.cast_to_varchar_data_ref()
         var kid = List[WirePlan]()
-        kid.append(_plan_to_wire(d.child[]))
+        kid.append(_plan_to_wire(d.child[], optimized))
         cast_to_varchar.append(WireCastToVarcharNode(kid^))
     elif tag == PLAN_MAP_BATCHES:
         # Arm ordinal, not field number — `map_batches` is field 21, arm 17
@@ -3431,10 +3456,10 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         arm = 17
         ref d = p.map_batches_data_ref()
         var kid = List[WirePlan]()
-        kid.append(_plan_to_wire(d.child[]))
+        kid.append(_plan_to_wire(d.child[], optimized))
         var gb = List[WireExpr]()
         for i in range(len(d.group_by)):
-            gb.append(_expr_to_wire(d.group_by[i]))
+            gb.append(_expr_to_wire(d.group_by[i], optimized))
         map_batches.append(
             WireMapBatchesNode(kid^, UInt32(d.udf_index), gb^)
         )
@@ -3483,14 +3508,12 @@ def _optimizer_decision_message(field: String, detail: String) -> String:
 
 
 def _estimated_groups_message(where: String) -> String:
-    """`estimated_groups` is an OPTIMIZER-populated cardinality hint. It is
-    plain data and the `.proto` has slots for it — but there is no public
-    mutable path to it after construction (`aggregate_data_ref` borrows
-    `self` immutably), and restoring it through the private `_aggregate` field
-    would make the codec depend on the node's internal layout. Refused rather
-    than dropped: silently losing a cardinality hint changes which side of a
-    join builds, which is a plan change that no leg of the round-trip test
-    would see."""
+    """`estimated_groups` is an OPTIMIZER-populated cardinality hint. The
+    OPTIMIZED context restores it (`LogicalPlan.set_estimated_groups`); a RAW
+    plan is taken before `optimize()` and carries none, so RAW refuses it
+    rather than dropping it: silently losing a cardinality hint changes which
+    side of a join builds, which is a plan change that no leg of the
+    round-trip test would see."""
     return (
         PLAN_WIRE_UNSUPPORTED_ESTIMATED_GROUPS + ": " + where + " carries an"
         + " estimated_groups hint. Plans taken BEFORE `optimize()` do not have"
@@ -3880,6 +3903,8 @@ def _plan_from_wire(w: WirePlan, ctx: _DecodeCtx) raises -> LogicalPlan:
         if d.has_filter:
             filt = Optional(_one_expr(d.filter, "WireScanNode.filter", ctx))
         var rc: Optional[Int] = None
+        if d.has_row_count and ctx.optimized:
+            raise optimized_scan_row_count_refusal()
         if d.has_row_count:
             rc = Optional(Int(d.row_count))
         out = LogicalPlan.scan_from_source(
@@ -3965,12 +3990,30 @@ def _plan_from_wire(w: WirePlan, ctx: _DecodeCtx) raises -> LogicalPlan:
             out = LogicalPlan.aggregate(
                 gb^, ax^, _one_child(d.child, "WireAggregateNode", ctx)
             )
-        if d.has_estimated_groups:
+        if d.has_estimated_groups and ctx.optimized:
+            out.set_estimated_groups(
+                optimized_estimated_groups_from_wire(
+                    d.estimated_groups, "decoded WireAggregateNode"
+                )
+            )
+        elif d.has_estimated_groups:
             raise Error(_estimated_groups_message("decoded WireAggregateNode"))
     elif tag == PLAN_JOIN:
         if not w.join:
             raise _malformed("PLAN_JOIN with no join payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.join[0].copy()
+        var build_side = JOIN_BUILD_SIDE_UNSET
+        if ctx.optimized:
+            build_side = optimized_join_build_side_from_wire(
+                d.build_side.number()
+            )
+        elif d.build_side.number() != 0:
+            raise Error(
+                PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION
+                + ": WireJoinNode.build_side is set (" + String(d.build_side.number())
+                + ") in a raw plan; a build side is a recorded optimizer"
+                + " decision, which only an optimized plan carries"
+            )
         var residual: Optional[OwnedPointer[Expr]] = None
         if d.has_residual:
             residual = Optional(
@@ -3984,6 +4027,7 @@ def _plan_from_wire(w: WirePlan, ctx: _DecodeCtx) raises -> LogicalPlan:
             join_type_from_wire(Int32(d.join_type.number())),
             join_algo_from_wire(Int32(d.algo_hint.number())),
             residual^,
+            build_side,
         )
     elif tag == PLAN_SORT:
         if not w.sort:
@@ -4011,7 +4055,13 @@ def _plan_from_wire(w: WirePlan, ctx: _DecodeCtx) raises -> LogicalPlan:
         out = LogicalPlan.distinct(
             cols^, _one_child(d.child, "WireDistinctNode", ctx)
         )
-        if d.has_estimated_groups:
+        if d.has_estimated_groups and ctx.optimized:
+            out.set_estimated_groups(
+                optimized_estimated_groups_from_wire(
+                    d.estimated_groups, "decoded WireDistinctNode"
+                )
+            )
+        elif d.has_estimated_groups:
             raise Error(_estimated_groups_message("decoded WireDistinctNode"))
     elif tag == PLAN_TOPN:
         if not w.topn:
@@ -4231,7 +4281,7 @@ def plan_to_bytes(p: LogicalPlan) raises -> List[UInt8]:
     return encode_proto[WirePlanEnvelope](
         WirePlanEnvelope(
             _envelope_version_for(False),
-            Optional(_plan_to_wire(p)),
+            Optional(_plan_to_wire(p, False)),
             None,
             List[WireUdfRef](),
         )
@@ -4253,7 +4303,7 @@ def plan_to_bytes_with_udfs(p: LogicalPlan, udfs: List[UdfRef]) raises -> List[U
     return encode_proto[WirePlanEnvelope](
         WirePlanEnvelope(
             _envelope_version_for(False),
-            Optional(_plan_to_wire(p)),
+            Optional(_plan_to_wire(p, False)),
             None,
             wire_udfs^,
         )
@@ -4279,7 +4329,7 @@ def plan_to_bytes_with_write_target(
     return encode_proto[WirePlanEnvelope](
         WirePlanEnvelope(
             _envelope_version_for(True),
-            Optional(_plan_to_wire(p)),
+            Optional(_plan_to_wire(p, False)),
             Optional(_write_target_to_wire(target)),
             List[WireUdfRef](),
         )
@@ -4546,9 +4596,28 @@ def optimized_plan_to_bytes(p: LogicalPlan, udfs: List[UdfRef]) raises -> List[U
     `udfs`. The bytes are decoded back in the OPTIMIZED context before they
     are returned, so a producer learns of a call the host would refuse (a
     named UDF, a call that disagrees with its entry) on its own machine."""
-    var bytes = encode_proto[WirePlan](_plan_to_wire(p))
+    var bytes = encode_proto[WirePlan](_plan_to_wire(p, True))
     _ = optimized_plan_from_bytes(bytes.copy(), udfs)
     return bytes^
+
+
+def optimized_plan_to_wire(p: LogicalPlan, udfs: List[UdfRef]) raises -> WirePlan:
+    """The `WirePlan` of an optimized plan whose UDF calls index `udfs`: the
+    struct form of `optimized_plan_to_bytes`, for a body codec that embeds the
+    plan in `OptimizedPlanBody` without a bytes round trip. The same checks
+    run: the result is decoded back in the OPTIMIZED context before it is
+    returned."""
+    var w = _plan_to_wire(p, True)
+    _ = optimized_plan_from_wire(w, udfs)
+    return w^
+
+
+def optimized_plan_from_wire(w: WirePlan, udfs: List[UdfRef]) raises -> LogicalPlan:
+    """The plan of a decoded OPTIMIZED `WirePlan`: the struct form of
+    `optimized_plan_from_bytes`, with the same size, nesting, value and UDF
+    checks. The size and nesting budgets read bytes, so `w` is encoded and the
+    bytes path runs."""
+    return optimized_plan_from_bytes(encode_proto[WirePlan](w), udfs)
 
 
 def plan_round_trip(p: LogicalPlan) raises -> LogicalPlan:

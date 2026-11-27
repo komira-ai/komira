@@ -1,0 +1,15 @@
+{
+  "name": "@komira-ai/npm-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The npm rule's fixture.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/komira-ai/komira",
+    "directory": "tools/build/package/npm/fixtures"
+  },
+  "files": [
+    "lib"
+  ]
+}

@@ -30,8 +30,9 @@ the Mojo structs generated from it. Four files:
   schema stage, and fields whose types later stages add are left free at
   the numbers the design gives them (the file's header lists them).
   `optimized_plan_header` decodes and encodes the `OptimizedPlan`
-  header and runs its admission checks; no codec reads the body or the
-  segments yet.
+  header and runs its admission checks; the package `optimized_plan`
+  (`src/optimized_plan`) reads and writes the body and the segments, the
+  canonical form and the digests.
 - `bound_source.proto`: the input of `komira_add_sql_binding`
   (`docs/design/credentials_and_writes.md`, decisions 4 and 8). A
   `WireBoundSource` is the source a caller binds to a SQL name; its one kind

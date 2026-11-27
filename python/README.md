@@ -43,7 +43,9 @@ libkomira needs three Mojo runtime libraries, which are Modular's and come
 under Modular's licence. The wheel carries libkomira in `komira/_lib/` and, in `komira/_lib/lib/`,
 its native owner libraries (Linux only: on macOS they are linked into the
 dylib) and those three Mojo runtime libraries, with Modular's licence and
-third-party notices beside komira's own. It requires two other
+third-party notices beside komira's own. The Linux wheel also carries, beside
+libkomira, `libkomira_udf_python.so`, the runtime that will run Python UDFs in
+worker processes; no query opens it yet. It requires two other
 distributions, which `pip install komira` installs: `pyarrow>=25.0.1`, which a
 result is read as, and `protobuf>=5.29.1,<8`, which a DataFrame's plan is
 encoded with (the generated plan modules are in the wheel, at
@@ -350,6 +352,8 @@ The package's layout and API are designed in
 | `komira/py.typed` | the PEP 561 marker |
 | `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the tests that encode or run a plan; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |
+| `task_examples.bzl` | `task_pages_check`, the check of the common-task pages against the catalogue (`docs/tasks/catalogue.json`) |
+| `docs/tasks/` | the Python examples of the common data-analysis tasks, one directory `<rank>-<slug>/` per task with `example.py`, `expected_output.txt` and `page.md`, and `BUCK`, which runs each example against the installed wheel ([docs/tasks/README.md](https://github.com/komira-ai/komira/blob/main/docs/tasks/README.md)) |
 | `pythons.bzl` | the supported Pythons, the one list of them (Supported Pythons, below) |
 | `CHANGELOG.md` | what the releases it keeps added or changed, newest first, and how a change gets an entry (Changelog entries, below) |
 | `changelog.d/` | the entries no kept release holds yet, one file `<slug>.md` for each change |
@@ -551,7 +555,10 @@ target and a new test changes no generated list.
 The Linux wheel is `./buck2 build //python:komira_wheel`: the package and, in
 `komira/_lib/`, `libkomira[dist]` whole: `libkomira.so`, and in `lib/` its
 native owner libraries and the three Mojo runtime libraries, taken from the
-toolchain's Mojo package so that runtime and compiler are one build. It is
+toolchain's Mojo package so that runtime and compiler are one build; beside
+`libkomira.so`, the komira/python UDF runtime `libkomira_udf_python.so`
+(`//src/udf_python:komira_udf_python`), which no query opens yet
+(`//python:udf_installed_test` runs a UDF through it from the installed wheel). It is
 tagged `py3-none-manylinux_2_35_x86_64`, declares the `Requires-Dist` lines
 `pyarrow>=25.0.1` and `protobuf>=5.29.1,<8` (`PYARROW_REQUIREMENT` and
 `PROTOBUF_REQUIREMENT`, `dependencies.bzl`), carries the generated plan

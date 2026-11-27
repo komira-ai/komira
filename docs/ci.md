@@ -105,12 +105,27 @@ It does three things, in this order:
    tokens whose subject is this repository, so no Tailscale secret is stored
    anywhere. The tailnet policy lets `tag:ci` reach the farm's nodes on the
    one port of the remote-execution service and nothing else.
-2. **Refuses to go on unless the farm answers** on that port, retrying for a
-   minute. buck2 with no farm configured builds on the machine it runs on, so
-   a job that cannot reach the farm must fail, not quietly build on the runner.
+2. **Waits for the farm to answer, and refuses to go on unless it does.** It
+   opens a TCP connection to the farm's port, giving each try 5 s with 5 s
+   between two, until one is accepted or `farm-wait-minutes` (20 by default,
+   a whole number from 1 to 120) have passed since the first; the probe that
+   starts at the bound is the last. A new node can take a few seconds to get
+   its routes, and the connection between the runner and the farm can be lost
+   for minutes at a time. Each minute without an answer prints
+   `farm-connect: the farm has not answered for <N> min <M> s; waiting up to <W> min 0 s`
+   in the job log. When the farm answers after the first try failed, the job
+   summary gets `farm-connect: farm unreachable for <N> min <M> s; went on when it answered (probe <n>)`;
+   when the bound passes, the job summary gets
+   `farm-connect: farm unreachable for <N> min <M> s, the longest wait; not building`
+   and the step fails. buck2 with no farm configured builds on the machine it
+   runs on, so a job that cannot reach the farm must fail, not quietly build on
+   the runner: the wait never falls back to a local build.
 3. **Writes the farm's machine buckconfig**, `~/.buckconfig.d/farm.buckconfig`
-   (buck2 reads `~/.buckconfig.d/` and `/etc/buckconfig.d/`): the
-   `[buck2_re_client]` addresses, instance name, `tls` and
+   (buck2 reads `~/.buckconfig.d/` and `/etc/buckconfig.d/`): first
+   `farm_wait_seconds` under `[komira_ci]`, the `farm-wait-minutes` input in
+   seconds, which buck2 does not read and the
+   [buck2-farm action](#running-a-buck2-command-on-the-farm) reads for its own
+   wait; then the `[buck2_re_client]` addresses, instance name, `tls` and
    `execution_concurrency_limit`, and `linux_x86_64_properties` under
    `[komira_re]`. It also writes two keys for a slow connection to the farm
    (through a tailnet relay it carries a few MB/s for all of a job's
@@ -137,8 +152,9 @@ It does three things, in this order:
 Every input is checked before the tailnet is joined: an empty required
 input, a value holding a line break, half of the macOS pair, a macOS set equal
 to the linux one, a macOS config file without a macOS set, relative or holding
-`$`, `tls` other than `true` or `false`, and a CA file that is not
-an absolute path to a readable file are refused. `//:farm_connect_cases` runs
+`$`, `tls` other than `true` or `false`, a CA file that is not
+an absolute path to a readable file, and a `farm-wait-minutes` that is not a
+whole number from 1 to 120 are refused. `//:farm_connect_cases` runs
 those checks and the writer from `action.yml`'s own scripts and compares the
 buckconfig written whole. It also reads every workflow and holds each step
 that uses the action to `tls: ${{ vars.FARM_TLS || 'false' }}` under its
@@ -171,7 +187,10 @@ endpoint out of every committed buckconfig, workflow and local action.
 
 The connection is checked on every farm-connected run: the action's
 `refuse unless the farm answers` step fails the job before any build when the
-farm's port does not answer.
+farm's port does not answer within `farm-wait-minutes`. The cases of that wait
+(`.github/actions/farm-connect/probe_test.zig`, part of `//:farm_connect_cases`)
+run the step's own script on a clock of their own, so none sleeps or touches
+the network.
 
 **Priority.** A farm that queues by priority class runs a `ci` action before a
 `batch` one. The action takes an optional `farm-qos` (`ci` or `batch`) and, when
@@ -205,7 +224,7 @@ When the connection between the runner and the farm is cut, buck2 fails every
 action in flight at once, each with its own `Error:` line holding
 `RE channel error: code:`. `assert_remote run`
 ([`farm_retry.zig`](../tools/build/ci/assert_remote/farm_retry.zig)) then runs
-the same command once more, when every failure in the output is such a cut:
+the same command again, when every failure in the output is such a cut:
 each failed action (`Action failed:`) or test (`✗ Fail:`) has that line among
 buck2's own lines before its output, no test timed out or was fatal, and no
 other error stands outside them. A test whose run was cut before it started
@@ -213,13 +232,46 @@ gets buck2's lines as its output instead: an empty stdout, and a stderr of only
 `Remote Execution Error on Execute with digest ...` with that line right after
 it. That output, with nothing else in it but empty lines around the two, is a
 cut too. A log that mixes a real failure with cuts, a test whose output quotes
-the phrase among output of its own, and a subcommand other than build, test or
-bxl are never run again. The first output is kept beside the log as
-`buck2-farm.first.log`, the job summary gets one line saying the step ran
-again after a cut connection, and the second run is final: when it is cut too,
-the step fails saying so. There is never a third run. The release workflows'
-publish and upload steps are not buck2-farm steps, so this never runs one of
-them twice; a publish cut half way stays a failed step.
+the phrase among output of its own, a buck2 ended by a signal, and a subcommand
+other than build, test or bxl are never run again.
+
+Before it runs again, the tool waits for the farm
+([`farm_wait.zig`](../tools/build/ci/assert_remote/farm_wait.zig)): the same
+probe as farm-connect's (a TCP connection to the farm's port, 5 s for each try,
+5 s between two, a line in the job log each minute without an answer), bounded
+by the same input. Both come from the machine buckconfig farm-connect wrote,
+which the action names as `--farm-config "$HOME/.buckconfig.d/farm.buckconfig"`:
+the farm is buck2's own `engine_address`, and the bound is
+`farm_wait_seconds` under `[komira_ci]`. The tool reads that file only when a
+run is to be run again; a missing file, or one with no address or no bound,
+fails the step with exit 2 and the reason, and nothing runs again.
+
+- **The farm answers.** The cut run's output is kept beside the log as
+  `buck2-farm.first.log` (`buck2-farm.second.log` after the second run), and
+  the job summary gets one line naming the wait, such as
+  ``buck2-farm: the first run of `build` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 4 failed block(s)); farm unreachable for 3 min 10 s; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log``
+  (`the farm answered at once` when the first probe answered). Then the same
+  command runs again.
+- **The bound passes first.** The job summary gets
+  `...; farm unreachable for <N> min <M> s, the longest wait; not run again`,
+  the cut run's log stays in place (later steps that read the log, such as
+  `release-macos.yml`'s report, read it), and the step fails with buck2's code.
+
+A step runs at most three times: a third run that is cut too fails the step,
+saying so. The wait reports itself and never hides an outage: each wait is a
+line in the job summary, unlike a longer client timeout, which would hide it
+(komira-ai/komira#2269). Three runs, not two, because a lost connection can
+come back for a few minutes and drop again, and a second run cut that way
+otherwise ends a long check that needed a hand re-run. What it costs in runner
+minutes: each wait is at most `farm-wait-minutes` (20 by default) of an idle
+runner, and each run again redoes only what the action cache does not hold
+(the actions cut in flight and those not yet started), so the most a step
+adds is two waits, 40 minutes by default, and two partial reruns; every step's
+own `timeout-minutes` still bounds the whole. The other choice, a second run
+that stays final, costs nothing more in a step, and a whole job's hand re-run
+each time an outage cut it twice. The release workflows' publish and upload
+steps are not buck2-farm steps, so this never runs one of them twice; a
+publish cut half way stays a failed step.
 
 The tool step fails when a `Commands:` summary line says `local:` anything
 but `0`, when the log ends a failed run (`BUILD FAILED`, `BXL FAILED`), or when
@@ -230,8 +282,10 @@ at all, only `Network: up 0B  down 0B`, and passes on that line. `build` and
 its path as `assert-remote`. That build, and the few other `./buck2` steps
 that do not go through the action (pr.yml's build of its change tool, for
 one), are not run again: a cut during one of them still fails its step. The cases are recorded buck2 output
-(`//tools/build/ci:assert_remote_unit`, `//tools/build/ci:farm_retry_unit`) and
-the action's own two lines run over it (`//:buck2_farm_cases`).
+(`//tools/build/ci:assert_remote_unit`, `//tools/build/ci:farm_retry_unit`, which also
+runs the wait on a fake clock and a fake farm) and the action's own two lines run over
+it (`//:buck2_farm_cases`), each case with a farm on a loopback port of its own that
+answers at once or never answers (with a bound of 0 s, so no case sleeps).
 
 ## Pull requests from forks
 
@@ -513,15 +567,24 @@ tests, which no pull request builds. The rest of this section is about `release-
   needs no ordering with the release (nothing waits on it), and `workflow_run` would
   start it only after the whole release finished, build the default branch's head
   instead of the pushed commit, and run for a pull request's `release.yml` run too if
-  that ever changed. `timeout-minutes: 90` still bounds a stalled build.
+  that ever changed. `timeout-minutes: 90` still bounds a stalled build, and the steps that
+  wait on the farm have bounds of their own inside it (farm-connect 5 minutes, the macOS set
+  65, the Python harness tests 10):
+  a step past its bound fails, so the run ends failed, where a job past its `timeout-minutes`
+  is cancelled and GitHub ends its run cancelled.
 - **Reported, not blocking (for now).** A red macOS build is a failed run of
   `release-macos.yml`, with a line in its summary, and the release run, the prod publish and
   `main_red.yml` do not see it: none of them `needs` it or reads its result. The job is not
   `continue-on-error`, which would end a failed build green. The last job,
-  `release-macos-result` (`needs: release-macos`, `if: always()`), fails with "the macOS build
+  `release-macos-result` (`needs: release-macos`, `if: ${{ !cancelled() }}`), fails with "the macOS build
   did not run" when the build job was skipped, and with "did not pass" when it failed, so the
   run list, the commit status and the badge never read green for a Mac build that did not
-  pass. Its message says what happened rather than guessing: when a buck2 step failed (the build
+  pass. A build job that ran out its `timeout-minutes` is cancelled by GitHub while the run
+  goes on, so `release-macos-result` runs and fails with "the macOS build was cancelled while
+  the run went on" (the run itself still reads cancelled, which is why the farm steps carry
+  their own bounds). Only when the run itself was cancelled (a newer push, or by hand) does
+  `release-macos-result` not run: the run ends cancelled and the newer run builds.
+  Its message says what happened rather than guessing: when a buck2 step failed (the build
   of the set, or of the Python harness tests), `//release/ci:buck2_failure` (built before them)
   reads that step's buck2 output and the message is buck2's own lines after `BUILD FAILED`
   (also written to the run's summary);

@@ -5,11 +5,11 @@
 # THE ENUM-VALUE CENSUS of `komira.plan.v1` (plan_vocabulary.proto and
 # bound_source.proto), part 1 of 2: the plan and expression tag spaces and the
 # join, window, source and operator enums: PlanTag, ExprTag, AggFn, WindowFn,
-# FrameUnits, FrameBound, JoinType, JoinAlgo, AsofDirection, AsofToleranceKind,
-# CorrelatedKind, SourceType, SourceOrientation, SourceVariantTag, BinaryOp,
-# UnaryOp, and AddressingStyleWire (bound_source.proto, held under
-# `WireSourceAccess.addressing`). The other part is
-# test_plan_enum_numbers_functions.mojo.
+# FrameUnits, FrameBound, JoinType, JoinAlgo, JoinBuildSide, AsofDirection,
+# AsofToleranceKind, CorrelatedKind, SourceType, SourceOrientation,
+# SourceVariantTag, BinaryOp, UnaryOp, and AddressingStyleWire
+# (bound_source.proto, held under `WireSourceAccess.addressing`). The other
+# part is test_plan_enum_numbers_functions.mojo.
 #
 # An enum value's number is what is stored, like a field's: renumbering
 # `COL_SIDE_LEFT = 2` in the .proto moves the generated encoder and decoder
@@ -52,6 +52,7 @@ from plan_proto.plan_vocabulary import (
     FrameBound,
     FrameUnits,
     JoinAlgo,
+    JoinBuildSide,
     JoinType,
     PlanTag,
     SourceOrientation,
@@ -385,6 +386,11 @@ def _check(enum: String, v: String, n: Int) raises:
         var b = _rec(6, n)  # WireJoinNode.algo_hint
         var m = decode_proto[WireJoinNode](b.copy())
         _host(m.algo_hint.json_name(), encode_proto(m), b, v, q)
+    elif enum == "JoinBuildSide":
+        _names_agree[JoinBuildSide](v, n, q)
+        var b = _rec(9, n)  # WireJoinNode.build_side
+        var m = decode_proto[WireJoinNode](b.copy())
+        _host(m.build_side.json_name(), encode_proto(m), b, v, q)
     elif enum == "AsofDirection":
         _names_agree[AsofDirection](v, n, q)
         var b = _rec(5, n)  # WireAsofJoinNode.strategy
@@ -579,6 +585,9 @@ JoinAlgo.JOIN_ALGO_WIRE_UNSPECIFIED 0
 JoinAlgo.JOIN_ALGO_AUTO 1
 JoinAlgo.JOIN_ALGO_HASH 2
 JoinAlgo.JOIN_ALGO_SORT_MERGE 3
+JoinBuildSide.JOIN_BUILD_SIDE_WIRE_UNSPECIFIED 0
+JoinBuildSide.JOIN_BUILD_SIDE_LEFT 1
+JoinBuildSide.JOIN_BUILD_SIDE_RIGHT 2
 AsofDirection.ASOF_WIRE_UNSPECIFIED 0
 AsofDirection.ASOF_BACKWARD 1
 AsofDirection.ASOF_FORWARD 2
