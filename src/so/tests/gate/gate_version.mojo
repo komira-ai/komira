@@ -1,4 +1,4 @@
-# komira_abi_version returns 1009, the version 1.9 as major * 1000 + minor.
+# komira_abi_version returns 1010, the version 1.10 as major * 1000 + minor.
 #
 # A gate driver of //src/so:libkomira. It has no dependency: it opens
 # the library with dlopen (RTLD_NOW, through OwnedDLHandle) and calls the
@@ -15,6 +15,6 @@ comptime LIB = "./libkomira.dylib" if CompilationTarget.is_macos() else "./libko
 def main() raises:
     var lib = OwnedDLHandle(LIB)
     var v = lib.call["komira_abi_version", Int32]()
-    if v != 1009:
-        raise Error("komira_abi_version() = " + String(v) + ", want 1009")
+    if v != 1010:
+        raise Error("komira_abi_version() = " + String(v) + ", want 1010")
     print("ok")

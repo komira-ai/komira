@@ -42,6 +42,10 @@
  * answers), run on a context with no table registered, answers what
  * komira_sql_stream answers for the same file.
  *
+ * And it binds tables with komira_add_sql_binding: a WireBoundSource it
+ * encodes by hand names a local Parquet file, SQL reads the table by name, and
+ * a second binding of the name replaces it (binding_cases.h).
+ *
  * Exit 0 only if every check holds; each failure prints one line. */
 #include <dlfcn.h>
 #include <pthread.h>
@@ -88,6 +92,7 @@ DECLARE(komira_run_progress);
 DECLARE(komira_sql_stream_run);
 DECLARE(komira_plan_stream);
 DECLARE(komira_register_arrow_stream);
+DECLARE(komira_add_sql_binding);
 
 static int bind_all(void *lib) {
     int missing = 0;
@@ -125,6 +130,7 @@ static int bind_all(void *lib) {
     BIND(komira_sql_stream_run);
     BIND(komira_plan_stream);
     BIND(komira_register_arrow_stream);
+    BIND(komira_add_sql_binding);
 #undef BIND
     return missing;
 }
@@ -1062,6 +1068,10 @@ static void options_cases(void) {
    file stays under 1000 lines. */
 #include "plan_cases.h"
 
+/* The cases of komira_add_sql_binding, in a file of their own for the same
+   reason. */
+#include "binding_cases.h"
+
 int main(void) {
     void *lib = dlopen("./libkomira.so", RTLD_NOW);
     if (lib == NULL) {
@@ -1178,5 +1188,6 @@ int main(void) {
     options_cases();
     plan_stream_cases();
     arrow_stream_cases();
+    binding_cases();
     return failures == 0 ? 0 : 1;
 }
