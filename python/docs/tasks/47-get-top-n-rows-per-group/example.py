@@ -14,8 +14,7 @@ Path("sales.csv").write_text(
     "north,Hal,50\n"
 )
 
-# SQL: number the rows in each group with ROW_NUMBER, then keep numbers 1 to 2.
-# BETWEEN 1 AND 2 stands where most people write rn <= 2 (see the notes).
+# SQL: number the rows in each group with ROW_NUMBER, then keep numbers up to 2.
 with komira.Session() as s:
     s.register_csv("sales", "sales.csv")
     top2 = s.sql(
@@ -23,7 +22,7 @@ with komira.Session() as s:
         " SELECT region, rep, amount,"
         " ROW_NUMBER() OVER (PARTITION BY region ORDER BY amount DESC) AS rn"
         " FROM sales) ranked"
-        " WHERE rn BETWEEN 1 AND 2 ORDER BY region, amount DESC"
+        " WHERE rn <= 2 ORDER BY region, amount DESC"
     )
     print(top2.to_arrow().to_pylist())
 

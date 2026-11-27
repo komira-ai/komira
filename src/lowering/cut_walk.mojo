@@ -14,7 +14,8 @@
 #             `ops`; a projection column that is a user-function call adds an
 #             OP_UDF_APPLY before its OP_PROJECT (`cut_project`);
 #   breaker   PLAN_AGGREGATE, PLAN_DISTINCT, PLAN_SORT, PLAN_TOPN,
-#             PLAN_PARTITION_BY (a window): ends the open pipeline in a sink
+#             PLAN_PARTITION_BY (a window), PLAN_PARTITION_TOPN (the top rows
+#             of each partition, `cut_partition_topn`): ends the open pipeline in a sink
 #             and opens a pipeline whose source is that segment's output
 #             (SOURCE_SINK_OUTPUT), joined by an E3 edge.
 #   range     a PLAN_LIMIT that reaches a PLAN_SORT or a PLAN_TOPN through
@@ -42,11 +43,11 @@
 # the resolution of shared subplans (`_walk`, `_resolve`). Each arm is its own
 # module: `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
 # `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_topn`, `cut_window`,
-# `cut_union`, `cut_join`, `cut_map_batches`, `cut_step` and `cut_shared`; what
+# `cut_partition_topn`, `cut_union`, `cut_join`, `cut_map_batches`, `cut_step` and `cut_shared`; what
 # they share (the open pipeline, the cutter's state and the close and reopen of
 # a breaker) is `cut_state`, and what a user-function call is held to is
 # `udf_check`. The filter, project, limit, top-n, aggregate, distinct, frame,
-# join and window arms have two halves: the first holds every check that
+# join, window and partition top-n arms have two halves: the first holds every check that
 # refuses the node itself and runs before the child (or the children) is
 # walked; the second fuses onto, or closes, the child's pipeline. The sort arm
 # has only the second. The union arm checks its branches' schemas before it
@@ -73,6 +74,10 @@ from lowering.cut_limit import (
     _limit_op,
     _reaches_sort,
     _sorted_stream_refusal,
+)
+from lowering.cut_partition_topn import (
+    _check_partition_topn,
+    _close_partition_topn,
 )
 from lowering.cut_map_batches import _map_batches_op, _fuse_map_batches
 from lowering.cut_project import _project_op, _fuse_project
@@ -110,6 +115,7 @@ from plan_ir.logical_plan import (
     PLAN_JOIN,
     PLAN_UNION,
     PLAN_PARTITION_BY,
+    PLAN_PARTITION_TOPN,
     PLAN_CSE_REF,
     PLAN_VIEW_REF,
     PLAN_MAP_BATCHES,
@@ -217,6 +223,10 @@ def _walk_node(
         var data = _window_data(node)
         var pipe = _walk(cutter, node.partition_by_data_ref().child[], inputs)
         return _close_window(cutter, node, pipe^, data^, inputs)
+    if tag == PLAN_PARTITION_TOPN:
+        _check_partition_topn(node)
+        var pipe = _walk(cutter, node.partition_topn_data_ref().child[], inputs)
+        return _close_partition_topn(cutter, node, pipe^, inputs)
     if tag == PLAN_TOPN:
         return _walk_range(cutter, node, RowRange.every_row(), inputs)
     if tag == PLAN_JOIN:

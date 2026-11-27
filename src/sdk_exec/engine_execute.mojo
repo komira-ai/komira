@@ -44,6 +44,7 @@ from phase_timers.phase_timers import (
 from physical_plan.physical_plan import (
     AggSinkData,
     PartitionBySinkData,
+    PartitionTopNSinkData,
     SortSinkData,
     TopNSinkData,
 )
@@ -155,6 +156,13 @@ def run_lowered_plan_with[
         reversed_windows.append(lowered.params.window.pop())
     while len(reversed_windows) > 0:
         _ = builder.add_window_sink(reversed_windows.pop())
+    # And for the partition top-n sinks, which SINK_PARTITION_TOPN segments
+    # index: a `WHERE rn <= K` over a ROW_NUMBER or RANK window.
+    var reversed_ptopns = List[PartitionTopNSinkData]()
+    while len(lowered.params.partition_topn) > 0:
+        reversed_ptopns.append(lowered.params.partition_topn.pop())
+    while len(reversed_ptopns) > 0:
+        _ = builder.add_partition_topn_sink(reversed_ptopns.pop())
     var token = control.token()
     ref dispatch = ctx.runtime.dispatcher()
     pt_record[PH_EXEC_SETUP](t_setup)

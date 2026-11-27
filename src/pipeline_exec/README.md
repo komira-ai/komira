@@ -61,9 +61,10 @@ Import each module by name; the package root exports nothing.
   output when no morsel reaches it needs it).
 - `source_variant`, `op_variant`, `pipeline_sink`: the closed variants. Each
   holds one of its member types, fixed where the variant is named (three for a
-  source, four for an operator and for a sink: the fourth slot defaults to
+  source, four for an operator, five for a sink: the fourth slot defaults to
   `NoOperator` or `NoSink` and is read as `fourth()` under `OP_TAG_FOURTH` or
-  `SINK_TAG_FOURTH`), and a tag;
+  `SINK_TAG_FOURTH`, and a sink's fifth defaults to `NoSink` and is read as
+  `fifth()` under `SINK_TAG_FIFTH`), and a tag;
   its trait methods test the tag and call the member. `unused_members` fills
   the slots a list leaves empty with members that refuse to run.
 - `source_parquet`, `source_batch`, `source_sink_output`, `source_csv`,
@@ -375,6 +376,21 @@ Import each module by name; the package root exports nothing.
   taken. A denied draw fails by name, its message beginning with the code `MEMORY_BUDGET_EXCEEDED: `; there is no spill. Refused when built: a
   direction list that does not match the order keys, an output schema with
   fewer columns than expressions. A kernel refusal surfaces from `combine`.
+- `sink_partition_topn`: the top rows of each partition `(SINK_PARTITION_TOPN,
+  KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`, from a `PartitionTopNSinkData`
+  (partition keys, sort keys, directions, `k`, ROW_NUMBER or RANK, the name of
+  the rank column when the plan reads it, and the output schema). It collects
+  with a `CollectSink` as `sink_window` does, then runs `op_window`'s
+  `PartitionTopNSink` on the one batch: per partition the rows numbered at most
+  `k`, every row tied within `k` for RANK, NULL partition keys one partition and
+  NULL sort keys last in both directions. Of rows tied at the k-th place
+  ROW_NUMBER keeps the earliest in the collected order, the ones the window's
+  stable sort numbers first, so the rows equal `rn <= k` over the window on
+  every worker count. A segment that keeps no row gives a batch of no rows under
+  the output schema. Memory: as `sink_window`, with an estimate of a sorted
+  copy and 16 bytes per row for the kernel. Refused when built: a direction
+  list that does not match the sort keys, a function other than ROW_NUMBER or
+  RANK.
 - `spike/intern_spike.mojo` (target `intern_spike`, not part of the library): the
   dictionary-interning spike of the string group-by. A standalone program that times
   interned dictionary codes, hashing every row, the fragment merge and the string-table
@@ -401,9 +417,11 @@ Import each module by name; the package root exports nothing.
   SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR)`,
   `(SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`, `(SINK_TOPN, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)` and `(SINK_PARTITION_BY, KEY_DTYPE_NONE,
-  SINK_ORIENT_COLUMNAR)` (a `WindowSink`), and refuses every other kind by name. It keeps the
+  SINK_ORIENT_COLUMNAR)` (a `WindowSink`) and `(SINK_PARTITION_TOPN,
+  KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)` (a `PartitionTopNPipelineSink`), and
+  refuses every other kind by name. It keeps the
   resident batches (`add_resident`), the aggregation sink data a descriptor's
-  `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`), the top-N data (`add_topn_sink`), the window sink data (`add_window_sink`) and the segment pool
+  `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`), the top-N data (`add_topn_sink`), the window sink data (`add_window_sink`), the partition top-n data (`add_partition_topn_sink`) and the segment pool
   (`set_memory_budget`, unbounded until set) and the spill directory of the
   fixed-width grouped sinks (`set_spill_directory`, none until set), shares one set of operator parts among the
   workers of a segment run, and derives the empty-output schema by running the

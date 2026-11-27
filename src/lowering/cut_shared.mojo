@@ -71,6 +71,7 @@ from plan_ir.logical_plan import (
     PLAN_DISTINCT,
     PLAN_SORT,
     PLAN_PARTITION_BY,
+    PLAN_PARTITION_TOPN,
     PLAN_TOPN,
     PLAN_LIMIT,
     PLAN_UNION,
@@ -103,6 +104,8 @@ def _referenced_hashes(plan: LogicalPlan, mut out: List[UInt64]):
         _referenced_hashes(plan.sort_data_ref().child[], out)
     elif tag == PLAN_PARTITION_BY:
         _referenced_hashes(plan.partition_by_data_ref().child[], out)
+    elif tag == PLAN_PARTITION_TOPN:
+        _referenced_hashes(plan.partition_topn_data_ref().child[], out)
     elif tag == PLAN_TOPN:
         _referenced_hashes(plan.topn_data_ref().child[], out)
     elif tag == PLAN_MAP_BATCHES:
@@ -137,6 +140,8 @@ def _scan_count(plan: LogicalPlan) -> Int:
         return _scan_count(plan.sort_data_ref().child[])
     if tag == PLAN_PARTITION_BY:
         return _scan_count(plan.partition_by_data_ref().child[])
+    if tag == PLAN_PARTITION_TOPN:
+        return _scan_count(plan.partition_topn_data_ref().child[])
     if tag == PLAN_TOPN:
         return _scan_count(plan.topn_data_ref().child[])
     if tag == PLAN_MAP_BATCHES:
@@ -212,6 +217,8 @@ def _expand_inplace(mut plan: LogicalPlan, cutter: _Cutter):
         _expand_inplace(plan._sort.value()[].child[], cutter)
     elif tag == PLAN_PARTITION_BY:
         _expand_inplace(plan._partition_by.value()[].child[], cutter)
+    elif tag == PLAN_PARTITION_TOPN:
+        _expand_inplace(plan._partition_topn.value()[].child[], cutter)
     elif tag == PLAN_TOPN:
         _expand_inplace(plan._topn.value()[].child[], cutter)
     elif tag == PLAN_MAP_BATCHES:

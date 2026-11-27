@@ -231,8 +231,10 @@ on the grouped one. What `ORDER_ROW_RANGE`
 asks of the driver is in §3.3 and open point O1, and what step 9 built is after the table of §7.3.
 
 **What the cutter refuses.** An `ASOF` join (`SINK_ASOF_JOIN`), a sort-merge join (`SINK_SMJ_BUILD`), the IR's
-`SINK_JOIN_PROBE` (a second, sink-form probe the cutter does not emit; the probe is `OP_JOIN_PROBE`, §3.6), a view reference, a partition top-n (`PLAN_PARTITION_TOPN`) and
-a cast to string in a pipeline's spine are not cut yet: the IR has the tags and the cutter does not emit them. A union is cut: each branch ends in a
+`SINK_JOIN_PROBE` (a second, sink-form probe the cutter does not emit; the probe is `OP_JOIN_PROBE`, §3.6), a view reference and
+a cast to string in a pipeline's spine are not cut yet: the IR has the tags and the cutter does not emit them. A partition top-n
+(`PLAN_PARTITION_TOPN`, the optimizer's fusion of `rn <= K` over a ROW_NUMBER or RANK window) is cut into a
+`SINK_PARTITION_TOPN` segment (src/lowering/README.md, `cut_partition_topn`). A union is cut: each branch ends in a
 segment of its own and the union's pipeline reads their outputs through a `SOURCE_CONCAT` in branch order (src/lowering/README.md). A shared-subplan
 reference (`PLAN_CSE_REF`) is cut: a canonical subtree with a breaker or a limit ends in a segment of its own that every reference reads over an `E3`
 edge, the driver handing each reader the same rows, and one of scans, filters, projections and unions is cut again at each reference over the same
@@ -987,7 +989,8 @@ ranking functions, `NTILE`, `LAG`, `LEAD`, `FIRST_VALUE`, `LAST_VALUE`, `NTH_VAL
 `RANGE` frame with an offset whose window does not order by one INT64, INT32 or FLOAT64 key; every other `ROWS` or
 `RANGE` frame is served. The schema the sink declares marks a `SUM`, `AVG`, `MIN` or `MAX` column nullable when its
 argument column is, and a `SUM`, `AVG`, `MIN`, `MAX`, `FIRST_VALUE` or `LAST_VALUE` column nullable when its frame can be
-empty. Not built: a partition top-n and a parallel window sink.
+empty. A partition top-n ends its child in a `SINK_PARTITION_TOPN` segment that runs `op_window`'s `PartitionTopNSink`
+(src/pipeline_exec/README.md, `sink_partition_topn`). Not built: a parallel window sink.
 **What step 9 built, against the row above.** The ungrouped sink, the only one that folded a float argument at step 9 (the
 grouped sinks do since the grouped float fold below), is
 reproducible; neither 9a nor `GrainSourceImpl` was built, because the sources already stamp a position on every morsel:

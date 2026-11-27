@@ -20,7 +20,9 @@
 #     the producer collected, a third segment sees the second's, and a published
 #     output nobody reads is returned.
 #   * Sources, operators and sinks the builder does not serve are refused by
-#     name, a concatenation of no segment is refused, a resident batch the builder does not hold is refused, and a
+#     name, a concatenation of no segment is refused, a top-n or
+#     partition top-n segment naming sink data the builder does not hold is
+#     refused, a resident batch the builder does not hold is refused, and a
 #     predicate the evaluator cannot scope fails the query with the refusal.
 
 from std.testing import (
@@ -47,6 +49,7 @@ from physical_plan.physical_plan import (
     SINK_COLLECT,
     SINK_ORIENT_COLUMNAR,
     SINK_TOPN,
+    SINK_ASOF_JOIN,
     SINK_PARTITION_TOPN,
     SOURCE_BATCH,
     SOURCE_CONCAT,
@@ -392,13 +395,23 @@ def test_what_the_builder_does_not_serve_is_refused_by_name() raises:
     ):
         _ = run_plan(_one(probe^), builder, dispatch, 1, CancellationToken.new())
 
-    var windowed = SegmentDescPod(
+    var asof = SegmentDescPod(
+        0, SOURCE_BATCH, SourceSpecPod.batch(handle), Slab[MorselOp](),
+        SINK_ASOF_JOIN, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR, -1, 0,
+        List[Int](), List[UInt8](),
+    )
+    with assert_raises(contains="the sink of segment 0 is not served"):
+        _ = run_plan(_one(asof^), builder, dispatch, 1, CancellationToken.new())
+
+    var ptopn = SegmentDescPod(
         0, SOURCE_BATCH, SourceSpecPod.batch(handle), Slab[MorselOp](),
         SINK_PARTITION_TOPN, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR, -1, 0,
         List[Int](), List[UInt8](),
     )
-    with assert_raises(contains="the sink of segment 0 is not served"):
-        _ = run_plan(_one(windowed^), builder, dispatch, 1, CancellationToken.new())
+    with assert_raises(
+        contains="segment 0 names partition top-n sink data -1, and the builder holds 0"
+    ):
+        _ = run_plan(_one(ptopn^), builder, dispatch, 1, CancellationToken.new())
 
     var top = SegmentDescPod(
         0, SOURCE_BATCH, SourceSpecPod.batch(handle), Slab[MorselOp](), SINK_TOPN,

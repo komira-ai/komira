@@ -105,6 +105,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        the refusal of a reference with no canonical subtree,
 #                        before it or of another layout, and of a view
 #                        reference.
+# test_lower_partition_topn
+#                        the rendered physical plan of partition top-n nodes
+#                        (`WHERE rn <= K` fused): one SINK_PARTITION_TOPN
+#                        segment and its param row, a named rank column read
+#                        above, RANK and its heap capacity kept, a limit above
+#                        a keyed node refused and one above a node with no key
+#                        cut, each refusal by name, and the node in a shared
+#                        subplan (read twice, over a reference, a join's left
+#                        child, held by a canonical subtree).
 # test_lower_sum_fuse    SUM(CAST(<signed integer> AS DECIMAL(38, 0))), the SQL
 #                        integer sum, is lowered to SUM(<integer>) with its
 #                        declared DECIMAL(38, 0) output kept; every other shape
@@ -128,8 +137,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        fixed order, and the windows that lower beside each:
 #                        every frame SQL allows, for every function that reads
 #                        it.
-# test_sink_capability   the capability table's rows, which triples are not
-#                        served, and admission of hand-built segments.
+# test_sink_capability   the capability table's rows (the partition top-n's
+#                        among them), which triples are not served, and
+#                        admission of hand-built segments.
 # test_lower_udf_nodes   the rendered physical plan of user-function plans: an
 #                        ungrouped frame as an OP_UDF_FRAME over its read set,
 #                        a step as a SOURCE_UDF_STEP segment, a projection
@@ -186,6 +196,7 @@ mojo_library(
         "tests/test_lower_iceberg.mojo",
         "tests/test_lower_jsonl_scan.mojo",
         "tests/test_lower_names.mojo",
+        "tests/test_lower_partition_topn.mojo",
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",
         "tests/test_lower_s3_scan.mojo",

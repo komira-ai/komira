@@ -274,23 +274,23 @@ struct PartitionTopNSinkData(Movable):
     """Configuration for a PartitionTopN sink (per-partition Top-K).
 
     Mirrors the LogicalPlan PartitionTopNData payload. Output schema =
-    child schema (no new columns; the sink selects existing rows).
+    the child's columns, plus the INT64 rank column when
+    `output_rank_col_name` is set.
 
     Carries `func` and `over_fetch_k` for the ROW_NUMBER and RANK fast paths.
 
     CONTRACT for the engine:
       - `func` is the window-function tag from `partition_expr.mojo`
-        (`PF_ROW_NUMBER = 0`, `PF_RANK = 1`). The engine's PartitionTopN sink
-        (not in this tree) implements ROW_NUMBER semantics (first K rows by
-        sort key per partition, no tie handling). For RANK, the engine must:
-          1. Use `over_fetch_k` as the heap capacity (NOT `k`).
-          2. After collecting the top `over_fetch_k` rows by sort key,
-             compute a rank for each row (1 + count of rows with strictly
-             better sort key in the same partition; ties share rank).
-          3. Filter to rows with `rank <= k`.
-        For 10K rows/partition with a Float64 score,
-        tie probability ≈ 10K × 2^-52 → effectively zero, so the
-        over-fetch buffer of K+16 covers all real-world inputs.
+        (`PF_ROW_NUMBER = 0`, `PF_RANK = 1`). The engine's sink
+        (`op_window.partition_topn_sink.PartitionTopNSink`, run by
+        `pipeline_exec.sink_partition_topn`) keeps, per partition, the rows
+        whose ROW_NUMBER (first K rows by sort key; of tied rows the
+        earliest) or RANK (1 + count of rows with a strictly better sort key
+        in the same partition; ties share rank) is at most `k`. For RANK the
+        bounded-heap path uses `over_fetch_k` as the heap capacity, and a
+        partition whose full heap still ranks its worst row within `k` is
+        recomputed from every row, so every tie within `k` is kept whatever
+        `over_fetch_k` is.
       - `over_fetch_k >= k` invariant. Engine code can `assert over_fetch_k >= k`.
       - The optimizer is responsible for setting `over_fetch_k`; engines
         MUST NOT recompute it.

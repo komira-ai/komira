@@ -65,6 +65,11 @@
 #                                 `sink_param_id` names: the rows sorted by the
 #                                 partition and order keys with one column per
 #                                 window expression
+#            SINK_PARTITION_TOPN, `PartitionTopNPipelineSink`
+#            key NONE             (`sink_partition_topn`), from the
+#                                 `PartitionTopNSinkData` the descriptor's
+#                                 `sink_param_id` names: per partition, the
+#                                 rows numbered at most k
 #            SINK_HASH_BUILD,     `CollectSink`: the build side's rows, which the
 #            key NONE             probe segment takes and indexes
 #
@@ -156,11 +161,13 @@ from physical_plan.physical_plan import (
     SINK_COLLECT,
     SINK_HASH_BUILD,
     SINK_PARTITION_BY,
+    SINK_PARTITION_TOPN,
     SINK_SORT,
     SINK_TOPN,
     SortSinkData,
     TopNSinkData,
     PartitionBySinkData,
+    PartitionTopNSinkData,
     SINK_ORIENT_COLUMNAR,
     SINK_ORIENT_DICT_ENCODED,
     SOURCE_BATCH,
@@ -189,6 +196,7 @@ from .sink_agg_any import AnyAggSink
 from .sink_collect import CollectSink
 from .sink_group_agg import GroupAggSink
 from .sink_sort import SortSink
+from .sink_partition_topn import PartitionTopNPipelineSink
 from .sink_window import WindowSink
 from .sink_string_group_agg import StringGroupAggSink
 from .source_batch import BatchSource
@@ -262,7 +270,7 @@ struct RealBuilder[
     """Builds the real members of a segment: Parquet (local, or on the store
     `R` opens), batch, sink-output, CSV, concatenation and JSONL sources;
     filter, project, limit and join probe operators; the collect, aggregation,
-    sort, window and hash build sinks."""
+    sort, window, partition top-n and hash build sinks."""
 
     comptime ParquetArm = SourceVariant[
         LocalParquetSource[Self.cache_o, Self.pool_o, Self.filter_o],
@@ -278,7 +286,7 @@ struct RealBuilder[
     ]
     comptime Op = OpVariant[FilterOp, MapOp, LimitOp, HashProbeOp]
     comptime Sink = PipelineSink[
-        CollectSink, AnyAggSink, SortSink, WindowSink
+        CollectSink, AnyAggSink, SortSink, WindowSink, PartitionTopNPipelineSink
     ]
 
     # The borrowed cache and pool, kept as pointers (private) because a struct
@@ -292,6 +300,7 @@ struct RealBuilder[
     var _sort_sinks: List[SortSinkData]
     var _topn_sinks: List[TopNSinkData]
     var _window_sinks: List[PartitionBySinkData]
+    var _partition_topn_sinks: List[PartitionTopNSinkData]
     var _segment_pool: SegmentPool
     var _opener: Optional[Self.R]
     var _spill_dir: String
@@ -310,6 +319,7 @@ struct RealBuilder[
         self._sort_sinks = List[SortSinkData]()
         self._topn_sinks = List[TopNSinkData]()
         self._window_sinks = List[PartitionBySinkData]()
+        self._partition_topn_sinks = List[PartitionTopNSinkData]()
         self._segment_pool = SegmentPool()
         self._opener = None
         self._spill_dir = String("")
@@ -347,6 +357,12 @@ struct RealBuilder[
         `sink_param_id` names."""
         self._window_sinks.append(data^)
         return len(self._window_sinks) - 1
+
+    def add_partition_topn_sink(mut self, var data: PartitionTopNSinkData) -> Int:
+        """Keep `data` for SINK_PARTITION_TOPN segments; returns the id their
+        `sink_param_id` names."""
+        self._partition_topn_sinks.append(data^)
+        return len(self._partition_topn_sinks) - 1
 
     def set_memory_budget(mut self, bytes: Int):
         """Bound the memory the sinks of later segment runs may draw, in
@@ -742,6 +758,24 @@ struct RealBuilder[
                         desc.seg_id,
                     )
                 )
+            if desc.sink_kind == SINK_PARTITION_TOPN and key == KEY_DTYPE_NONE:
+                var id = desc.sink_param_id
+                if id < 0 or id >= len(self._partition_topn_sinks):
+                    raise Error(
+                        "pipeline_exec: segment "
+                        + String(desc.seg_id)
+                        + " names partition top-n sink data "
+                        + String(id)
+                        + ", and the builder holds "
+                        + String(len(self._partition_topn_sinks))
+                    )
+                return Self.Sink.fifth(
+                    PartitionTopNPipelineSink(
+                        self._partition_topn_sinks[id],
+                        self._segment_pool.share(),
+                        desc.seg_id,
+                    )
+                )
         raise Error(
             "pipeline_exec: the sink of segment "
             + String(desc.seg_id)
@@ -753,7 +787,8 @@ struct RealBuilder[
             " (SINK_AGG, KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR),"
             " (SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR),"
             " (SINK_TOPN, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR),"
-            " (SINK_PARTITION_BY, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) and"
+            " (SINK_PARTITION_BY, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR),"
+            " (SINK_PARTITION_TOPN, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) and"
             " (SINK_HASH_BUILD, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
         )
 
