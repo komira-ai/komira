@@ -549,15 +549,15 @@ The rulings that settled each item once open or departing, the table of parity g
   - underscores between digits: `'1_000'` is 1000;
   - hexadecimal and binary prefixes: `'0x1F'` is 31, `'0b101'` is 5.
 
-  The oracle measures each before a case relies on it.
-- **Current behaviour.** `src/kernels/cast_to_varchar_kernels.mojo:40-50` accepts only the strict grammar and rejects every DuckDB extension above, including `'1e2'` ("Code that does not follow", item 18).
+  The oracle measures each before a case relies on it. The exponent is applied as DuckDB applies it, which is not exact arithmetic everywhere: `'5e-2'` and `'0.5e-1'` are 1, `'0.55e-1'` is 0, and a fraction of 19 digits under an exponent wraps the 10^19 divisor (`'1.9000000000000000000e0'` is 0). A sign followed only by whitespace (`'- '`) is 0. A hexadecimal or binary number takes no sign and no trailing whitespace. An INTEGER target reads the value as a BIGINT and range-checks it after rounding.
+- **Current behaviour.** `src/kernels/cast_string_to_number.mojo` follows the rule, step for step with DuckDB's `TrySimpleIntegerCast` (its header lists the grammar); SQL `CAST` and `TRY_CAST` from a string reach it (`src/sql/sql_bind_cast.mojo`, `_bind_cast`). The SQL end-to-end cases `cast_text_strict` and `cast_text_try_integers` (`src/tests/e2e/sql_e2e`) hold it to the pinned DuckDB.
 - **Mark.** MATCHES.
 
 ### 6.7 String to double out of range
 
-- **Rule.** A string whose value is finite but outside DOUBLE's range (`'1e400'`) answers what DuckDB answers, measured by the oracle; the expected answer is an error, as for an integer out of range. `'inf'`, `'infinity'`, `'nan'` (any case, with an optional sign) parse to those values.
-- **DuckDB.** Not documented. Likely a Conversion Error (inferred, not measured); the oracle measures it.
-- **Current behaviour.** Saturates to ±inf (`src/kernels/cast_to_varchar_kernels.mojo:48`); accepts the special spellings (`:47`). "Code that does not follow", item 19, unless the oracle shows DuckDB saturates too.
+- **Rule.** A string whose value is finite but outside the target's range (`'1e400'` as a DOUBLE, `'3.4028236e38'` as a REAL) is ±inf, and one below the smallest subnormal a zero of its sign, as DuckDB answers. Every other value is the correctly rounded float of the target's width, rounded once (a REAL is not a DOUBLE rounded again). `'inf'`, `'infinity'`, `'nan'` and `'nan(<letters, digits, _>)'` (any case, with an optional sign; `'-nan'` keeps its sign) parse to those values. The grammar is DuckDB's: whitespace around the number, one `+` (after which a `-` is read: `'+-5'` is -5.0), digits on either side of a `.`, `_` between two digits, an optional exponent.
+- **DuckDB.** `TryDoubleCast` over its fast_float. Measured: `CAST('1e400' AS DOUBLE)` and `TRY_CAST('1e400' AS DOUBLE)` are `inf`, not an error; the oracle measures each value in the SQL end-to-end case `cast_text_try_floats` (`src/tests/e2e/sql_e2e`).
+- **Current behaviour.** `src/kernels/cast_string_to_number.mojo` follows the rule, through `proto_codec`'s correctly rounded `parse_decimal_f64` and `parse_decimal_f32`.
 - **Mark.** MATCHES.
 
 ### 6.8 Timestamp units
@@ -593,7 +593,7 @@ The rulings that settled each item once open or departing, the table of parity g
 | NULL | NULL (the sink decides how to write it) |
 
 - **DuckDB.** "Any type can be cast to VARCHAR" (DuckDB documentation, "typecasting"); the ISO 8601 shape of timestamps and the offset rendering of zoned ones are documented (DuckDB documentation, "timestamp types"). The float and decimal spellings in the table are not documented and must be measured. **pyarrow.** `cast(double, string)` renders 1.0 as `1`; not followed.
-- **Current behaviour.** Integers, booleans and strings render as in the table (`src/kernels/cast_to_varchar_kernels.mojo:9-50`). Floats render with Mojo's `String(Float64)` (`:316-322`), which has not been compared with DuckDB. No DECIMAL, DATE or TIMESTAMP rendering kernel is in this repository.
+- **Current behaviour.** Integers, booleans and strings render as in the table (`src/kernels/cast_to_varchar_kernels.mojo:1-40`). Floats render with Mojo's `String(Float64)` (`:69-76`), which has not been compared with DuckDB. No DECIMAL, DATE or TIMESTAMP rendering kernel is in this repository.
 - **Mark.** MATCHES.
 
 ### 6.11 Mixing zoned and unzoned timestamps

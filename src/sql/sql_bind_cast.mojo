@@ -284,12 +284,11 @@ def _bind_decimal_literal_cast(
 
 
 def _bind_cast(sx: SqlExpr, is_try: Bool, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:
-    """`CAST(<expr> AS <type>)` / `<expr>::<type>` -> an `EXPR_CAST` node.
+    """`CAST(<expr> AS <type>)` / `<expr>::<type>` / `TRY_CAST(...)` -> an
+    `EXPR_CAST` node, with the TRY flag for `TRY_CAST`.
 
-    `TRY_CAST` and a string operand are refused by name (see the comment
-    below for why). `_bound_expr_is_string` is the conservative predicate
-    `_bind_nullif` uses too: it catches a string column, a string literal and
-    an alias of either.
+    A temporal operand to a number is refused by name, and so is a TRY_CAST
+    over a DECIMAL, whose casts raise where TRY_CAST answers NULL.
     """
     ref cargs = sx._call.value().args
     if len(cargs) != 2:
@@ -333,52 +332,14 @@ def _bind_cast(sx: SqlExpr, is_try: Bool, schema: Schema, scope: BindScope, cata
                 return Expr.cast_to_arrow(vchild^, ArrowType.STRING)
     var target = _sql_cast_target_arrow(ty)
     var child = _bind_scalar(cargs[0], schema, scope, catalog, cte_scope, prebound)
-    var from_string = _bound_expr_is_string(child, schema)
-    # A string operand and `TRY_CAST` are both refused, for one reason: the
-    # rounding model. DuckDB v1.5.3:
-    #
-    #     CAST('3.5' AS BIGINT)      -> 4        TRY_CAST('3.5' AS BIGINT) -> 4
-    #     CAST('2.5' AS BIGINT)      -> 3        TRY_CAST('2.5' AS BIGINT) -> 3
-    #
-    # i.e. the string -> integer path accepts a fractional spelling and rounds
-    # half away from zero. Without that parse, a strict cast would raise where
-    # DuckDB answers 4 and a TRY_CAST would answer NULL (a wrong answer that
-    # looks like TRY's own output). This is a third rounding model on one cast
-    # surface: DOUBLE -> BIGINT is half to even, DECIMAL -> BIGINT and
-    # STRING -> BIGINT are half away from zero.
-    # `is_try` is tested first: `TRY_CAST(<string> AS BIGINT)` is refusable on
-    # both counts, and dropping TRY is the rewrite the query can make.
-    if is_try:
-        raise Error(
-            "SQL not supported: TRY_CAST. Its contract is to answer NULL where"
-            " the cast fails, so a gap in the underlying cast becomes an"
-            " INVISIBLE wrong answer rather than an error. Two known ones:"
-            " TRY_CAST('3.5' AS BIGINT) is 4 in DuckDB v1.5.3 and would be NULL"
-            " here (`cast_string_to_int64` in kernels parses an integer"
-            " spelling only), and TRY_CAST(<INT64_MIN> AS INTEGER) is NULL"
-            " there and would not be here (`eval_cast`, the integer cast in"
-            " column_kernels, has no null-on-overflow arm). Use"
-            " CAST(x AS " + ty.upper() + "), which refuses loudly instead."
-        )
-    if from_string:
-        raise Error(
-            "SQL not supported: CAST from a STRING to " + ty.upper() + "."
-            " What is refused is the ROUNDING: DuckDB v1.5.3 answers 4 for"
-            " CAST('3.5' AS BIGINT) and 3 for CAST('2.5' AS BIGINT), rounding"
-            " half AWAY FROM ZERO — a third model, different again from the"
-            " half-to-even it uses for CAST(<double> AS BIGINT) — and"
-            " `cast_string_to_int64` in kernels parses an integer"
-            " spelling only, so serving this would raise where DuckDB answers"
-            " a number. Convert in your application, or cast a numeric column"
-            " instead."
-        )
+    var tmissing = String("")
+    var tsrc = walk_expr_field[PlanColRefFields](child, schema, tmissing).arrow_type
+    var src_known = tmissing.byte_length() == 0
     # A DATE / TIME / TIMESTAMP / INTERVAL operand to a number is refused by
     # name: DuckDB v1.5.3 has no such cast (`Conversion Error: Unimplemented
     # type for cast (DATE -> BIGINT)`), and a cast here would answer the
     # stored epoch count.
-    var tmissing = String("")
-    var tsrc = walk_expr_field[PlanColRefFields](child, schema, tmissing).arrow_type
-    if tmissing.byte_length() == 0 and tsrc.is_temporal():
+    if src_known and tsrc.is_temporal():
         raise Error(
             "SQL not supported: CAST from a " + String(tsrc) + " value to "
             + ty.upper() + ". DuckDB v1.5.3 has no cast from a DATE, TIME,"
@@ -387,24 +348,60 @@ def _bind_cast(sx: SqlExpr, is_try: Bool, schema: Schema, scope: BindScope, cata
             " engine would answer the value's stored epoch count. For a day"
             " count write date_diff('day', DATE '1970-01-01', <date>)."
         )
+    # TRY_CAST answers NULL where the cast fails, so it is served only where
+    # no failure of the cast below is a wrong number: a STRING operand (the
+    # text kernels take the TRY flag), a float (the rounding kernels
+    # range-check and take it), BIGINT -> INTEGER (it narrows through a
+    # float, below), and every other integer or BOOLEAN cast, which either
+    # widens and cannot fail or is not served and raises under CAST and
+    # TRY_CAST alike. A DECIMAL operand's casts take no TRY flag: a value
+    # past INTEGER raises a Conversion Error where TRY_CAST answers NULL, so
+    # it is refused by name.
+    if is_try and src_known and tsrc == ArrowType.DECIMAL128:
+        raise Error(
+            "SQL not supported: TRY_CAST from a DECIMAL value to " + ty.upper()
+            + ". TRY_CAST answers NULL where the cast fails, and the cast from"
+            " this operand has no NULL-on-failure form here: a value out of"
+            " range would raise instead. Use CAST(x AS " + ty.upper() + "),"
+            " which raises on the same rows, or TRY_CAST a STRING, a float or"
+            " an integer operand."
+        )
     # BIGINT -> INTEGER narrows through an exact DOUBLE. A direct INT64 ->
     # INT32 cast keeps the low 32 bits (`CAST(2147483648 AS INTEGER)` would be
     # -2147483648), where DuckDB v1.5.3 raises a Conversion Error. Every INT64
     # value that fits INT32 is exact as a DOUBLE and every one that does not
     # is out of range, and the DOUBLE -> INT32 cast range-checks the raw value,
-    # so it raises on exactly the rows DuckDB raises on and answers the same
-    # integer everywhere else (its message names DOUBLE where DuckDB's names
-    # INT64). Only a provably INT64 operand takes this arm: a DECIMAL rounds
-    # half away from zero on its own edge, an INT32 needs no narrowing, and an
-    # operand whose type is not visible here keeps the plain cast.
-    if target == ArrowType.INT32:
-        var missing = String("")
-        var src = walk_expr_field[PlanColRefFields](child, schema, missing).arrow_type
-        if missing.byte_length() == 0 and src == ArrowType.INT64:
-            return Expr.cast_to_arrow(
-                Expr.cast_to_arrow(child^, ArrowType.FLOAT64), ArrowType.INT32
-            )
+    # so it raises on exactly the rows DuckDB raises on (TRY: is NULL on
+    # them) and answers the same integer everywhere else (its message names
+    # DOUBLE where DuckDB's names INT64). Only a provably INT64 operand takes
+    # this arm: a DECIMAL rounds half away from zero on its own edge, an
+    # INT32 needs no narrowing, and an operand whose type is not visible here
+    # keeps the plain cast.
+    if target == ArrowType.INT32 and src_known and tsrc == ArrowType.INT64:
+        var wide = Expr.cast_to_arrow(child^, ArrowType.FLOAT64)
+        if is_try:
+            return Expr.try_cast(wide^, DType.int32)
+        return Expr.cast_to_arrow(wide^, ArrowType.INT32)
+    # A STRING operand reads its text as DuckDB does
+    # (`kernels.cast_string_to_number`): `CAST('3.5' AS BIGINT)` is 4 and
+    # `CAST('2.5' AS BIGINT)` 3, half away from zero on the first fraction
+    # digit — a third rounding model on this cast surface, next to DOUBLE ->
+    # BIGINT's half to even — and `CAST('1e3' AS DOUBLE)` is 1000.0.
+    if is_try:
+        return _try_cast_to(child^, target)
     return Expr.cast_to_arrow(child^, target)
+
+
+def _try_cast_to(var child: Expr, target: ArrowType) -> Expr:
+    """`Expr.try_cast` to one of the four targets `_sql_cast_target_arrow`
+    returns (INTEGER, BIGINT, REAL, DOUBLE)."""
+    if target == ArrowType.INT32:
+        return Expr.try_cast(child^, DType.int32)
+    if target == ArrowType.INT64:
+        return Expr.try_cast(child^, DType.int64)
+    if target == ArrowType.FLOAT32:
+        return Expr.try_cast(child^, DType.float32)
+    return Expr.try_cast(child^, DType.float64)
 
 
 def _bound_expr_is_string(e: Expr, schema: Schema) -> Bool:

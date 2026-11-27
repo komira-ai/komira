@@ -88,6 +88,7 @@ _REGRESSION_TABLES = [
     "in_partsupp",
     "in_part",
     "floats",
+    "cast_text",
 ]
 
 sql_oracle(
@@ -272,7 +273,10 @@ _CAPABILITY_CASES = {
     "cast": [
         "cast_decimal_to_double",
         "cast_numeric",
+        "cast_text_strict",
         "cast_text_to_integer",
+        "cast_text_try_floats",
+        "cast_text_try_integers",
     ],
     "computed_column": [
         "computed_arithmetic",

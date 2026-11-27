@@ -650,7 +650,7 @@ def test_having() raises:
 def test_deparse_names_of_expressions() raises:
     _check(
         "SELECT count(*) + count(k), sum(v + 1), max(k IS NULL), max(s LIKE 'x%'), max(s NOT LIKE 'y%'), min(DATE '1995-03-15'), max(true), max(false), max(-k), max(@k), sum(abs(k)), count(CASE WHEN k > 1 THEN 1 ELSE 0 END), max(CAST(v AS DOUBLE)), max(TRY_CAST(k AS DOUBLE)), max(position('b' IN s)), max(k || 'x'), max(k ^ 2), max(s ^@ 'a'), max(1.5), max('x'), max(TIMESTAMP '2021-01-01 00:00:00'), max(TIMESTAMPTZ '2021-01-01 00:00:00+00'), max(NOT b), mean(v), MEAN(v), SUM(K) FROM t",
-        "ERR: SQL not supported: TRY_CAST. Its contract is to answer NULL where the cast fails, so a gap in the underlying cast becomes an INVISIBLE wrong answer rather than an error. Two known ones: TRY_CAST('3.5' AS BIGINT) is 4 in DuckDB v1.5.3 and would be NULL here (`cast_string_to_int64` in kernels parses an integer spelling only), and TRY_CAST(<INT64_MIN> AS INTEGER) is NULL there and would not be here (`eval_cast`, the integer cast in column_kernels, has no null-on-overflow arm). Use CAST(x AS DOUBLE), which refuses loudly instead."
+        "ERR: SQL not supported: the `||` string-concatenation operator. DuckDB's `||` PROPAGATES NULL (`'a' || NULL` is NULL) where this engine's only concatenation, `concat()`, SKIPS a NULL operand (`concat('a', NULL)` is 'a'), and answering one for the other would be wrong on every row with a NULL. The missing primitive is a STRING-typed NULL value in the plan (the CASE that would propagate the NULL has no string NULL to return). `concat(a, b)` is served for the NULL-skipping answer, and is EXACT wherever neither operand can be NULL."
     )
     _check(
         "SELECT mean(v), MEAN(v), avg(v), SUM(K), max(t.k) FROM t",

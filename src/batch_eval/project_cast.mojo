@@ -16,15 +16,17 @@ from column_kernels.cast_null import (
     eval_cast_float_to_int,
 )
 from column_kernels.compiler_helpers import clone_array_validity, int64_to_float64
+from kernels.cast_string_to_number import (
+    cast_string_to_float32,
+    cast_string_to_float64,
+    cast_string_to_int32,
+    cast_string_to_int64,
+)
 from kernels.cast_to_varchar_kernels import (
     cast_float32_to_string,
     cast_float64_to_string,
     cast_int32_to_string,
     cast_int64_to_string,
-    cast_string_to_float32,
-    cast_string_to_float64,
-    cast_string_to_int32,
-    cast_string_to_int64,
 )
 from plan_expr.expr import Expr
 

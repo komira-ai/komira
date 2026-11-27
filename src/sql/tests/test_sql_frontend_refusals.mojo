@@ -18,8 +18,8 @@
 #     tokenizer's or parser's `SQL syntax error`.
 #   * test_bind_failures_raise_their_own_message: an unknown table, column and
 #     function raise the binder's whole message, unchanged by the entry; a
-#     CAST from a STRING to INTEGER, a CAST of a column to DECIMAL and a CAST
-#     over an aggregate are refused by name.
+#     CAST of a column to DECIMAL and a CAST over an aggregate are refused by
+#     name.
 #   * test_the_footer_reader_is_the_callers: a `read_parquet` relation takes
 #     its schema from the reader the caller passes, the reader's own failure is
 #     the statement's failure, and `NoParquetFooters` refuses the relation by
@@ -183,14 +183,8 @@ def test_bind_failures_raise_their_own_message() raises:
         "SQL not supported: scalar function 'nosuchfn'. No UDFs are declared"
         " on this catalog either — declare one with `catalog.declare_udf(f)`",
     )
-    # Two casts DuckDB answers and this engine refuses by name rather than
-    # answer differently: a STRING to a number (DuckDB rounds '3.5' half
-    # away from zero) and a column to DECIMAL.
-    assert_true(
-        _plan_err("SELECT CAST(s AS INTEGER) AS si FROM t").startswith(
-            "SQL not supported: CAST from a STRING to INTEGER."
-        )
-    )
+    # A cast DuckDB answers and this engine refuses by name rather than
+    # answer differently: a column to DECIMAL.
     assert_true(
         _plan_err("SELECT CAST(v AS DECIMAL(10,2)) AS vd FROM t").startswith(
             "SQL not supported: CAST to DECIMAL"

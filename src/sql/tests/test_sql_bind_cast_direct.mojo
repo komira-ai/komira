@@ -9,8 +9,9 @@
 #   1. CAST to VARCHAR is served from an INTEGER / BIGINT / VARCHAR operand
 #      (a VARCHAR operand is the identity) and refused from a float; CAST to
 #      INTEGER from a BIGINT narrows through an exact DOUBLE; the served
-#      targets and their aliases; every other target, TRY_CAST, a string
-#      operand and a temporal operand are refused by name.
+#      targets and their aliases, from a string operand too; TRY_CAST binds
+#      the same casts with the TRY flag; every other target, TRY_CAST over a
+#      DECIMAL and a temporal operand are refused by name.
 #   2. CAST('<digits>' AS DECIMAL(p,s)) folds to one exact DECIMAL128 literal,
 #      rounding half away from zero on the first dropped digit, with the
 #      bare spelling meaning (18, 3); overflow after rounding, malformed text,
@@ -152,17 +153,43 @@ def test_cast_targets() raises:
         "ERR: SQL not supported: CAST to SMALLINT. This engine converts to INTEGER / BIGINT / REAL / DOUBLE — the four targets its cast kernels reach from every numeric source — and refuses every other target BY NAME rather than approximating it with the nearest one: a CAST that answered a number of the wrong type would be a wrong answer with a success code."
     )
     _check(
-        "SELECT TRY_CAST(k AS INTEGER) FROM t",
-        "ERR: SQL not supported: TRY_CAST. Its contract is to answer NULL where the cast fails, so a gap in the underlying cast becomes an INVISIBLE wrong answer rather than an error. Two known ones: TRY_CAST('3.5' AS BIGINT) is 4 in DuckDB v1.5.3 and would be NULL here (`cast_string_to_int64` in kernels parses an integer spelling only), and TRY_CAST(<INT64_MIN> AS INTEGER) is NULL there and would not be here (`eval_cast`, the integer cast in column_kernels, has no null-on-overflow arm). Use CAST(x AS INTEGER), which refuses loudly instead."
+        "SELECT CAST(s AS BIGINT) AS a, CAST(s AS INTEGER) AS b, CAST(s AS DOUBLE) AS c, CAST(s AS REAL) AS d, CAST('3.5' AS BIGINT) AS e, s::BIGINT AS f FROM t",
+        "Project(exprs=[Alias(Cast(ColRef(s), int64), \"a\"), Alias(Cast(ColRef(s), int32), \"b\"), Alias(Cast(ColRef(s), float64), \"c\"), Alias(Cast(ColRef(s), float32), \"d\"), Alias(Cast(Literal(ScalarValue(utf8, \"3.5\")), int64), \"e\"), Alias(Cast(ColRef(s), int64), \"f\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def test_try_cast_carries_the_try_flag() raises:
+    """TRY_CAST binds the cast CAST would bind, with the TRY flag on the cast
+    that can fail: over a string, a float, BIGINT -> INTEGER (the outer,
+    narrowing cast of the two) and the widening casts that cannot fail."""
+    _check(
+        "SELECT TRY_CAST(s AS BIGINT) AS a, TRY_CAST(s AS INTEGER) AS b, TRY_CAST(s AS DOUBLE) AS c, TRY_CAST(s AS REAL) AS d, TRY_CAST('x' AS BIGINT) AS e FROM t",
+        "Project(exprs=[Alias(Cast(ColRef(s), int64, try), \"a\"), Alias(Cast(ColRef(s), int32, try), \"b\"), Alias(Cast(ColRef(s), float64, try), \"c\"), Alias(Cast(ColRef(s), float32, try), \"d\"), Alias(Cast(Literal(ScalarValue(utf8, \"x\")), int64, try), \"e\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
-        "SELECT CAST(s AS BIGINT) FROM t",
-        "ERR: SQL not supported: CAST from a STRING to BIGINT. What is refused is the ROUNDING: DuckDB v1.5.3 answers 4 for CAST('3.5' AS BIGINT) and 3 for CAST('2.5' AS BIGINT), rounding half AWAY FROM ZERO — a third model, different again from the half-to-even it uses for CAST(<double> AS BIGINT) — and `cast_string_to_int64` in kernels parses an integer spelling only, so serving this would raise where DuckDB answers a number. Convert in your application, or cast a numeric column instead."
+        "SELECT TRY_CAST(k AS INTEGER) AS a, TRY_CAST(v AS BIGINT) AS b, TRY_CAST(v AS REAL) AS c, TRY_CAST(i32 AS BIGINT) AS d, TRY_CAST(k AS DOUBLE) AS e, TRY_CAST(f32 AS INTEGER) AS f FROM t",
+        "Project(exprs=[Alias(Cast(Cast(ColRef(k), float64), int32, try), \"a\"), Alias(Cast(ColRef(v), int64, try), \"b\"), Alias(Cast(ColRef(v), float32, try), \"c\"), Alias(Cast(ColRef(i32), int64, try), \"d\"), Alias(Cast(ColRef(k), float64, try), \"e\"), Alias(Cast(ColRef(f32), int32, try), \"f\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def test_try_cast_refusals() raises:
+    """TRY_CAST over a DECIMAL is refused by name: its casts raise on a value
+    out of range where TRY_CAST answers NULL. A temporal operand keeps the
+    CAST refusal."""
+    _check(
+        "SELECT TRY_CAST(dc AS INTEGER) FROM t",
+        "ERR: SQL not supported: TRY_CAST from a DECIMAL value to INTEGER. TRY_CAST answers NULL where the cast fails, and the cast from this operand has no NULL-on-failure form here: a value out of range would raise instead. Use CAST(x AS INTEGER), which raises on the same rows, or TRY_CAST a STRING, a float or an integer operand."
     )
     _check(
-        "SELECT CAST('3' AS BIGINT) FROM t",
-        "ERR: SQL not supported: CAST from a STRING to BIGINT. What is refused is the ROUNDING: DuckDB v1.5.3 answers 4 for CAST('3.5' AS BIGINT) and 3 for CAST('2.5' AS BIGINT), rounding half AWAY FROM ZERO — a third model, different again from the half-to-even it uses for CAST(<double> AS BIGINT) — and `cast_string_to_int64` in kernels parses an integer spelling only, so serving this would raise where DuckDB answers a number. Convert in your application, or cast a numeric column instead."
+        "SELECT TRY_CAST(d AS BIGINT) FROM t",
+        "ERR: SQL not supported: CAST from a date32 value to BIGINT. DuckDB v1.5.3 has no cast from a DATE, TIME, TIMESTAMP or INTERVAL to a number (it raises `Conversion Error: Unimplemented type for cast`, and TRY_CAST answers NULL); this engine would answer the value's stored epoch count. For a day count write date_diff('day', DATE '1970-01-01', <date>)."
     )
+
+
+def test_cast_temporal_refusals() raises:
     _check(
         "SELECT CAST(d AS BIGINT) FROM t",
         "ERR: SQL not supported: CAST from a date32 value to BIGINT. DuckDB v1.5.3 has no cast from a DATE, TIME, TIMESTAMP or INTERVAL to a number (it raises `Conversion Error: Unimplemented type for cast`, and TRY_CAST answers NULL); this engine would answer the value's stored epoch count. For a day count write date_diff('day', DATE '1970-01-01', <date>)."
