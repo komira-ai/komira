@@ -2,13 +2,14 @@
 //! (python/changelog/defs.bzl).
 //!
 //!   changelog assemble    --root <dir> --prefix <text> --stamp <n> --out <file>
-//!   changelog description --root <dir> --prefix <text> --stamp <n> --readme <file> --out <file>
+//!   changelog description --root <dir> --prefix <text> --stamp <n> [--commit <sha>] --readme <file> --out <file>
 //!
 //! `--root` holds `CHANGELOG.md` and the directory `changelog.d` of fragments (no directory is no
 //! fragment). `--prefix` is what the messages put before those names (`python/`), `--stamp` the build's
-//! `komira.package_stamp` (`0` for none). `assemble` writes CHANGELOG.md with the new section
-//! (changelog.zig `assemble`); `description` writes `--readme` followed by that text with its headings one
-//! level down (`description`). The exit status is 0 when the file was written, 1 when an input was
+//! `komira.package_stamp` (`0` for none), and `--commit` the build's `komira.package_commit`, given with a
+//! stamp and only then. `assemble` writes CHANGELOG.md with the new section (changelog.zig `assemble`);
+//! `description` writes `--readme` followed by that text with its headings one level down, and with
+//! `--commit` every link to the repository's `main` pinned to that commit (`description`, `linksOf`). The exit status is 0 when the file was written, 1 when an input was
 //! refused or unreadable (`changelog: FAILED: <why>` on stderr, nothing written) and 2 for a usage error.
 //! Everything is a flag; no environment is read.
 const std = @import("std");
@@ -18,7 +19,7 @@ const Allocator = std.mem.Allocator;
 
 pub const usage =
     \\usage: changelog assemble --root <dir> --prefix <text> --stamp <n> --out <file>
-    \\       changelog description --root <dir> --prefix <text> --stamp <n> --readme <file> --out <file>
+    \\       changelog description --root <dir> --prefix <text> --stamp <n> [--commit <sha>] --readme <file> --out <file>
     \\
 ;
 
@@ -27,16 +28,18 @@ const Flags = struct {
     prefix: []const u8,
     stamp: []const u8,
     readme: ?[]const u8,
+    commit: ?[]const u8,
     out: []const u8,
 };
 
-/// The flags of a command, each given once; `readme` only when `with_readme`. Null after the usage error was
+/// The flags of a command, each given once; `readme`, and `commit` if it is given, only when `with_readme`. Null after the usage error was
 /// written to `err`.
 fn parse(args: []const []const u8, with_readme: bool, err: *std.Io.Writer) !?Flags {
     var root: ?[]const u8 = null;
     var prefix: ?[]const u8 = null;
     var stamp: ?[]const u8 = null;
     var readme: ?[]const u8 = null;
+    var commit: ?[]const u8 = null;
     var out: ?[]const u8 = null;
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
@@ -51,6 +54,8 @@ fn parse(args: []const []const u8, with_readme: bool, err: *std.Io.Writer) !?Fla
             &out
         else if (with_readme and std.mem.eql(u8, flag, "--readme"))
             &readme
+        else if (with_readme and std.mem.eql(u8, flag, "--commit"))
+            &commit
         else
             null;
         if (slot == null) {
@@ -71,7 +76,7 @@ fn parse(args: []const []const u8, with_readme: bool, err: *std.Io.Writer) !?Fla
         try err.flush();
         return null;
     }
-    return .{ .root = root.?, .prefix = prefix.?, .stamp = stamp.?, .readme = readme, .out = out.? };
+    return .{ .root = root.?, .prefix = prefix.?, .stamp = stamp.?, .readme = readme, .commit = commit, .out = out.? };
 }
 
 fn failed(err: *std.Io.Writer, why: []const u8) !u8 {
@@ -123,7 +128,8 @@ fn command(a: Allocator, why: *[]const u8, f: Flags) changelog.Error!void {
     const made = try assembled(a, why, f, root);
     const text = if (f.readme) |readme_path| blk: {
         const readme = try readFile(a, why, std.fs.cwd(), readme_path, readme_path);
-        break :blk try changelog.description(a, why, readme, made.path, made.text);
+        const links = try changelog.linksOf(a, why, f.stamp, f.commit);
+        break :blk try changelog.description(a, why, readme, made.path, made.text, links);
     } else made.text;
     std.fs.cwd().writeFile(.{ .sub_path = f.out, .data = text }) catch |e|
         return changelog.refuse(a, why, "--out {s}: cannot write it: {s}", .{ f.out, @errorName(e) });

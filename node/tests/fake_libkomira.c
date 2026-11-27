@@ -20,6 +20,8 @@
 //   engine cannot start with: the call returns NULL.
 // - FAKE_ERROR_CODES exports komira_last_error_code and komira_last_error_step
 //   (ABI 1.7), which answer the code and step the last refusal set.
+// - komira_sql_stream (ABI 1.3) is exported by every build of version 1.3 or
+//   later, refusing every query with -3, unless FAKE_OMIT_SQL_STREAM.
 // With FAKE_SCRIPTED komira_register_parquet answers by its `name`:
 //   "refuse <status> <step> [<code>]"  fails with that status, step number
 //       and code, and the last error `stand-in refusal status <status> step
@@ -45,6 +47,12 @@
 #define EXPORT __attribute__((visibility("default")))
 
 EXPORT int32_t komira_abi_version(void) { return FAKE_VERSION; }
+#if FAKE_VERSION % 1000 >= 3 && !defined(FAKE_OMIT_SQL_STREAM)
+EXPORT int32_t komira_sql_stream(void *ctx, const char *sql, void *out) {
+  (void)ctx; (void)sql; (void)out;
+  return -3;
+}
+#endif
 static char the_ctx[] = "komira_ctx_new()";
 EXPORT void *komira_ctx_new(void) { return the_ctx; }
 EXPORT void komira_ctx_free(void *ctx) {

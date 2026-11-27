@@ -1,5 +1,7 @@
-//! native_policy: the wheel the rule refuses to write. Every member is held
-//! to these checks, and every ELF member (elf.zig) and Mach-O member
+//! native_policy: the package a tool refuses to write, a wheel (komira_wheel)
+//! or an npm package (komira_npm); `Policy.package` is the word its refusals
+//! use for it, and the text below says wheel. Every member is held to these
+//! checks, and every ELF member (elf.zig) and Mach-O member
 //! (macho.zig) is read:
 //!
 //!   size      no member over 90 MB (90,000,000 bytes; PyPI takes 100 MB a file);
@@ -71,6 +73,9 @@ pub const Policy = struct {
     max_glibcxx: ?[]const u8 = null,
     max_cxxabi: ?[]const u8 = null,
     external_needed: []const []const u8 = &.{},
+    /// What the members are packed in, as the refusals name it: `wheel`, or
+    /// `package` for an npm package (komira_npm).
+    package: []const u8 = "wheel",
 };
 
 pub const Member = struct { name: []const u8, data: []const u8 };
@@ -113,7 +118,7 @@ fn bounded(alloc: Alloc, d: *Diag, member: []const u8, version: []const u8, pref
 }
 
 fn checkMachO(alloc: Alloc, d: *Diag, p: Policy, m: Member, names: []const []const u8) Refused!void {
-    const tag_macos = p.macos orelse return refuse(d, alloc, "platform: {s} is a Mach-O file, and a manylinux wheel holds none", .{m.name});
+    const tag_macos = p.macos orelse return refuse(d, alloc, "platform: {s} is a Mach-O file, and a manylinux {s} holds none", .{ m.name, p.package });
     const info = try macho.read(alloc, d, m.name, m.data);
     if (info.cputype != macho.CPU_TYPE_ARM64) return refuse(d, alloc, "arch: {s} is a Mach-O file for CPU type {x}, not arm64", .{ m.name, info.cputype });
     const minos = info.minos orelse return refuse(d, alloc, "minos: {s} states no minimum macOS version (no LC_BUILD_VERSION or LC_VERSION_MIN_MACOSX)", .{m.name});
@@ -136,7 +141,7 @@ fn checkMachO(alloc: Alloc, d: *Diag, p: Policy, m: Member, names: []const []con
         if (has(names, base) and (rpath or loader)) continue;
         if (rpath and has(p.external_needed, base)) continue;
         if (systemLibrary(n)) continue;
-        return refuse(d, alloc, "needed: {s} loads `{s}`, which is not in the wheel, not an operating system library under /usr/lib or /System/Library, and not in external_needed", .{ m.name, n });
+        return refuse(d, alloc, "needed: {s} loads `{s}`, which is not in the {s}, not an operating system library under /usr/lib or /System/Library, and not in external_needed", .{ m.name, n, p.package });
     }
 }
 
@@ -148,13 +153,13 @@ pub fn check(alloc: Alloc, d: *Diag, p: Policy, members: []const Member) Refused
             return refuse(d, alloc, "size: {s} is {d} bytes, over the {d} a wheel member may be (PyPI takes 100 MB a file)", .{ m.name, m.data.len, max_member });
         const base = diag.baseName(m.name);
         if (has(p.external_needed, base))
-            return refuse(d, alloc, "external: the wheel carries {s}, which external_needed says comes from another package and never from this wheel", .{m.name});
+            return refuse(d, alloc, "external: the {s} carries {s}, which external_needed says comes from another package and never from this {s}", .{ p.package, m.name, p.package });
         if (macho.isMachO(m.data)) {
             try checkMachO(alloc, d, p, m, names.items);
             continue;
         }
         if (!elf.isElf(m.data)) continue;
-        const glibc = p.glibc orelse return refuse(d, alloc, "platform: {s} is an ELF file, and a macOS wheel holds none", .{m.name});
+        const glibc = p.glibc orelse return refuse(d, alloc, "platform: {s} is an ELF file, and a macOS {s} holds none", .{ m.name, p.package });
         const info = try elf.read(alloc, d, m.name, m.data);
         const want: u16 = if (std.mem.eql(u8, p.arch, "aarch64")) 183 else 62;
         if (info.machine != want) return refuse(d, alloc, "arch: {s} is an ELF file for machine {d}, not the tag's {s} ({d})", .{ m.name, info.machine, p.arch, want });
@@ -173,7 +178,7 @@ pub fn check(alloc: Alloc, d: *Diag, p: Policy, members: []const Member) Refused
         }
         for (info.needed) |n| {
             if (has(names.items, n) or has(&system_libs, n) or has(p.external_needed, n)) continue;
-            return refuse(d, alloc, "needed: {s} needs {s}, which is not in the wheel, not a manylinux system library, and not in external_needed", .{ m.name, n });
+            return refuse(d, alloc, "needed: {s} needs {s}, which is not in the {s}, not a manylinux system library, and not in external_needed", .{ m.name, n, p.package });
         }
     }
 }

@@ -1,0 +1,30 @@
+{
+  "name": "@komira-ai/komira-linux-x64-gnu",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The linux-x64 native files of @komira-ai/komira: its Node addon and libkomira with the libraries it loads.",
+  "license": "Apache-2.0 AND LicenseRef-Modular-Proprietary",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/komira-ai/komira",
+    "directory": "node"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "files": [
+    "komira_addon.node",
+    "native",
+    "NOTICE",
+    "AWS_LC_LICENSE",
+    "S2N_TLS_LICENSE",
+    "MODULAR_LICENSE",
+    "MODULAR_THIRD_PARTY_NOTICES"
+  ]
+}

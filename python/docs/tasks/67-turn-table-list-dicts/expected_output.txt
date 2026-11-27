@@ -1,0 +1,4 @@
+[{'id': 1, 'name': 'Ana'}, {'id': 2, 'name': 'Bo'}, {'id': 3, 'name': 'Cy'}]
+{'id': [1, 2, 3], 'name': ['Ana', 'Bo', 'Cy']}
+[{'id': 1, 'name': 'Ana', 'city': 'Oslo'}, {'id': 2, 'name': 'Bo', 'city': 'Lima'}, {'id': 3, 'name': 'Cy', 'city': 'Oslo'}]
+[{'id': 1, 'name': 'Ana', 'city': 'Oslo'}, {'id': 2, 'name': 'Bo', 'city': 'Lima'}, {'id': 3, 'name': 'Cy', 'city': 'Oslo'}]

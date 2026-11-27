@@ -152,6 +152,7 @@ COVERAGE_BRANCH_GATE = {
     "komira//src/libc:libc": "its eight tests' branches all classify (94 arms of 5 files)",
     "komira//src/lz4:lz4": "its three tests' branches all classify (76 arms of 2 files, 16 of them `try` arms)",
     "komira//src/name_registry:name_registry": "its test's branches all classify (32 arms of 1 file)",
+    "komira//src/optimized_plan:optimized_plan": "its six tests' branches all classify (114 arms of 4 files)",
     # parquet left the list: ten of its tests' branches do not all
     # classify at this head, without the `try` rule as with it. An `or` and
     # an `and` whose result is returned (decode_helpers.mojo 210:9,

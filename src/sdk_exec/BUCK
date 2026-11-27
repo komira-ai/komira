@@ -184,6 +184,40 @@ _MIXED_TEST_DATA = {
 
 _MIXED_TEST_DATA.update({c + ".tsv": ":group_keys_mixed_oracle[" + c + ".tsv]" for c in _MIXED_CASES})
 
+# DuckDB's table and answers for test_run_sql_expr_beside_agg:
+# tests/expr_beside_agg/data.sql writes expr.parquet, and each line of
+# tests/expr_beside_agg/cases.sql runs one SELECT with a literal or an
+# expression of the GROUP BY keys beside an aggregate and writes its answer.
+_EXPR_BESIDE_AGG_CASES = [
+    "literal_ungrouped",
+    "literal_ungrouped_no_row",
+    "literal_grouped_no_row",
+    "literal_union_labels",
+    "literal_grouped_union",
+    "int_literal_grouped",
+    "coalesce_of_key",
+    "upper_of_key",
+    "arith_of_key",
+    "expr_of_two_keys",
+    "item_under_where_having",
+]
+
+sql_oracle(
+    name = "expr_beside_agg_oracle",
+    srcs = [
+        "tests/expr_beside_agg/data.sql",
+        "tests/expr_beside_agg/cases.sql",
+    ],
+    outputs = ["expr.parquet"] + [c + ".tsv" for c in _EXPR_BESIDE_AGG_CASES],
+)
+
+_EXPR_BESIDE_AGG_TEST_DATA = {
+    "cases.sql": "tests/expr_beside_agg/cases.sql",
+    "expr.parquet": ":expr_beside_agg_oracle[expr.parquet]",
+}
+
+_EXPR_BESIDE_AGG_TEST_DATA.update({c + ".tsv": ":expr_beside_agg_oracle[" + c + ".tsv]" for c in _EXPR_BESIDE_AGG_CASES})
+
 # The cases of komira_sql_conformance's order_by_limit corpus with a LIMIT or an
 # OFFSET: test_run_sql_topn runs each SELECT and holds it to DuckDB's answer.
 _TOPN_CASES = [
@@ -791,6 +825,7 @@ mojo_library(
         "tests/test_run_sql_csv.mojo": _CSV_TEST_DATA,
         "tests/test_run_sql_cte.mojo": _CTE_TEST_DATA,
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,
+        "tests/test_run_sql_expr_beside_agg.mojo": _EXPR_BESIDE_AGG_TEST_DATA,
         "tests/test_run_sql_topn.mojo": _TOPN_TEST_DATA,
         "tests/test_run_sql_window.mojo": _WINDOW_TEST_DATA,
         "tests/test_run_sql_window_frames.mojo": _WINDOW_FRAMES_TEST_DATA,

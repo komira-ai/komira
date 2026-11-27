@@ -110,8 +110,10 @@ A library whose package holds a `README.md` runs the README's examples as one
 more welded test, `[tests][readme]`, so the documentation cannot rot. Nothing
 declares it: the README is declared by existing. The program generator is
 the Zig tool [`//tools/build/readme_examples:tool`](../readme_examples/BUCK)
-(`generate`, `map` for a report's lines, and `link` and `link-check` for a
-packaged README's `sh komira-link` block; its unit tests are welded), built
+(`generate`, `map` for a report's lines, `link` and `link-check` for a
+packaged README's `sh komira-link` block, and `tasks-check` for the
+common-task pages, [docs/tasks/README.md](../../../docs/tasks/README.md); its
+unit tests are welded), built
 for the execution platform of the action that runs it (macOS for a
 darwin-arm64 library; analysis refuses a mismatch, `readme.bzl`). It
 reads Markdown through the shared Zig module

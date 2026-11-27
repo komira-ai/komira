@@ -7,9 +7,10 @@
 //! input check and the buckconfig writer, in that order, with the busybox
 //! `sh` (the launcher's PATH) and a HOME of the case's own. Each step gets
 //! its `env:` with every `${{ inputs.<name> }}` replaced by the case's value,
-//! or else the input's `default:`. The tailnet join and the port probe are
-//! skipped: a case that passes the check is one the action would go on to
-//! connect with.
+//! or else the input's `default:`. The tailnet join is skipped: a case that
+//! passes the check is one the action would go on to connect with. The wait
+//! for the farm's port has cases of its own, on a clock of each case's own
+//! (probe_test.zig, imported below).
 //!
 //! What the cases catch:
 //!  - the buckconfig written is compared whole, so a key dropped, renamed,
@@ -43,6 +44,11 @@
 //!    empty string, which the action refuses) fails; a mention of the action
 //!    outside a step's `uses:` fails too, so a caller the reader cannot see is
 //!    not skipped. The reader's own cases are workflow texts written here;
+//!  - the longest wait: `farm-wait-minutes` is written in seconds as
+//!    `farm_wait_seconds` under `[komira_ci]` (1200 when left out, so every
+//!    case's buckconfig holds it, and a writer that drops it leaves the
+//!    buck2-farm action with no bound), and a value that is not a whole number
+//!    of minutes from 1 to 120 is refused;
 //!  - the priority class: `farm-qos` set to `batch` or `ci` writes exactly one
 //!    `http_headers = x-kbf-qos:<class>` line under `[buck2_re_client]`, and left out
 //!    writes none (so a pull-request check sends no header and queues as `ci`); any
@@ -55,14 +61,14 @@
 const std = @import("std");
 const t = std.testing;
 
-const Input = struct { name: []const u8, default: ?[]const u8 };
-const EnvVar = struct { name: []const u8, input: ?[]const u8, literal: []const u8 };
-const Step = struct { name: []const u8, env: []const EnvVar, run: ?[]const u8 };
-const Action = struct { inputs: []const Input, steps: []const Step, runs: []const u8 };
+pub const Input = struct { name: []const u8, default: ?[]const u8 };
+pub const EnvVar = struct { name: []const u8, input: ?[]const u8, literal: []const u8 };
+pub const Step = struct { name: []const u8, env: []const EnvVar, run: ?[]const u8 };
+pub const Action = struct { inputs: []const Input, steps: []const Step, runs: []const u8 };
 
 const CHECK = "the farm variables are set";
 const JOIN = "join the tailnet";
-const PROBE = "refuse unless the farm answers";
+pub const PROBE = "refuse unless the farm answers";
 const WRITE = "write the farm's machine buckconfig";
 
 fn indentOf(line: []const u8) usize {
@@ -151,20 +157,20 @@ fn parse(ar: std.mem.Allocator, text: []const u8) !Action {
     return .{ .inputs = inputs.items, .steps = steps.items, .runs = text[runs_at orelse return error.NoRuns ..] };
 }
 
-fn loadAction(ar: std.mem.Allocator) !Action {
+pub fn loadAction(ar: std.mem.Allocator) !Action {
     const work = try std.process.getEnvVarOwned(ar, "KOMIRA_TEST_WORK");
     const path = try std.fs.path.join(ar, &.{ work, "action.yml" });
     const text = try std.fs.cwd().readFileAlloc(ar, path, 1 << 20);
     return parse(ar, text);
 }
 
-fn step(action: Action, name: []const u8) !Step {
+pub fn step(action: Action, name: []const u8) !Step {
     for (action.steps) |s| if (std.mem.eql(u8, s.name, name)) return s;
     std.debug.print("action.yml has no step named '{s}'\n", .{name});
     return error.NoSuchStep;
 }
 
-const Value = struct { name: []const u8, value: []const u8 };
+pub const Value = struct { name: []const u8, value: []const u8 };
 
 const Outcome = struct {
     /// The exit status of the first step that failed, or 0.
@@ -190,7 +196,7 @@ const BASE = [_]Value{
     .{ .name = "farm-properties", .value = "OSFamily=Linux,pool=linux" },
 };
 
-fn valueOf(action: Action, values: []const Value, name: []const u8) ![]const u8 {
+pub fn valueOf(action: Action, values: []const Value, name: []const u8) ![]const u8 {
     var i = values.len;
     while (i > 0) {
         i -= 1;
@@ -278,6 +284,8 @@ fn expectRefused(values: []const Value, message: []const u8) !void {
 }
 
 const LINUX_ONLY =
+    \\[komira_ci]
+    \\  farm_wait_seconds = 1200
     \\[buck2_re_client]
     \\  engine_address = grpc://re.example.com:8980
     \\  action_cache_address = grpc://re.example.com:8980
@@ -304,6 +312,8 @@ test "macOS properties and hosts: both keys under [komira_re], after the linux s
         .{ .name = "darwin-macos-hosts", .value = "26.5-0123456789abcdef 27.0-fedcba9876543210" },
         .{ .name = "execution-concurrency-limit", .value = "64" },
     },
+        \\[komira_ci]
+        \\  farm_wait_seconds = 1200
         \\[buck2_re_client]
         \\  engine_address = grpc://re.example.com:8980
         \\  action_cache_address = grpc://re.example.com:8980
@@ -327,6 +337,8 @@ test "macOS library directories: written verbatim after the hosts, spaces and co
         .{ .name = "darwin-macos-hosts", .value = "26.5-0123456789abcdef" },
         .{ .name = "macos-library-dirs", .value = "/opt/homebrew/lib:/usr/local/opt/lz4/lib /opt/other" },
     },
+        \\[komira_ci]
+        \\  farm_wait_seconds = 1200
         \\[buck2_re_client]
         \\  engine_address = grpc://re.example.com:8980
         \\  action_cache_address = grpc://re.example.com:8980
@@ -351,6 +363,8 @@ test "macOS properties and hosts without library directories write no macos_libr
         .{ .name = "darwin-macos-hosts", .value = "26.5-0123456789abcdef" },
         .{ .name = "macos-library-dirs", .value = "" },
     },
+        \\[komira_ci]
+        \\  farm_wait_seconds = 1200
         \\[buck2_re_client]
         \\  engine_address = grpc://re.example.com:8980
         \\  action_cache_address = grpc://re.example.com:8980
@@ -398,6 +412,8 @@ test "a macOS config file without library directories holds no macos_library_dir
 
 test "tls true with no CA file: tls = true and no tls_ca_certs (the system's roots)" {
     try expectWritten(&.{.{ .name = "tls", .value = "true" }},
+        \\[komira_ci]
+        \\  farm_wait_seconds = 1200
         \\[buck2_re_client]
         \\  engine_address = grpc://re.example.com:8980
         \\  action_cache_address = grpc://re.example.com:8980
@@ -418,6 +434,8 @@ test "tls false said outright is the default's buckconfig" {
 }
 
 const WITH_BATCH =
+    \\[komira_ci]
+    \\  farm_wait_seconds = 1200
     \\[buck2_re_client]
     \\  engine_address = grpc://re.example.com:8980
     \\  action_cache_address = grpc://re.example.com:8980
@@ -460,6 +478,8 @@ test "tls true with a CA file: tls_ca_certs names that path" {
     try tmp.dir.writeFile(.{ .sub_path = "ca.pem", .data = "not parsed by the action\n" });
     const ca = try tmp.dir.realpathAlloc(ar, "ca.pem");
     const want = try std.fmt.allocPrint(ar,
+        \\[komira_ci]
+        \\  farm_wait_seconds = 1200
         \\[buck2_re_client]
         \\  engine_address = grpc://re.example.com:8980
         \\  action_cache_address = grpc://re.example.com:8980
@@ -572,6 +592,27 @@ test "a concurrency limit that is not a number is refused" {
     try expectRefused(&.{.{ .name = "execution-concurrency-limit", .value = "64x" }}, "execution-concurrency-limit is not a number");
 }
 
+test "farm-wait-minutes is written in seconds as farm_wait_seconds under [komira_ci], and 20 minutes when left out" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    try t.expect(std.mem.indexOf(u8, LINUX_ONLY, "farm_wait_seconds = 1200\n") != null);
+    try expectWritten(&.{.{ .name = "farm-wait-minutes", .value = "45" }}, try std.mem.replaceOwned(u8, ar, LINUX_ONLY, "farm_wait_seconds = 1200", "farm_wait_seconds = 2700"));
+    try expectWritten(&.{.{ .name = "farm-wait-minutes", .value = "1" }}, try std.mem.replaceOwned(u8, ar, LINUX_ONLY, "farm_wait_seconds = 1200", "farm_wait_seconds = 60"));
+    try expectWritten(&.{.{ .name = "farm-wait-minutes", .value = "120" }}, try std.mem.replaceOwned(u8, ar, LINUX_ONLY, "farm_wait_seconds = 1200", "farm_wait_seconds = 7200"));
+}
+
+test "a farm-wait-minutes that is not a whole number from 1 to 120 is refused" {
+    for ([_][]const u8{ "", "0", "121", "600", "20m", "-1", "1.5", "07", " 5", "5 " }) |bad| {
+        try expectRefused(&.{.{ .name = "farm-wait-minutes", .value = bad }}, "not a whole number of minutes from 1 to 120");
+    }
+}
+
+// The cases of the step that waits for the farm, on a clock of their own.
+test {
+    _ = @import("probe_test.zig");
+}
+
 // ---- the shape of the action ---------------------------------------------
 
 test "the steps run in this order: the check comes before the tailnet join" {
@@ -602,7 +643,7 @@ test "every input is used, and every use names a declared input" {
     defer arena.deinit();
     const ar = arena.allocator();
     const action = try loadAction(ar);
-    try t.expectEqual(@as(usize, 13), action.inputs.len);
+    try t.expectEqual(@as(usize, 14), action.inputs.len);
     for (action.inputs) |in| {
         const use = try std.fmt.allocPrint(ar, "${{{{ inputs.{s} }}}}", .{in.name});
         if (std.mem.indexOf(u8, action.runs, use) == null) std.debug.print("input '{s}' is never used\n", .{in.name});

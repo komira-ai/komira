@@ -11,6 +11,7 @@
 //   registerParquet(session, name, path)  Promise<undefined>
 //   parquetSchema(session, path)       Promise<Buffer>: the file's schema as komira.plan.v1 WireSchema bytes
 //   planRender(session, bytes)         Promise<string>: the text of a serialized plan; the plan is not run
+//   sql(session, text)                 Promise of an Arrow result: komira_sql_stream's stream, drained
 //   sessionStats()                     { created, freed }: contexts made and freed here
 //   importArrowStream(capsule), arrowSchema(result), arrowNextBatch(result), arrowClose(result)
 //                                      an Arrow C stream drained and described (arrow_import.c)
@@ -23,10 +24,11 @@
 // or wrong library a loader error before any JavaScript runs. With dlopen the
 // host gives the path, the addon checks `komira_abi_version` (major 1) and
 // names a missing symbol, and every failure is a JavaScript Error. A call a
-// later minor of ABI 1 added (komira_ctx_new_with_options in 1.4,
-// komira_last_error_code and komira_last_error_step in 1.7) must be there when
-// the library's minor includes it, and may be missing from an older library:
-// newSession with options then throws, naming both versions. The library
+// later minor of ABI 1 added (komira_sql_stream in 1.3,
+// komira_ctx_new_with_options in 1.4, komira_last_error_code and
+// komira_last_error_step in 1.7) must be there when the library's minor
+// includes it, and may be missing from an older library: `sql`, or
+// newSession with options, then throws, naming both versions. The library
 // is never dlclose'd: the Mojo runtime does not support unloading, and a
 // session finalizer may run late.
 //
@@ -49,6 +51,10 @@
 // argument types, a freed session, a library not loaded, a path with a NUL
 // byte) throws TypeError or Error with `code` and no `status`, synchronously,
 // before anything is queued.
+//
+// sql. The session thread runs komira_sql_stream into a zeroed stream and
+// drains it there (arrow_drain); the result needs no context, so it reads
+// after freeSession. A failed drain rejects with the drain's error.
 //
 // Sessions. A session is an N-API external over a heap box that holds the
 // context handle and the session thread's queue. `freeSession` refuses new
@@ -102,6 +108,7 @@ typedef struct {
   int32_t (*register_parquet)(void *, const char *, const char *);
   int32_t (*parquet_schema)(void *, const char *, uint8_t *, uint64_t, uint64_t *);
   int32_t (*plan_render)(void *, const uint8_t *, uint64_t, uint8_t *, uint64_t, uint64_t *);
+  int32_t (*sql_stream)(void *, const char *, struct ArrowArrayStream *);  // ABI 1.3; NULL from an older library
 } Api;
 
 static Api g_api;
@@ -110,7 +117,7 @@ static atomic_bool g_loaded;
 static atomic_uint_fast64_t g_created;
 static atomic_uint_fast64_t g_freed;
 
-typedef enum { OP_REGISTER, OP_SCHEMA, OP_RENDER, OP_FREE } Op;
+typedef enum { OP_REGISTER, OP_SCHEMA, OP_RENDER, OP_FREE, OP_SQL } Op;
 
 // A further freeSession call made while the free was queued: its Promise
 // settles with the free's.
@@ -129,6 +136,7 @@ typedef struct Job {
   char *path;  // OP_REGISTER, OP_SCHEMA
   uint8_t *plan;  // OP_RENDER: a copy of the caller's bytes, never NULL
   uint64_t plan_len;
+  char *sql;  // OP_SQL
   // The outcome. `code` set: the addon failed (no status), with `message`.
   // Otherwise `status` is the library's; when it is not zero, `last` is the
   // last error's text, `last_code` its named code and `last_step` its step.
@@ -138,6 +146,11 @@ typedef struct Job {
   char *last;
   char *last_code;
   int32_t last_step;
+  // OP_SQL: the drained stream until it is handed to JavaScript, or, when
+  // `drain_failed`, why it could not be drained.
+  ArrowResult *result;
+  bool drain_failed;
+  ArrowDrainError drain;
   uint8_t *out;  // OP_SCHEMA, OP_RENDER: the result bytes
   uint64_t out_len;
   // JavaScript thread only.
@@ -424,6 +437,8 @@ static napi_value js_load(napi_env env, napi_callback_info info) {
   if (!resolve(env, lib, "komira_plan_render", &fn)) goto closed;
   api.plan_render =
       (int32_t(*)(void *, const uint8_t *, uint64_t, uint8_t *, uint64_t, uint64_t *))fn;
+  if (!resolve_since(env, lib, version, 3, "komira_sql_stream", &fn)) goto closed;
+  api.sql_stream = (int32_t(*)(void *, const char *, struct ArrowArrayStream *))fn;
   api.path = path;
   path = NULL;
   g_api = api;
@@ -455,6 +470,9 @@ static void free_job(Job *j) {
   free(j->plan);
   free(j->last);
   free(j->last_code);
+  free(j->sql);
+  arrow_drain_error_free(&j->drain);
+  arrow_result_free(j->result);
   free(j->out);
   for (Waiter *w = j->waiters; w != NULL;) {
     Waiter *next = w->next;
@@ -509,11 +527,25 @@ static void run_two_call(Session *s, Job *j) {
   j->out_len = n;
 }
 
+// komira_sql_stream into a zeroed stream, which the library writes only on
+// success, then the drain of that stream.
+static void run_sql(Session *s, Job *j) {
+  struct ArrowArrayStream stream;
+  memset(&stream, 0, sizeof stream);
+  j->status = g_api.sql_stream(s->ctx, j->sql, &stream);
+  if (j->status != KOMIRA_OK) return;
+  j->result = arrow_drain(&stream, &j->drain);
+  j->drain_failed = j->result == NULL;
+}
+
 // Runs one call on the session thread and records its outcome in `j`.
 static void run_job(Session *s, Job *j) {
   switch (j->op) {
     case OP_REGISTER:
       j->status = g_api.register_parquet(s->ctx, j->name, j->path);
+      break;
+    case OP_SQL:
+      run_sql(s, j);
       break;
     case OP_SCHEMA:
     case OP_RENDER:
@@ -598,14 +630,20 @@ static void finalize_tsfn(napi_env env, void *data, void *hint) {
 // The Value a settled job resolves with, or the Error it rejects with
 // (`*reject`). NULL if neither can be made.
 static napi_value outcome(napi_env env, Job *j, bool *reject) {
-  static const char *const ops[] = {"komira_register_parquet", "komira_parquet_schema",
-                                    "komira_plan_render", "komira_ctx_free"};
+  static const char *const ops[] = {"komira_register_parquet", "komira_parquet_schema", "komira_plan_render",
+                                    "komira_ctx_free", "komira_sql_stream"};
   napi_value v = NULL;
   *reject = true;
   if (j->code != NULL) return code_error(env, j->code, j->message);
   if (j->status != KOMIRA_OK) return status_error(env, ops[j->op], j->status, j->last, j->last_code, j->last_step);
+  if (j->drain_failed) return arrow_drain_error_value(env, &j->drain);
   *reject = false;
   switch (j->op) {
+    case OP_SQL:
+      // The result is JavaScript's now, made or not (arrow_result_value).
+      v = arrow_result_value(env, j->result);
+      j->result = NULL;
+      break;
     case OP_REGISTER:
     case OP_FREE:
       if (napi_get_undefined(env, &v) != napi_ok) v = NULL;
@@ -973,6 +1011,28 @@ static napi_value js_plan_render(napi_env env, napi_callback_info info) {
   return enqueue(env, argv[0], s, j);
 }
 
+static napi_value js_sql(napi_env env, napi_callback_info info) {
+  napi_value argv[2];
+  if (!get_args(env, info, 2, argv) || !require_loaded(env)) return NULL;
+  Session *s = get_session(env, argv[0]);
+  if (s == NULL) return NULL;
+  if (g_api.sql_stream == NULL) {
+    char msg[4096 + 160];  // the library's path and the versions
+    snprintf(msg, sizeof msg, "komira_sql_stream needs libkomira ABI version %d.3; the library at %s is %d.%d",
+             ABI_MAJOR, g_api.path, (int)(g_api.version / 1000), (int)(g_api.version % 1000));
+    return fail(env, "KOMIRA_ABI_TOO_OLD", msg);
+  }
+  char *sql = get_cstring(env, argv[1], "the query");
+  if (sql == NULL) return NULL;
+  Job *j = new_job(env, OP_SQL);
+  if (j == NULL) {
+    free(sql);
+    return NULL;
+  }
+  j->sql = sql;
+  return enqueue(env, argv[0], s, j);
+}
+
 // ---- the module -------------------------------------------------------------
 
 static int export_fn(napi_env env, napi_value exports, const char *name, napi_callback fn) {
@@ -989,6 +1049,7 @@ NAPI_MODULE_INIT() {
       !export_fn(env, exports, "registerParquet", js_register_parquet) ||
       !export_fn(env, exports, "parquetSchema", js_parquet_schema) ||
       !export_fn(env, exports, "planRender", js_plan_render) ||
+      !export_fn(env, exports, "sql", js_sql) ||
       !export_fn(env, exports, "sessionStats", js_session_stats) ||
       !arrow_import_export(env, exports)) {
     napi_throw_error(env, NULL, "komira_addon: cannot export its functions");
