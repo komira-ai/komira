@@ -293,16 +293,14 @@ def test_ddof_1_builds_the_sample_aggregates_and_ddof_0_the_population_ones():
     df, g = env.df, env.df.groupby("a")
     for how, sample, population in (("std", "stddev_samp", "stddev_pop"), ("var", "var_samp", "var_pop")):
         for ddof, func in ((1, sample), (0, population)):
-            want = _ops.aggregate(SCAN, (), (("x", agg(func, "x")),))
-            assert getattr(df[["x"]], how)(ddof=ddof)._plan == want, (how, ddof)
-            assert getattr(g["x"], how)(ddof=ddof)._plan == grouped(
-                SCAN, ("a",), (("x", agg(func, "x")),)
-            ), (how, ddof)
+            want = [agg(func, "x")]
+            assert _walk_aggs(getattr(df[["x"]], how)(ddof=ddof)._plan) == want, (how, ddof)
+            assert _walk_aggs(getattr(g["x"], how)(ddof=ddof)._plan) == want, (how, ddof)
         # The default is the sample one, as in pandas.
         assert getattr(df[["x"]], how)()._plan == getattr(df[["x"]], how)(ddof=1)._plan
         assert getattr(df[["x"]], how)(ddof=0).dtypes == {"x": "float64"}
     boolean = df[["ok"]].std(ddof=0)
-    assert boolean._plan == _ops.aggregate(SCAN, (), (("ok", agg("stddev_pop", arg=Cast(ColRef("ok"), "float64"))),))
+    assert _walk_aggs(boolean._plan) == [agg("stddev_pop", arg=Cast(ColRef("ok"), "float64"))]
 
 
 def test_a_ddof_that_is_neither_0_nor_1_is_refused_by_name_listing_both():

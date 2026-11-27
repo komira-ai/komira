@@ -46,12 +46,10 @@ it is used inside its own frame's verbs: `df[s]` filters by it and
 
 from __future__ import annotations
 
-from numbers import Real
 from typing import TYPE_CHECKING
 
-from . import _accessors, _cast, _ops, _refusals, _windows
+from . import _accessors, _cast, _groupby, _ops, _refusals, _windows
 from ._errors import UnsupportedOperation
-from ._groupby import _NUMERIC_TYPES
 from ._windows import Windows, merged
 
 if TYPE_CHECKING:
@@ -302,7 +300,7 @@ class Series:
                 "quantile() of several fractions gives a Series indexed by them in pandas, and a komira Series "
                 "has no index: ask for one fraction at a time, as s.quantile(0.25)"
             )
-        if isinstance(q, bool) or not isinstance(q, Real):
+        if isinstance(q, bool) or not isinstance(q, (int, float)):
             raise TypeError(f"quantile q must be a number from 0 to 1, not {type(q).__name__}")
         if not 0 <= q <= 1:
             raise ValueError("percentiles should all be in the interval [0, 1]")
@@ -317,7 +315,7 @@ class Series:
                 'as df.assign(x=...), then take df["x"]'
             )
         dtype = self._type
-        if dtype not in _NUMERIC_TYPES:
+        if dtype not in _groupby._NUMERIC_TYPES:
             raise UnsupportedOperation(
                 f"quantile() needs a numeric or boolean Series, and this one is {dtype}"
             )

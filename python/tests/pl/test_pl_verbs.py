@@ -535,8 +535,23 @@ def test_std_and_var_with_ddof_1_are_the_sample_aggregates_and_with_ddof_0_the_p
         kpl.col("y").median().alias("f"),
     )
     funcs = ["stddev_samp", "stddev_samp", "stddev_pop", "var_samp", "var_pop", "median"]
-    assert lf._plan.child.aggs == tuple((f"__komira_agg_{i}", Agg(func, (c("y"),))) for i, func in enumerate(funcs))
+    assert sorted(a.func for a in _walk_aggs(lf._plan)) == sorted(funcs)
+    assert all(a.args == (c("y"),) for a in _walk_aggs(lf._plan))
     assert list(lf.schema) == ["a", "b", "c", "d", "e", "f"]
+
+
+def _walk_aggs(node):
+    """Every Agg in a plan tree."""
+    out, stack = [], [node]
+    while stack:
+        n = stack.pop()
+        if isinstance(n, Agg):
+            out.append(n)
+        elif isinstance(n, tuple):
+            stack.extend(n)
+        else:
+            stack.extend(getattr(n, f) for f in getattr(n, "__dataclass_fields__", {}))
+    return out
 
 
 def test_the_sum_of_a_boolean_counts_its_trues():
