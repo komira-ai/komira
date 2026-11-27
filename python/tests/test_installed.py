@@ -253,7 +253,10 @@ def check_compressed_parquet(s):
 
     rows = [{"id": i, "word": "w{}".format(i % 7)} for i in range(1000)]
     table = pa.Table.from_pylist(rows, schema=pa.schema([("id", pa.int64()), ("word", pa.string())]))
-    for codec, stored in (("zstd", "ZSTD"), ("lz4", "LZ4_RAW")):
+    # pyarrow names a column chunk's codec by Arrow's compression name: the
+    # Parquet codec LZ4_RAW, which compression="lz4" writes, is "LZ4" (the
+    # Hadoop-framed Parquet LZ4 would be "LZ4_HADOOP").
+    for codec, stored in (("zstd", "ZSTD"), ("lz4", "LZ4")):
         path = os.path.join(os.getcwd(), codec + ".parquet")
         pq.write_table(table, path, compression=codec)
         written = pq.ParquetFile(path).metadata.row_group(0).column(0).compression
