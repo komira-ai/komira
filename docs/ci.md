@@ -744,6 +744,34 @@ as the same file as its NFC form, `bench_data`'s Snappy digests (komira-ai/komir
 tests (komira-ai/komira#2206, komira-ai/komira#2207), the ELF-only native shared library
 (komira-ai/komira#2197) and the UDF spike helpers' C (`probe.c`, `channel.c`, `engine_loop.c`).
 
+Each `macOS build:` issue these sweeps filed was checked against the code on main after the last one
+merged and closed with the change that fixed it:
+
+| Issue | What stopped the macOS build | Fixed by |
+| --- | --- | --- |
+| komira-ai/komira#2196 | aws-lc and s2n-tls had no darwin-arm64 build (133 libraries) | komira-ai/komira#2203, komira-ai/komira#2248 |
+| komira-ai/komira#2197 | a library's native shared library was ELF only | komira-ai/komira#2228 |
+| komira-ai/komira#2198 | `mojo_shared_lib_exports` ran the Linux `so_exports` on a Mac | komira-ai/komira#2193 |
+| komira-ai/komira#2199 | the UDF spike helpers' C and welded tests were Linux-only | komira-ai/komira#2224, komira-ai/komira#2295 |
+| komira-ai/komira#2200 | `phase_timers` dropped a join tail stamped on the fork's tick | komira-ai/komira#2220 |
+| komira-ai/komira#2201 | `http_core` and `host_probe` tests read `/proc/self/status` | komira-ai/komira#2210 |
+| komira-ai/komira#2207 | `http_core`'s partial-send test saw no partial send on macOS | komira-ai/komira#2227 |
+| komira-ai/komira#2208 | `bench_data`'s join digests (Snappy hashes differently on arm64) | komira-ai/komira#2220 |
+| komira-ai/komira#2233 | `cbrt` one ulp from the Linux DuckDB oracle | komira-ai/komira#2295 (the libm rule) |
+| komira-ai/komira#2288 | the Python UDF runtime library was ELF only and used `memfd_create` | komira-ai/komira#2299 |
+| komira-ai/komira#2289 | `mojo_shared_lib` refused `native_owners` on darwin-arm64 | komira-ai/komira#2298 |
+| komira-ai/komira#2002 | `elfsyms` read no Mach-O archive, so snappy's prefix header failed | komira-ai/komira#2158 |
+
+What is left, none of it a `//src` library that fails to build for darwin-arm64:
+
+- `//third_party/aws-lc`'s libssl and `bssl` stay linux-x86_64 only (limit `aws-lc-x86-64-linux`).
+  No library depends on them: only the `mojo_test`s of `//src/tests/e2e/komira_tls_interop_e2e`,
+  which run `bssl` as a TLS peer, name it.
+- `//src/http_client`'s `test_rss_gate` checks its flat-RSS bound on macOS only, and returns before
+  streaming on Linux, which has no resident-set probe in it (komira-ai/komira#2446).
+- The darwin busybox shim is still a shell script with two rows in `no_shell_list.tsv`
+  (komira-ai/komira#2023). The darwin actions that use it build.
+
 The proposal keeps this set built, in the same way as the mopm set:
 
 - **One named target, generated.** `//release:darwin_src_libs` is a generated list, like the
