@@ -116,7 +116,8 @@ test "usage: every flag required, none unknown or twice, a value for each; exit 
         const o = cli.run(a, tmp.dir, c.argv);
         try t.expectEqual(@as(u8, 2), o.code);
         try t.expect(std.mem.startsWith(u8, o.stdout, c.first));
-        try t.expect(std.mem.endsWith(u8, o.stdout, "       tool release-check --out F [--expect-refusal TEXT] (--member NAME DISPLAY F | --no-readme NAME DISPLAY)...\n"));
+        try t.expect(std.mem.indexOf(u8, o.stdout, "       tool release-check --out F [--expect-refusal TEXT] (--member NAME DISPLAY F | --no-readme NAME DISPLAY)...\n") != null);
+        try t.expect(std.mem.endsWith(u8, o.stdout, "       tool tasks-check --catalogue F --catalogue-display NAME --root D --display D --out F\n"));
     }
     // A README it cannot read.
     const args = generateArgs("missing.md", "allow");
@@ -273,6 +274,320 @@ test "release-check usage: --out once and required, a member needed, each member
         .{ .argv = &.{ "tool", "release-check", "--out", "o", "--member", "a", "d" }, .first = "readme-examples: --member needs 3 values\n" },
         .{ .argv = &.{ "tool", "release-check", "--out", "o", "--no-readme", "", "d" }, .first = "readme-examples: --no-readme has an empty value\n" },
         .{ .argv = &.{ "tool", "release-check", "--out", "o", "--readme", "r" }, .first = "readme-examples: unknown argument --readme\n" },
+    };
+    for (cases) |c| {
+        const o = cli.run(a, tmp.dir, c.argv);
+        try t.expectEqual(@as(u8, 2), o.code);
+        try t.expect(std.mem.startsWith(u8, o.stdout, c.first));
+    }
+}
+
+// ---- tasks-check ------------------------------------------------------------
+
+const TASKS_CATALOGUE =
+    \\[
+    \\  {"rank": 1, "slug": "a", "category": "Read", "question": "How do I a?", "status": "works"},
+    \\  {"rank": 2, "slug": "b", "category": "Read", "question": "How do I b?", "status": "partial"},
+    \\  {"rank": 3, "slug": "c", "category": "Read", "question": "How do I c?", "status": "gap", "issues": ["komira-ai/komira#1"]}
+    \\]
+;
+
+fn writeTask(dir: std.fs.Dir, a: std.mem.Allocator, name: []const u8, question: []const u8) !void {
+    try dir.makePath(name);
+    var sub = try dir.openDir(name, .{});
+    defer sub.close();
+    try sub.writeFile(.{ .sub_path = "example.py", .data = "print(1)\n" });
+    try sub.writeFile(.{ .sub_path = "expected_output.txt", .data = "1\n" });
+    const page = try std.fmt.allocPrint(a, "# {s}\n\n<!-- include example.py -->\n```python\nprint(1)\n```\n\n<!-- include expected_output.txt -->\n```text\n1\n```\n", .{question});
+    try sub.writeFile(.{ .sub_path = "page.md", .data = page });
+}
+
+const TASKS_ARGS = [_][]const u8{ "tool", "tasks-check", "--catalogue", "tasks/catalogue.json", "--catalogue-display", "docs/tasks/catalogue.json", "--root", "tasks", "--display", "python/docs/tasks", "--out", "report.txt" };
+
+test "tasks-check reads every subdirectory of the root, in name order, and writes the report" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "tasks_pass");
+    defer tmp.done();
+    try tmp.dir.makePath("tasks");
+    try tmp.dir.writeFile(.{ .sub_path = "tasks/catalogue.json", .data = TASKS_CATALOGUE });
+    // Files at the top of the root are not task directories.
+    try tmp.dir.writeFile(.{ .sub_path = "tasks/README.md", .data = "# Tasks\n" });
+    var root = try tmp.dir.openDir("tasks", .{});
+    defer root.close();
+    try writeTask(root, a, "2-b", "How do I b?");
+    try writeTask(root, a, "1-a", "How do I a?");
+    const o = cli.run(a, tmp.dir, &TASKS_ARGS);
+    try t.expectEqualStrings("", o.stdout);
+    try t.expectEqual(@as(u8, 0), o.code);
+    try t.expectEqualStrings("1-a works\n2-b partial\n", try tmp.dir.readFileAlloc(a, "report.txt", 1 << 20));
+}
+
+test "tasks-check refused is exit 1, names each file under --display, and writes no report" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "tasks_refused");
+    defer tmp.done();
+    try tmp.dir.makePath("tasks");
+    try tmp.dir.writeFile(.{ .sub_path = "tasks/catalogue.json", .data = TASKS_CATALOGUE });
+    var root = try tmp.dir.openDir("tasks", .{});
+    defer root.close();
+    try writeTask(root, a, "1-a", "How do I a?");
+    try root.writeFile(.{ .sub_path = "1-a/expected_output.txt", .data = "2\n" });
+    try root.makePath("1-a/out");
+    try writeTask(root, a, "3-c", "How do I c?");
+    const o = cli.run(a, tmp.dir, &TASKS_ARGS);
+    try t.expectEqual(@as(u8, 1), o.code);
+    try t.expectEqualStrings("python/docs/tasks/1-a/out/: a task directory holds no directory\n" ++
+        "python/docs/tasks/1-a/page.md:9: include expected_output.txt is stale (first difference at line 1 of expected_output.txt)\n" ++
+        "python/docs/tasks/3-c: rank 3 is a gap, which has no example\n", o.stdout);
+    try t.expectError(error.FileNotFound, tmp.dir.access("report.txt", .{}));
+}
+
+test "tasks-check with no catalogue or no root is exit 2, naming the path" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "tasks_io");
+    defer tmp.done();
+    var o = cli.run(a, tmp.dir, &TASKS_ARGS);
+    try t.expectEqual(@as(u8, 2), o.code);
+    try t.expectEqualStrings("readme-examples: cannot read tasks/catalogue.json: FileNotFound\n", o.stdout);
+    try tmp.dir.writeFile(.{ .sub_path = "catalogue.json", .data = TASKS_CATALOGUE });
+    const args = [_][]const u8{ "tool", "tasks-check", "--catalogue", "catalogue.json", "--catalogue-display", "c.json", "--root", "tasks", "--display", "d", "--out", "report.txt" };
+    o = cli.run(a, tmp.dir, &args);
+    try t.expectEqual(@as(u8, 2), o.code);
+    try t.expectEqualStrings("readme-examples: cannot read the task directories of tasks: FileNotFound\n", o.stdout);
+}
+
+test "tasks-check without a flag is the usage, exit 2" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "tasks_usage");
+    defer tmp.done();
+    const args = [_][]const u8{ "tool", "tasks-check", "--catalogue", "c.json", "--catalogue-display", "c.json", "--root", "r", "--display", "d" };
+    const o = cli.run(a, tmp.dir, &args);
+    try t.expectEqual(@as(u8, 2), o.code);
+    try t.expect(std.mem.startsWith(u8, o.stdout, "readme-examples: --out is required\n"));
+}
+
+// ---- source-first READMEs: generate, check, fill, migrate ---------------------
+
+const INCLUDED = "# R\n\n<!-- include examples/a.mojo -->\n```mojo\ndef main():\n    print(1)\n```\n";
+
+test "generate reads an included fence as a whole program, and --includes refuse refuses its marker" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "includes");
+    defer tmp.done();
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = INCLUDED });
+    const args = generateArgs("README.md", "refuse");
+    var o = cli.run(a, tmp.dir, &args);
+    try t.expectEqualStrings("", o.stdout);
+    try t.expectEqual(@as(u8, 0), o.code);
+    try t.expectEqualStrings("4\n", try tmp.dir.readFileAlloc(a, "out/examples", 1 << 20));
+    // Module mode: the file's own `main`, no `def main() raises:` around it.
+    try t.expect(std.mem.endsWith(u8, try tmp.dir.readFileAlloc(a, "out/src/readme_r_4.mojo", 1 << 20), "\n\n\n\ndef main():\n    print(1)\n"));
+    const refuse = [_][]const u8{ "tool", "generate", "--readme", "README.md", "--display", "src/r/README.md", "--package", "r", "--links", "refuse", "--out-dir", "out/src", "--examples", "out/examples", "--includes", "refuse" };
+    o = cli.run(a, tmp.dir, &refuse);
+    try t.expectEqual(@as(u8, 1), o.code);
+    try t.expectEqualStrings("src/r/README.md:3: an include marker in the README of a library that lists no readme_examples:" ++
+        " list the files in its BUCK file (readme_examples = glob([\"examples/*.mojo\"])), so the freshness check holds each fence to its file\n", o.stdout);
+    const allow = [_][]const u8{ "tool", "generate", "--readme", "README.md", "--display", "src/r/README.md", "--package", "r", "--links", "refuse", "--out-dir", "out/src", "--examples", "out/examples", "--includes=allow" };
+    try t.expectEqual(@as(u8, 0), cli.run(a, tmp.dir, &allow).code);
+}
+
+fn shownArgs(verb: []const u8, out: []const u8) [10][]const u8 {
+    return .{ "tool", verb, "--readme", "README.md", "--display", "src/r/README.md", "--example", "examples/a.mojo=examples/a.mojo", "--out", out };
+}
+
+test "check writes its line for a fresh README; fill's patch is empty then" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "fresh");
+    defer tmp.done();
+    try tmp.dir.makePath("examples");
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = INCLUDED });
+    try tmp.dir.writeFile(.{ .sub_path = "examples/a.mojo", .data = "def main():\n    print(1)\n" });
+    const c = shownArgs("check", "fresh.passed");
+    const o = cli.run(a, tmp.dir, &c);
+    try t.expectEqualStrings("", o.stdout);
+    try t.expectEqual(@as(u8, 0), o.code);
+    try t.expectEqualStrings("src/r/README.md: 1 example(s), each fence its file byte for byte\n", try tmp.dir.readFileAlloc(a, "fresh.passed", 1 << 20));
+    const f = shownArgs("fill", "fill.patch");
+    try t.expectEqual(@as(u8, 0), cli.run(a, tmp.dir, &f).code);
+    try t.expectEqualStrings("", try tmp.dir.readFileAlloc(a, "fill.patch", 1 << 20));
+}
+
+test "check refuses a stale README, writing nothing; fill writes the patch that mends it" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "stale");
+    defer tmp.done();
+    try tmp.dir.makePath("examples");
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = INCLUDED });
+    try tmp.dir.writeFile(.{ .sub_path = "examples/a.mojo", .data = "def main():\n    print(2)\n" });
+    const c = shownArgs("check", "fresh.passed");
+    const o = cli.run(a, tmp.dir, &c);
+    try t.expectEqual(@as(u8, 1), o.code);
+    try t.expectEqualStrings("src/r/README.md:6: include examples/a.mojo is stale: this line is not line 2 of src/r/examples/a.mojo; " ++
+        "build the library's [tests][readme][fill] sub-target and apply the patch it writes with git apply\n", o.stdout);
+    try t.expectError(error.FileNotFound, tmp.dir.access("fresh.passed", .{}));
+    const f = shownArgs("fill", "fill.patch");
+    try t.expectEqual(@as(u8, 0), cli.run(a, tmp.dir, &f).code);
+    try t.expectEqualStrings("--- a/src/r/README.md\n+++ b/src/r/README.md\n@@ -3,5 +3,5 @@\n" ++
+        " <!-- include examples/a.mojo -->\n ```mojo\n def main():\n-    print(1)\n+    print(2)\n ```\n", try tmp.dir.readFileAlloc(a, "fill.patch", 1 << 20));
+}
+
+test "fill refuses an include it cannot fill, writing nothing" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "unfillable");
+    defer tmp.done();
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = INCLUDED });
+    const o = cli.run(a, tmp.dir, &.{ "tool", "fill", "--readme=README.md", "--display=src/r/README.md", "--out=fill.patch" });
+    try t.expectEqual(@as(u8, 1), o.code);
+    try t.expectEqualStrings("src/r/README.md:3: include examples/a.mojo: no such example: the library's readme_examples (its BUCK file) lists no examples/a.mojo\n", o.stdout);
+    try t.expectError(error.FileNotFound, tmp.dir.access("fill.patch", .{}));
+}
+
+test "check and fill usage: an --example is PATH=FILE, given once, and readable; each flag once; exit 2" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "shown_usage");
+    defer tmp.done();
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = INCLUDED });
+    try tmp.dir.writeFile(.{ .sub_path = "a.mojo", .data = "def main():\n    print(1)\n" });
+    const cases = [_]struct { argv: []const []const u8, first: []const u8 }{
+        .{ .argv = &.{ "tool", "check", "--readme", "README.md", "--display", "d", "--example", "examples/a.mojo", "--out", "o" }, .first = "readme-examples: --example examples/a.mojo is not PATH=FILE\n" },
+        .{ .argv = &.{ "tool", "check", "--readme", "README.md", "--display", "d", "--example", "=a.mojo", "--out", "o" }, .first = "readme-examples: --example =a.mojo is not PATH=FILE\n" },
+        .{ .argv = &.{ "tool", "check", "--readme", "README.md", "--display", "d", "--example", "examples/a.mojo=a.mojo", "--example=examples/a.mojo=a.mojo", "--out", "o" }, .first = "readme-examples: --example examples/a.mojo given twice\n" },
+        .{ .argv = &.{ "tool", "fill", "--readme", "README.md", "--readme", "README.md" }, .first = "readme-examples: --readme given twice\n" },
+        .{ .argv = &.{ "tool", "fill", "--readme", "README.md", "--display", "d", "--outdir", "o" }, .first = "readme-examples: unknown flag --outdir\n" },
+        .{ .argv = &.{ "tool", "fill", "--readme", "README.md", "--display", "d", "--out" }, .first = "readme-examples: --out needs a value\n" },
+        .{ .argv = &.{ "tool", "fill", "--readme", "README.md", "--display=", "--out", "o" }, .first = "readme-examples: --display has an empty value\n" },
+        .{ .argv = &.{ "tool", "check", "--display", "d", "--out", "o" }, .first = "readme-examples: --readme is required\n" },
+        .{ .argv = &.{ "tool", "check", "--readme", "README.md", "--out", "o" }, .first = "readme-examples: --display is required\n" },
+        .{ .argv = &.{ "tool", "check", "--readme", "README.md", "--display", "d" }, .first = "readme-examples: --out is required\n" },
+    };
+    for (cases) |c| {
+        const o = cli.run(a, tmp.dir, c.argv);
+        try t.expectEqual(@as(u8, 2), o.code);
+        try t.expect(std.mem.startsWith(u8, o.stdout, c.first));
+    }
+    const missing = cli.run(a, tmp.dir, &.{ "tool", "check", "--readme", "README.md", "--display", "d", "--example", "examples/a.mojo=nope.mojo", "--out", "o" });
+    try t.expectEqual(@as(u8, 2), missing.code);
+    try t.expectEqualStrings("readme-examples: cannot read nope.mojo: FileNotFound\n", missing.stdout);
+    const no_readme = cli.run(a, tmp.dir, &.{ "tool", "check", "--readme", "nope.md", "--display", "d", "--out", "o" });
+    try t.expectEqual(@as(u8, 2), no_readme.code);
+    try t.expectEqualStrings("readme-examples: cannot read nope.md: FileNotFound\n", no_readme.stdout);
+}
+
+test "check of a README that shows no example and lists none writes NO EXAMPLE" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "check_none");
+    defer tmp.done();
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = "# R\n" });
+    const o = cli.run(a, tmp.dir, &.{ "tool", "check", "--readme", "README.md", "--display", "src/r/README.md", "--out", "fresh.passed" });
+    try t.expectEqual(@as(u8, 0), o.code);
+    try t.expectEqualStrings("NO EXAMPLE src/r/README.md: it lists no readme_examples and shows none, so nothing was compiled or run\n", try tmp.dir.readFileAlloc(a, "fresh.passed", 1 << 20));
+}
+
+test "migrate writes the README and its files; migrate --verify proves them and refuses an edited README" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "migrate");
+    defer tmp.done();
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = "```mojo\nprint(1)\n```\n" });
+    var o = cli.run(a, tmp.dir, &.{ "tool", "migrate", "--readme", "README.md", "--display", "src/r/README.md", "--out-dir", "m" });
+    try t.expectEqualStrings("", o.stdout);
+    try t.expectEqual(@as(u8, 0), o.code);
+    try t.expectEqualStrings("<!-- include examples/example_1.mojo -->\n```mojo\ndef main() raises:\n    print(1)\n```\n", try tmp.dir.readFileAlloc(a, "m/README.md", 1 << 20));
+    try t.expectEqualStrings("def main() raises:\n    print(1)\n", try tmp.dir.readFileAlloc(a, "m/examples/example_1.mojo", 1 << 20));
+    const verify = [_][]const u8{ "tool", "migrate", "--verify", "--readme", "README.md", "--display", "src/r/README.md", "--migrated", "m", "--out", "proof" };
+    o = cli.run(a, tmp.dir, &verify);
+    try t.expectEqualStrings("", o.stdout);
+    try t.expectEqual(@as(u8, 0), o.code);
+    try t.expectEqualStrings("migrate --verify src/r/README.md: 1 example(s), each file the program the gate ran for its fence; the README differs only inside them\n", try tmp.dir.readFileAlloc(a, "proof", 1 << 20));
+    try tmp.dir.deleteFile("proof");
+    try tmp.dir.writeFile(.{ .sub_path = "m/README.md", .data = "<!-- include examples/example_1.mojo -->\n```mojo\ndef main() raises:\n    print(1)\n```\nExtra.\n" });
+    o = cli.run(a, tmp.dir, &verify);
+    try t.expectEqual(@as(u8, 1), o.code);
+    try t.expectEqualStrings("src/r/README.md:6: the migrated README differs from the old one outside the examples: `Extra.` where the old one has `(nothing)` (its line 4)\n", o.stdout);
+    try t.expectError(error.FileNotFound, tmp.dir.access("proof", .{}));
+}
+
+test "migrate refuses a README it cannot migrate, writing nothing; its usage is exit 2" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "migrate_refused");
+    defer tmp.done();
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = "```mojo skip\n```\n" });
+    var o = cli.run(a, tmp.dir, &.{ "tool", "migrate", "--readme", "README.md", "--display", "R.md", "--out-dir", "m" });
+    try t.expectEqual(@as(u8, 1), o.code);
+    try t.expect(std.mem.startsWith(u8, o.stdout, "R.md:1: `mojo skip`"));
+    try t.expectError(error.FileNotFound, tmp.dir.access("m", .{}));
+    o = cli.run(a, tmp.dir, &.{ "tool", "migrate", "--verify", "--verify", "--readme", "README.md" });
+    try t.expectEqual(@as(u8, 2), o.code);
+    try t.expect(std.mem.startsWith(u8, o.stdout, "readme-examples: --verify given twice\n"));
+    o = cli.run(a, tmp.dir, &.{ "tool", "migrate", "--verify", "--readme", "README.md", "--display", "R.md", "--out-dir", "m" });
+    try t.expectEqual(@as(u8, 2), o.code);
+    try t.expect(std.mem.startsWith(u8, o.stdout, "readme-examples: unknown flag --out-dir\n"));
+    o = cli.run(a, tmp.dir, &.{ "tool", "migrate", "--verify", "--readme", "README.md", "--display", "R.md", "--migrated", "none", "--out", "p" });
+    try t.expectEqual(@as(u8, 2), o.code);
+    try t.expectEqualStrings("readme-examples: cannot read none/README.md: FileNotFound\n", o.stdout);
+}
+
+test "expect-failure passes only a command that fails with the text in its output" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "expect_failure");
+    defer tmp.done();
+    // The busybox applets the test runs with (its PATH): busybox `cat` names
+    // a file it cannot open.
+    var o = cli.run(a, tmp.dir, &.{ "tool", "expect-failure", "--text", "no_such_file", "--out", "red.passed", "--", "cat", "no_such_file" });
+    try t.expectEqualStrings("", o.stdout);
+    try t.expectEqual(@as(u8, 0), o.code);
+    try t.expectEqualStrings("FAILED AS EXPECTED: no_such_file\n", try tmp.dir.readFileAlloc(a, "red.passed", 1 << 20));
+    try tmp.dir.deleteFile("red.passed");
+    o = cli.run(a, tmp.dir, &.{ "tool", "expect-failure", "--text", "other", "--out", "red.passed", "--", "cat", "no_such_file" });
+    try t.expectEqual(@as(u8, 1), o.code);
+    try t.expect(std.mem.startsWith(u8, o.stdout, "expect-failure: the run failed (exit 1) but its output does not hold `other`. Its output ends:\n"));
+    try t.expect(std.mem.indexOf(u8, o.stdout, "no_such_file") != null);
+    o = cli.run(a, tmp.dir, &.{ "tool", "expect-failure", "--text", "x", "--out", "red.passed", "--", "true" });
+    try t.expectEqual(@as(u8, 1), o.code);
+    try t.expect(std.mem.startsWith(u8, o.stdout, "expect-failure: the run passed (exit 0); it must fail with `x` in its output."));
+    try t.expectError(error.FileNotFound, tmp.dir.access("red.passed", .{}));
+    o = cli.run(a, tmp.dir, &.{ "tool", "expect-failure", "--text", "x", "--out", "red.passed", "--", "readme_examples_no_such_program" });
+    try t.expectEqual(@as(u8, 2), o.code);
+    try t.expectEqualStrings("readme-examples: cannot run readme_examples_no_such_program: FileNotFound\n", o.stdout);
+}
+
+test "expect-failure usage: its flags, then `--` and a command; exit 2" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "expect_usage");
+    defer tmp.done();
+    const cases = [_]struct { argv: []const []const u8, first: []const u8 }{
+        .{ .argv = &.{ "tool", "expect-failure", "--text", "x", "--out", "o" }, .first = "readme-examples: expect-failure needs `--` and the command after its flags\n" },
+        .{ .argv = &.{ "tool", "expect-failure", "--text", "x", "--out", "o", "--" }, .first = "readme-examples: expect-failure: no command after `--`\n" },
+        .{ .argv = &.{ "tool", "expect-failure", "--out", "o", "--", "true" }, .first = "readme-examples: --text is required\n" },
+        .{ .argv = &.{ "tool", "generate", "--readme", "R", "--display", "d", "--package", "p", "--links", "allow", "--out-dir", "o", "--examples", "e", "--includes", "maybe" }, .first = "readme-examples: --includes is allow or refuse, not maybe\n" },
+        .{ .argv = &.{ "tool", "generate", "--readme", "R", "--display", "d", "--package", "p", "--links", "allow", "--out-dir", "o", "--examples", "e", "--includes=" }, .first = "readme-examples: --includes needs a value\n" },
     };
     for (cases) |c| {
         const o = cli.run(a, tmp.dir, c.argv);

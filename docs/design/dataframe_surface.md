@@ -3,19 +3,12 @@
 Status: design, partly built. The Python package is under [`python/komira/`](../../python/komira/), and
 its private layers of this surface are built: the plan node tree (`komira._ops`), the plan encoder
 (`komira._plan`), which writes a `komira.plan.v1.WirePlanEnvelope` with each node's output schema, the
-capture of a user function (`komira._capture`) and the UDF worker runtime (`komira._udf`). The first
-part of the pandas-shaped skin is built too: its readers, subscripts, `assign`, `sort_values`, `head`,
-`materialize` and `explain` are in `python/komira/_frame.py` and `_series.py`, and `materialize` runs
-the plan through `komira_plan_stream`. So are `groupby` with its `GroupBy` reductions and `agg`, the
-frame's own reductions (`agg`, `sum`, `mean`, `median`, `std`, `var`, `min`, `max`, `count`,
-`nunique`) and `drop_duplicates`, in `python/komira/_groupby.py`. So are `fillna`, `dropna`, `rename`,
-`add_prefix`, `add_suffix`, `astype`, `tail`, `komira.concat` and the `.str` and
-`.dt` accessors (`_frame.py`, `_verbs.py`, `_missing.py`, `_cast.py`, `_accessors.py`). NaN as missing
-(ruling 6) is built in `fillna` and `dropna`, not yet in the aggregates; `isna`, `notna`
-and the `Series` reductions are not built yet. The core of the polars-shaped skin, `komira.pl`, is built (the readers of Parquet, NDJSON and CSV, the
-row-wise verbs, sort and its order rules, aggregates, `concat`, `group_by`, `join`, `unique` and the
-windows), and its `collect()` runs the plan the same way. The other verbs (`shift`, `join_asof`, the
-sinks, `from_arrow`) are not built. The verbs, the plan each one builds and
+capture of a user function (`komira._capture`) and the UDF worker runtime (`komira._udf`). Both skins are built
+in part, in `python/komira/_frame.py` and `python/komira/pl/`, and `materialize` and `collect` run the plan
+through `komira_plan_stream`. What each skin does today is one page per feature under
+[python/docs/](../../python/docs/dataframe/overview.md), and what each capability has and lacks is its
+row of the capability map in [dataframe_surface_verbs.md](dataframe_surface_verbs.md); this paragraph lists
+neither. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
 
@@ -156,10 +149,13 @@ The frames are immutable, except for one pandas idiom:
   ([src/plan_proto/plan.proto](../../src/plan_proto/plan.proto)), using the generated protobuf modules
   under `komira/plan/v1/`. The encoder is built (`komira._plan.encode_plan`); the package does not ship
   the generated modules yet. The session sends the bytes through the plan entry, `komira_plan_stream`
-  (`libkomira` ABI 1.8), which no session method calls yet.
+  (`libkomira` ABI 1.8), which the session's `_plan_stream` and `_plan_write` call.
   - The plan entry decodes the bytes with `plan_wire`, binds the scans, optimizes, lowers, runs, and
     returns an Arrow C stream.
-  - A write terminal sets the envelope's `write_target`.
+  - A write terminal sets the envelope's `write_target` (format version 5). The plan entry writes the file
+    and answers the one-row `Count` stream, which the terminal reads and drops, returning `None`
+    ([credentials_and_writes.md §10](credentials_and_writes.md#10-writes)). Built for the pandas-shaped
+    skin; the polars-shaped `sink_*` of `komira.pl` are not built.
   - protobuf becomes a required dependency of the package with this surface, beside pyarrow, as the
     Python package design says. Its range is `PROTOBUF_REQUIREMENT` in `python/dependencies.bzl`, which
     the wheel of the release that first ships the plan modules declares.
@@ -290,7 +286,7 @@ whether the frame is **ordered**.
 
 - **A sort makes a frame ordered:** `sort_values`, `sort`, `nlargest`, `top_k` and the others.
 - **These verbs keep it ordered:**
-  - filters;
+  - filters, the semi and anti joins of `isin` with another frame's column (ruling 16) among them;
   - a projection, rename or `with_columns`/`assign` that keeps every sort key;
   - `head`, `limit` and `slice`.
 
@@ -459,8 +455,8 @@ its number).
       input column. That is the rule `select_aggregates.name_unaliased` and `agg_output_naming` apply on
       the Mojo side.
     - Two outputs with one name are refused at the verb.
-13. **Float aggregates are not bit-reproducible** (carried) across runs and worker counts (§2.10), except an ungrouped
-    float sum or mean, which the engine folds in source position order. Tests compare float sums and means with a
+13. **Float aggregates are not bit-reproducible** (carried) across runs and worker counts (§2.10), except a float
+    sum or mean, ungrouped or per group, which the engine folds in source position order. Tests compare float sums and means with a
     stated tolerance. Neither library promises more for parallel input.
 14. **Types.** New with the verbs that take a dtype (D17).
     - A dtype argument (`astype`, `cast`, `return_dtype`) is a `pyarrow.DataType`, or a name from the
@@ -638,8 +634,8 @@ package design). D4 to D18 are this design's own.
 
 ## Where is the code?
 
-The code is in `python/komira/`: the node tree (`_ops/`), the encoder (`_plan/`) and the first part of
-the pandas-shaped skin (`_frame.py`, `_groupby.py`, `_series.py`, `_verbs.py`, `_missing.py`, `_cast.py`,
-`_accessors.py`, `_refusals.py`) and the core of the polars-shaped skin (`pl/`). The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
+The code is in `python/komira/`: the node tree (`_ops/`), the encoder (`_plan/`), the pandas-shaped skin
+(the frame, series and group-by modules, and `_refusals.py`) and the polars-shaped skin (`pl/`). The
+pages that say what each skin does are in `python/docs/`. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
 `src/plan_expr/col_expr.mojo`. The wire format is in [src/plan_proto](../../src/plan_proto/plan.proto)
 and `src/plan_wire`.

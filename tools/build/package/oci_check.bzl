@@ -19,6 +19,8 @@ digests in order; and the added layer changes the type of no base entry.
 With `expect_red = "<text>"` the target is a negative case of the check
 itself: it builds only when the check is red and a failure names `<text>`,
 and its one output is that verdict (the image is not forwarded).
+
+Linux x86_64 only, like the image: another target platform skips it.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -97,6 +99,11 @@ _oci_image_check = rule(
 )
 
 def oci_image_check(**kwargs):
-    _oci_image_check(exec_compatible_with = LINUX_X86_64, **kwargs)
+    # The image it reads is linux/amd64: another target platform skips the check.
+    _oci_image_check(
+        exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:image-linux-x86-64-only
+        **kwargs
+    )
 
 oci_image_check = declares_docs(oci_image_check)

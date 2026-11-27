@@ -1,0 +1,4 @@
+[{'orders': 6, 'revenue': Decimal('655'), 'smallest': 45, 'largest': 200, 'customers': 3}]
+[{'region': 'east', 'orders': 2, 'revenue': Decimal('165'), 'largest': 120}, {'region': 'north', 'orders': 2, 'revenue': Decimal('260'), 'largest': 200}, {'region': 'west', 'orders': 2, 'revenue': Decimal('230'), 'largest': 150}]
+[{'region': 'east', 'orders': 2, 'revenue': 165, 'largest': 120}, {'region': 'north', 'orders': 2, 'revenue': 260, 'largest': 200}, {'region': 'west', 'orders': 2, 'revenue': 230, 'largest': 150}]
+[{'revenue': 655, 'largest': 200}]

@@ -1,22 +1,19 @@
-# Writes ci/targets.bzl and its shards ci/targets/shard_<n>.bzl: the roots of
-# the check set (TARGETS) and the standalone tests among them (TESTS), which
-# `//ci:pr` (ci/BUCK) holds. ci/targets.bzl loads the shards and exposes the two
-# lists; the rows of a package are in the shard its path hashes to
-# (ci_graph.bzl SHARDS, shard_of), so no file grows past the line limit as
-# packages are added.
+# Writes the committed roots of `//ci:pr` (ci/BUCK): one empty file per root of the
+# check set, `ci/roots/<cell>/<package>:<name>` for a root that is not a test and
+# `ci/test_roots/<cell>/<package>:<name>` for one Buck2 runs as a test (roots.bzl says
+# why one file per root: two pull requests that add targets never edit the same file).
 #
-#   out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL --no-preserve=mode "$out"/. ci/
+#   out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && git rm -rqf --ignore-unmatch ci/roots ci/test_roots && git clean -fdq -- ci/roots ci/test_roots && cp -rL --no-preserve=mode "$out"/. ci/ && git add ci/roots ci/test_roots
 #
 # A BXL script cannot write the source tree. It builds the files into one
 # directory of buck-out (a scratch copy, so a failed generation leaves the
-# checked-in files as they are: never redirect onto ci/targets.bzl, which
-# empties it before this script, which loads it, runs) and prints that
-# directory; the `cp` is the one shell element. The files are checked in, and
-# `guard.bxl:check` fails the pull request check when they are out of date.
-# Regenerate after adding or removing a package or a target no other target
-# depends on.
+# committed files as they are) and prints that directory; the command deletes the
+# committed files and copies the new ones in only once it has succeeded. The files
+# are committed, and `guard.bxl:check` fails the pull request check, naming each
+# file to add or delete, when they are out of date. A change that adds one root
+# can add its one file by hand instead (the guard's failure names it).
 #
-# TARGETS: every check of the scope (UNIVERSE of rules.bzl) that no other
+# The roots: every check of the scope (UNIVERSE of rules.bzl) that no other
 # check depends on; building them builds every other check, as a
 # dependency. A check is a target of any kind but a source (SOURCE_KINDS).
 # An execution-platform registration (defs.bzl) does not remove what it names from
@@ -25,30 +22,26 @@
 # EXCLUDED of rules.bzl names the checks left out on purpose (Python that is
 # not the Python SDK's); `guard.bxl` leaves the same ones out and
 # `python_guard.bxl` fails when the aggregate reaches one anyway.
-# TESTS: the roots Buck2 can run as a test (they provide
+# The test roots: the roots Buck2 can run as a test (they provide
 # ExternalRunnerTestInfo), the list `buck2 test //ci:pr` follows.
 #
 # Option: --scope <patterns> (default UNIVERSE).
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load(":ci_graph.bzl", "check_nodes", "render_all", "roots")
+load(":ci_graph.bzl", "check_nodes", "is_test", "roots")
+load(":roots.bzl", "PACKAGE_DIR", "root_files")
 load(":rules.bzl", "AGGREGATE", "EXCLUDED", "UNIVERSE")
-
-def _is_test(ctx, node):
-    if "test" not in node.rule_type.split(":")[-1]:
-        return False
-    return ExternalRunnerTestInfo in ctx.analysis(node).providers()
 
 def _generate(ctx):
     scope = ctx.cli_args.scope or UNIVERSE
     nodes = check_nodes(ctx, scope, AGGREGATE.split(":")[0] + ":", [p for p, _ in EXCLUDED])
     labels = roots(nodes)
-    tests = [l for l in labels if _is_test(ctx, nodes[l])]
+    tests = [l for l in labels if is_test(ctx, nodes[l])]
     actions = ctx.bxl_actions(exec_compatible_with = LINUX_X86_64).actions
     files = {}
-    for path, lines in render_all(labels, tests).items():
-        rel = path[len("ci/"):]
-        files[rel] = actions.write("targets_gen/files/" + rel, "\n".join(lines) + "\n")
+    for path in root_files(labels, tests).keys():
+        rel = path.removeprefix(PACKAGE_DIR + "/")
+        files[rel] = actions.write("targets_gen/files/" + rel, "")
     out = actions.symlinked_dir("targets_gen/dir", files)
     ctx.output.print(ctx.output.ensure(out).abs_path())
 

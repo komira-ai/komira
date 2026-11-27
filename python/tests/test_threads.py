@@ -370,7 +370,7 @@ def main(args):
     directory = os.path.join(lib_dir, "fake_threads")
     native = _native.load(directory)
     assert native.abi_version == 1003, native.abi_version
-    fake = Fake(os.path.join(directory, "libkomira.so"))
+    fake = Fake(os.path.join(directory, _native._LIB_NAME))
 
     s = komira.Session()
     c = context_number(fake)

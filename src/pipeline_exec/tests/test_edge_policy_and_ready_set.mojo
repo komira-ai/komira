@@ -8,8 +8,9 @@
 #     value that is no tag are refused by name.
 #   * ORDER_NONE, ORDER_PARTITION_ID and ORDER_ROW_RANGE are served; an unknown
 #     kind is refused by name. `check_plan` accepts ORDER_ROW_RANGE on the
-#     ungrouped aggregation sink and refuses it, naming the segment, on a
-#     collect sink and on a grouped aggregation sink.
+#     ungrouped and the grouped aggregation sinks (fixed-width and string
+#     keys) and refuses it, naming the segment, on a collect sink and on a
+#     sort sink.
 #   * The ready set is the unfinished segments whose waited-for dependencies
 #     finished, in id order: a chain opens one segment at a time, two
 #     independent segments are ready together, a segment behind both waits for
@@ -36,6 +37,7 @@ from physical_plan.physical_plan import (
     KEY_DTYPE_NONE,
     KEY_DTYPE_STRING,
     SINK_AGG,
+    SINK_SORT,
     SegmentDescPod,
 )
 from pipeline_exec.edge_policy import (
@@ -174,30 +176,28 @@ def test_check_plan_accepts_a_diamond_and_an_independent_cycle() raises:
     check_plan(List[SegmentDescPod]())
 
 
-def _row_range_agg(key_dtype: UInt8) -> List[SegmentDescPod]:
+def _row_range(sink_kind: UInt8, key_dtype: UInt8) -> List[SegmentDescPod]:
     var descs = List[SegmentDescPod]()
     descs.append(_seg(0))
     descs[0].order_key_kind = ORDER_ROW_RANGE
-    descs[0].sink_kind = SINK_AGG
+    descs[0].sink_kind = sink_kind
     descs[0].sink_key_dtype = key_dtype
     return descs^
 
 
-def test_check_plan_serves_row_range_on_the_ungrouped_aggregation_only() raises:
-    var ungrouped = _row_range_agg(KEY_DTYPE_NONE)
-    check_plan(ungrouped)
-    var grouped = _row_range_agg(KEY_DTYPE_I64)
+def test_check_plan_serves_row_range_on_the_aggregation_sinks_only() raises:
+    check_plan(_row_range(SINK_AGG, KEY_DTYPE_NONE))
+    check_plan(_row_range(SINK_AGG, KEY_DTYPE_I64))
+    check_plan(_row_range(SINK_AGG, KEY_DTYPE_STRING))
+    var sort = _row_range(SINK_SORT, KEY_DTYPE_NONE)
     _expect_refusal(
-        grouped,
+        sort,
         "pipeline_exec: segment 0 asks for ORDER_ROW_RANGE on sink kind "
-        + String(Int(SINK_AGG))
+        + String(Int(SINK_SORT))
         + " with key dtype "
-        + String(Int(KEY_DTYPE_I64))
-        + "; only the ungrouped aggregation sink (SINK_AGG, KEY_DTYPE_NONE)"
-        " folds by source position",
+        + String(Int(KEY_DTYPE_NONE))
+        + "; only the aggregation sinks (SINK_AGG) fold by source position",
     )
-    var strings = _row_range_agg(KEY_DTYPE_STRING)
-    _expect_refusal(strings, "asks for ORDER_ROW_RANGE")
 
 
 def test_check_plan_refuses_a_plan_it_cannot_run() raises:
@@ -264,6 +264,6 @@ def main() raises:
     suite.test[test_check_plan_accepts_a_diamond_and_an_independent_cycle]()
     suite.test[test_check_plan_refuses_a_plan_it_cannot_run]()
     suite.test[
-        test_check_plan_serves_row_range_on_the_ungrouped_aggregation_only
+        test_check_plan_serves_row_range_on_the_aggregation_sinks_only
     ]()
     suite^.run()

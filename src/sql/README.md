@@ -58,6 +58,16 @@ Any other extension is refused with `COPY_FORMAT_NOT_INFERRED` instead of
 being written as Parquet. With no `COMPRESSION`, Parquet is snappy and CSV and
 JSON take gzip from `.gz`, zstd from `.zst`, and none otherwise.
 
+The parser recurses once per nested construct on the caller's thread, so it
+refuses a statement nested deeper than `MAX_SQL_NESTING` (100) levels with
+`SQL syntax error: the statement nests deeper than 100 levels`
+(`sql.sql_nesting`) instead of exhausting the stack. DuckDB allows 1000; a
+level here takes about 25 to 35 KB of stack (measured on linux-x86_64), so 1000
+would not fit in the 8 MiB a host's query thread has. One level is one
+parenthesised expression, function call, CASE, prefix `NOT`, `+`, `-` or `@`,
+`IN ( ... )` list, subquery or derived table; chains a loop builds
+(`a + b + c`, `a AND b`, an IN list's items, a UNION chain) are not levels.
+
 `sql.sql_catalog` holds the tables and user functions a query may
 name. `SqlCatalog` registers an in-memory `Table` or `RecordBatch`
 (`add_in_memory`) or a parquet path with its schema (`add_parquet`, which
@@ -424,6 +434,28 @@ from sql.sql_copy_format import copy_codec_from_path, copy_format_from_path
 assert_equal(Int(copy_format_from_path("out/sales.parquet")), Int(WFMT_PARQUET))
 assert_equal(Int(copy_format_from_path("rows.csv.gz")), Int(WFMT_CSV))
 assert_equal(Int(copy_codec_from_path(WFMT_CSV, "rows.csv.gz")), Int(WCOMP_GZIP))
+```
+
+A statement nested one level past the limit is refused by the parser:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from sql.sql_nesting import MAX_SQL_NESTING
+from sql.sql_parser import parse_sql
+from sql.sql_token import tokenize
+
+var deep = String("SELECT ")
+for _ in range(MAX_SQL_NESTING + 1):
+    deep += "("
+deep += "1"
+for _ in range(MAX_SQL_NESTING + 1):
+    deep += ")"
+var refused = String("")
+try:
+    _ = parse_sql(tokenize(deep))
+except e:
+    refused = String(e)
+assert_equal(refused, "SQL syntax error: the statement nests deeper than 100 levels")
 ```
 
 A multi-file parquet relation, built in memory (no file is opened), registered in

@@ -1,5 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "TOOL_EXEC")
 load("@komira//tools/build/platforms:table.bzl", "row")
 
@@ -16,22 +16,38 @@ _ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 # block (the link commands the packer writes) and `link-check` compares it
 # with what the packer wrote (cli.zig, link.zig); `release-check` refuses a
 # release member that packages no README or one with no example
-# (tools/build/package/release_set.bzl). mojo_library runs it on its package's
-# README.md as an action, and so do the coverage build and the README API
+# (tools/build/package/release_set.bzl); `tasks-check` holds the catalogue of
+# common tasks to a language's task pages (tasks.zig; python/docs/tasks/BUCK);
+# `check` and `fill` are a source-first README's freshness check and the patch
+# that mends it (include.zig), `migrate` turns an inline README into files and
+# includes and `migrate --verify` proves it the same programs (migrate.zig),
+# and `expect-failure` passes only when a command fails with a given text
+# (expect_failure.zig; tools/build/mojo/readme.bzl's failure fixture).
+# mojo_library runs `generate` on its package's README.md as an action, and so do the coverage build and the README API
 # census. Zig, as every build tool under tools/build is;
 # what is code, a fence and a link is the shared Markdown reader's
 # (//tools/build/markdown:markdown).
 
 _SRCS = glob(["*.zig"])
 
-# The unit tests (examples_test.zig, program_test.zig, cli_test.zig): `zig
-# test` of main.zig, run as a build action.
+# The unit tests (the `*_test.zig` files main.zig imports): `zig test` of
+# main.zig, run as a build action. Their data: the migrated README of
+# src/anomaly and its files, with the README as it was (the source-first
+# fixture library of the tests cell, which builds and runs the same files),
+# and the marker-comment cases a renderer is held to (marker_comments.json).
 zig_test(
     name = "readme_examples_unit",
     exec_compatible_with = TOOL_EXEC,
     imports = _SRCS,
     src = "main.zig",
-    deps = ["//tools/build/markdown:markdown"],
+    data = {
+        "anomaly": "tests//functional/readme_examples/source_first:fixture",
+        "marker_comments.json": "marker_comments.json",
+    },
+    deps = [
+        "//tools/build/markdown:markdown",
+        "//tools/build/mojo:unified_diff",
+    ],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
 )
@@ -56,11 +72,29 @@ zig_exe(
         "prelude//os/constraints:macos": row("darwin-arm64")["zig_triple"],
         "DEFAULT": "x86_64-linux-musl",
     }),
-    deps = ["//tools/build/markdown:markdown"],
+    deps = [
+        "//tools/build/markdown:markdown",
+        "//tools/build/mojo:unified_diff",
+    ],
     unit_tests = [":readme_examples_unit", _ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
     visibility = ["PUBLIC"],
+)
+
+# The reader of a README's examples (examples.zig) as a module, for a Zig
+# tool that asks what the tool's `generate` would take from a README without
+# making programs of it: the graph check `readme_coverage`
+# (tools/build/selftest/graph/readme_coverage.zig) counts each README's
+# examples with it. Imported only once `:readme_examples_unit` passed.
+zig_module(
+    name = "examples",
+    src = "examples.zig",
+    # The marker words (examples.zig reads an include marker).
+    imports = ["task_page.zig"],
+    deps = ["//tools/build/markdown:markdown"],
+    unit_tests = [":readme_examples_unit"],
+    visibility = ["//tools/build/selftest/graph:"],
 )
 
 # What is left in Mojo: the Markdown reader `buildtools.doc_links`

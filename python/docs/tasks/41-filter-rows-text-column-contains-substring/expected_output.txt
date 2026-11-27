@@ -1,0 +1,7 @@
+[{'id': 1}, {'id': 4}]
+[{'id': 3}]
+[{'id': 1}, {'id': 2}, {'id': 4}]
+[{'id': 4}]
+[{'id': 3, 'name': 'Gadget (large)'}]
+[{'id': 1, 'name': 'Red Widget'}, {'id': 2, 'name': 'blue widget'}, {'id': 4, 'name': 'Widget Pro'}]
+[{'id': 4, 'name': 'Widget Pro'}]

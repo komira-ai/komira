@@ -4,6 +4,7 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_te
 load(":conda.bzl", "conda_doc_check")
 load(":defs.bzl", "launcher_level_test")
 load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
+load(":npm.bzl", "npm_platform_cases", "npm_tarball_test_stamped")
 load(":wheel.bzl", "wheel_file_test_stamped", "wheel_tag_cases")
 load(":release_set.bzl", "conda_release_set_check", "release_order_test", "release_readme_test")
 
@@ -81,37 +82,28 @@ zig_module(
     unit_tests = [":komira_pack_unit"],
 )
 
-# The wheel writer and its read-back check (wheel/main.zig; the rule is
-# wheel.bzl). Each scenario is its own test, on synthetic files and ELF
-# libraries (wheel/testing.zig), and the tool is built only behind all of
-# them:
-#   wheel_zip_unit     the zip: members, modes, dates and order read back,
-#                      deflated or stored by size, the same bytes twice, the
-#                      commit time as the DOS date, and a damaged or foreign
-#                      zip refused by defect;
-#   wheel_elf_unit     DT_NEEDED, run path and symbol versions read back, and a
+# The native policy (native_policy/native_policy.zig): what a package's native
+# libraries may ask of the system that loads them, and the ELF, Mach-O and
+# code signature readers it rests on, as one module that every package tool
+# writing native libraries imports (komira_wheel below). Each scenario is its
+# own test, on synthetic ELF and Mach-O libraries (native_policy/testing.zig, which
+# the module exports as `testing` for the tools' tests), and nothing imports
+# the module unless all of them passed:
+#   native_elf_unit    DT_NEEDED, run path and symbol versions read back, and a
 #                      file that is not a 64-bit little-endian ELF or reads
 #                      outside itself refused;
-#   wheel_macho_unit   the Mach-O reader: install name, loads in command
+#   native_macho_unit  the Mach-O reader: install name, loads in command
 #                      order, run paths and the minimum macOS (from either
 #                      version command) read back, and a universal file, a
 #                      file that is not Mach-O or reads outside itself refused;
-#   wheel_codesign_unit  the code signature of a Mach-O file: an ad hoc
+#   native_codesign_unit  the code signature of a Mach-O file: an ad hoc
 #                      signature of each hash type passes, and a file with
 #                      none, a page or a requirements blob changed after
 #                      signing, a code limit short of the signature, a slot
 #                      count that is not the page count, an unknown hash type,
 #                      a hash for a bundle file and a SuperBlob or blob outside
 #                      its bounds are each refused by their exact message;
-#   wheel_compare_unit two wheels of one package for two platforms
-#                      (`komira_wheel same`): the macOS and Linux layouts pass
-#                      with their native libraries as each one's own, and a
-#                      Python file missing, added, changed or of another mode
-#                      on one side, a Python file named as one side's own, a
-#                      native file named but absent or on both sides, another
-#                      version, another Python tag and a WHEEL differing beyond
-#                      its Tag are each refused by their exact message;
-#   wheel_policy_unit  the library checks: GLIBC_2.38 under a 2.34 tag, a
+#   native_policy_unit the library checks: GLIBC_2.38 under a 2.34 tag, a
 #                      GLIBCXX_ or CXXABI_ version over or without its bound,
 #                      an absolute run path, an unlisted DT_NEEDED, a bundled
 #                      Mojo runtime library, an ELF file in a macOS wheel, a
@@ -121,7 +113,53 @@ zig_module(
 #                      one with no minimum), another CPU, an install name that
 #                      is not @rpath/<file>, a run path that is not
 #                      @loader_path-relative, a load nobody provides and an
-#                      unsigned dylib;
+#                      unsigned dylib.
+_NATIVE_SRCS = [
+    "native_policy/codesign.zig",
+    "native_policy/diag.zig",
+    "native_policy/elf.zig",
+    "native_policy/macho.zig",
+    "native_policy/policy.zig",
+]
+
+_NATIVE_SCENARIOS = ["codesign", "elf", "macho", "policy"]
+
+[
+    zig_test(
+        name = "native_{}_unit".format(scenario),
+        exec_compatible_with = LINUX_X86_64,
+        src = "native_policy/{}_test.zig".format(scenario),
+        imports = _NATIVE_SRCS + ["native_policy/testing.zig"],
+        busybox = "komira//tools/build/toolchains:busybox",
+        zig = "komira//tools/build/toolchains:zig_next",
+    )
+    for scenario in _NATIVE_SCENARIOS
+]
+
+zig_module(
+    name = "native_policy",
+    src = "native_policy/native_policy.zig",
+    imports = _NATIVE_SRCS + ["native_policy/testing.zig"],
+    unit_tests = [":native_{}_unit".format(s) for s in _NATIVE_SCENARIOS],
+)
+
+# The wheel writer and its read-back check (wheel/main.zig; the rule is
+# wheel.bzl), on the native policy above. Each scenario is its own test, on
+# synthetic files and the native policy's synthetic libraries
+# (wheel/testing.zig), and the tool is built only behind all of them and the
+# native policy's:
+#   wheel_zip_unit     the zip: members, modes, dates and order read back,
+#                      deflated or stored by size, the same bytes twice, the
+#                      commit time as the DOS date, and a damaged or foreign
+#                      zip refused by defect;
+#   wheel_compare_unit two wheels of one package for two platforms
+#                      (`komira_wheel same`): the macOS and Linux layouts pass
+#                      with their native libraries as each one's own, and a
+#                      Python file missing, added, changed or of another mode
+#                      on one side, a Python file named as one side's own, a
+#                      native file named but absent or on both sides, another
+#                      version, another Python tag and a WHEEL differing beyond
+#                      its Tag are each refused by their exact message;
 #   wheel_build_unit   the wheel: the same bytes twice and from inputs in
 #                      another order, the members, METADATA, WHEEL and RECORD,
 #                      the stamp's version (a half stamp refused), the tags
@@ -143,20 +181,15 @@ zig_module(
 _WHEEL_SRCS = [
     "wheel/check.zig",
     "wheel/cli.zig",
-    "wheel/codesign.zig",
     "wheel/compare.zig",
-    "wheel/diag.zig",
-    "wheel/elf.zig",
     "wheel/libs.zig",
-    "wheel/macho.zig",
-    "wheel/policy.zig",
     "wheel/stamp.zig",
     "wheel/tag.zig",
     "wheel/wheel.zig",
     "wheel/zip.zig",
 ]
 
-_WHEEL_SCENARIOS = ["build", "check", "cli", "codesign", "compare", "elf", "libs", "macho", "policy", "zip"]
+_WHEEL_SCENARIOS = ["build", "check", "cli", "compare", "libs", "zip"]
 
 [
     zig_test(
@@ -164,7 +197,7 @@ _WHEEL_SCENARIOS = ["build", "check", "cli", "codesign", "compare", "elf", "libs
         exec_compatible_with = LINUX_X86_64,
         src = "wheel/{}_test.zig".format(scenario),
         imports = _WHEEL_SRCS + ["wheel/testing.zig"],
-        deps = [":pack_deflate"],
+        deps = [":native_policy", ":pack_deflate"],
         busybox = "komira//tools/build/toolchains:busybox",
         zig = "komira//tools/build/toolchains:zig_next",
     )
@@ -177,8 +210,7 @@ _WHEEL_SCENARIOS = ["build", "check", "cli", "codesign", "compare", "elf", "libs
 zig_module(
     name = "wheel_zip",
     src = "wheel/zip.zig",
-    imports = ["wheel/diag.zig"],
-    deps = [":pack_deflate"],
+    deps = [":native_policy", ":pack_deflate"],
     unit_tests = [":wheel_zip_unit"],
     visibility = ["//python/smoke:"],
 )
@@ -187,17 +219,126 @@ zig_exe(
     name = "komira_wheel",
     exec_compatible_with = LINUX_X86_64,
     src = "wheel/main.zig",
-    unit_tests = [":wheel_{}_unit".format(s) for s in _WHEEL_SCENARIOS] + ["komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":wheel_{}_unit".format(s) for s in _WHEEL_SCENARIOS] + [":native_{}_unit".format(s) for s in _NATIVE_SCENARIOS] + ["komira//tools/build/toolchains:zig_next_version"],
     imports = _WHEEL_SRCS,
-    deps = [":pack_deflate"],
+    deps = [":native_policy", ":pack_deflate"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
+# The wheel's stamp (wheel/stamp.zig: `0.1.<N>` from -c komira.package_*, or
+# `0.0.0` unstamped, a half stamp refused) as a module, for komira_npm, whose
+# sources are in npm/. Imported only once wheel_build_unit, which holds it,
+# passed.
+zig_module(
+    name = "package_stamp",
+    src = "wheel/stamp.zig",
+    deps = [":native_policy"],
+    unit_tests = [":wheel_build_unit"],
+)
+
+# The npm package writer and its read-back check (npm/main.zig; the rule is
+# npm.bzl), on the native policy and the wheel's stamp. Each scenario is its
+# own test, on synthetic files and the native policy's synthetic libraries
+# (npm/testing.zig), and the tool is built only behind all of them and the
+# native policy's:
+#   npm_tarball_unit   the tarball: members, modes and order read back, the
+#                      same bytes twice, ustar headers of npm pack's date that
+#                      std.tar reads, and a gzip or tar this writer would not
+#                      write refused by its exact message;
+#   npm_manifest_unit  package.json: the source stamped (version, optional
+#                      dependencies, private), its text as JSON.stringify
+#                      writes it, and a source or read-back manifest refused
+#                      for another name, licence, repository.url, platform,
+#                      version or private, a bad `files` list, an install
+#                      script; which paths npm packs for a `files` list;
+#   npm_build_unit     the package: the main and the linux-x64 platform
+#                      package written, the same bytes from files in another
+#                      order, and a stray file, a missing Mojo runtime library,
+#                      another repository.url, a bad or doubled path, a member
+#                      over 90 MB, a native library with no platform and one
+#                      over the glibc floor refused;
+#   npm_check_unit     the read-back check: the builder's tarball passes, and
+#                      a stray, missing, reordered, changed or re-moded member,
+#                      an unstamped release, another name and another twin
+#                      are refused by their check's name;
+#   npm_cli_unit       the command line: flags, <name>=<value>, files and
+#                      directories staged, a link refused, a whole input read
+#                      with and without a platform, a platform by halves
+#                      refused.
+_NPM_SRCS = [
+    "npm/check.zig",
+    "npm/cli.zig",
+    "npm/manifest.zig",
+    "npm/npm.zig",
+    "npm/tarball.zig",
+]
+
+_NPM_SCENARIOS = ["build", "check", "cli", "manifest", "tarball"]
+
+[
+    zig_test(
+        name = "npm_{}_unit".format(scenario),
+        exec_compatible_with = LINUX_X86_64,
+        src = "npm/{}_test.zig".format(scenario),
+        imports = _NPM_SRCS + ["npm/testing.zig"],
+        deps = [":native_policy", ":pack_deflate", ":package_stamp"],
+        busybox = "komira//tools/build/toolchains:busybox",
+        zig = "komira//tools/build/toolchains:zig_next",
+    )
+    for scenario in _NPM_SCENARIOS
+]
+
+zig_exe(
+    name = "komira_npm",
+    exec_compatible_with = LINUX_X86_64,
+    src = "npm/main.zig",
+    unit_tests = [":npm_{}_unit".format(s) for s in _NPM_SCENARIOS] + [":native_{}_unit".format(s) for s in _NATIVE_SCENARIOS] + ["komira//tools/build/toolchains:zig_next_version"],
+    imports = _NPM_SRCS,
+    deps = [":native_policy", ":pack_deflate", ":package_stamp"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The npm rule on a fixture (npm/fixtures/): a package of plain files at the
+# test stamp, so building it runs [check] and [release_check], the twin's
+# byte equality among them. //node:package and //node:package_linux_x64 are
+# the package's own, unstamped in a pull request.
+npm_tarball_test_stamped(
+    name = "npm_fixture",
+    package = "@komira-ai/npm-fixture",
+    manifest = "npm/fixtures/package.json",
+    license = "Apache-2.0",
+    files = {
+        "LICENSE": "komira//:LICENSE",
+        "lib/data.txt": "npm/fixtures/data.txt",
+    },
+)
+
+# The npm platform of each release platform's row, written out: the
+# manifest's os, cpu and libc and the native policy's floor and machine, from
+# tools/build/platforms/table.bzl; and npm pack's file name of a scoped and a
+# plain package.
+npm_platform_cases(
+    name = "npm_platform_cases",
+    cases = {
+        "darwin-arm64": "--os darwin --cpu arm64 --macos 11.0",
+        "linux-arm64": "--os linux --cpu arm64 --libc glibc --glibc 2.34 --arch aarch64",
+        "linux-x86_64": "--os linux --cpu x64 --libc glibc --glibc 2.34 --arch x86_64",
+    },
+    file_names = {
+        "@komira-ai/komira": "komira-ai-komira-0.1.7.tgz",
+        "@komira-ai/komira-linux-x64-gnu": "komira-ai-komira-linux-x64-gnu-0.1.7.tgz",
+        "plain": "plain-0.1.7.tgz",
+    },
+)
+
 # The rule on fixtures (wheel/fixtures/): a linux-x86_64 wheel holding a real
 # Mojo shared library (the example `plain`, which needs the Mojo runtime:
-# external_needed) at the test stamp, so building it runs [check] and
+# external_needed; an ELF library, so a darwin-arm64 build skips it and
+# `wheel_file_name_cases`) at the test stamp, so building it runs [check] and
 # [release_check], the twin's byte equality among them; and wheels of plain
 # files for the linux-arm64 and darwin-arm64 (macOS) rows, whose tags are
 # derived the same way.
@@ -221,6 +362,7 @@ wheel_file_test_stamped(
         "libKGENCompilerRTShared.so",
         "libMSupportGlobals.so",
     ],
+    target_compatible_with = LINUX_X86_64,  # komira-limit:manylinux-wheel-linux-x86-64
 )
 
 # Named by the tag they test: each is built on linux like every other
@@ -247,8 +389,8 @@ zig_test(
     name = "wheel_file_name_cases",
     exec_compatible_with = LINUX_X86_64,
     src = "wheel/file_name_test.zig",
-    imports = ["wheel/diag.zig", "wheel/zip.zig"],
-    deps = [":pack_deflate"],
+    imports = ["wheel/zip.zig"],
+    deps = [":native_policy", ":pack_deflate"],
     data = {
         "linux.file_name": ":wheel_fixture[file_name]",
         "linux.whl": ":wheel_fixture[release]",
@@ -257,6 +399,7 @@ zig_test(
     },
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
+    target_compatible_with = LINUX_X86_64,  # komira-limit:manylinux-wheel-linux-x86-64
 )
 
 # The tag of each release platform's row, written out: the glibc floor and

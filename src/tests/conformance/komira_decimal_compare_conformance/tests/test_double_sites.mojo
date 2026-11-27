@@ -21,6 +21,10 @@
 #   * test_a_stored_decimal_beside_a_double_is_duckdbs: `col * 1e0` and
 #     `col + 0.5e0` over a stored DECIMAL(38, s).
 #   * test_a_math_function_over_a_stored_decimal_is_duckdbs: `cbrt(col)`.
+#
+# The two math-function sites answer glibc's `cbrt` bit for bit on Linux. Off
+# Linux the engine's libm is not glibc, and they are held within the few ulp of
+# komira_plan_harness.libm_rule; every other site is bit for bit everywhere.
 
 from std.testing import TestSuite
 

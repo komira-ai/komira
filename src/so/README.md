@@ -16,7 +16,12 @@ another thread cancels and reads while it runs; `komira_plan_stream`,
 which runs a serialized logical plan the same way, with no SQL text on the
 way; and
 `komira_register_arrow_stream`, which drains a host's Arrow C stream into a
-table the session holds in memory, which SQL on the session reads by name.
+table the session holds in memory, which SQL on the session reads by name; and
+`komira_add_sql_binding`, which binds a table name to the protobuf bytes of a
+`WireBoundSource` (a local Parquet path, or Parquet objects of an `s3://` or
+`az://` location read with a credential sealed on the session), replacing a
+table of that name; `komira_sql_stream` reads such a table through the object
+store.
 
 - `abi/komira.tsv`: the golden of the C ABI; `komira.h` is made from it.
 - `status.mojo`: the seven status codes, `KOMIRA_MAX_INPUT_BYTES`, the credential
@@ -36,6 +41,9 @@ table the session holds in memory, which SQL on the session reads by name.
   of `sql_result` and `plan_result` out, or a raise with the engine's message);
   `sql_result` also runs under a `RunControl` (`sdk_exec.run_control`), whose
   cancel raises the named error `QUERY_CANCELLED`.
+- `bindings.mojo`: what `komira_add_sql_binding` does on values (a name, the
+  bytes of a `WireBoundSource` and a scope in; a table bound on the session, or
+  a raise with the named refusal).
 - `_c_abi.mojo`: the exports. It is the only file here that holds pointers, it
   is not part of the Mojo package (it is the source of the `libkomira`
   target), and its header says who owns and frees each pointer.
@@ -89,6 +97,9 @@ int32_t  komira_plan_stream(void *ctx, const uint8_t *plan, uint64_t plan_len,
                             struct ArrowArrayStream *out);
 int32_t  komira_register_arrow_stream(void *ctx, const char *name,
                                       struct ArrowArrayStream *stream);
+int32_t  komira_add_sql_binding(void *ctx, const char *name,
+                                const uint8_t *source, uint64_t source_len,
+                                int32_t scope);
 ```
 
 **Status codes.** Every fallible call returns one: `KOMIRA_OK` (0),
@@ -143,7 +154,7 @@ from so import ABI_MAJOR, ABI_MINOR, abi_version
 from std.testing import assert_equal
 
 assert_equal(abi_version(), ABI_MAJOR * 1000 + ABI_MINOR)
-assert_equal(abi_version(), Int32(1009))
+assert_equal(abi_version(), Int32(1010))
 ```
 
 **The handle.** `komira_ctx_new` returns a context the caller owns until it
@@ -258,8 +269,8 @@ for a NULL `ctx`, when no error is held and for an error with no step, and it
 never fails or clears.
 
 The step of an error: an engine refusal of `komira_sql_stream` has the step
-that refused, and so does one of `komira_plan_stream` at `optimize`, `lower`
-or `execute` (one at `decode` has `KOMIRA_STEP_NONE`, as `decode` is no step
+that refused, and so does one of `komira_plan_stream` at `bind` (a write's
+destination), `optimize`, `lower` or `execute` (one at `decode` has `KOMIRA_STEP_NONE`, as `decode` is no step
 of the SQL pipeline); a `KOMIRA_ERR_ENGINE` of `komira_register_parquet`,
 `komira_parquet_schema`, `komira_csv_binding`, `komira_json_binding` or a
 credential call has `KOMIRA_STEP_BIND`; every other error (a NULL argument, a
@@ -271,8 +282,9 @@ supported: ` is `SQL_NOT_SUPPORTED`; any other reason that starts with an
 upper-case word of two or more underscore-joined parts and `: `
 (`LOWERING_WINDOW_UNSERVED: ...`) has that word; every other reason has no code.
 For a `komira_sql_stream` or `komira_plan_stream` refusal the reason is the
-text after `<step>: `, so an envelope with a write target has the code
-`PLAN_WIRE_WRITE_TARGET_DROPPED`.
+text after `<step>: `, so an envelope with UDFs has the code
+`PLAN_WIRE_UDFS_DROPPED` and a write to an `s3://` destination has
+`STORAGE_URL_REFUSED` (step `bind`).
 
 **Sources and render.** Each call below takes the context first and returns a
 status code; on `KOMIRA_ERR_ENGINE` the context's last error holds the engine's
@@ -296,10 +308,11 @@ binding and schema bytes are what a plan author splices into a scan leaf: the
 fingerprint, kind id and snapshot fields come from the engine and are not
 computed by the caller. A NULL `ctx` is -1 for all seven.
 
-A name is refused when it is taken because the catalog resolves a name to the
-first table registered under it: a second table there would never be read.
-`komira_register_parquet` does not refuse a taken name, and the first table
-keeps it. `register_csv` and `register_json` are the calls on values:
+`komira_register_csv` and `komira_register_json` refuse a taken name.
+`komira_register_parquet` replaces the table of a taken name (any kind, any
+case), as `komira_add_sql_binding` and `komira_register_arrow_stream` do; a
+registration it refuses leaves that table as it was. `register_csv` and
+`register_json` are the calls on values:
 
 ```mojo
 from runtime_paths import test_tmpdir
@@ -387,21 +400,34 @@ its own source (its paths and the schema `komira_parquet_schema` answers), so
 the plan needs no table registered on the session.
 
 - `*out`, its ownership and its lifetime are as for `komira_sql_stream`.
+- An envelope that carries a write target (`WirePlanEnvelope.write_target`,
+  format version 5) is written, not answered: the plan's rows go to the local
+  Parquet, CSV or newline-delimited JSON file the target names, as `COPY ... TO`
+  writes them (the same bytes, replacing an existing file), and `*out` is the
+  one-row stream `COPY` answers, one `NOT NULL` int64 column `Count` holding
+  the rows written. The destination is checked at `bind`, before the plan runs
+  or any file is touched, so a refused write leaves the destination as it was.
 - Refusals: NULL `ctx` is -1; a NULL `plan` or `out` is -2; a `plan_len` above
   `KOMIRA_MAX_INPUT_BYTES` is -5 before any byte of `plan` is read (exactly
   64 MiB is read, and the decoder then refuses what is above its own 16 MiB
   bound); every other refusal is -3, with the last error `<step>: <reason>`:
   `decode` for bytes that are not a plan this build runs (SQL text among them,
-  a version it does not speak, and an envelope that carries a write target or
-  UDFs, `PLAN_WIRE_WRITE_TARGET_DROPPED` and `PLAN_WIRE_UDFS_DROPPED`), then
-  `optimize`, `lower` or `execute`. The context answers the next call after any
+  a version it does not speak, and an envelope that carries UDFs,
+  `PLAN_WIRE_UDFS_DROPPED`), then `bind` (a write's destination refused before
+  the plan runs: a path with `://`, `STORAGE_URL_REFUSED`; CSV or JSON with
+  `lz4`, `COPY_COMPRESSION_UNSUPPORTED`), then `optimize`, `lower` or
+  `execute` (a destination directory that does not exist,
+  `STORAGE_NOT_FOUND`; a column type the writer does not write,
+  `COPY_TYPE_UNSUPPORTED`). The context answers the next call after any
   refusal. The refusal's step and code are read with `komira_last_error_step`
   and `komira_last_error_code`.
 
 `plan_result` is the call on values: the plan's bytes in, an `ArrowResult` out,
 or a raise with the `<step>: <reason>` text, which it records on the session
 as the last error with its step and code. The route from the optimizer down
-is `sdk_exec.engine_plan.run_plan`, the one `run_sql` takes after it binds.
+is `sdk_exec.engine_plan.run_plan`, the one `run_sql` takes after it binds; an
+envelope with a write target takes `sdk_exec.engine_plan.run_plan_write`, the
+route `run_sql` takes for `COPY ... TO`.
 
 ```mojo
 from so import KOMIRA_STEP_NONE, STEP_DECODE, Session, plan_result
@@ -605,6 +631,69 @@ var answer = sql_result(session, String("select count(*) as n from T where k > 1
 assert_equal(answer.batches[0].column_at(0).as_primitive[DType.int64]().get(0), Int64(2))
 ```
 
+**A source as a table.** `komira_add_sql_binding(ctx, name, source,
+source_len, scope)` binds `name` (found without regard to case) to the
+protobuf bytes `source[0..source_len]` of a `komira.plan.v1.WireBoundSource`
+(`src/plan_proto/bound_source.proto`); `scope` is
+`KOMIRA_BIND_SESSION` (1), the only scope there is. The source names its kind
+as the `files` case, a Parquet location: a path with no scheme, which binds as
+`komira_register_parquet` does (the footer is read at the call, so a missing
+or unreadable file is -3 with the reader's message), or an object-store
+location: `s3://bucket/key` (`s3a://` too) read with an `AwsKeys` credential
+and the source's `region` (and `endpoint`, `addressing`), or
+`az://container/blob` (`abfs://`, `abfss://`, and the forms `azure_blob`'s
+`parse_azure_url` reads) read with an `AzureKey` or `AzureSas` credential,
+whose `ACCOUNT` names the account, or `anonymous` when the location names the
+account. The key may be a glob (`*`, `?`, `[...]`, `{a,b}`, one `**`), listed
+now. The footers are read now, through the store, so a refused key or a
+missing object is -3 with the store's message. Path-style addressing is the
+default on an endpoint of the source's own, virtual-hosted on the
+provider's; plaintext only for an `http://` endpoint. `komira_sql_stream`
+reads the table through the same store, with the value sealed under the
+credential's name when the statement starts (`so.store_fs`: one file system per
+bound bucket); a credential that no longer fits refuses the statement at step
+`bind`. The bytes
+carry no secret: the source's access names a credential sealed on the
+session beforehand (`komira_credential_add`, `_set`, `_seal`), and the library
+reveals its value inside itself when it reads. The bytes are copied before
+they are decoded, so `source` and `name` are the caller's again when the call
+returns; a `source_len` of 0 with a non-NULL `source` is a source that names
+no kind. A second binding of a name replaces the table of that name, of any
+kind, as `komira_register_arrow_stream` and `komira_register_parquet` do;
+`komira_register_csv` and `komira_register_json` still refuse a taken name.
+
+Refusals are -1 for a NULL `ctx`, -2 for a NULL `name` or `source` (the last
+error `komira_add_sql_binding: name or source is NULL`), -5 for a
+`source_len` above `KOMIRA_MAX_INPUT_BYTES` (the last error
+`komira_add_sql_binding: source_len is above 67108864 bytes`; no byte of
+`source` is read), and -3 with a last error at step `bind`, checked in this
+order, for a name that is not UTF-8 (`a string argument is not valid UTF-8`),
+a `scope` other than 1
+(`BIND_SCOPE_UNSUPPORTED: add_sql_binding scope=<scope>: only KOMIRA_BIND_SESSION (1) binds a source`), an empty
+name (`TABLE_NAME_EMPTY: a table name must not be empty`), bytes that are not a
+`WireBoundSource`
+(`BIND_SOURCE_MALFORMED: add_sql_binding name=<name>: the source is not a komira.plan.v1.WireBoundSource`),
+bytes that decode but name no kind, an empty buffer among them
+(`BIND_SOURCE_MALFORMED: add_sql_binding name=<name>: the source names no kind`),
+and a local file the reader refuses. Then the source's own refusals, each
+`<CODE>: add_sql_binding name=<name>: <reason>`: `STORAGE_URL_REFUSED` (user
+information in a location or endpoint, a query or fragment, an endpoint that is
+not `http://` or `https://`, and every scheme but those above: `gs://` is not
+read yet), `BIND_SOURCE_UNSUPPORTED` (a signing service, Hive partitioning on
+an object store, an endpoint, region or addressing on a local path, a region on
+Azure, `anonymous` or an `AwsProfile` on S3), `CREDENTIALS_NOT_FOUND` (an
+object-store source naming no credential, or `ambient`, which the library does
+not resolve), `CREDENTIAL_KIND_MISMATCH` (a credential of another store, or
+one on a local path), `STORAGE_REGION_UNKNOWN` (an S3 source with no region),
+`BIND_SCOPE_NOT_A_TABLE` (a location ending in `/`), and
+`BIND_STORE_CONFLICT` (a bucket another table of the session reads with
+another credential name or other settings: a statement reads each bucket one
+way); `CREDENTIAL_UNBOUND` is `SessionCredentials`'s, for a name with no
+sealed value. No message holds a credential's value. Nothing is bound or
+replaced on a refusal.
+
+On values, the call is `add_sql_binding` over the source's bytes (`so.bindings`).
+
 ## Building and testing
 
 ```sh
@@ -613,10 +702,10 @@ assert_equal(answer.batches[0].column_at(0).as_primitive[DType.int64]().get(0), 
 ```
 
 The library is published only if the gate passes: the exports check, then
-eighteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
-foreign host would. Seven cover the skeleton: the version (1009, which is 1.9),
+nineteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
+foreign host would. Seven cover the skeleton: the version (1010, which is 1.10),
 create and free (distinct handles, separate sessions), no symbol beyond the
-twenty-five, a fresh session's empty error, the two-call protocol (zero capacity, one
+twenty-six, a fresh session's empty error, the two-call protocol (zero capacity, one
 byte short, exact, larger), a NULL context, and a NULL `out_len`. `gate_error_code_step`
 checks that `komira_last_error_code` and `komira_last_error_step` exist and, on a
 fresh session, give an empty code and step 0, and that a NULL context is -1 and
@@ -637,12 +726,19 @@ refused name stays free.
 read: a released stream (five NULL words) and an empty name or one that is
 not UTF-8 are -3 word for word, the NULL cases -1 and -2, and each leaves the
 name free; the streams the library drains are the C driver's.
-`exports_exact` makes the twenty-five names above the whole dynamic symbol table.
+`gate_add_sql_binding` binds a local Parquet file it writes through a
+`WireBoundSource` it encodes by hand (0, and again under the same name), and
+checks the NULL cases (-1, -2 with the named last error), a `source_len` of 64 MiB
+plus one (-5 with its last error), and each -3 word for word with step `bind`
+and its code: a scope other than 1, an empty name, a name that is not UTF-8, a
+one-byte source, a zero-length source and a missing file; a good call after a
+refusal leaves no error.
+`exports_exact` makes the twenty-six names above the whole dynamic symbol table.
 On Linux the eleven C owners in the library's closure (async, async_api,
 compression, crypto, fs, http_core, libc, metrics, objectstore, parquet_codec,
 scan_source) are linked as their own shared libraries (`native_owners`), not
 embedded; on macOS arm64 there are none, and the C archives are linked
-statically into `libkomira.dylib`. On Linux the eighteenth driver, `gate_native_owners`,
+statically into `libkomira.dylib`. On Linux the nineteenth driver, `gate_native_owners`,
 reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
 the SONAME of each of the eleven (`libkomira_<owner>_native.so.1`); an owner
 dropped from `native_owners` leaves its C embedded, and that driver fails.
@@ -786,7 +882,7 @@ the extra `$ORIGIN/../../lib` finds the one `lib/` of the variants directory fro
 
 ## The header and the golden
 
-`abi/komira.tsv` is the golden of the ABI: the version (1.9), one row per export
+`abi/komira.tsv` is the golden of the ABI: the version (1.10), one row per export
 with its return type, argument types and the version that added it, and one row
 per status code, limit and credential kind, field and scope (`constant`). `komira_abi_golden` checks it on every
 build against the `@export abi("C")` functions of `_c_abi.mojo` (names, return and
@@ -810,7 +906,7 @@ headers. The golden does not check that its version was raised when
 a row changed: that compares with the previous release.
 
 `tests/c/abi_driver.c` is a C program that includes `komira.h` and nothing of
-ours. It opens `./libkomira.so`, binds each of the twenty-five functions to a pointer
+ours. It opens `./libkomira.so`, binds each of the twenty-six functions to a pointer
 declared with the header's own prototype, and checks the version in the header
 against `komira_abi_version()`, the status codes, the input bound
 (`KOMIRA_MAX_INPUT_BYTES` plus one is -5), and the last-error round trip (NULL
@@ -855,6 +951,15 @@ thread cancels a run in flight on a second thread: the answer (the cancel came
 after the run's last check) or -6 with `*out` untouched and a
 `QUERY_CANCELLED` last error, and the context answers after either; no check
 depends on how long the run takes.
+It binds tables with `komira_add_sql_binding` (the cases are in
+`tests/c/binding_cases.h`, which it includes), each source a `WireBoundSource`
+it encodes by hand: the no-row fixture's `count(*)` is 0, binding the same name
+to the three-row file replaces it (3, and its rows by name), and binding the
+fixture again answers 0; a NULL `ctx` is -1, a NULL `name` or `source` -2, a
+length of 64 MiB plus one or `UINT64_MAX` -5, and each -3 (scope 2, an empty
+name, a one-byte source, a zero-length source, a missing file, a name that is
+not UTF-8) has its named last error, step and code and leaves the earlier table
+answering; a good call after them leaves no error.
 It runs plans through `komira_plan_stream` (the cases are in `tests/c/plan_cases.h`,
 which it includes), each a `WirePlanEnvelope` it encodes by hand (a scan of a Parquet file, the schema bytes
 `komira_parquet_schema` answers spliced in), on a second context with no table
@@ -886,15 +991,65 @@ published library:
 The header is not part of the library's conda package yet; that waits on the
 packaging change that lists it.
 
+## What an abort does to the host
+
+A raise inside the library is a value: every export catches it and returns a
+status (`KOMIRA_ERR_ENGINE` with the message as the last error), and no raise
+crosses the boundary. An `abort()`, a failed `debug_assert`, a fault, stack
+exhaustion or an out-of-memory kill is not a value. Mojo has no unwinding, so
+nothing in the library can turn one into a status: it ends the host process
+(the Python interpreter, the Node process) at once. The library installs no
+signal handler and never `longjmp`s: a handler that jumped back into the export
+would leave other engine threads holding locks over half-written state, skip
+Mojo destructors, and replace the host's own handler (Python's `faulthandler`,
+Node's).
+
+What the library does instead is refuse, before running, every input known to
+reach one, so that it comes back as a status:
+
+- A statement nested more than 100 levels deep (parentheses, prefix operators,
+  function calls, `CASE`, subqueries, derived tables; `src/sql/README.md` lists
+  what counts as a level) is `parse: SQL syntax error: the statement nests
+  deeper than 100 levels at line <L>, column <C>`, where the text stopped
+  parsing. The parser recursed once per level on the
+  caller's stack, so a deep enough text exhausted it.
+- `lpad`, `rpad` and `repeat` whose value for one row would be over 64 MiB
+  (`STRING_FN_N_REPEAT_MAX_BYTES`) are refused by name before anything is
+  allocated.
+- libzstd, libz and liblz4, which the codec packages open by soname at first
+  use in an initializer that cannot raise, are opened first by a probe that
+  can, at the start of every call that can reach a codec (the Parquet, CSV
+  and JSON register and describe calls, `komira_sql_stream`,
+  `komira_sql_stream_run` and `komira_plan_stream`;
+  `komira_register_arrow_stream` reads no file and is not probed). A missing library is `compression: cannot load
+  <soname>: <the loader's error>`, not an abort in the middle of a query.
+
+`tests/c/abort_driver.c` sends each of these inputs from a C host, on its main
+thread, and requires the status and the reason as the last error, `*out`
+untouched, and a good query on the same context afterwards. Each form nested to
+exactly the limit still runs, except nested scalar subqueries, which the
+optimizer refuses by name:
+
+```sh
+./buck2 build komira//src/so:abort_check     # exit 0 of the driver, or red
+```
+
+What is left ends the host process, and the bindings say so. The library is
+built at the compiler's default assert level (`safe`): the `debug_assert`s
+declared `assert_mode="safe"` are kept and abort when they fail. The rest of the
+abort sites in the library's closure and the inputs still known to end the
+process are listed, each with why, in §8 of
+[docs/design/libkomira_run_abi.md](https://github.com/komira-ai/komira/blob/main/docs/design/libkomira_run_abi.md).
+
 ## Not done
 
 No release-over-release version check and no packaged header yet; the session
 holds an engine, and `komira_sql_stream` runs SQL on it (cancelled and
 watched through a run handle with `komira_sql_stream_run`) and
-`komira_plan_stream` a plan, but no call runs a UDF or writes a plan's answer
-to a file yet (the plan door refuses an envelope with UDFs or a write target); no session
+`komira_plan_stream` a plan, and writes it to a file when its envelope carries a
+write target, but no call runs a UDF yet (the plan door refuses an envelope
+with UDFs); no session
 options beyond the worker count and the memory budget (no spill directory); the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).
 The calls that run a query, ported from the earlier SDK, their result as an Arrow
-C stream, and what an abort does at the boundary (not contained yet: an abort
-inside the library ends the host process) are described in
+C stream, and the abort-prone paths the library does not refuse yet are described in
 [docs/design/libkomira_run_abi.md](https://github.com/komira-ai/komira/blob/main/docs/design/libkomira_run_abi.md).

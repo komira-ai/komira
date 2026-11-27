@@ -21,7 +21,7 @@ where to read the environment the compiler sees) and
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, c_exports, unlisted_exports, exports_exact, gate_srcs, force_load, native_owners, extra_runpath, optimization_level, toolchain)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK), [`spike_native`](../examples/shared_lib_native/README.md) |
 | `komira_abi_golden(src, golden, header_name, constants_src)` ([`abi_golden.bzl`](abi_golden.bzl)) | `<header_name>` (default `<name>.h`): the C header of a golden list of C-ABI symbols and constants, built only if the `@export abi("C")` functions of `src` are exactly its rows, with the same types, and the constants match `constants_src` (see [The ABI golden and the C header](#the-abi-golden-and-the-c-header)). | [`abi_header`](../examples/abi_golden/BUCK) |
-| `komira_c_abi_check(driver, lib, native_owners, data)` ([`c_abi_check.bzl`](c_abi_check.bzl)) | `<name>.passed`: the marker of a C program (`driver`, a `cxx_binary` that includes the generated header) run against the `mojo_shared_lib` `lib` from a staged tree, with the `data` files beside it; it exists only if the program exited 0. | [`c_abi_check`](../../../src/so/BUCK) |
+| `komira_c_abi_check(driver, lib, native_owners, data)` ([`c_abi_check.bzl`](c_abi_check.bzl)) | `<name>.passed`: the marker of a C program (`driver`, a `cxx_binary` that includes the generated header, or a `mojo_binary` where no C program links, as on macOS arm64) run against the `mojo_shared_lib` `lib` from a staged tree, with the `data` files beside it; it exists only if the program exited 0. | [`c_abi_check`](../../../src/so/BUCK) |
 | `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](doc.md)). | [`hellopkg_doc`](../examples/BUCK) |
 
 ## Libraries and the `test_srcs` gate
@@ -110,8 +110,10 @@ A library whose package holds a `README.md` runs the README's examples as one
 more welded test, `[tests][readme]`, so the documentation cannot rot. Nothing
 declares it: the README is declared by existing. The program generator is
 the Zig tool [`//tools/build/readme_examples:tool`](../readme_examples/BUCK)
-(`generate`, `map` for a report's lines, and `link` and `link-check` for a
-packaged README's `sh komira-link` block; its unit tests are welded), built
+(`generate`, `map` for a report's lines, `link` and `link-check` for a
+packaged README's `sh komira-link` block, and `tasks-check` for the
+common-task pages, [docs/tasks/README.md](../../../docs/tasks/README.md); its
+unit tests are welded), built
 for the execution platform of the action that runs it (macOS for a
 darwin-arm64 library; analysis refuses a mismatch, `readme.bzl`). It
 reads Markdown through the shared Zig module
@@ -185,6 +187,71 @@ until it moves to the Zig module.
   [`../native/README.md`](../native/README.md#each-librarys-shared-library))
   fails unless one of them references the library's C, so the installed
   README run calls the shared library it ships.
+
+#### Source-first READMEs
+
+A library whose README shows each example from a file lists the files
+([docs/design/documentation_tests.md](../../../docs/design/documentation_tests.md)):
+
+```python
+mojo_library(
+    name = "anomaly",
+    srcs = glob(["anomaly/**/*.mojo"]),
+    readme_examples = glob(["examples/*.mojo"]),
+)
+```
+
+The README shows each file through an include marker on the line before
+its fence, and the fence body is the file less its final line feed:
+
+````markdown
+<!-- include examples/validate_series.mojo -->
+```mojo
+from anomaly import Series
+
+
+def main() raises:
+    var s = Series("latency/p50")
+```
+````
+
+`mojo_adopted_library` takes `readme_examples` the same way. Then:
+
+- **One welded test per file**, `[tests][readme][<name>]`: the file compiled
+  against the library (the ungated package) and run through the gate,
+  labelled `<target>:examples/<name>.mojo`, on every platform the library
+  builds for. The file is staged at its path from the cell root, so a
+  failure names `<package>/examples/<name>.mojo:<line>`, a file the author
+  can open. `<name>` is lower-case letters, digits and underscores, and not
+  `file`, `fill`, `generated`, `migrated` or `objects`. The list is the glob,
+  so analysis has it: no dynamic action.
+- **The freshness check** (the tool's `check`, welded beside them): every
+  listed file is shown by exactly one include, every ```` ```mojo ```` fence
+  (`mojo module` too) is an include, each included fence is its file byte for
+  byte (a file with a carriage return, a byte order mark or a line ending in
+  a space or a tab is refused), a ```` ```text ```` fence right after an
+  included one carries `<!-- not-tested: <reason> -->`, and the inline
+  model's `mojo-hidden` comments and misspelt markers are refused. Each
+  refusal names `README.md:<line>`. With no file listed and no example shown
+  the marker reads `NO EXAMPLE`; `release-check` still refuses such a README
+  when it is released.
+- **`[tests][readme][fill]`** is the patch that makes the README fresh (each
+  included fence rewritten from its file, nothing else): build it and apply
+  it with `git apply`. The stale refusal says so.
+- `generate` still runs, reading an included fence as a whole program, for
+  `[generated]` and the coverage build; the installed README's run
+  (`release/readme_e2e`) reads it the same way.
+
+A library still on the inline model refuses an include marker in its
+README, naming its line: nothing would hold that fence to a file. Its
+`[tests][readme][migrated]`, built only when asked for, is the README made
+source-first by the tool's `migrate` (the README and `examples/example_<n>.mojo`,
+to copy over the package), proven in the same build by `migrate --verify`:
+each file is the program the gate runs today for its fence, and the README
+differs only inside its examples. A README example that must fail is
+`mojo_readme_example_failure` (`readme.bzl`): it builds only when the run
+fails with a given text, which is how the tool's fixtures show a broken
+example going red, naming its file and line.
 
 Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples); its
 `run_tests.sh` case is stale until komira-ai/komira#1281 replaces it) builds
@@ -984,16 +1051,16 @@ generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
 - **macOS arm64.** The same rule builds `<out_name>.dylib`: install name `@rpath/<out_name>.dylib`, run path
   `@loader_path/lib`, linker-signed ad hoc by ld (nothing else signs it), runtime library
   `@rpath/libKGENCompilerRTShared.dylib`. `exports_exact` uses `-exported_symbols_list` (names with the C
-  underscore) and `force_load` uses one `-force_load` per archive of the C libraries' link line. A driver
+  underscore) and `force_load` uses one `-force_load` per archive path of the C libraries' link line (a flag on that line, such as `-lc++`, passes through unchanged). A driver
   opens `./<out_name>.dylib` there: pick the name with `CompilationTarget.is_macos()`. The gate runs
   on the macOS worker with `DYLD_LIBRARY_PATH` set to the compiler's `lib/` (as for tests). The wrapper
   lets `--emit shared-lib` through only when the link names itself with `-install_name`; the
   bundle's `-soname` library stays refused (bundles are Linux only).
 - **Run path.** `$ORIGIN/lib:$ORIGIN` on Linux (macOS: `@loader_path/lib`): the `lib/` the gate stages the runtime libraries and `native_owners` in, and the library's own directory, where an installed package has the runtime libraries beside it (`<prefix>/lib`). A run path with only `$ORIGIN/lib` finds nothing there (the install check of the libkomira package goes red on it). **`extra_runpath`** appends entries after those, in the platform's spelling: a CPU-level variant of libkomira installed at `variants/<level>/` of its native directory takes `$ORIGIN/../../lib` ([`../package/libkomira`](../package/libkomira/README.md)).
 - **`toolchain`** names the Mojo toolchain, `toolchains//:mojo` by default. The variant links of libkomira (`src/so/BUCK`) name a toolchain with another `target_cpu` (`toolchains//:mojo_linux_x86_64_x86_64_v2`): the library and its drivers are built for that CPU, and the `.mojoc` of `deps` are the default configuration's, since a `.mojoc` holds no machine code.
-- **`[runnable]`** (Linux): the gated library with `lib/` beside it, holding the Mojo runtime libraries (the platform row's `runtime_libs`) and the closure of each `native_owners` library. It is the directory a host loads the library from with no library path set (a Node test hands it to `load()`, [`node`](../../../node/README.md)); a copy, since the loader expands `$ORIGIN` from the resolved path. Like the public file it exists only if the gate passed.
-- **`[dist]`** (Linux x86_64 and macOS arm64). On Linux: `[runnable]` without the C++ runtime (`libstdc++.so.6` and `libgcc_s.so.1`, `HOST_CXX_RUNTIME` in [shared_lib.bzl](shared_lib.bzl)): the library, its `native_owners` closure and the three Mojo runtime libraries in `lib/`, taken from the toolchain's `mojo_runtime`, the pinned download that compiled the library. On macOS arm64 it is `libkomira.dylib` (install name `@rpath/libkomira.dylib`, run path `@loader_path/lib`) and, in `lib/`, the three Mojo runtime libraries of the darwin row (`libAsyncRTRuntimeGlobals.dylib`, `libKGENCompilerRTShared.dylib`, `libMSupportGlobals.dylib`), with no owner libraries (the C archives are linked statically) and no C++ runtime (libc++ and libSystem are the system's). It is the directory a language package carries as it is (the Python wheel copies it to `komira/_lib/`, on Linux and macOS arm64, [python/BUCK](../../../python/BUCK)); a host provides the C++ runtime, as it provides glibc. `[runnable]` keeps the C++ runtime because a build worker has none. `komira//tools/build/package/libkomira:libkomira_dist_load` copies it elsewhere and loads it from a C caller with no library path.
-- **`native_owners`** names `native_shared_library` targets (a library's own shared library, [`../native`](../native/README.md)), linked ahead of the C archives of the closure: the `.so` is NEEDED on each owner's SONAME and the owner's names are bound there instead of to a static copy. The gate stages each owner and what it needs in `lib/` beside the library (the run path `$ORIGIN/lib` finds them). Linux only. The archives stay on the link line, so a name the owner does not export is still embedded silently; [`examples/shared_lib_native`](../examples/shared_lib_native/README.md) measures it, its driver (`call_driver.mojo`) opens the owner's SONAME and checks that the library's own dynamic symbol table leaves the owner's names undefined. `tests//negative/shared_lib:owner_embedded` is the same library without the attribute with a smaller driver (`owner_embedded_driver.mojo`) that only opens the owner's SONAME, so it is red on the missing NEEDED edge and does not read the symbol table.
+- **`[runnable]`** (Linux x86_64 and macOS arm64): the gated library with `lib/` beside it, holding the Mojo runtime libraries (the platform row's `runtime_libs`) and the closure of each `native_owners` library. It is the directory a host loads the library from with no library path set (a Node test hands it to `load()`, [`node`](../../../node/README.md); a Python test finds it through `DYLD_LIBRARY_PATH` on macOS); a copy, since the Linux loader expands `$ORIGIN` from the resolved path. On macOS arm64 it is the same directory as `[dist]`, because libc++ and libSystem are the system's. Like the public file it exists only if the gate passed.
+- **`[dist]`** (Linux x86_64 and macOS arm64). On Linux: `[runnable]` without the C++ runtime (`libstdc++.so.6` and `libgcc_s.so.1`, `HOST_CXX_RUNTIME` in [shared_lib.bzl](shared_lib.bzl)): the library, its `native_owners` closure and the three Mojo runtime libraries in `lib/`, taken from the toolchain's `mojo_runtime`, the pinned download that compiled the library. On macOS arm64 it is `libkomira.dylib` (install name `@rpath/libkomira.dylib`, run path `@loader_path/lib`) and, in `lib/`, the three Mojo runtime libraries of the darwin row (`libAsyncRTRuntimeGlobals.dylib`, `libKGENCompilerRTShared.dylib`, `libMSupportGlobals.dylib`) and the closure of each `native_owners` library (`libkomira` has none on macOS: its C archives are linked statically), with no C++ runtime (libc++ and libSystem are the system's). It is the directory a language package carries as it is (the Python wheel copies it to `komira/_lib/`, on Linux and macOS arm64, [python/BUCK](../../../python/BUCK)); a host provides the C++ runtime, as it provides glibc. On Linux, `[runnable]` keeps the C++ runtime because a build worker has none. `komira//tools/build/package/libkomira:libkomira_dist_load` copies it elsewhere and loads it from a C caller with no library path.
+- **`native_owners`** names `native_shared_library` targets (a library's own shared library, [`../native`](../native/README.md)), linked ahead of the C archives of the closure: the `.so` is NEEDED on each owner's SONAME and the owner's names are bound there instead of to a static copy. The gate stages each owner and what it needs in `lib/` beside the library (the run path `$ORIGIN/lib` finds them). On macOS arm64 the link line is the same: ld64 records each owner by its install name (`@rpath/libkomira_<library>_native.1.dylib`) as an `LC_LOAD_DYLIB`, binds the owner's names to it through the two-level namespace, and the library's run path `@loader_path/lib` finds the staged copy; an owner that needs another finds it beside itself (`@loader_path`). No codesign step is needed: ld64 signs an arm64 output ad hoc (`linker-signed`) as it writes it, and nothing rewrites the file afterwards, so every copy keeps a valid signature. The archives stay on the link line, so a name the owner does not export is still embedded silently; [`examples/shared_lib_native`](../examples/shared_lib_native/README.md) measures it, its driver (`call_driver.mojo`) opens the owner's SONAME and checks that the library's own dynamic symbol table leaves the owner's names undefined (on macOS, that each is undefined and bound to the owner's install name, and that the library carries `LC_CODE_SIGNATURE`). `tests//negative/shared_lib:owner_embedded` is the same library without the attribute with a smaller driver (`owner_embedded_driver.mojo`) that only opens the owner's SONAME, so it is red on the missing NEEDED edge and does not read the symbol table; `tests//negative/shared_lib:owner_embedded_bound` runs `call_driver.mojo` itself against that library and is red on the symbol table.
 - **Not yet:** consuming a `.so` from a `deps` edge (a consumer linking it, or generating its `@extern` declarations).
 
 ### The ABI golden and the C header

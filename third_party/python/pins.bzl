@@ -1,7 +1,8 @@
 """The hermetic Python of the tests: the interpreter and the wheels, each pinned by sha256 and size.
 
 Read by this package's BUCK, which declares the downloads and the installed
-targets, except those of PROTOBUF_EDGES, which python/tests/BUCK declares.
+targets, except those of PROTOBUF_EDGES, which python/tests/BUCK declares
+(with PROTOBUF_EDGES_MACOS, their macOS files).
 Every wheel of WHEELS and PROTOBUF_EDGES is a binary
 wheel for CPython 3.13 on manylinux x86_64 (glibc 2.28 or older) or a
 pure-Python one, and every wheel of WHEELS_314 one for CPython 3.14 (`cp314`)
@@ -333,6 +334,23 @@ PROTOBUF_EDGES = [
         "BSD-3-Clause",
     ),
 ]
+
+# The macOS file of each PROTOBUF_EDGES version, by version: the `universal2`
+# wheel (`cp38-abi3`) that CPython 3.13 on macOS installs, as MACOS_WHEELS holds
+# the 7.36.2 one. python/tests/BUCK downloads them and selects them for the
+# `:protobuf-<version>` targets of a macOS target platform.
+PROTOBUF_EDGES_MACOS = {
+    "5.29.1": {
+        "url": _PYPI + "e5/39/44239fb1c6ec557e1731d996a5de89a9eb1ada7a92491fcf9c5d714052ed/protobuf-5.29.1-cp38-abi3-macosx_10_9_universal2.whl",
+        "sha256": "d473655e29c0c4bbf8b69e9a8fb54645bc289dead6d753b952e7aa660254ae18",
+        "size": 417822,
+    },
+    "5.28.3": {
+        "url": _PYPI + "1c/f2/baf397f3dd1d3e4af7e3f5a0382b868d25ac068eefe1ebde05132333436c/protobuf-5.28.3-cp38-abi3-macosx_10_9_universal2.whl",
+        "sha256": "a3f6857551e53ce35e60b403b8a27b0295f7d6eb63d10484f12bc6879c715687",
+        "size": 414743,
+    },
+}
 
 # pyarrow 25.0.1, the version of WHEELS and WHEELS_314, for CPython 3.11 and
 # 3.12 (`cp311`, `cp312`; manylinux x86_64), by ABI tag: the Python package

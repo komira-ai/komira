@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
 load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 
 # Test-only: komira's SQL surface held end to end to the pinned DuckDB.
@@ -16,8 +16,9 @@ load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 # run.sql writes the answer as expected.tsv. Nothing komira builds is an
 # input of an answer.
 #
-# The library (corpus.mojo, runner.mojo) runs each case through so.sql_result,
-# the call on values libkomira's komira_sql_stream wraps, and holds komira's
+# The library (corpus.mojo, runner.mojo, capability.mojo) runs each case
+# through so.sql_result, the call on values libkomira's komira_sql_stream
+# wraps, and holds komira's
 # answer to DuckDB's by value and in row order; a case komira refuses must
 # be listed in refusals.tsv with its refusal, word for word. Nothing ships,
 # so `conda = False`.
@@ -32,6 +33,13 @@ load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 #     otherwise; a malformed refusal list; a case with no answer, an answer
 #     with no case, a file that is no case; a session with no table; a
 #     resident twin not registered from memory or not holding its rows.
+#   test_sql_capability_checks -- the check of one capability's cases
+#     (capability.mojo) fed wrong flags and stagings: a flag absent, empty or
+#     given twice; a case named but not staged, staged but not named, named
+#     twice or empty; a staged refusal list; a refused or wrong case.
+#   test_sql_<capability> (below, mojo_test, run by `buck2 test`) -- one
+#     capability's cases alone, each equal to DuckDB's answer: the test the
+#     capability's cell of the surface capability matrix names.
 #
 # `deps` is the full transitive closure: so's, so itself and
 # komira_plan_harness.
@@ -108,6 +116,9 @@ _CASES = [p[len("cases/"):-len(".sql")] for p in glob(["cases/*.sql"])]
     outputs = ["expected.tsv"],
 ) for case in _CASES]
 
+# The tables under tables/, as open_session reads them.
+_TABLE_DATA = {"tables/" + t: src for t, src in _TABLES.items()}
+
 # The corpus as test_sql_e2e reads it: cases/, answers/, refusals.tsv and
 # the tables under tables/.
 _CORPUS = dict(
@@ -117,115 +128,310 @@ _CORPUS = dict(
     [("refusals.tsv", "refusals.tsv")],
 )
 
+_DEPS = [
+    "//src/agg:agg",
+    "//src/agg_api:agg_api",
+    "//src/arrow:arrow",
+    "//src/arrow_ipc:arrow_ipc",
+    "//src/async_api:async_api",
+    "//src/async_rt:async_rt",
+    "//src/atomic_alias:atomic_alias",
+    "//src/avro:avro",
+    "//src/awslc:awslc",
+    "//src/batch_eval:batch_eval",
+    "//src/byte_buffer:byte_buffer",
+    "//src/clock:clock",
+    "//src/column_format:column_format",
+    "//src/column_kernels:column_kernels",
+    "//src/compression:compression",
+    "//src/containers:containers",
+    "//src/counters:counters",
+    "//src/crypto:crypto",
+    "//src/csv:csv",
+    "//src/dynamic_filter:dynamic_filter",
+    "//src/encoding:encoding",
+    "//src/engine_runtime:engine_runtime",
+    "//src/exec_types:exec_types",
+    "//src/expr:expr",
+    "//src/fork_join:fork_join",
+    "//src/fs:fs",
+    "//src/hashing:hashing",
+    "//src/host_probe:host_probe",
+    "//src/host_profile:host_profile",
+    "//src/http_client:http_client",
+    "//src/http_core:http_core",
+    "//src/iceberg_catalog:iceberg_catalog",
+    "//src/iceberg_scan:iceberg_scan",
+    "//src/join_assembly:join_assembly",
+    "//src/json:json",
+    "//src/json_index:json_index",
+    "//src/jsonl:jsonl",
+    "//src/kernels:kernels",
+    "//src/libc:libc",
+    "//src/log:log",
+    "//src/lowering:lowering",
+    "//src/lz4:lz4",
+    "//src/metrics:metrics",
+    "//src/morsel:morsel",
+    "//src/name_registry:name_registry",
+    "//src/net:net",
+    "//src/objectstore:objectstore",
+    "//src/op_agg_state:op_agg_state",
+    "//src/op_join_probe:op_join_probe",
+    "//src/op_sort:op_sort",
+    "//src/op_sources:op_sources",
+    "//src/op_spill_rows:op_spill_rows",
+    "//src/op_window:op_window",
+    "//src/operator_api:operator_api",
+    "//src/optimizer:optimizer",
+    "//src/parquet:parquet",
+    "//src/parquet_api:parquet_api",
+    "//src/parquet_codec:parquet_codec",
+    "//src/parquet_footers:parquet_footers",
+    "//src/parquet_scan:parquet_scan",
+    "//src/parquet_writer:parquet_writer",
+    "//src/phase_timers:phase_timers",
+    "//src/physical_plan:physical_plan",
+    "//src/pipeline_exec:pipeline_exec",
+    "//src/plan_expr:plan_expr",
+    "//src/plan_ir:plan_ir",
+    "//src/plan_proto:plan_proto",
+    "//src/plan_stats:plan_stats",
+    "//src/plan_wire:plan_wire",
+    "//src/proto_codec:proto_codec",
+    "//src/protobuf:protobuf",
+    "//src/row_format:row_format",
+    "//src/scalar_arithmetic:scalar_arithmetic",
+    "//src/scan_planning:scan_planning",
+    "//src/scan_source:scan_source",
+    "//src/sdk:sdk",
+    "//src/sdk_exec:sdk_exec",
+    "//src/secret_registry:secret_registry",
+    "//src/secret_store:secret_store",
+    "//src/shuffle:shuffle",
+    "//src/simd_ops:simd_ops",
+    "//src/so:so",
+    "//src/spsc_ring:spsc_ring",
+    "//src/sql:sql",
+    "//src/sync:sync",
+    "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
+    "//src/trace:trace",
+    "//src/udf:udf",
+    "//src/uuid:uuid",
+    "//src/zlib:zlib",
+    "//tools/build/mojo/runtime_paths:runtime_paths",
+]
+
 mojo_library(
     name = "sql_e2e",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     conda = False,
-    deps = [
-        "//src/agg:agg",
-        "//src/agg_api:agg_api",
-        "//src/arrow:arrow",
-        "//src/arrow_ipc:arrow_ipc",
-        "//src/async_api:async_api",
-        "//src/async_rt:async_rt",
-        "//src/atomic_alias:atomic_alias",
-        "//src/avro:avro",
-        "//src/awslc:awslc",
-        "//src/batch_eval:batch_eval",
-        "//src/byte_buffer:byte_buffer",
-        "//src/clock:clock",
-        "//src/column_format:column_format",
-        "//src/column_kernels:column_kernels",
-        "//src/compression:compression",
-        "//src/containers:containers",
-        "//src/counters:counters",
-        "//src/crypto:crypto",
-        "//src/csv:csv",
-        "//src/dynamic_filter:dynamic_filter",
-        "//src/encoding:encoding",
-        "//src/engine_runtime:engine_runtime",
-        "//src/exec_types:exec_types",
-        "//src/expr:expr",
-        "//src/fork_join:fork_join",
-        "//src/fs:fs",
-        "//src/hashing:hashing",
-        "//src/host_probe:host_probe",
-        "//src/host_profile:host_profile",
-        "//src/http_client:http_client",
-        "//src/http_core:http_core",
-        "//src/iceberg_catalog:iceberg_catalog",
-        "//src/iceberg_scan:iceberg_scan",
-        "//src/join_assembly:join_assembly",
-        "//src/json:json",
-        "//src/json_index:json_index",
-        "//src/jsonl:jsonl",
-        "//src/kernels:kernels",
-        "//src/libc:libc",
-        "//src/log:log",
-        "//src/lowering:lowering",
-        "//src/lz4:lz4",
-        "//src/metrics:metrics",
-        "//src/morsel:morsel",
-        "//src/name_registry:name_registry",
-        "//src/net:net",
-        "//src/objectstore:objectstore",
-        "//src/op_agg_state:op_agg_state",
-        "//src/op_join_probe:op_join_probe",
-        "//src/op_sort:op_sort",
-        "//src/op_sources:op_sources",
-        "//src/op_spill_rows:op_spill_rows",
-        "//src/op_window:op_window",
-        "//src/operator_api:operator_api",
-        "//src/optimizer:optimizer",
-        "//src/parquet:parquet",
-        "//src/parquet_api:parquet_api",
-        "//src/parquet_codec:parquet_codec",
-        "//src/parquet_footers:parquet_footers",
-        "//src/parquet_scan:parquet_scan",
-        "//src/parquet_writer:parquet_writer",
-        "//src/phase_timers:phase_timers",
-        "//src/physical_plan:physical_plan",
-        "//src/pipeline_exec:pipeline_exec",
-        "//src/plan_expr:plan_expr",
-        "//src/plan_ir:plan_ir",
-        "//src/plan_proto:plan_proto",
-        "//src/plan_stats:plan_stats",
-        "//src/plan_wire:plan_wire",
-        "//src/proto_codec:proto_codec",
-        "//src/protobuf:protobuf",
-        "//src/row_format:row_format",
-        "//src/scalar_arithmetic:scalar_arithmetic",
-        "//src/scan_planning:scan_planning",
-        "//src/scan_source:scan_source",
-        "//src/sdk:sdk",
-        "//src/sdk_exec:sdk_exec",
-        "//src/secret_registry:secret_registry",
-        "//src/secret_store:secret_store",
-        "//src/shuffle:shuffle",
-        "//src/simd_ops:simd_ops",
-        "//src/so:so",
-        "//src/spsc_ring:spsc_ring",
-        "//src/sql:sql",
-        "//src/sync:sync",
-        "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
-        "//src/trace:trace",
-        "//src/udf:udf",
-        "//src/uuid:uuid",
-        "//src/zlib:zlib",
-        "//tools/build/mojo/runtime_paths:runtime_paths",
-    ],
+    deps = _DEPS,
     test_srcs = [
         "tests/test_sql_e2e.mojo",
+        "tests/test_sql_capability_checks.mojo",
         "tests/test_sql_e2e_checks.mojo",
     ],
     test_data = {
+        "tests/test_sql_capability_checks.mojo": _TABLE_DATA,
         "tests/test_sql_e2e.mojo": _CORPUS,
         # The tables, and a tree for load_corpus at tree/ (case a with its
         # answer, case b with none, answer c with no case, notes.txt).
         "tests/test_sql_e2e_checks.mojo": dict(
-            [("tables/" + t, src) for t, src in _TABLES.items()] +
+            _TABLE_DATA.items() +
             [(f[len("tests/data/"):], f) for f in glob(["tests/data/tree/**"])],
         ),
     },
     visibility = ["PUBLIC"],
 )
+
+# One test per capability of the SQL surface, for the surface capability
+# matrix (docs/surface_capability_matrix.md), whose lint takes one test target
+# for each filled cell: test_sql_<capability> runs the cases below through
+# so.sql_result, each held to its DuckDB answer by value and in row order
+# (capability.mojo, tests/test_sql_capability.mojo). Only those cases and
+# their answers are staged, with the tables and no refusal list, so a case
+# komira refuses fails its capability, and the staged cases must be exactly the
+# ones named. A case may serve more than one capability; a refused case
+# (refusals.tsv) serves none. Each row of tests/surface_capability_matrix.bzl
+# whose surface is sql names one of these targets. The whole corpus, refusals
+# included, is still test_sql_e2e above.
+_CAPABILITY_CASES = {
+    "aggregate": [
+        "aggregate_avg",
+        "aggregate_counts",
+        "aggregate_no_rows",
+        "aggregate_numeric",
+        "regress_agg_scalar_filtered",
+        "regress_agg_scalar_whole",
+        "regress_count_distinct_global",
+        "regress_count_distinct_no_rows",
+    ],
+    "between": ["between"],
+    "case_when": ["case_when"],
+    "cast": [
+        "cast_decimal_to_double",
+        "cast_numeric",
+        "cast_text_to_integer",
+    ],
+    "computed_column": [
+        "computed_arithmetic",
+        "computed_comparison",
+        "computed_division",
+        "computed_typed_literals",
+    ],
+    "distinct": ["distinct"],
+    "filter": [
+        "filter_compare",
+        "filter_is_null",
+        "filter_three_valued",
+        "filter_where_boolean_column",
+        "regress_float_scan_filtered",
+    ],
+    "group_by": [
+        "group_by_count_distinct",
+        "group_by_counts_sums",
+        "group_by_having",
+        "group_by_string",
+        "group_by_two_keys",
+        "regress_count_all_null_group",
+        "regress_count_distinct_grouped",
+        "regress_derived_agg_grouped",
+    ],
+    "in_list": [
+        "in_list",
+        "in_list_value",
+    ],
+    "join_anti": [
+        "join_anti_not_exists",
+        "join_anti_not_in_null",
+        "regress_anti_join_unmatched",
+        "regress_string_key_anti",
+    ],
+    "join_cross": [
+        "join_cross",
+        "regress_cross_join_empty_left",
+        "regress_cross_join_empty_right",
+        "regress_cross_join_pairs",
+    ],
+    "join_full": [
+        "join_full",
+        "regress_full_join_both_empty",
+        "regress_full_join_both_sides",
+        "regress_full_join_empty_left",
+        "regress_full_join_empty_right",
+    ],
+    "join_inner": [
+        "join_inner",
+        "join_residual",
+        "join_string_key",
+        "join_two_keys",
+        "regress_join_fanout",
+        "regress_string_key_inner",
+    ],
+    "join_left": [
+        "join_left",
+        "regress_count_left_join_distribution",
+        "regress_count_left_join_zero",
+        "regress_left_join_null_pad",
+        "regress_string_key_left",
+    ],
+    "join_right": ["join_right"],
+    "join_semi": [
+        "join_semi_exists",
+        "join_semi_in",
+        "regress_string_key_semi",
+    ],
+    "limit": ["limit_offset"],
+    "math_functions": ["math_functions"],
+    # NULL in comparisons and logic, IN lists, joins, aggregates, windows and
+    # ordering.
+    "null_semantics": [
+        "aggregate_no_rows",
+        "coalesce_bigint",
+        "filter_is_null",
+        "filter_three_valued",
+        "in_list_value",
+        "join_anti_not_in_null",
+        "regress_count_all_null_group",
+        "regress_left_join_null_pad",
+        "sort_keys_directions",
+        "window_lag_lead_nulls_first",
+    ],
+    # Float columns holding NaN, infinities and NULL, scanned, filtered and
+    # sorted; a NaN cell and a NULL cell compare as different values.
+    "output_nan_null": [
+        "regress_float_scan_filtered",
+        "regress_float_scan_row_groups",
+        "scan_floats",
+        "sort_float_specials",
+    ],
+    "project": ["project_rename_reorder"],
+    "regexp": ["regexp_matches"],
+    "scan_in_memory": [
+        "inmem_left_join_file",
+        "inmem_scan_filter_aggregate",
+    ],
+    "scan_parquet": [
+        "regress_float_scan_row_groups",
+        "scan_dates",
+        "scan_decimals",
+        "scan_floats",
+        "scan_row_groups",
+        "scan_signed_ints",
+        "scan_strings",
+        "scan_unsigned_ints",
+    ],
+    "sort": [
+        "sort_float_specials",
+        "sort_keys_directions",
+        "sort_strings",
+    ],
+    "string_functions": [
+        "string_functions",
+        "string_like",
+        "string_unicode_length",
+    ],
+    "subquery": [
+        "subquery_correlated_count",
+        "subquery_scalar",
+    ],
+    "temporal_extract": ["temporal_extract"],
+    "topn": ["topn"],
+    "union": [
+        "union_all",
+        "union_all_widening",
+    ],
+    "window": [
+        "window_int_aggregates_by_partition",
+        "window_lag",
+        "window_lag_lead_nulls_first",
+        "window_lag_nulls_last_desc",
+        "window_narrow_int_aggregates",
+        "window_partition_count",
+        "window_range_frame_nulls_first",
+        "window_rank_nulls_first",
+        "window_row_number",
+        "window_rows_frame_nulls_first",
+        "window_running_sum",
+        "window_sum_integer",
+    ],
+}
+
+[mojo_test(
+    name = "test_sql_" + capability,
+    srcs = ["tests/test_sql_capability.mojo"],
+    args = [
+        "--capability=" + capability,
+        "--cases=" + ",".join(cases),
+    ],
+    data = dict(
+        _TABLE_DATA,
+        **dict(
+            [("cases/" + c + ".sql", "cases/" + c + ".sql") for c in cases] +
+            [("answers/" + c + ".tsv", ":oracle/" + c + "[expected.tsv]") for c in cases],
+        )
+    ),
+    deps = [":sql_e2e"] + _DEPS,
+    visibility = ["PUBLIC"],
+) for capability, cases in _CAPABILITY_CASES.items()]

@@ -2,6 +2,11 @@
 # The secret capability reveals exactly its own node's secret
 # =============================================================================
 #
+# Covers: A capability reveals exactly the secret bound to its own node id,
+# once and after one store resolve; two capabilities over one bindings table
+# each reveal their own value; an unbound node or a removed ref raises before
+# the consumer is called.
+#
 # `SecretCapability` is a handle that carries only a node id.
 # `open_connection_for` lifts the plan's `SecretBindings` into a registry over
 # the supplied store and reveals the secret bound to that id to a consumer.

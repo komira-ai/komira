@@ -42,6 +42,7 @@
 # =============================================================================
 
 from .zlib_ffi import (
+    LIBZ_SONAME,
     ZLIB_LEVEL_DEFAULT,
     ZLIB_WINDOW_BITS_AUTO,
     ZLIB_WINDOW_BITS_GZIP,

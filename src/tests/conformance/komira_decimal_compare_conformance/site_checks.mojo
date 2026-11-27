@@ -1,7 +1,9 @@
 """The checks of the DECIMAL-to-DOUBLE site tests: each query of
 double_sites.tsv is run through `run_sql` against the tables pj, pd and pg (the
 Parquet files the test declares), and the DOUBLE it answers for each group k
-is compared bit for bit with the DOUBLE DuckDB printed."""
+is compared with the DOUBLE DuckDB printed: bit for bit, except that a query
+that calls a transcendental function is held within a few ulp on a platform
+whose libm is not the oracle's (komira_plan_harness.libm_rule)."""
 
 from std.testing import assert_equal, assert_true
 
@@ -12,6 +14,14 @@ from komira_decimal_compare_conformance.checks import (
     _rows,
 )
 from jsonl.value_parsers.parse_float import parse_float_f64
+from komira_plan_harness import (
+    FloatCell,
+    float_cells_match,
+    is_oracle_host,
+    transcendental_tolerance,
+    ulp_distance,
+)
+from std.memory import bitcast
 from runtime_paths import data_path
 from sdk_exec.engine_catalog import register_parquet
 from sdk_exec.engine_context import EngineContext
@@ -45,6 +55,7 @@ def check_double_site(name: String) raises:
         want_text.append(cells[3])
     assert_true(len(want_k) >= 9, name + ": double_sites.tsv holds too few groups")
 
+    var tol = transcendental_tolerance(text, is_oracle_host())
     var ctx = _new_site_context()
     var outcome = run_sql(ctx, text)
     if outcome.refusal:
@@ -83,7 +94,14 @@ def check_double_site(name: String) raises:
                 want_text[found].as_bytes(), 0, want_text[found].byte_length()
             )
             var got = xs.get(i)
-            if got != want:
+            var want_bits = bitcast[DType.uint64](want)
+            var got_bits = bitcast[DType.uint64](got)
+            if not float_cells_match(
+                FloatCell(False, False, want_bits),
+                FloatCell(False, False, got_bits),
+                tol,
+                64,
+            ):
                 problems.append(
                     name
                     + " group "
@@ -92,6 +110,11 @@ def check_double_site(name: String) raises:
                     + want_text[found]
                     + ", komira "
                     + String(got)
+                    + " ("
+                    + String(ulp_distance(want_bits, got_bits, 64))
+                    + " ulp apart, "
+                    + String(tol)
+                    + ")"
                 )
     if seen != len(want_k):
         problems.append(

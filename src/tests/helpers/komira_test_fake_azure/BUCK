@@ -25,5 +25,5 @@ mojo_library(
         "//src/http_core:http_core",
     ],
     test_srcs = ["tests/test_fake_azure_answers.mojo"],
-    visibility = ["//src/azure_blob:", "//src/sdk_exec:"],
+    visibility = ["//src/azure_blob:", "//src/sdk_exec:", "//src/so:"],
 )

@@ -33,7 +33,10 @@ stand-in's counted Arrow stream (fake_libkomira.c):
 `<dir>/fake_v1_3/libkomira.so` the stand-in reporting ABI 1.3 (`--runtime-dir`,
 which the rule passes, is not read). `--polars` says
 polars is installed for this interpreter; without it, to_polars must raise the
-ImportError that names it, and the polars cases are that check.
+ImportError that names it, and the polars cases are that check. The target
+runs on CPython 3.13 and 3.14, the minors with a pinned pandas, and passes
+`--polars` on 3.13 alone, the one minor with a pinned polars; 3.11 and 3.12,
+which pin neither, are held by test_sql.py's `to_arrow`.
 """
 
 import ctypes
@@ -251,7 +254,7 @@ def fake(args):
     lib_dir, with_polars = args[0], args[1] == "polars"
     directory = os.path.join(lib_dir, "fake_v1_3")
     assert _native.load(directory).abi_version == 1003
-    counts = Counts(ctypes.CDLL(os.path.join(directory, "libkomira.so")))
+    counts = Counts(ctypes.CDLL(os.path.join(directory, _native._LIB_NAME)))
     read = zero(streams=1, streams_released=1, schemas=1, schemas_released=1, batches=2, batches_released=2)
     failed = zero(streams=1, streams_released=1, schemas=1, schemas_released=1, batches=1, batches_released=1)
     opened = zero(streams=1, schemas=1, schemas_released=1)

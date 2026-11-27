@@ -1,0 +1,5 @@
+{'id': 'int64', 'price': 'float64', 'qty': 'int32'}
+[{'id': 1, 'price': 1.5, 'qty': 3}, {'id': 2, 'price': 2.25, 'qty': 4}, {'id': 3, 'price': 10.0, 'qty': 5}]
+int64
+{'id': 'int64', 'price': 'double', 'qty': 'int32'}
+[{'id': '1', 'qty': 3.0}, {'id': '2', 'qty': 4.0}, {'id': '3', 'qty': 5.0}]

@@ -131,7 +131,9 @@ _MACOS_FILES = {n: w["url"].rsplit("/", 1)[1] for n, w in MACOS_WHEELS.items()}
 # its own closure (pins.bzl, WHEELS_314): `:cpython314` and `:cpython314t`, and
 # one target per distribution and interpreter, named `<distribution>-<abi>`
 # (`:numpy-cp314t`). A pure-Python wheel is downloaded once and installed for
-# each interpreter.
+# each interpreter. These interpreters have no macOS build: a `python_wheel`
+# that names one is configured for linux x86_64 only (tools/build/python), so a
+# macOS build skips it.
 _OTHER_PYTHONS = [PYTHON_310, PYTHON_311, PYTHON_312, PYTHON_314, PYTHON_314T]
 
 _WHEEL_FILES = [w["file"] for w in WHEELS]

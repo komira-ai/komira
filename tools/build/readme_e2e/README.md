@@ -15,7 +15,14 @@ compiles them against the bytes of the `.conda` file.
 ## What runs
 
 One build action per package, on the farm, hermetic and offline
-([`readme_e2e verify`](verify.zig); the rule is `readme_e2e`, [`defs.bzl`](defs.bzl)):
+([`readme_e2e verify`](verify.zig); the rule is `readme_e2e`, [`defs.bzl`](defs.bzl)).
+
+The targets are for linux x86_64 only (limit `readme-e2e-linux-x86-64`): the pinned mopm, the Mojo
+compiler and the gate run in a Linux action. For another target platform, such as darwin-arm64,
+`readme_e2e`, `readme_e2e_all` and `readme_e2e_complete` are skipped as incompatible; the macOS
+libraries are built, and their welded tests run, by `//release:mopm_darwin_libs`.
+
+The phases:
 
 | phase | what it does | what fails it |
 |---|---|---|
@@ -142,8 +149,10 @@ that set, the one it publishes, and nothing else changes. There are three source
 * **`stage`**: `//release/staged_set:taken`, one action's copy of `//release/staged_set:set`.
   `:set` is the files of the directory of that package,
   where the release workflow's job `mopm-stage` has had `mopm stage --out` write the set
-  that `publish --staged` will publish, or where `prod-test` has written the files it checked
-  against the plan (the ones the registry holds in quarantine). Those files are an input of the build (uploaded to
+  that `publish --staged` will publish, or where `beta-test` and `prod-test` have written the files they checked
+  against the plan (the ones the registry holds in quarantine), or where `beta-served-readmes` and
+  `prod-served-readmes` have written, after each commit, the files and READMEs the registry serves
+  (`release_staged_verify served`; below). Those files are an input of the build (uploaded to
   the farm) and are not in the repository, so `:set`, and its copy, are empty in a checkout. The e2e
   then runs on the farm against the real set; against the empty target it fails at
   phase `staged` (no `plan.json`), so a release that did not stage fails.
@@ -159,6 +168,22 @@ that set, the one it publishes, and nothing else changes. There are three source
 
 The e2e proves the README examples run on the packages' bytes; a package's own tests are not in
 its `.conda` and do not run.
+
+### What runs where
+
+The release workflow (`.github/workflows/release.yml`; [docs/ci.md](../../../docs/ci.md#the-mopm-jobs))
+builds `//release/readme_e2e/verify:all` with `-c komira_release.staged=stage` at the version of its run
+five times, in five jobs, on three kinds of set, each written into `release/staged_set` on the runner and uploaded to the farm,
+which has no network:
+
+| job | the set | the README the examples come from |
+|---|---|---|
+| `mopm-stage` | the set `mopm stage` wrote, before anything is sent to a registry | the one `mopm stage` packed |
+| `beta-test`, `prod-test` | the files that registry holds in quarantine after `--no-commit`, each checked against `plan.json` (`release_staged_verify verify`) | the one in the staged directory the registry was sent |
+| `beta-served-readmes`, `prod-served-readmes` | after `beta-commit` and `prod-commit`: every file downloaded from that registry's channel, checked against `plan.json` (sha256 and size) | the one that registry's API serves for the version (`getVersion`), which must be the plan's byte for byte (`release_staged_verify served`) |
+
+A served file or README that differs from the plan, a version the registry does not serve, or a README
+example that fails, fails the job. The pull request check builds the same target on the assembled set.
 
 Any other value of the option is an error.
 
@@ -189,6 +214,11 @@ reaches the farm: `stage` names `//release/staged_set:taken`, whose only action 
 `readme_e2e take` run over `:set`, and whose output is that action's; the same check runs
 over made-up wirings first (`stage` naming `:set`, a second action, a copy buck2 makes itself,
 the source passed through), each of which it must refuse.
+
+[`release/README_COVERAGE.md`](../../../release/README_COVERAGE.md) starts from the other side: every
+`src/<name>/README.md`, with or without a `mopm.toml`, and whether this e2e, a README gate of the
+build, both or nobody runs its examples. The graph check `//release:readme_coverage` writes it from
+the build graph and fails when the committed file is stale.
 
 ## Tests
 

@@ -197,8 +197,14 @@ _mojo_bundle = rule(
 )
 
 def mojo_bundle(**kwargs):
-    # Compiling the launcher and copying files, with linux x86_64 tools.
-    _mojo_bundle(exec_compatible_with = LINUX_X86_64, **kwargs)
+    # Compiling the launcher and copying files, with linux x86_64 tools. A
+    # bundle is a linux x86_64 product (baseline x86-64 and glibc), so another
+    # target platform skips it.
+    _mojo_bundle(
+        exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:image-linux-x86-64-only
+        **kwargs
+    )
 
 def _level_test_impl(ctx):
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
@@ -299,9 +305,14 @@ def bundle_tarball(**kwargs):
     """`<name>-<version>-<platform>.tar.gz`: the bundle under `<name>-<version>/`.
 
     Entries sorted, mtime 0, uid/gid 0, modes 0755/0644; the same bundle
-    gives the same bytes.
+    gives the same bytes. Linux x86_64 only, like the bundle: another target
+    platform skips it.
     """
-    _bundle_tarball(exec_compatible_with = LINUX_X86_64, **kwargs)
+    _bundle_tarball(
+        exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:image-linux-x86-64-only
+        **kwargs
+    )
 
 # manifest: the base image manifest (linux/amd64); manifest_digest: its pinned
 # digest (komira_pack checks it); config: its config blob; layers: its layer
@@ -459,9 +470,14 @@ def oci_tree(**kwargs):
     with an exec bit, else 0644. A path that is not plain, or is inside
     another, fails the build (`oci tree`, oci/README.md). The kcov
     guard reads every file of the tree, and `oci_image(tree = ...)` packs it
-    only after the guard passed.
+    only after the guard passed. Linux x86_64 only: another target platform
+    skips it.
     """
-    _oci_tree(exec_compatible_with = LINUX_X86_64, **kwargs)
+    _oci_tree(
+        exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:image-linux-x86-64-only
+        **kwargs
+    )
 
 def _oci_image_impl(ctx):
     if (ctx.attrs.bundle == None) == (ctx.attrs.tree == None):
@@ -648,9 +664,15 @@ def oci_image(**kwargs):
     `sha256` the hex of `[digest]`); `[release][manifest]` is that manifest
     alone. A name that is not an artifact name ([a-z][a-z0-9_]*, so no
     hyphen or dot) fails building `[release]`, naming the image and its
-    repository; it is never rewritten. Nothing is pushed.
+    repository; it is never rewritten. Nothing is pushed. The image is
+    linux/amd64 whatever the target platform, so another target platform
+    skips it.
     """
-    _oci_image(exec_compatible_with = LINUX_X86_64, **kwargs)
+    _oci_image(
+        exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:image-linux-x86-64-only
+        **kwargs
+    )
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.

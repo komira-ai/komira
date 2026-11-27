@@ -83,6 +83,7 @@ from plan_expr.expr import (
     string_fn_n_arity_ok,
 )
 from batch_eval.eval_column import _eval_column_expr
+from batch_eval.string_bytes import _pad_bytes
 
 
 comptime N_ROWS: Int = 7
@@ -524,6 +525,70 @@ def test_a_wrong_arity_node_is_REFUSED_BY_NAME_not_evaluated() raises:
         "the refusal must NAME the function, not just the op number; got: "
         + msg,
     )
+
+
+def _pad_refusal(op: UInt8, name: String) raises:
+    var args = List[Expr]()
+    args.append(_v())
+    args.append(_int(9223372036854775807))
+    args.append(_lit(String("x")))
+    var batch = _batch()
+    var raised = False
+    var msg = String("")
+    try:
+        var _c = _eval_column_expr(_node(op, args^), batch)
+    except e:
+        raised = True
+        msg = String(e)
+    assert_true(raised, name + " with an Int64-max count must RAISE")
+    assert_equal(
+        msg,
+        "PipelineCompiler: "
+        + name
+        + "() would produce more than 67108864 bytes for one row, over the"
+        " per-row ceiling (STRING_FN_N_REPEAT_MAX_BYTES)",
+    )
+
+
+def test_lpad_refuses_an_int64_max_count_by_name() raises:
+    """`lpad(v, 9223372036854775807, 'x')` raises the named ceiling refusal
+    instead of allocating; the message is asserted in full."""
+    _pad_refusal(STRFNN_LPAD, String("lpad"))
+
+
+def test_rpad_refuses_an_int64_max_count_by_name() raises:
+    """The `rpad` twin of the Int64-max refusal, naming `rpad`."""
+    _pad_refusal(STRFNN_RPAD, String("rpad"))
+
+
+def _pad_raises(
+    s: String, count: Int, pad: String, left: Bool, cap: Int
+) -> Bool:
+    try:
+        _ = _pad_bytes(s, count, pad, left, cap)
+        return False
+    except:
+        return True
+
+
+def test_pad_ceiling_counts_exact_bytes_and_accepts_the_boundary() raises:
+    """With a 2-byte pad character the output is 6 bytes for `''` padded to 3
+    characters: a ceiling of 6 accepts it and 5 refuses it, for both sides.
+    A partial pad prefix counts too: `'a'` padded to 4 characters with
+    `'ßx'` is 1 + 3 (one full cycle) + 2 (the `ß` prefix) = 6 bytes."""
+    for left in range(2):
+        var on_left = left == 0
+        var out = _pad_bytes(String(""), 3, String("ß"), on_left, 6)
+        assert_equal(len(out), 6)
+        assert_true(_pad_raises(String(""), 3, String("ß"), on_left, 5))
+        var mixed = _pad_bytes(String("a"), 4, String("ßx"), on_left, 6)
+        assert_equal(len(mixed), 6)
+        assert_true(_pad_raises(String("a"), 4, String("ßx"), on_left, 5))
+        # An input already over the ceiling leaves a negative budget.
+        assert_true(_pad_raises(String("abc"), 4, String("x"), on_left, 2))
+        # Truncation never produces more than the input, so it is not capped.
+        var cut = _pad_bytes(String("abc"), 2, String("x"), on_left, 0)
+        assert_equal(len(cut), 2)
 
 
 def main() raises:

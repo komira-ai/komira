@@ -17,13 +17,13 @@ It needs no file beside it and runs in an empty directory:
 - it makes two mistakes and prints each `komira.KomiraError`: a missing file
   (`komira.BindError`), whose message names the file by its absolute path,
   and a SQL syntax error (`komira.ParseError`), whose message names the line
-  and column;
+  and column (newer than 0.1.1623);
 - it closes the session.
 
 Every value it prints can be checked by eye against the six rows it wrote.
 In `quickstart.expected`, `<version>` stands for the installed version,
-`<abi_version>` for the ABI version of `src/so/abi/komira.tsv` (`1.9` is
-`1009`) and `<cwd>` for the real path of the directory the program ran in.
+`<abi_version>` for the ABI version of `src/so/abi/komira.tsv` (`1.10` is
+`1010`) and `<cwd>` for the real path of the directory the program ran in.
 
 Where it runs, each time compared with `quickstart.expected` exactly, every
 line, with those three filled in:
@@ -48,10 +48,11 @@ The docs show the same text:
 - The "What works" section of [the package README](../README.md), which is
   also the package's description on PyPI, shows `quickstart.py` byte for
   byte and what it prints: `quickstart.expected` with the version of the
-  newest release in [the changelog](../CHANGELOG.md) and the ABI version
-  filled in, and `<cwd>` as written. The test
+  newest release section in [the changelog](../CHANGELOG.md) and the ABI
+  version filled in, and `<cwd>` as written. The test
   `//python/smoke:readme_shows_quickstart` fails when either block differs,
-  and the install test holds the wheel's description to the README byte for
+  and the install test holds the wheel's description, the README followed by
+  the assembled changelog, to `//python:changelog[description]` byte for
   byte.
 - The install page, [docs/install.md](../../docs/install.md), shows the same
   two blocks. The test `//python/smoke:install_page_shows_quickstart` fails

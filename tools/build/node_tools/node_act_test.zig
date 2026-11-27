@@ -1,9 +1,10 @@
 //! Unit tests of node_act's pure parts.
-//! Its process behaviour (the four subcommands, their messages and exit
+//! Its process behaviour (the subcommands, their messages and exit
 //! statuses, the environment node is run in) is tests//functional/node_act;
 //! the node rules' targets run through it too.
 const std = @import("std");
 const A = @import("node_act.zig");
+const tartest = @import("node_tartest");
 const t = std.testing;
 
 test "keepDist and isFile" {
@@ -179,4 +180,254 @@ test "coverTable: one line per covered source, in the order given" {
             "binding_test: covered src/a.ts: lines 11/11 (100.00%), branches 5/5 (100.00%)\n",
         try A.coverTable(a, files, &.{ "src/b.ts", "src/a.ts", "src/none.ts" }),
     );
+}
+
+const macho_arm64 = [_]u8{ 0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00 };
+
+test "machoArm64Refusal accepts the Mach-O 64-bit arm64 header" {
+    try t.expectEqual(@as(?[]const u8, null), A.machoArm64Refusal(&macho_arm64));
+    try t.expectEqual(@as(?[]const u8, null), A.machoArm64Refusal(macho_arm64[0..8]));
+}
+
+test "machoArm64Refusal names an ELF file" {
+    const elf = "\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00";
+    try t.expectEqualStrings("it is an ELF file", A.machoArm64Refusal(elf).?);
+}
+
+test "machoArm64Refusal refuses a Mach-O of another cputype" {
+    var x86_64 = macho_arm64;
+    x86_64[4] = 0x07;
+    try t.expectEqualStrings("its Mach-O cputype is not arm64", A.machoArm64Refusal(&x86_64).?);
+    var wrong_cpu = macho_arm64;
+    wrong_cpu[7] = 0x00;
+    try t.expectEqualStrings("its Mach-O cputype is not arm64", A.machoArm64Refusal(&wrong_cpu).?);
+}
+
+test "machoArm64Refusal refuses a file that is no Mach-O or too short to be one" {
+    try t.expectEqualStrings("it does not start with the Mach-O 64-bit magic", A.machoArm64Refusal("#!/bin/sh\necho\n").?);
+    var swapped = macho_arm64;
+    swapped[0] = 0xfe;
+    try t.expectEqualStrings("it does not start with the Mach-O 64-bit magic", A.machoArm64Refusal(&swapped).?);
+    try t.expectEqualStrings("it is shorter than a Mach-O header", A.machoArm64Refusal(macho_arm64[0..7]).?);
+    try t.expectEqualStrings("it is shorter than a Mach-O header", A.machoArm64Refusal("").?);
+}
+
+const version_h = "#ifndef SRC_NODE_VERSION_H_\n#define SRC_NODE_VERSION_H_\n\n#define NODE_MAJOR_VERSION 24\r\n#define NODE_MINOR_VERSION 21\n#define NODE_PATCH_VERSION\t0\n\n#define NODE_VERSION_IS_RELEASE 1\n#endif\n";
+
+test "headerVersion reads the three defines, tolerating tabs, CRLF and other defines" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    var missing: []const u8 = "";
+    try t.expectEqualStrings("24.21.0", try A.headerVersion(arena.allocator(), version_h, &missing));
+}
+
+test "headerVersion names the define a header lacks or leaves without a number" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var missing: []const u8 = "";
+    try t.expectError(error.NoDefine, A.headerVersion(a, "#define NODE_MAJOR_VERSION 24\n#define NODE_PATCH_VERSION 0\n", &missing));
+    try t.expectEqualStrings("NODE_MINOR_VERSION", missing);
+    try t.expectError(error.NoDefine, A.headerVersion(a, "", &missing));
+    try t.expectEqualStrings("NODE_MAJOR_VERSION", missing);
+    // A longer name, a comment and a value that is no number are not the define.
+    try t.expectError(error.NoDefine, A.headerVersion(a, "#define NODE_MAJOR_VERSION_X 24\n// #define NODE_MAJOR_VERSION 24\n#define NODE_MAJOR_VERSION abc\n#define NODE_MAJOR_VERSION\n", &missing));
+    try t.expectEqualStrings("NODE_MAJOR_VERSION", missing);
+    try t.expectError(error.NoDefine, A.headerVersion(a, "#define NODE_MAJOR_VERSION 24\n#define NODE_MINOR_VERSION 21\n#define NODE_PATCH_VERSION x\n", &missing));
+    try t.expectEqualStrings("NODE_PATCH_VERSION", missing);
+}
+
+test "foreignRefusal accepts the pinned release: a Mach-O arm64 node and the version its header states" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try t.expectEqual(@as(?[]const u8, null), try A.foreignRefusal(arena.allocator(), "a.tgz", &macho_arm64, version_h, "24.21.0"));
+}
+
+test "foreignRefusal refuses an ELF node by name" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try t.expectEqualStrings(
+        "node_dist: the bin/node in a.tgz is not a Mach-O 64-bit arm64 executable: it is an ELF file\n",
+        (try A.foreignRefusal(arena.allocator(), "a.tgz", "\x7fELF\x02\x01\x01\x00", version_h, "24.21.0")).?,
+    );
+}
+
+test "foreignRefusal refuses a header whose version is not the pin, a prefix or suffix of it included" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings(
+        "node_dist: include/node/node_version.h in a.tgz states v24.21.0, the pin says v24.20.0\n",
+        (try A.foreignRefusal(a, "a.tgz", &macho_arm64, version_h, "24.20.0")).?,
+    );
+    try t.expect((try A.foreignRefusal(a, "a.tgz", &macho_arm64, version_h, "24.21")) != null);
+    try t.expect((try A.foreignRefusal(a, "a.tgz", &macho_arm64, version_h, "4.21.0")) != null);
+}
+
+test "foreignRefusal names a define the header lacks" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try t.expectEqualStrings(
+        "node_dist: include/node/node_version.h in a.tgz does not define NODE_PATCH_VERSION as a number\n",
+        (try A.foreignRefusal(arena.allocator(), "a.tgz", &macho_arm64, "#define NODE_MAJOR_VERSION 24\n#define NODE_MINOR_VERSION 21\n", "24.21.0")).?,
+    );
+}
+
+test "foreignRefusal checks the executable before the header" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try t.expectEqualStrings(
+        "node_dist: the bin/node in a.tgz is not a Mach-O 64-bit arm64 executable: it is shorter than a Mach-O header\n",
+        (try A.foreignRefusal(arena.allocator(), "a.tgz", "", "", "24.21.0")).?,
+    );
+}
+
+// ---- install-test ---------------------------------------------------------------
+
+test "isTopManifest: the package.json of the one top directory, whatever its name" {
+    try t.expect(A.isTopManifest("package/package.json"));
+    try t.expect(A.isTopManifest("node v25.9/package.json"));
+    try t.expect(A.isTopManifest("./package/package.json"));
+    try t.expect(!A.isTopManifest("package.json"));
+    try t.expect(!A.isTopManifest("/package.json"));
+    try t.expect(!A.isTopManifest("package/dist/package.json"));
+    try t.expect(!A.isTopManifest("package/package.json5"));
+    try t.expect(!A.isTopManifest("package/"));
+}
+
+test "manifestName: the top-level name, a string that is not empty" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings("@komira-ai/komira", try A.manifestName(a, "{\"version\":\"0.0.0\",\"name\":\"@komira-ai/komira\"}"));
+    try t.expectError(error.NoName, A.manifestName(a, "{\"version\":\"0.0.0\"}"));
+    try t.expectError(error.NoName, A.manifestName(a, "{\"name\":7}"));
+    try t.expectError(error.NoName, A.manifestName(a, "{\"name\":\"\"}"));
+    try t.expectError(error.NoName, A.manifestName(a, "{\"dist\":{\"name\":\"nested\"}}"));
+    try t.expectError(error.NoName, A.manifestName(a, "[\"name\"]"));
+    try t.expect(std.meta.isError(A.manifestName(a, "{\"name\":")));
+}
+
+test "tarballName: the name in the top package.json of a tarball, any top directory" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const plain = try tartest.tgz(a, "apache-arrow", "21.2.0", &.{.{ .name = "package/Arrow.js", .data = "export {};\n" }});
+    try t.expectEqualStrings("apache-arrow", try A.tarballName(a, plain));
+    const types = try tartest.gzip(a, try tartest.tar(a, &.{
+        .{ .name = "node v25.9/", .kind = '5', .mode = 0o755 },
+        .{ .name = "node v25.9/README.md", .data = "types\n" },
+        .{ .name = "node v25.9/package.json", .data = "{\"name\":\"@types/node\",\"version\":\"25.9.9\"}" },
+    }));
+    try t.expectEqualStrings("@types/node", try A.tarballName(a, types));
+    // A package.json deeper down is not the package's.
+    const nested = try tartest.gzip(a, try tartest.tar(a, &.{
+        .{ .name = "package/", .kind = '5', .mode = 0o755 },
+        .{ .name = "package/sub/package.json", .data = "{\"name\":\"inner\"}" },
+    }));
+    try t.expectError(error.NoManifest, A.tarballName(a, nested));
+    const nameless = try tartest.gzip(a, try tartest.tar(a, &.{
+        .{ .name = "package/package.json", .data = "{\"version\":\"1.0.0\"}" },
+    }));
+    try t.expectError(error.NoName, A.tarballName(a, nameless));
+    try t.expect(std.meta.isError(A.tarballName(a, "not gzip")));
+}
+
+test "projectManifest: one file: dependency, every other tarball an override, by absolute path" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const text = try A.projectManifest(
+        a,
+        "/s/project",
+        .{ .name = "@komira-ai/komira", .file = "tarballs/komira-ai-komira-0.0.0.tgz" },
+        &.{
+            .{ .name = "@komira-ai/komira-linux-x64-gnu", .file = "tarballs/komira-ai-komira-linux-x64-gnu-0.0.0.tgz" },
+            .{ .name = "apache-arrow", .file = "tarballs/npm-apache-arrow-21.2.0.tgz" },
+        },
+    );
+    try t.expect(std.mem.endsWith(u8, text, "}\n"));
+    const v = (try std.json.parseFromSlice(std.json.Value, a, text, .{})).value;
+    try t.expectEqual(@as(usize, 6), v.object.count());
+    try t.expectEqualStrings("komira-install-test", v.object.get("name").?.string);
+    try t.expectEqualStrings("0.0.0", v.object.get("version").?.string);
+    try t.expect(v.object.get("private").?.bool);
+    try t.expectEqualStrings("module", v.object.get("type").?.string);
+    const deps = v.object.get("dependencies").?.object;
+    try t.expectEqual(@as(usize, 1), deps.count());
+    try t.expectEqualStrings("file:/s/project/tarballs/komira-ai-komira-0.0.0.tgz", deps.get("@komira-ai/komira").?.string);
+    const over = v.object.get("overrides").?.object;
+    try t.expectEqual(@as(usize, 2), over.count());
+    try t.expectEqualStrings("file:/s/project/tarballs/komira-ai-komira-linux-x64-gnu-0.0.0.tgz", over.get("@komira-ai/komira-linux-x64-gnu").?.string);
+    try t.expectEqualStrings("file:/s/project/tarballs/npm-apache-arrow-21.2.0.tgz", over.get("apache-arrow").?.string);
+    // With no other tarball, overrides is an empty object.
+    const alone = (try std.json.parseFromSlice(std.json.Value, a, try A.projectManifest(a, "/p", .{ .name = "p", .file = "tarballs/p.tgz" }, &.{}), .{})).value;
+    try t.expectEqual(@as(usize, 0), alone.object.get("overrides").?.object.count());
+}
+
+test "clash: a package name or a file name given twice" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const have = [_]A.Tarball{.{ .name = "tslib", .file = "tarballs/tslib-2.8.1.tgz" }};
+    try t.expect(try A.clash(a, &have, .{ .name = "flatbuffers", .file = "tarballs/flatbuffers.tgz" }) == null);
+    try t.expect(try A.clash(a, &.{}, .{ .name = "tslib", .file = "tarballs/tslib-2.8.1.tgz" }) == null);
+    try t.expectEqualStrings(
+        "tarballs/tslib-2.8.1.tgz and tarballs/other.tgz are both the package tslib",
+        (try A.clash(a, &have, .{ .name = "tslib", .file = "tarballs/other.tgz" })).?,
+    );
+    try t.expectEqualStrings(
+        "two tarballs are named tarballs/tslib-2.8.1.tgz",
+        (try A.clash(a, &have, .{ .name = "other", .file = "tarballs/tslib-2.8.1.tgz" })).?,
+    );
+}
+
+test "npmInstallArgv: offline, no install script, engines enforced, nothing of the worker's" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const argv = try A.npmInstallArgv(a, "/n/bin/node", "/npm", "/s");
+    const want = [_][]const u8{
+        "/n/bin/node",
+        "/npm/bin/npm-cli.js",
+        "install",
+        "--offline",
+        "--ignore-scripts",
+        "--engine-strict",
+        "--no-audit",
+        "--no-fund",
+        "--no-update-notifier",
+        "--loglevel=warn",
+        "--cache=/s/npm-cache",
+        "--userconfig=/s/npmrc",
+        "--globalconfig=/s/npmrc-global",
+    };
+    try t.expectEqual(want.len, argv.len);
+    for (want, argv) |w, g| try t.expectEqualStrings(w, g);
+}
+
+test "installScripts: the packages npm marks hasInstallScript, sorted, and nothing else" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const lock =
+        \\{"name":"t","lockfileVersion":3,"packages":{
+        \\  "":{"name":"t","hasInstallScript":true},
+        \\  "node_modules/zz":{"version":"1.0.0","hasInstallScript":true},
+        \\  "node_modules/@komira-ai/komira":{"version":"0.0.0","hasInstallScript":true},
+        \\  "node_modules/tslib":{"version":"2.8.1"},
+        \\  "node_modules/off":{"version":"1.0.0","hasInstallScript":false},
+        \\  "node_modules/odd":{"version":"1.0.0","hasInstallScript":"yes"}
+        \\}}
+    ;
+    const got = try A.installScripts(a, lock);
+    try t.expectEqual(@as(usize, 3), got.len);
+    try t.expectEqualStrings("", got[0]);
+    try t.expectEqualStrings("node_modules/@komira-ai/komira", got[1]);
+    try t.expectEqualStrings("node_modules/zz", got[2]);
+    try t.expectEqual(@as(usize, 0), (try A.installScripts(a, "{\"packages\":{\"node_modules/a\":{\"version\":\"1.0.0\"}}}")).len);
+    try t.expectError(error.NotALock, A.installScripts(a, "{\"lockfileVersion\":3}"));
+    try t.expectError(error.NotALock, A.installScripts(a, "{\"packages\":[]}"));
+    try t.expectError(error.NotALock, A.installScripts(a, "[]"));
+    try t.expect(std.meta.isError(A.installScripts(a, "{\"packages\":")));
 }

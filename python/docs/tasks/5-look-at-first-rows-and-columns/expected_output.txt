@@ -1,0 +1,11 @@
+[{'n': 5}]
+{'id': 1, 'city': 'Oslo', 'km': 3, 'fare': 12.5}
+{'id': 2, 'city': 'Lima', 'km': 8, 'fare': 20.0}
+['id', 'city', 'km', 'fare']
+int64 int64 float64
+[{'id': 1, 'city': 'Oslo', 'km': 3, 'fare': 12.5}, {'id': 2, 'city': 'Lima', 'km': 8, 'fare': 20.0}]
+[{'n': 5}]
+[{'id': 5, 'city': 5, 'km': 5, 'fare': 4}]
+['id', 'city', 'km', 'fare']
+[{'id': 1, 'city': 'Oslo', 'km': 3, 'fare': 12.5}, {'id': 2, 'city': 'Lima', 'km': 8, 'fare': 20.0}]
+[{'len': 5}]

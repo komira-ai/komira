@@ -205,9 +205,11 @@ How the library is found at run time: by its install name, through a run
 path. A library that needs it carries `LC_RPATH @loader_path` and finds it in
 its own directory; a program or test that links it stages it in the `lib/`
 its own run path (`@loader_path/lib`) names, as on Linux. Nothing loads it by
-an absolute path or through `DYLD_LIBRARY_PATH`. No `mojo_shared_lib` links an
-owner's library on macOS yet (`native_owners` is refused there), and no conda
-package for osx-arm64 holds one: the conda packer builds linux-64 only.
+an absolute path or through `DYLD_LIBRARY_PATH`. A `mojo_shared_lib` with
+`native_owners` links an owner's library on macOS as on Linux and stages it
+in the `lib/` of its gate and `[dist]`
+([`../examples/shared_lib_native`](../examples/shared_lib_native/README.md)).
+No conda package for osx-arm64 holds one: the conda packer builds linux-64 only.
 
 `native_so` reads Mach-O as well as ELF, by each file's magic: a `.dylib`,
 Mach-O objects, and BSD-layout archives of them (`#1/<n>` long names, a

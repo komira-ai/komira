@@ -88,7 +88,7 @@ from std.sys.info import CompilationTarget
 # every host; comptime if elides the non-host branch at codegen.
 # -----------------------------------------------------------------------------
 
-comptime _LIBZ: StaticString = (
+comptime LIBZ_SONAME: StaticString = (
     "libz.dylib" if CompilationTarget.is_macos() else "libz.so.1"
 )
 
@@ -145,7 +145,7 @@ def _init_zlib_ffi_handle() -> OwnedDLHandle:
     error), so we `abort`: an unloadable libz cannot serve any later call.
     """
     try:
-        return OwnedDLHandle(_LIBZ)
+        return OwnedDLHandle(LIBZ_SONAME)
     except e:
         abort("libz dlopen failed (zlib FFI handle init)")
 
