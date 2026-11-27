@@ -1,10 +1,10 @@
 """komira.pl's `LazyFrame.sink_parquet` against polars' own, on the real
 libkomira and the pinned polars:
 
-- test_the_keywords_are_polars_own: every keyword of polars'
-  `LazyFrame.sink_parquet` is either one komira takes (`path`, `compression`)
-  or one it refuses by name (`komira.pl._frame.SINK_PARQUET_REFUSED`), and
-  komira refuses no name polars lacks;
+- test_the_keywords_are_polars_own: every keyword komira's
+  `LazyFrame.sink_parquet` takes is one of polars', in polars' order and with
+  polars' default, and each keyword of polars' that komira does not take
+  raises a TypeError naming it, before any file is written;
 - test_the_codecs_and_the_default_are_polars_own: polars' default compression
   is komira's, and each codec polars names is one komira writes or one it
   refuses by name (brotli);
@@ -33,7 +33,6 @@ import pyarrow.parquet as pq
 import komira.pl as kpl
 from komira import Session, UnsupportedOperation
 from komira import _native
-from komira.pl._frame import SINK_PARQUET_REFUSED
 
 assert pl.__version__ == "1.44.2", pl.__version__
 
@@ -55,19 +54,23 @@ def kinds(table):
     return out
 
 
-def test_the_keywords_are_polars_own():
+def test_the_keywords_are_polars_own(session, work):
     theirs = inspect.signature(pl.LazyFrame.sink_parquet).parameters
-    named = [n for n in theirs if n != "self"]
-    assert named[:2] == ["path", "compression"], named
-    assert set(named[2:]) == set(SINK_PARQUET_REFUSED), (
-        sorted(set(named[2:]) - set(SINK_PARQUET_REFUSED)),
-        sorted(set(SINK_PARQUET_REFUSED) - set(named[2:])),
-    )
-    assert len(SINK_PARQUET_REFUSED) == len(set(SINK_PARQUET_REFUSED)), SINK_PARQUET_REFUSED
     mine = inspect.signature(kpl.LazyFrame.sink_parquet).parameters
-    assert list(mine)[:3] == ["self", "path", "compression"], list(mine)
-    assert mine["compression"].kind is inspect.Parameter.KEYWORD_ONLY
-    assert theirs["compression"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert list(mine)[:2] == list(theirs)[:2] == ["self", "path"], (list(mine), list(theirs))
+    taken = [n for n in mine if n not in ("self", "path")]
+    assert taken == [n for n in theirs if n in taken], (taken, list(theirs))
+    for name in taken:
+        assert mine[name].kind is theirs[name].kind is inspect.Parameter.KEYWORD_ONLY, name
+        assert mine[name].default == theirs[name].default, (name, mine[name].default, theirs[name].default)
+    lf = kpl.scan_parquet(os.path.join(work, "t.parquet"), session=session)
+    others = [n for n in theirs if n not in mine]
+    assert others, "polars has no keyword komira lacks"
+    for name in others:
+        dest = os.path.join(work, f"kw_{name}.parquet")
+        e = raised(lambda: lf.sink_parquet(dest, **{name: None}))
+        assert type(e) is TypeError and repr(name) in str(e), (name, repr(e))
+        assert not os.path.exists(dest), name
 
 
 def test_the_codecs_and_the_default_are_polars_own(session, work):
@@ -157,11 +160,11 @@ def main(argv):
     parser.add_argument("--runtime-dir", required=True)
     args = parser.parse_args(argv)
     _native.load(os.path.join(os.path.abspath(args.lib_dir), "libkomira"))
-    test_the_keywords_are_polars_own()
-    print("ok test_the_keywords_are_polars_own")
     with tempfile.TemporaryDirectory() as work:
         pq.write_table(table(), os.path.join(work, "t.parquet"))
         with Session() as session:
+            test_the_keywords_are_polars_own(session, work)
+            print("ok test_the_keywords_are_polars_own")
             test_the_codecs_and_the_default_are_polars_own(session, work)
             print("ok test_the_codecs_and_the_default_are_polars_own")
             test_each_program_writes_the_file_polars_writes(session, work)

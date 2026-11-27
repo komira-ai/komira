@@ -28,6 +28,6 @@ with komira.Session() as s:
 df = komira.read_parquet("big_orders.parquet")
 print(df.groupby("customer").agg(total=("amount", "sum")).sort_values("customer").materialize().to_arrow().to_pylist())
 
-# A komira.pl frame writes its own rows: sink_parquet runs the plan and writes one file.
-pl.scan_csv("orders.csv").filter(pl.col("amount") >= 75).sort("order_id").sink_parquet("big_orders_pl.parquet")
-print(pl.scan_parquet("big_orders_pl.parquet").sort("order_id").collect().to_arrow().to_pylist())
+# The polars-shaped frame writes its own rows with sink_parquet, zstd by default.
+pl.scan_parquet("big_orders.parquet").filter(pl.col("customer") == "Ana").sink_parquet("ana.parquet")
+print(pl.scan_parquet("ana.parquet").sort("order_id").collect().to_arrow().to_pylist())

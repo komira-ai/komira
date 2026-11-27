@@ -16,8 +16,8 @@ Lazy frames and unbound expressions, as in polars (docs/design/dataframe_surface
 A frame is a plan of the package's private node tree. No verb runs a query:
 the two terminals do. `collect()` encodes the plan and runs it through
 libkomira's plan entry (`komira_plan_stream`), and returns the package's
-`Result`, read once; `sink_parquet(path)` runs it there with a write target and
-writes the rows to a local Parquet file, returning None. Nothing
+`Result`, read once; `sink_csv`, `sink_parquet` and `sink_ndjson` run it there
+with a write target and write the rows to a local file, returning None. Nothing
 here writes SQL text, and nothing imports polars to compute.
 
 The names are exactly `__all__`. A name the module or one of its classes does

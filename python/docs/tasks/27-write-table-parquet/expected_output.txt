@@ -1,4 +1,4 @@
 rows written: 3
 [{'order_id': 1, 'customer': 'Ana', 'amount': 120}, {'order_id': 3, 'customer': 'Ana', 'amount': 75}, {'order_id': 4, 'customer': 'Cy', 'amount': 200}]
 [{'customer': 'Ana', 'total': 195}, {'customer': 'Cy', 'total': 200}]
-[{'order_id': 1, 'customer': 'Ana', 'amount': 120}, {'order_id': 3, 'customer': 'Ana', 'amount': 75}, {'order_id': 4, 'customer': 'Cy', 'amount': 200}]
+[{'order_id': 1, 'customer': 'Ana', 'amount': 120}, {'order_id': 3, 'customer': 'Ana', 'amount': 75}]

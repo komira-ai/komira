@@ -155,7 +155,7 @@ The frames are immutable, except for one pandas idiom:
   - A write terminal sets the envelope's `write_target` (format version 5). The plan entry writes the file
     and answers the one-row `Count` stream, which the terminal reads and drops, returning `None`
     ([credentials_and_writes.md §10](credentials_and_writes.md#10-writes)). Built for the pandas-shaped
-    skin, and for `sink_parquet` of `komira.pl`; its `sink_csv` and `sink_ndjson` are not built.
+    skin, and for the polars-shaped `sink_csv`, `sink_parquet` and `sink_ndjson` of `komira.pl`.
   - protobuf becomes a required dependency of the package with this surface, beside pyarrow, as the
     Python package design says. Its range is `PROTOBUF_REQUIREMENT` in `python/dependencies.bzl`, which
     the wheel of the release that first ships the plan modules declares.

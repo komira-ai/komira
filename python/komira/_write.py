@@ -4,9 +4,11 @@ door (docs/design/credentials_and_writes.md, section 10).
 `write` wraps a plan in a `Write` root, encodes it and runs it on a session;
 `destination`, `text_codec` and `parquet_codec` check a terminal's arguments
 and name the path and the codec the engine is given, before the library is
-called. The terminals of the pandas-shaped frame (komira/_frame.py) use them
-with pandas' own parameter names, and `LazyFrame.sink_parquet`
-(komira/pl/_frame.py) with polars'.
+called, and `unsupported` is the refusal of an argument komira writes
+otherwise. The pandas-shaped frame's terminals (komira/_frame.py) use them with
+pandas' own parameter names; the polars-shaped frame's sinks
+(komira/pl/_frame.py) use `write`, `destination` and `unsupported`, with
+polars' names checked in komira/pl/_sink.py.
 
 The engine writes the file all or nothing, and refuses a destination that is a
 URL (`STORAGE_URL_REFUSED`) or a codec the format does not take by name.
@@ -21,7 +23,12 @@ from . import _ops
 from ._errors import UnsupportedOperation
 from ._session import Session, _local_path
 
-__all__ = ["destination", "parquet_codec", "text_codec", "write"]
+__all__ = ["ALWAYS_HEADER", "COMMA", "destination", "parquet_codec", "text_codec", "unsupported", "write"]
+
+# What komira's CSV writer does where pandas and polars take an option: the
+# defaults of DuckDB's COPY, the only form the writer has.
+COMMA = "komira writes ',' between cells"
+ALWAYS_HEADER = "komira always writes the header line"
 
 # Each suffix the `compression="infer"` of pandas reads, as the name of the
 # compression it means; the longer suffixes of an archive come first.
@@ -57,6 +64,12 @@ def write(
 
     root = _ops.Write(plan, _ops.WriteTarget(path, fmt, codec))
     session._plan_write(_plan.encode_plan(root, sources).SerializeToString())
+
+
+def unsupported(verb: str, name: str, value: object, what: str) -> UnsupportedOperation:
+    """The refusal of `verb`'s argument `name` at `value`, which komira does
+    not write: `what` says what komira writes instead. The caller raises it."""
+    return UnsupportedOperation(f"{verb}({name}={value!r}) is not supported: {what}")
 
 
 def destination(path: object, verb: str) -> str:
@@ -120,20 +133,16 @@ def text_codec(compression: object, dest: str, verb: str) -> str:
     raise TypeError(f"{verb} compression must be a str or None, not {type(compression).__name__}")
 
 
-def parquet_codec(compression: object, verb: str = "to_parquet", off: str | None = None) -> str:
-    """The codec of a Parquet file for the `compression` of `verb`: "snappy",
-    "gzip", "zstd" and "lz4" are themselves, and `off`, the verb's word for no
-    compression (None for pandas' `to_parquet`, "uncompressed" for polars'
-    `sink_parquet`), is none; any other str is refused by name, and a value
-    that is neither a str nor `off` is a TypeError."""
-    if compression is off or (isinstance(off, str) and compression == off):
+def parquet_codec(compression: object) -> str:
+    """The codec of a Parquet file for `to_parquet`'s `compression`: "snappy",
+    "gzip", "zstd" and "lz4" are themselves, None is none; any other is refused."""
+    if compression is None:
         return "uncompressed"
     if isinstance(compression, str):
         if compression in _PARQUET_NAMES:
             return compression
         raise UnsupportedOperation(
-            f"{verb}(compression={compression!r}) is not a codec komira writes: "
-            f"use 'snappy', 'gzip', 'zstd', 'lz4' or {off!r}"
+            f"to_parquet(compression={compression!r}) is not a codec komira writes: "
+            "use 'snappy', 'gzip', 'zstd', 'lz4' or None"
         )
-    allowed = "a str or None" if off is None else "a str"
-    raise TypeError(f"{verb} compression must be {allowed}, not {type(compression).__name__}")
+    raise TypeError(f"to_parquet compression must be a str or None, not {type(compression).__name__}")
