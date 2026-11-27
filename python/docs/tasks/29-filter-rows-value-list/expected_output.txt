@@ -1,0 +1,5 @@
+[{'order_id': 1, 'region': 'east'}, {'order_id': 3, 'region': 'east'}, {'order_id': 4, 'region': 'north'}]
+[{'order_id': 2, 'region': 'west'}, {'order_id': 5, 'region': 'west'}, {'order_id': 6, 'region': 'south'}]
+[{'order_id': 1, 'customer': 'Ana', 'region': 'east', 'amount': 120}, {'order_id': 3, 'customer': 'Ana', 'region': 'east', 'amount': 45}, {'order_id': 4, 'customer': 'Cy', 'region': 'north', 'amount': 200}]
+[{'order_id': 2, 'customer': 'Bo', 'region': 'west', 'amount': 80}, {'order_id': 5, 'customer': 'Bo', 'region': 'west', 'amount': 150}, {'order_id': 6, 'customer': 'Cy', 'region': 'south', 'amount': 60}]
+[{'order_id': 2, 'customer': 'Bo'}, {'order_id': 4, 'customer': 'Cy'}, {'order_id': 6, 'customer': 'Cy'}]

@@ -18,7 +18,11 @@
 //!     skipped test fail though node may exit 0, an addon that is not staged
 //!     fails its test, and an addon that returns the wrong number fails it;
 //!     with covered sources, lines or branches under 99% and a covered source
-//!     no test loaded fail though every test passed.
+//!     no test loaded fail though every test passed;
+//!   - npm_install_test (//node:install_test's files and pins): a platform
+//!     package without a Mojo runtime library installs and fails the test at
+//!     its first load, and a main package with a postinstall script or a
+//!     platform package with a binding.gyp fails before any test runs.
 //!
 //! The analysis refusals of the same rules are analysis_refusals_node.
 const std = @import("std");
@@ -239,6 +243,21 @@ const ROWS = [_]lib.Row{
         .name = "node_binding_cover_not_loaded",
         .target = "tests//negative/node:binding_cover_not_loaded",
         .text = "binding_cover_unloaded.mjs is to be covered, and no test loaded it",
+    },
+    .{
+        .name = "node_install_missing_runtime",
+        .target = "tests//negative/node:install_missing_runtime",
+        .text = "libMSupportGlobals.so: cannot open shared object file",
+    },
+    .{
+        .name = "node_install_postinstall",
+        .target = "tests//negative/node:install_postinstall",
+        .text = "install_test: npm reports an install script in node_modules/@komira-ai/komira, and npm install is the only step",
+    },
+    .{
+        .name = "node_install_binding_gyp",
+        .target = "tests//negative/node:install_binding_gyp",
+        .text = "install_test: npm reports an install script in node_modules/@komira-ai/komira-linux-x64-gnu, and",
     },
     .{
         .name = "node_c_warns",

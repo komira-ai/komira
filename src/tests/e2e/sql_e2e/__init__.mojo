@@ -5,8 +5,10 @@
 # DuckDB is a sql_oracle build action (BUCK); its answer from
 # komira is `so.sql_result`, what libkomira's komira_sql_stream runs. The two
 # must be equal by value and in row order (runner.mojo), or komira must refuse
-# the case with the text refusals.tsv lists for it (corpus.mojo). Test-only;
-# nothing ships.
+# the case with the text refusals.tsv lists for it (corpus.mojo). One
+# capability's cases also run as a test of their own, one per cell of the
+# surface capability matrix (capability.mojo). Test-only; nothing ships.
+from .capability import check_capability, flag_value, split_cases
 from .corpus import (
     REFUSALS_FILE,
     Corpus,

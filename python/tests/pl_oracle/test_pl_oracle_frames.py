@@ -17,8 +17,8 @@ the same columns; the right file has a duplicated key, keys the left lacks, a
 null key, and columns named like the left's. The programs cover:
 
 - group_by with one and two keys, a null key, the aggregates the engine's
-  grouped sinks serve (sums, means, minimums and maximums of integers,
-  counts), expressions over aggregates, polars' types of a sum over
+  grouped sinks serve (sums, means, minimums and maximums of integers and of
+  a float, counts), expressions over aggregates, polars' types of a sum over
   int32, uint16 and bool, len(), the per-column reductions, a key given as
   col(), and over the empty file;
 - join with each how (inner, left, right, full, semi, anti, cross), on one
@@ -36,9 +36,7 @@ null key, and columns named like the left's. The programs cover:
   the types of cum_sum over int32, float32 and bool.
 
 And the edges the oracle does not cover: unique(subset, keep="any") keeps one
-row of each value, any of them; a grouped sum, mean or maximum of a float column, which
-the engine's aggregation sinks do not serve yet, is refused by the engine; and
-collect() of a frame of all of these calls
+row of each value, any of them; and collect() of a frame of all of these calls
 the plan entry and never the SQL one, whose explain() holds no SQL text.
 
     test_pl_oracle_frames.py --lib-dir <dir> --runtime-dir <dir>
@@ -139,6 +137,17 @@ GROUP_BY = [
             P.col("x").count().alias("xc"),
             P.len(),
             P.col("t").n_unique().alias("tu"),
+        ),
+        False,
+    ),
+    (
+        "group_by_float_aggregates",
+        lambda P, lf, rf: lf.group_by("g").agg(
+            P.col("y").sum(),
+            P.col("y").mean().alias("ym"),
+            P.col("y").min().alias("ymin"),
+            P.col("y").max().alias("ymax"),
+            (P.col("y") * 2.0).sum().alias("twice"),
         ),
         False,
     ),
@@ -410,25 +419,6 @@ def test_unique_keep_any_keeps_one_row_of_each_value(session, left):
         assert row in rows, row
 
 
-def test_a_grouped_float_sum_is_refused_by_the_engine(session, left):
-    """A grouped sum, mean or maximum of a float column builds the plan's own
-    aggregate; the engine's aggregation sinks fold floats only with no key, so
-    running it raises the engine's refusal, naming its step, and the session
-    answers the next frame."""
-    from komira import KomiraError
-
-    lf = kpl.scan_parquet(left, session=session)
-    for expr in (kpl.col("y").sum(), kpl.col("y").mean(), kpl.col("y").max()):
-        try:
-            lf.group_by("g").agg(expr).collect().to_arrow()
-        except KomiraError as e:
-            # The engine's refusal names the step of the query that refused.
-            assert e.step is not None, (e.code, str(e))
-        else:
-            raise AssertionError("the engine ran a grouped float aggregate")
-    assert lf.group_by("g").len().collect().to_arrow().num_rows == 4
-
-
 class Spy:
     """The library's calls, recording the name of each one made."""
 
@@ -482,7 +472,6 @@ def main(argv):
             run_cases(session, left, right, GROUP_BY + JOINS + UNIQUE + WINDOWS)
             run_cases(session, empty, right, EMPTY)
             test_unique_keep_any_keeps_one_row_of_each_value(session, left)
-            test_a_grouped_float_sum_is_refused_by_the_engine(session, left)
             test_collect_calls_the_plan_entry_and_never_sql(left, right)
     print("pl_oracle_frames: the edge cases passed")
 

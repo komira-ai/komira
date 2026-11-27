@@ -1,0 +1,3 @@
+[{'size': 'L', 'color': 'blue'}, {'size': 'L', 'color': 'red'}, {'size': 'M', 'color': 'blue'}, {'size': 'M', 'color': 'red'}, {'size': 'S', 'color': 'blue'}, {'size': 'S', 'color': 'red'}]
+[{'n': 6}]
+[{'size': 'L', 'color': 'blue', 'code': 2}, {'size': 'L', 'color': 'red', 'code': 1}, {'size': 'M', 'color': 'blue', 'code': 2}, {'size': 'M', 'color': 'red', 'code': 1}, {'size': 'S', 'color': 'blue', 'code': 2}, {'size': 'S', 'color': 'red', 'code': 1}]

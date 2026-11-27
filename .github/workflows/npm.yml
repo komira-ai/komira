@@ -1,0 +1,287 @@
+# The publish of komira's npm packages (docs/ci.md, "npm.yml: publishing the npm packages"; the packages are
+# node/, docs/design/typescript_package.md, section 4): the main package @komira-ai/komira and its platform
+# package @komira-ai/komira-linux-x64-gnu, the set //release:npm_packages, whose names are
+# release/npm_names.txt.
+#
+# EVERY PUSH TO MAIN THAT CHANGES CODE, four jobs (a job that fails stops every job that needs it):
+#   `build`    on the farm: takes the stamp (`release_json stamp`), reads the publish gate
+#              (release/npm_publish.txt, `npm_smoke gate`), builds //release:npm_packages stamped (each
+#              package at 0.1.<N>, the wheel's version, with npm_set.json: each package's name, version,
+#              file, SHA-256 and sha512 integrity; with release.yml's three release values, which the
+#              stamped evaluation of release/BUCK needs), holds the directory to its set (`npm_smoke verify`), and
+#              builds the tools the later jobs run with no checkout: //release/ci:npm_smoke and the pinned
+#              Node.js and npm CLI (//third_party/node:node and :npm, pinned by URL and SHA-256). Keeps the
+#              set and the tools as two artifacts. No publish step.
+#   `test`     on the farm: holds the set the build job kept to its npm_set.json and to the set built again
+#              here from the same stamp (`npm_smoke verify --built`), then runs the install test of those
+#              tarballs on each pinned Node.js line (//node:install_test: 22, 24 and 26), stamped the same,
+#              so it installs the same bytes. No npm identity.
+#   `publish`  only when the gate says `publish: on`: holds the set's directory to npm_set.json again and
+#              publishes each platform package and then the main package, which names them, with
+#              `npm publish <file> --access public` (`npm_smoke publish`; a version the registry holds with
+#              the set's integrity is not published again, and one it holds with other bytes stops the job).
+#   `smoke`    after the publish: installs @komira-ai/komira at exactly the set's version from the registry
+#              into an empty project, holds the integrity npm recorded for each package to npm_set.json and
+#              runs SELECT 1 through it (`npm_smoke smoke`). The one place a job reaches the network for a
+#              test, and it reaches only the npm registry.
+#
+# THE GATE. npm publishing starts on the owner's go (the design's D4). The go is a reviewed change of
+# release/npm_publish.txt from `publish: off` to `publish: on`; //release:npm_publish_gate_cases holds the
+# file to one of the two lines. While it says off, every push builds and tests the packages, and `publish` and
+# `smoke` are skipped (a skipped job is not a failure). //:npm_workflow_cases holds that `publish` and `smoke`
+# run only when the gate's output is `true`.
+#
+# TRUSTED PUBLISHING. npm binds a package's trusted publisher to this file's name and the environment `npm`,
+# so the `publish` job alone runs in that environment, and it alone holds `id-token: write` for npm: npm
+# exchanges the job's OIDC token for the publish and adds the provenance itself. No NPM_TOKEN exists, and no
+# secret is read. `build` and `test` hold `id-token: write` for farm-connect alone, in the environment
+# `build`, which no registry trusts. `smoke` holds no permission. //:npm_workflow_cases holds every job's
+# environment and permissions.
+#
+# TRIGGERS AND CONCURRENCY. A push to main that changes more than documentation (`paths-ignore`, the list
+# pypi.yml and release.yml have); never a pull request, no schedule, no manual run. Every run is in the group
+# `npm-main` with cancel-in-progress false: a running run is never cancelled, and GitHub keeps one pending
+# run, the newest, so two runs never publish at once.
+name: npm
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+
+permissions: {}
+
+concurrency:
+  group: npm-main
+  cancel-in-progress: false
+
+jobs:
+  # Builds the set on the farm and keeps it, with the tools the later jobs run. The job holds `contents: read`
+  # and the `id-token: write` that the farm connection exchanges for the tailnet, nothing else, in the
+  # environment `build`. It has no publish step.
+  build:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    outputs:
+      version: ${{ steps.verify.outputs.version }}
+      publish: ${{ steps.gate.outputs.publish }}
+      build_number: ${{ steps.stamp.outputs.build_number }}
+      source_commit: ${{ steps.stamp.outputs.source_commit }}
+      timestamp_ms: ${{ steps.stamp.outputs.timestamp_ms }}
+    steps:
+      # The commit the run started on, with the full history: the stamp is
+      # derived from git and refuses a shallow clone.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # The farm connection: tailnet join, refusal unless the farm answers, and
+      # the machine buckconfig, from repository variables (docs/ci.md).
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # the publish queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      # A guard on the file farm-connect wrote: without the linux property set
+      # a build would run on this runner.
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      # The tool the buck2-farm action runs over each step's output; its path
+      # is the step's output.
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      - name: build the release tool
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //release/ci:release_json --out ${{ runner.temp }}/npm/release_json
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: build the npm release tool
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //release/ci:npm_smoke --out ${{ runner.temp }}/npm/tools/npm_smoke
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The Node.js and the npm CLI the publish and the smoke run: the pins of third_party/node, the npm
+      # (11.20.0) that trusted publishing needs at 11.5.1 or later, under a Node.js of 22.14 or later.
+      - name: build the pinned Node.js
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //third_party/node:node --out ${{ runner.temp }}/npm/tools/node
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: build the pinned npm
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //third_party/node:npm --out ${{ runner.temp }}/npm/tools/npm
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The stamp the packages carry: the build number, the commit it counts and its commit time, from git.
+      - name: the stamp
+        id: stamp
+        run: '"$RUNNER_TEMP/npm/release_json" stamp --revision "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"'
+      # publish=true or publish=false, from the committed gate: the publish job and the smoke run only on true.
+      - name: the publish gate
+        id: gate
+        run: '"$RUNNER_TEMP/npm/tools/npm_smoke" gate --file release/npm_publish.txt --github-output "$GITHUB_OUTPUT"'
+      # The set, stamped: every package at 0.1.<build number>, and npm_set.json. release/BUCK, which holds the
+      # set, also calls release_set, and a stamped evaluation of the file fails without the release's
+      # revision, run id and attempt, so this build passes them as release.yml does (//:release_stamp_cases
+      # holds every stamped build of a target that loads release/BUCK to them); the set reads none of them.
+      - name: build the npm packages
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} -c komira.release_revision=${{ github.sha }} -c komira.release_run_id=gh-${{ github.run_id }} -c komira.release_attempt=${{ github.run_attempt }} //release:npm_packages --out ${{ runner.temp }}/npm/set
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The directory is exactly the set's tarballs and npm_set.json, each with its sha256 and integrity; the
+      # output `version` is the set's.
+      - name: the set holds its tarballs
+        id: verify
+        run: '"$RUNNER_TEMP/npm/tools/npm_smoke" verify --set "$RUNNER_TEMP/npm/set/npm_set.json" --dir "$RUNNER_TEMP/npm/set" --github-output "$GITHUB_OUTPUT"'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-set-${{ github.sha }}
+          path: ${{ runner.temp }}/npm/set
+          if-no-files-found: error
+          retention-days: 14
+          # a re-run of every job builds the same bytes again
+          overwrite: true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-tools-${{ github.sha }}
+          path: ${{ runner.temp }}/npm/tools
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+          # the npm CLI's package directory is kept whole
+          include-hidden-files: true
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
+  # The install test of the tarballs the build job kept, on the farm, before anything is published: the kept
+  # set is held to its npm_set.json and to the set built here from the same stamp (so the install test, built
+  # from that stamp too, installs those bytes), then //node:install_test runs on each pinned Node.js line. The
+  # job holds `contents: read` and the `id-token: write` that the farm connection exchanges, in the environment
+  # `build`. No npm identity.
+  test:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-set-${{ github.sha }}
+          path: ${{ runner.temp }}/npm/set
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-tools-${{ github.sha }}
+          path: ${{ runner.temp }}/npm/tools
+      - name: the tool is executable
+        run: chmod +x "$RUNNER_TEMP/npm/tools/npm_smoke"
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # the publish queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      # The record of the set again, from the build job's stamp: the tarballs are reproducible, so it is the
+      # kept set's record exactly when the kept tarballs are the ones this stamp builds. It is of release/BUCK
+      # too, so it passes the release's revision, run id and attempt as the build job's set does.
+      - name: build the set's record from the same stamp
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} -c komira.release_revision=${{ github.sha }} -c komira.release_run_id=gh-${{ github.run_id }} -c komira.release_attempt=${{ github.run_attempt }} //release:npm_packages[npm_set.json] --out ${{ runner.temp }}/npm/built/npm_set.json
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the kept tarballs are the set and the set is the one this stamp builds
+        run: '"$RUNNER_TEMP/npm/tools/npm_smoke" verify --set "$RUNNER_TEMP/npm/set/npm_set.json" --dir "$RUNNER_TEMP/npm/set" --built "$RUNNER_TEMP/npm/built/npm_set.json" --github-output "$GITHUB_OUTPUT"'
+      # npm installs the tarballs into an empty project, offline, with no install script, and the package's
+      # tests import it by its name, once per pinned Node.js line (22, 24 and 26).
+      - name: the install test on each pinned Node.js
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} //node:install_test
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
+  # The publish, in the environment `npm` that the packages' trusted publishers name, only when the gate says
+  # on. The job holds `contents: read` and the `id-token: write` that npm exchanges for a publish, nothing
+  # else: no checkout, no farm, no build, no token.
+  publish:
+    needs: [build, test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    environment: npm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # trusted publishing: the token npm exchanges for a publish and its provenance
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-set-${{ github.sha }}
+          path: ${{ runner.temp }}/npm/set
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-tools-${{ github.sha }}
+          path: ${{ runner.temp }}/npm/tools
+      - name: the tools are executable
+        run: chmod +x "$RUNNER_TEMP/npm/tools/npm_smoke" "$RUNNER_TEMP/npm/tools/node/bin/node"
+      - name: publish the platform packages, then the main package
+        run: '"$RUNNER_TEMP/npm/tools/npm_smoke" publish --set "$RUNNER_TEMP/npm/set/npm_set.json" --dir "$RUNNER_TEMP/npm/set" --node "$RUNNER_TEMP/npm/tools/node/bin/node" --npm "$RUNNER_TEMP/npm/tools/npm" --work "$RUNNER_TEMP/npm/publish"'
+
+  # The smoke of what the registry serves, on a fresh runner: no checkout, no identity, no permission.
+  smoke:
+    needs: [build, publish]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-set-${{ github.sha }}
+          path: ${{ runner.temp }}/npm/set
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-tools-${{ github.sha }}
+          path: ${{ runner.temp }}/npm/tools
+      - name: the tools are executable
+        run: chmod +x "$RUNNER_TEMP/npm/tools/npm_smoke" "$RUNNER_TEMP/npm/tools/node/bin/node"
+      - name: npm installs the published version from the registry, with the set's integrity, and SELECT 1 answers
+        run: '"$RUNNER_TEMP/npm/tools/npm_smoke" smoke --set "$RUNNER_TEMP/npm/set/npm_set.json" --node "$RUNNER_TEMP/npm/tools/node/bin/node" --npm "$RUNNER_TEMP/npm/tools/npm" --work "$RUNNER_TEMP/npm/smoke" --attempts 5 --delay 30'

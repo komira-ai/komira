@@ -1,0 +1,2 @@
+[{'id': 1, 'name': 'ana smith'}, {'id': 2, 'name': 'bo jones'}, {'id': 3, 'name': 'cy   lee'}]
+[{'id': 1, 'name': '  ana smith '}, {'id': 2, 'name': 'bo jones'}, {'id': 3, 'name': ' cy   lee'}]

@@ -9,7 +9,7 @@
 //! macOS than its tag is refused by the minos check.
 
 const std = @import("std");
-const diag = @import("diag.zig");
+const diag = @import("native_policy").diag;
 const check = @import("check.zig");
 const stamp_mod = @import("stamp.zig");
 const wheel = @import("wheel.zig");

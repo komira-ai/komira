@@ -26,7 +26,8 @@ _DEFAULT = "k//ci:pr_default"
 
 _SELECTOR_FILES = [
     ".buckconfig",
-    "ci/targets.bzl",
+    "ci/BUCK",
+    "ci/roots/komira/src/containers:ci",
     "tools/build/ci/affected.bxl",
 ]
 

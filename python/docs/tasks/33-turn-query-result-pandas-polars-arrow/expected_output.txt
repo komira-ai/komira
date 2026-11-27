@@ -1,0 +1,8 @@
+3 ['order_id', 'customer', 'amount']
+[{'order_id': 1, 'customer': 'Ana', 'amount': 120}, {'order_id': 4, 'customer': 'Cy', 'amount': 200}, {'order_id': 5, 'customer': 'Bo', 'amount': 150}]
+{'order_id': [1, 4, 5], 'customer': ['Ana', 'Cy', 'Bo'], 'amount': [120, 200, 150]}
+the result was already read: run the query again to read it again
+True
+3
+True
+True

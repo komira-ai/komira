@@ -46,8 +46,7 @@ Import each module by name; the package root exports nothing.
 - `edge_policy`: what the driver does with each edge tag and order key. E1, E2
   and E3 make a consumer wait for its producer, E5 does not, E4 is refused;
   ORDER_NONE, ORDER_PARTITION_ID and ORDER_ROW_RANGE are served, and
-  `check_plan` refuses ORDER_ROW_RANGE on any sink but the ungrouped
-  aggregation sink.
+  `check_plan` refuses ORDER_ROW_RANGE on any sink but an aggregation sink.
 - `published_outputs`: `PublishedOutputs`, the batch each finished segment left.
   `run_plan` builds it from the plan, counting as a reader of a segment every
   SOURCE_SINK_OUTPUT and SOURCE_CONCAT spec that names it (a concatenation
@@ -118,7 +117,7 @@ Import each module by name; the package root exports nothing.
   crosses it, and reports FINISHED once it is spent. With several workers which
   rows survive depends on the claim order; how many does not.
 - `position_order`: sorts source positions (partition id, origin hint) into
-  source order, for the collect sink and the ungrouped aggregation sink.
+  source order, for the collect sink and the aggregation sinks.
 - `sink_collect`: `CollectSink` keeps each worker's morsels (gathered if masked)
   in the worker's own slot, orders them at `combine` by (partition id, origin
   hint) so a scan collects in file order whatever the schedule, and concatenates
@@ -190,14 +189,16 @@ Import each module by name; the package root exports nothing.
   last bits. Two morsels at one position are refused by name at `combine`.
   Each position's cells (one `AggCell` per aggregate) are drawn from the
   segment pool when it is first seen, so the state grows with the number of
-  morsels the segment reads.
+  morsels the segment reads. The grouped sinks fold their float aggregates by
+  position the same way, per group (`group_positions`, below).
 - `sink_group_agg`, `group_table`, `group_keys`, `sink_agg_any`: the grouped
   aggregation sinks `(SINK_AGG, KEY_DTYPE_I64 | I32 | F64 | F32 | DATE32 |
   BOOL | DECIMAL128, SINK_ORIENT_COLUMNAR)`, over one or more keys that are
   integer columns (the I64 and I32 rows), float columns (F64 and F32), DATE32,
   BOOL or DECIMAL128 columns (one row each), with the aggregates and the
-  exact folds of the ungrouped sink (`agg_fold`, `agg_output`); an aggregate
-  of a float argument (not a float key) is refused by name. The output
+  folds of the ungrouped sink (`agg_fold`, `agg_output`), FLOAT32 and FLOAT64
+  arguments included (below); an argument of a type no fold serves is
+  refused by name, naming the type. The output
   schema lists the key columns, in the input's types, then the aggregates. Each
   worker folds into a hash table of its own (`group_table`: a 64-bit cell and a
   NULL flag per key, two cells for a decimal key at its declared scale, a
@@ -226,12 +227,33 @@ Import each module by name; the package root exports nothing.
   table. `combine` then merges one partition at a time from the workers'
   tables and the chunks, keeping each partition's output rows (charged) and
   freeing its table, and writes the workers' remaining tables to disk when the
-  pool denies a partition's merge. The folds are exact, so the groups and their
-  values are the ones without a spill. The spill files are deleted at the end
+  pool denies a partition's merge. The integer folds are exact, and a float
+  MIN or MAX is up to which of -0.0 and 0.0 is kept, so the groups and their
+  values are the ones without a spill; a float SUM or AVG can differ in its
+  last bits, as between worker counts. The spill files are deleted at the end
   of `combine` or when the sink is dropped. A sink with COUNT(DISTINCT) does
   not spill and says so in its refusal; the string-keyed sinks and the sort do
   not spill. `AnyAggSink` is the
   one slot of the sink variant that holds the grouped or the ungrouped sink.
+- `group_positions`: the grouped sinks' float folds by source position. A
+  FLOAT32 or FLOAT64 argument folds into a double as in the ungrouped sink
+  (SUM from +0.0, MIN and MAX in DuckDB's order of floats). Folded into each
+  worker's table and merged in worker order, a group's float SUM or AVG
+  depends on which worker took which morsel, so `lowering` cuts a grouped
+  float SUM or AVG with `ORDER_ROW_RANGE` too, and `RealBuilder` builds the
+  fixed-width and the string-keyed sinks `by_position`: a worker keeps, per
+  source position it folded, a float cell (a count and a double) for each
+  group that position's rows reached and each float SUM, AVG, MIN and MAX,
+  folded from empty in row order, and `combine` merges those cells into the
+  merged groups in source position order after the workers' tables. Each
+  group's answer is then the same bits on every worker count and schedule,
+  under the same conditions as the ungrouped sink's (above), and a MIN or MAX
+  that meets -0.0 and 0.0 keeps the one first in source order. The other
+  aggregates fold into the worker's table as without a position. Each entry
+  is charged to the segment pool before it is made (a denial fails the query
+  by name), two morsels at one position are refused by name, and a sink that
+  folds by position does not spill (its refusal says why when a spill
+  directory is set).
 - `sink_string_group_agg`, `string_keys`: the grouped aggregation sinks keyed by
   strings, `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED | SINK_ORIENT_COLUMNAR)`,
   over one or more STRING key columns (a fixed-width key beside a string key is
@@ -466,11 +488,13 @@ the raise fails the query through the first-error slot.
   with a selection mask is materialized (fully copied) before the predicate is
   evaluated. Whether a mask-aware evaluation is worth it is for slice 3 to
   measure.
-- **Float aggregate arguments are folded by the ungrouped sink only.** The
-  grouped sinks read each argument into 128-bit values per row
-  (`agg_fold.widen_column`) and refuse a FLOAT32 or FLOAT64 argument by name;
-  a float key is served. A grouped float SUM or AVG, once served, needs its
-  own position fold to be the same bits on every worker count.
+- **A grouped float fold by position grows with (position, group) pairs.**
+  `group_positions` keeps one entry (a group id and 16 bytes per float
+  aggregate) for each group each morsel reaches, charged to the pool: a few
+  groups cost little, but many groups spread over many morsels cost up to one
+  entry per row, and a denial fails the query by name where a fold by worker
+  would have fit. Such a sink does not spill. The dense grouped sink and the
+  byte cap of the design (lowering_and_pipeline §3.3) are not built.
 - **The collect sink holds every chunk until `take_output`.** Chunks stay in the
   worker slots, then in the merged list, and `take_output` concatenates them
   into the output batch, so a segment's peak memory is about twice its output.

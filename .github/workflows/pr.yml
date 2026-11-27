@@ -204,6 +204,11 @@ jobs:
         with:
           args: bxl komira//tools/build/selftest/graph/checks.bxl:check -- --check komira//tools/build/selftest/graph:selftest_closure
           assert-remote: ${{ steps.assert.outputs.path }}
+      - name: graph check, readme_coverage
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/selftest/graph/checks.bxl:check -- --check komira//release:readme_coverage
+          assert-remote: ${{ steps.assert.outputs.path }}
       # //ci:pr holds every check target of the graph (fails, naming the
       # targets, when one exists outside it), and the selector and the guard
       # answer their cases.

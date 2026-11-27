@@ -20,9 +20,9 @@ python3 -m venv .venv
 pip install komira
 ```
 
-That is the whole install. The wheel is about 2.4 MB, and `pip` installs two other packages with it
-(`pip show komira` lists `Requires: protobuf, pyarrow`): pyarrow, which a query's answer is read as, and
-protobuf, which a DataFrame's plan is encoded with.
+That is the whole install. The wheel is about 11 MB on Linux and 8 MB on macOS, and `pip` installs
+two other packages with it (`pip show komira` lists `Requires: protobuf, pyarrow`): pyarrow, which a
+query's answer is read as, and protobuf, which a DataFrame's plan is encoded with.
 
 ## What it needs
 
@@ -50,7 +50,7 @@ import pyarrow.parquet as pq
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1009 is 1.9
+print(komira.abi_version())   # the engine's C ABI version: 1010 is 1.10
 
 # A small Parquet file to query: six days of weather in three cities.
 weather = pa.table({
@@ -97,8 +97,8 @@ It needs no other file: it writes the six-row Parquet file it queries, `weather.
 pyarrow, which `pip install komira` installed. Then `python quickstart.py` prints:
 
 ```text
-0.1.1512
-1009
+0.1.1623
+1010
 [{'days': 6, 'rain': 9.5}]
 city: string
 days: int64 not null
@@ -119,7 +119,8 @@ The first line is the version you installed, so a newer release prints a larger 
 against it, and the error names the file komira looked for. The last two lines before `True` are
 the two mistakes the program makes on purpose: the missing file raises `komira.BindError` and the
 syntax error `komira.ParseError`, both kinds of `komira.KomiraError`, and the program prints each
-message.
+message. The syntax error's message ends with ` at line 1, column 42` in releases newer than 0.1.1623;
+0.1.1623 and older print it without that part.
 
 This program is
 [`python/examples/quickstart.py`](../python/examples/quickstart.py), and what it prints is
@@ -149,7 +150,7 @@ What each call does:
   syntax error (`komira.ParseError`), an unknown table or column (`komira.BindError`), or a construct
   the engine does not run yet (`komira.UnsupportedOperation`) raises from `sql`, with the engine's
   `<step>: <reason>` message; a syntax error's message ends with the line and column where the
-  statement stopped parsing.
+  statement stopped parsing (newer than 0.1.1623).
 - `to_arrow()` reads the whole answer as a `pyarrow.Table`, with its schema. A result is read once;
   `to_reader()` reads it batch by batch instead, and `pyarrow.table(result)` takes it through the
   Arrow PyCapsule interface. `to_pylist()` is pyarrow's, turning the table into Python rows.
@@ -160,8 +161,9 @@ The package's [README](../python/README.md), which is also its PyPI description,
 
 - **The DataFrame verbs not built yet**, of the pandas-shaped and the polars-shaped frames: the
   [capability table](design/dataframe_surface_verbs.md) marks each one "not built", and gives what the
-  engine does with each capability's plan. Among them: the ORC, Avro and Arrow IPC readers, reading
-  from object stores (`s3://`, `gs://`, `az://`), frames made from Arrow data, and writing a frame to
+  engine does with each capability's plan. Among them: the ORC, Avro and Arrow IPC readers, the
+  readers on an object-store URL (`s3://`, `gs://`, `az://`; SQL reads `s3://` and `az://` Parquet
+  through `Session.add_sql_binding`), frames made from Arrow data, and writing a frame to
   a file.
 - **Python UDFs**: no verb takes a Python function yet, and `sql` runs none.
 - **Other platforms**: Linux on arm64, macOS on Intel, Windows, and Linux with musl (Alpine) have no
@@ -189,9 +191,9 @@ The package's [README](../python/README.md), which is also its PyPI description,
   session already has a table of that name. The message is the engine's; for `register_parquet` it
   names the file by its absolute path, a relative path resolved against the working directory.
 - **`komira.ParseError`** from `sql`: a syntax error. The message starts with `parse: ` and ends with
-  `at line <L>, column <C>`, where the statement stopped parsing. Other refusals of `sql` start with
-  the step that refused the statement: `bind: ...` (`komira.BindError`) names a table or column the
-  session does not have (register it first).
+  `at line <L>, column <C>`, where the statement stopped parsing (newer than 0.1.1623). Other
+  refusals of `sql` start with the step that refused the statement: `bind: ...`
+  (`komira.BindError`) names a table or column the session does not have (register it first).
 
 `komira.KomiraError` is the base class of every error komira raises on purpose, so `except
 komira.KomiraError` catches all of these. Anything else is a bug:

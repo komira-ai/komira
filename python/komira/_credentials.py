@@ -4,9 +4,12 @@ A credential is a value the user builds and holds; building one does no I/O
 and calls no library. Every credential has a name, which is what a plan
 carries; its fields are what `Session._seal_credential` copies into the
 session's secret store through `komira_credential_add`, `_set` and `_seal`
-(src/so/README.md, Credentials). Nothing public takes a credential yet: the
-names here are private until `Session.add_sql_binding`, which seals the
-credentials a source names, exports them.
+(src/so/README.md, Credentials). `komira.files` takes one as its
+`credential=`, and `Session.add_sql_binding` seals it when it binds the
+source. The package exports the kinds a file source takes (`AwsKeys`,
+`AwsProfile`, `GcpServiceAccount`, `GcpToken`, `AzureKey`, `AzureSas`,
+`AMBIENT` and `ANONYMOUS`); `BearerToken` and `OAuth2ClientCredentials`,
+which only a catalog takes, stay private until a catalog can be bound.
 
 Arguments are checked when the credential is built, before any library call:
 a name, a field or a value of the wrong type raises `TypeError`, and a name

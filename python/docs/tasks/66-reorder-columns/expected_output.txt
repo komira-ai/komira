@@ -1,0 +1,8 @@
+['amount', 'order_id', 'customer']
+{'amount': 120, 'order_id': 1, 'customer': 'Ana'}
+['order_id', 'customer', 'amount']
+['amount', 'customer', 'order_id']
+['amount', 'customer', 'order_id']
+{'amount': 120, 'customer': 'Ana', 'order_id': 1}
+['customer', 'amount', 'order_id']
+{'customer': 'Ana', 'amount': 120, 'order_id': 1}

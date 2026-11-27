@@ -75,3 +75,79 @@ It depends on `plan_ir`, `plan_expr`, `plan_stats`,
 Public API: import directly from the modules. There is no facade.
 
 Tests live in `tests/` and are welded into the library build.
+
+## Examples
+
+`optimize` runs the rules over one plan in their fixed order: constant folding turns `a > 1 + 2` into `a > 3`, and predicate pushdown moves the Filter into the scan. `optimize_status` returns the same plan in an `OptimizeResult` instead of raising:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
+```mojo module
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, SchemaBuilder
+from optimizer.optimizer_config import OptimizerConfig
+from optimizer.optimizer_driver import optimize, optimize_status
+from optimizer.optimizer_scalar_deps import ScalarDepTable
+from plan_expr.expr import BIN_ADD, BIN_GT, Expr
+from plan_expr.scalar_value import ScalarValue
+from plan_ir.logical_plan import LogicalPlan, PLAN_SCAN, SOURCE_PARQUET
+
+
+def _filter_over_scan() -> LogicalPlan:
+    var sb = SchemaBuilder()
+    sb.add_field(Field("a", ArrowType.INT64, False))
+    sb.add_field(Field("b", ArrowType.INT64, False))
+    var scan = LogicalPlan.scan(String("s.parquet"), SOURCE_PARQUET, sb.build())
+    var rhs = Expr.binary(
+        BIN_ADD,
+        Expr.literal(ScalarValue.from_int(1)),
+        Expr.literal(ScalarValue.from_int(2)),
+    )
+    var pred = Expr.binary(BIN_GT, Expr.col_ref("a"), rhs^)
+    return LogicalPlan.filter(pred^, scan^)
+
+
+def _render(p: LogicalPlan) -> String:
+    var s = String("")
+    p.write_to(s)
+    return s
+
+
+def main() raises:
+    var config = OptimizerConfig()
+    var want = String("filter=BinaryOp(GT, ColRef(a), Literal(ScalarValue(int64, 3)))")
+
+    var deps = ScalarDepTable()
+    var out = optimize(_filter_over_scan(), config, deps)
+    var text = _render(out)
+    assert_equal(Int(out.tag), Int(PLAN_SCAN), text)
+    assert_true(text.find(want) >= 0, text)
+    assert_false(deps.has_requests())
+
+    var deps2 = ScalarDepTable()
+    var result = optimize_status(_filter_over_scan(), config, deps2)
+    assert_true(result.is_ok(), result.message())
+    var got = result.take_plan()
+    assert_true(Bool(got))
+    assert_equal(_render(got.value()), text)
+```
+
+`OptimizerConfig` is the options as one value, and a non-positive row ceiling means the default. `OptimizeResult.err` carries a failure status and the refusing pass's message, never a plan:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
+```mojo
+from optimizer.optimizer_config import AGG_INMEM_MAX_ROWS_DEFAULT, OptimizerConfig
+from optimizer.optimizer_result import OPTIMIZE_ERR_PASS_REFUSED, OptimizeResult
+
+var config = OptimizerConfig()
+assert_true(config.eager_agg)
+config.agg_inmem_max_rows = 0
+assert_equal(config.agg_inmem_ceiling_rows(), AGG_INMEM_MAX_ROWS_DEFAULT)
+config.agg_inmem_max_rows = 123
+assert_equal(config.agg_inmem_ceiling_rows(), 123)
+
+var failed = OptimizeResult.err(OPTIMIZE_ERR_PASS_REFUSED, String("pass q refused"))
+assert_false(failed.is_ok())
+assert_equal(failed.status(), OPTIMIZE_ERR_PASS_REFUSED)
+assert_equal(failed.message(), String("pass q refused"))
+assert_false(failed.has_plan())
+```
