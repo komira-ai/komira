@@ -38,10 +38,11 @@
 #                                       of VARCHAR columns.
 #   test_skip_csv_equals_duckdb         skip = 2 over a file with two note
 #                                       lines above the header (one holding a
-#                                       quote and a comma): the types, the
-#                                       rows with a quoted line break, an
-#                                       aggregate; skip = 1 with a `|`
-#                                       delimiter; skip = 0 equals no skip.
+#                                       comma): the types, the rows with a
+#                                       quoted line break, an aggregate;
+#                                       skip = 1 with a `|` delimiter; skip = 1
+#                                       over a note holding a quote; skip = 0
+#                                       equals no skip.
 #   test_gzip_csv_equals_duckdb         every case above over gzip copies.
 #   test_every_case_is_run              each case of cases.sql belongs to one
 #                                       of the tests above, so none is skipped.
@@ -90,6 +91,7 @@ def _files() -> List[String]:
     out.append("header_only.csv")
     out.append("skip.csv")
     out.append("skip_pipe.csv")
+    out.append("skip_quote.csv")
     return out^
 
 
@@ -291,7 +293,7 @@ def test_gzip_csv_equals_duckdb() raises:
 
 def test_every_case_is_run() raises:
     var cases = _cases()
-    assert_true(len(cases) >= 22, "cases.sql holds " + String(len(cases)) + " cases")
+    assert_true(len(cases) >= 23, "cases.sql holds " + String(len(cases)) + " cases")
     for i in range(len(cases)):
         var known = False
         var prefixes = _prefixes()

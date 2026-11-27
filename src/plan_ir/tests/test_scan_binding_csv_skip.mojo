@@ -99,4 +99,4 @@ def main() raises:
     suite.test[test_scans_that_skip_different_counts_have_different_binding_identities]()
     suite.test[test_copy_keeps_the_skip_and_the_fingerprint]()
     suite.test[test_the_identity_corpus_has_a_skip_entry]()
-    suite.run()
+    suite^.run()
