@@ -431,18 +431,18 @@ def test_malformed_projects_and_an_empty_union_are_refused() raises:
 
 
 def test_every_aggregate_function_has_its_own_base_name() raises:
-    """Every AGG_* tag 0..37 has a base name of its own (none is the `agg`
+    """Every AGG_* tag 0..38 has a base name of its own (none is the `agg`
     fallback, no two are equal), and an id past the last falls back to
     `agg`. Catches an arm dropped (that function's unaliased output column
     would be named `agg`) and two arms sharing a name."""
     var names = List[String]()
-    for f in range(38):
+    for f in range(39):
         var n = String(agg_func_base_name(UInt8(f)))
         assert_true(n != "agg", "func " + String(f))
         for k in range(len(names)):
             assert_true(names[k] != n, n)
         names.append(n)
-    assert_equal(String(agg_func_base_name(UInt8(38))), "agg")
+    assert_equal(String(agg_func_base_name(UInt8(39))), "agg")
 
 
 def main() raises:
