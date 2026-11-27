@@ -1,0 +1,5 @@
+[{'name': 'Ana', 'order_id': 10, 'amount': 120}, {'name': 'Ana', 'order_id': 11, 'amount': 45}, {'name': 'Bo', 'order_id': None, 'amount': None}, {'name': 'Cy', 'order_id': 12, 'amount': 200}]
+[{'name': 'Bo'}]
+[{'name': 'Ana', 'n_orders': 2}, {'name': 'Bo', 'n_orders': 0}, {'name': 'Cy', 'n_orders': 1}]
+[{'customer_id': 1, 'name': 'Ana', 'order_id': 10, 'amount': 120}, {'customer_id': 1, 'name': 'Ana', 'order_id': 11, 'amount': 45}, {'customer_id': 2, 'name': 'Bo', 'order_id': None, 'amount': None}, {'customer_id': 3, 'name': 'Cy', 'order_id': 12, 'amount': 200}]
+[{'name': 'Bo'}]

@@ -111,3 +111,82 @@ Modules:
   be written.
 
 Import from the sub-modules; there is no facade.
+
+## Examples
+
+The bounded heaps keep the N best slots under (key, payload id), and the slot
+a push displaces is reported, so a caller can recycle its storage. Ties go to
+the smaller payload id (the earlier row) however the rows arrive:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from op_window.bounded_heap import BoundedHeapInt64Payload, BoundedHeapInt64PayloadDynamic, BoundedHeapStringPayload
+
+var keys: List[Int64] = [50, 10, 40, 20, 30]
+var heap = BoundedHeapInt64Payload[3]()
+var evicted = List[Int64]()
+for i in range(len(keys)):
+    evicted.append(heap.push_returning_evicted(keys[i], Int64(i)))
+assert_equal(heap.capacity(), 3)
+assert_equal(heap.size(), 3)
+assert_equal(evicted[0], Int64(-1))
+assert_equal(evicted[3], Int64(0))
+assert_equal(evicted[4], Int64(2))
+assert_equal(heap.peek_root().key, Int64(30))
+var kept = heap.extract_sorted()
+assert_equal(len(kept), 3)
+assert_equal(kept[0].key, Int64(10))
+assert_equal(kept[0].payload_row_id, Int64(1))
+assert_equal(kept[1].key, Int64(20))
+assert_equal(kept[1].payload_row_id, Int64(3))
+assert_equal(kept[2].key, Int64(30))
+assert_equal(kept[2].payload_row_id, Int64(4))
+assert_equal(heap.size(), 0)
+
+var ties = BoundedHeapInt64PayloadDynamic(2)
+ties.push(Int64(7), Int64(9))
+ties.push(Int64(7), Int64(3))
+ties.push(Int64(7), Int64(6))
+ties.push(Int64(7), Int64(1))
+var winners = ties.extract_sorted()
+assert_equal(len(winners), 2)
+assert_equal(winners[0].payload_row_id, Int64(1))
+assert_equal(winners[1].payload_row_id, Int64(3))
+
+var words = BoundedHeapStringPayload[2, 0]()
+_ = words.push_returning_evicted("b".as_bytes(), Int64(0))
+_ = words.push_returning_evicted("a".as_bytes(), Int64(1))
+_ = words.push_returning_evicted("a".as_bytes(), Int64(2))
+assert_equal(words.push_returning_evicted("a".as_bytes(), Int64(3)), Int64(3))
+var first_two = words.extract_sorted()
+assert_equal(len(first_two), 2)
+assert_equal(first_two[0].payload_row_id, Int64(1))
+assert_equal(first_two[1].payload_row_id, Int64(2))
+```
+
+The typed stage's top-N scaffold stores the bitwise NOT of a DESC key, so the
+largest and smallest INT64 values order correctly in both directions:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from expr.expr_sortable_key import SORT_DIR_ASC, SORT_DIR_DESC
+from op_window.topn_stage import TopNStageScaffoldI64
+
+var keys: List[Int64] = [0, Int64.MIN, Int64.MAX, -5, 7]
+var desc = TopNStageScaffoldI64[3].new(SORT_DIR_DESC)
+var asc = TopNStageScaffoldI64[3].new(SORT_DIR_ASC)
+for i in range(len(keys)):
+    desc.push_row(keys[i], Int64(i))
+    asc.push_row(keys[i], Int64(i))
+var largest = desc.finalize_emit()
+var smallest = asc.finalize_emit()
+var want_largest: List[Int64] = [Int64.MAX, 7, 0]
+var want_smallest: List[Int64] = [Int64.MIN, -5, 0]
+assert_equal(len(largest), 3)
+assert_equal(len(smallest), 3)
+for i in range(3):
+    assert_equal(largest[i].key, want_largest[i])
+    assert_equal(smallest[i].key, want_smallest[i])
+assert_equal(largest[0].payload_row_id, Int64(2))
+assert_equal(smallest[0].payload_row_id, Int64(1))
+```

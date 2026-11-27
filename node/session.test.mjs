@@ -27,8 +27,8 @@ function session() {
   return addon.newSession();
 }
 
-test('abiVersion is 1.9', () => {
-  assert.equal(addon.abiVersion(), 1009);
+test('abiVersion is 1.10', () => {
+  assert.equal(addon.abiVersion(), 1010);
 });
 
 test('a missing Parquet file rejects with an Error with status -3 and the last error text', async () => {
@@ -38,6 +38,10 @@ test('a missing Parquet file rejects with an Error with status -3 and the last e
       assert.ok(err instanceof Error);
       assert.equal(err.status, -3);
       assert.equal(err.code, 'KOMIRA_ERR_ENGINE');
+      // A registration's refusal is at the bind step (KOMIRA_STEP_BIND), and
+      // its named code is a string, empty when the reader's text names none.
+      assert.equal(err.lastErrorStep, 2);
+      assert.equal(typeof err.lastErrorCode, 'string');
       assert.equal(typeof err.lastError, 'string');
       assert.ok(err.lastError.length > 0, 'the engine gave no message');
       assert.ok(err.message.endsWith(`: ${err.lastError}`), `message ${err.message} lacks the last error`);
@@ -103,6 +107,36 @@ test('planRender of bytes that are not a plan rejects with status -3 and a last 
   } finally {
     await addon.freeSession(s);
   }
+});
+
+test('newSession takes the engine options threads and memoryLimit, each 0 or left out for the engine default', async () => {
+  const before = addon.sessionStats();
+  for (const args of [[], [undefined, undefined], [0, 0], [2], [2, 1 << 20], [undefined, 1 << 20], [1, 1]]) {
+    const s = addon.newSession(...args);
+    await addon.registerParquet(s, 't', PARQUET);
+    await addon.freeSession(s);
+  }
+  const after = addon.sessionStats();
+  assert.deepEqual([after.created - before.created, after.freed - before.freed], [7, 7]);
+});
+
+test('newSession refuses an option that is not an integer from 0 to 2**53 - 1, and makes no context', () => {
+  const before = addon.sessionStats();
+  const cases = [
+    [[-1], 'threads'], [[1.5], 'threads'], [['8'], 'threads'], [[Number.NaN], 'threads'], [[null], 'threads'],
+    [[2 ** 53], 'threads'], [[Number.POSITIVE_INFINITY], 'threads'], [[8n], 'threads'],
+    [[1, -1], 'memoryLimit'], [[1, 0.5], 'memoryLimit'], [[1, {}], 'memoryLimit'], [[undefined, 2 ** 53], 'memoryLimit'],
+  ];
+  for (const [args, what] of cases) {
+    assert.throws(() => addon.newSession(...args), (err) => {
+      assert.ok(err instanceof TypeError, String(err));
+      assert.equal(err.code, 'KOMIRA_ARG');
+      assert.equal(err.message, `${what} must be an integer from 0 to 2**53 - 1`);
+      assert.equal(err.status, undefined);
+      return true;
+    }, String(args));
+  }
+  assert.equal(addon.sessionStats().created, before.created);
 });
 
 test('arguments of the wrong kind are TypeErrors with no status, thrown before anything is queued', async () => {

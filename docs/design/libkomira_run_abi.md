@@ -70,8 +70,10 @@ The golden (`src/so/abi/komira.tsv`) holds both.
   built, and building it starts the worker runtime.
 - **EXISTS** `plan_wire.plan_from_bytes` decodes an authored envelope into a
   `LogicalPlan`. The decoder refuses input above `PLAN_WIRE_MAX_BYTES` (16 MiB).
-  `OptimizedPlan` is a schema in `src/plan_proto/optimized_plan.proto` with no
-  codec. Its design ([optimized_plan.md](optimized_plan.md)) is not built.
+  `OptimizedPlan` is a schema in `src/plan_proto/optimized_plan.proto`. Its
+  codec, producer and admission are the `optimized_plan` library
+  (`src/optimized_plan`); its design ([optimized_plan.md](optimized_plan.md))
+  is partly built, and libkomira does not call that library.
 - **EXISTS** The Arrow C stream exporter
   `arrow_ipc.build_record_batch_stream(batches, schema, out_stream)`
   (`src/arrow_ipc/c_data_stream.mojo`).
@@ -213,8 +215,9 @@ the "program that links the engine" role of [optimized_plan.md](optimized_plan.m
 - An `OptimizedPlan` is the form a client *submits* to a job manager. It is not an
   input of this door, and a bare `OptimizedPlan` passed here fails the envelope
   decoder by name (-3).
-- Producing an `OptimizedPlan` for a job manager is out of scope until its codec
-  exists.
+- Producing an `OptimizedPlan` for a job manager is out of scope for this door.
+  The producer exists (`optimized_plan.produce_optimized_plan`), but no entry of
+  this ABI calls it.
 
 ## 4. Who calls which entry
 
@@ -409,7 +412,7 @@ otherwise fail fast. The port keeps that answer and makes it explicit:
      aborts in the middle of a query (for example at the first compressed Parquet
      page).
    - **EXISTS:** every call that can reach a codec (the Parquet, CSV and JSON
-     register calls, the three describe calls, `komira_sql_stream`,
+     register calls, `komira_add_sql_binding`, the three describe calls, `komira_sql_stream`,
      `komira_sql_stream_run` and `komira_plan_stream`; not
      `komira_register_arrow_stream`, which reads no file) first opens libzstd, libz and liblz4 through a
      raising probe (`probe_codec_libraries` in `compression.codec_libraries`),

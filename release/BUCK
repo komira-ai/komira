@@ -1,7 +1,9 @@
 # The release files: what a release of komira builds (artifacts.textproto), the
 # set that builds it (release_set, below). .github/workflows/release.yml builds the set on every
 # push to main. release_set below holds the set to artifacts.textproto (a build
-# action).
+# action). The npm packages are a set of their own (npm_packages, below), which
+# .github/workflows/npm.yml builds, tests and, once release/npm_publish.txt says
+# so, publishes on every push to main.
 # release/ci (a package of its own) holds the programs of the workflows
 # (main_red, check_release_ref, release_json), built behind their cases.
 # Changes need the release approver's review (.github/CODEOWNERS).
@@ -9,9 +11,11 @@
 load("@komira//tools/build/lint:doc_tree.bzl", "docs_checked")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/selftest:defs.bzl", "graph_check")
 load(":darwin_libs.bzl", "DARWIN_PACKAGES", "mopm_darwin_libs")
 load(":exec_tools.bzl", "exec_tool_cases")
 load(":mopm_artifacts.bzl", "merge_tree_cases", "mopm_artifacts", "mopm_release_artifacts", "native_ids_json", "release_packages_json")
+load(":npm_packages.bzl", "npm_packages")
 load(":plan_expectation.bzl", "mopm_plan_expectation", "plan_expectation_cases")
 load(":release_set.bzl", "release_set")
 load(":unpublished.bzl", "src_library_paths")
@@ -62,8 +66,8 @@ release_packages_json(
 # //:readme_e2e_complete holds to the src/ packages that have a mopm.toml.
 # release.yml's `mopm-stage` job builds it, as the linux-64 half of
 # :mopm_release_artifacts (below), stages it, tries the README examples against the
-# staged set and dry-runs the publish on every push to main; the `prod-*` jobs publish
-# the set (docs/ci.md).
+# staged set and dry-runs the publish on every push to main; the `beta-*` and then the
+# `prod-*` jobs publish the set (docs/ci.md).
 mopm_artifacts(
     name = "mopm_artifacts",
     natives = RELEASE_NATIVES,
@@ -242,6 +246,29 @@ zig_test(
     if docs_checked()
 ]
 
+# README_COVERAGE.md lists every src/<name>/README.md and who runs its examples: whether the
+# package has a mopm.toml, whether //release/readme_e2e/verify:<name> exists, which README gate
+# (mojo_adopted_library or mojo_library) runs the examples in the build, whether the README holds
+# an example. The graph check writes that text from the build graph and the READMEs and fails,
+# printing each line that differs, when the committed file is not it
+# (tools/build/selftest/graph/readme_coverage.zig says what it reads and refuses). Building it
+# checks nothing: .github/workflows/pr.yml runs `./buck2 bxl
+# //tools/build/selftest/graph/checks.bxl:check -- --check //release:readme_coverage`, as it does
+# for every graph_check. The files are the cell's root doc_tree's, which only komira's own
+# checkout declares.
+[
+    graph_check(
+        name = "readme_coverage",
+        check = "readme_coverage",
+        checker = "//tools/build/selftest/graph:graph_checks",
+        targets = ["//src/...", "//release/readme_e2e/verify:"],
+        trees = {"": "//:doc_tree"},
+        srcs = ["README_COVERAGE.md"],
+    )
+    for _ in [1]
+    if docs_checked()
+]
+
 # The native ids the release reads from each package's unit graph (mopm_native_ids.bzl) are the
 # `[native.<id>]` tables of that package's mopm.toml, for every member, with nothing more or less
 # (native_ids_test.zig says what each case catches). A unit's id is `native:<package>/<id>`, and in a
@@ -314,6 +341,12 @@ export_file(
     visibility = ["//:"],
 )
 
+# The macro whose stamped evaluation needs the release's values, read by //:release_stamp_cases.
+export_file(
+    name = "release_set.bzl",
+    visibility = ["//:"],
+)
+
 export_file(
     name = "release_buck",
     src = "BUCK",
@@ -355,5 +388,53 @@ mopm_release_artifacts(
     linux = ":mopm_artifacts",
     mac = ":mopm_darwin_libs",
     target_compatible_with = select({":mac_tree": [], "DEFAULT": [":mac_tree_off"]}),  # komira-limit:release-mac-tree
+    visibility = ["PUBLIC"],
+)
+
+# ---- The npm packages (docs/design/typescript_package.md, section 4) --------------------------------
+
+# The npm release set (npm_packages.bzl): the tarballs of //node:package and //node:package_linux_x64
+# and npm_set.json, the record of each package's name, version, file, SHA-256 and sha512 integrity, in the
+# order .github/workflows/npm.yml publishes them (the platform package, then the main package, which names
+# it). npm.yml's build job builds it stamped (0.1.<N>, the wheel's version); the pull request builds it
+# unstamped (0.0.0), which checks everything but the stamp. Not a member of :release_set, whose members
+# are conda packages only.
+npm_packages(
+    name = "npm_packages",
+    main = "@komira-ai/komira",
+    packages = {
+        "@komira-ai/komira": "//node:package",
+        "@komira-ai/komira-linux-x64-gnu": "//node:package_linux_x64",
+    },
+    visibility = ["PUBLIC"],
+)
+
+# release/npm_names.txt is the set's names, so a package added to or dropped from :npm_packages changes
+# the list in the same change, and the owner knows which names to create on npm with their trusted
+# publisher (npm_names_test.zig says what each case catches).
+zig_test(
+    name = "npm_names_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "npm_names_test.zig",
+    data = {
+        "npm_names.txt": "npm_names.txt",
+        "npm_set.json": ":npm_packages[npm_set.json]",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# release/npm_publish.txt, the publish gate npm.yml's build job reads (`npm_smoke gate`), is one
+# `publish: off` or `publish: on` line among comments: a gate a typo or a merge left unreadable fails the
+# pull request, not main (npm_publish_gate_test.zig). Off until the owner's go (the design's D4).
+zig_test(
+    name = "npm_publish_gate_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "npm_publish_gate_test.zig",
+    data = {"npm_publish.txt": "npm_publish.txt"},
+    deps = ["//release/ci:npm_smoke_lib"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )

@@ -35,8 +35,9 @@ analysis fails if a dependency, direct or transitive, brings it in
 
 Every refusal is an `Error` whose text begins with its token.
 
-Not here: the body and segment codecs, the canonical encoder and the digests
-(stage 5 of the design, a separate package); `OPTIMIZED_PLAN_NEEDS_OVER_LIMIT`,
+Not here: the body codec, the canonical encoder, the plan digest and the host's
+admission steps after step 4, which are the `optimized_plan` library
+(`src/optimized_plan`); the segment codec; `OPTIMIZED_PLAN_NEEDS_OVER_LIMIT`,
 whose limits cap `ResourceNeeds`, a message the schema holds unnumbered; and
 runtimes declared by added image layers, which the image design has not
 specified.

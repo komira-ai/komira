@@ -1,7 +1,8 @@
 //! The cases of the macOS build of the release, //:release_macos_cases: a `zig_test` run as a build
 //! action. The subjects are the bytes of the workflows (the zig_test's `data`, under
-//! KOMIRA_TEST_WORK/workflows/<name>.yml), the shards of the pull request's check set
-//! (ci_targets/shard_<n>.bzl) and the macOS set's own definition (darwin_libs.bzl).
+//! KOMIRA_TEST_WORK/workflows/<name>.yml), the roots of the pull request's check set (ci_roots/: one
+//! empty file per root, named by its label, tools/build/ci/roots.bzl) and the macOS set's own
+//! definition (darwin_libs.bzl).
 //!
 //! The decision these hold: before the merge, macOS is built only by pr.yml's macOS part (the libraries of
 //! the macOS set a change reaches, on the farm's Macs, through a config file no other step names, bounded),
@@ -29,9 +30,15 @@
 //!  - it does not hold up the Linux path: it `needs` nothing (nothing in release.yml `needs` it, so the prod
 //!    publish never waits on this workflow; the publish waits on its own build of the macOS packages, in
 //!    mopm-stage), and it is bounded (`timeout-minutes` at most 120, the longest of the other jobs);
-//!  - a failed or skipped macOS build ends the run failed: the job is not `continue-on-error`, and a last job
-//!    `release-macos-result` (`needs: release-macos`, `if: always()`) fails with "the macOS build did not run"
-//!    when the build's result is skipped, so a run whose build never ran is not green;
+//!  - a stalled step ends the run failed, not cancelled: the steps that wait on the farm (farm-connect, the
+//!    macOS set, the Python harness tests) each carry a `timeout-minutes` of their own, and the step bounds
+//!    add up to less than the job's (a step past its bound fails; a job past its bound is cancelled);
+//!  - a failed, skipped or stalled macOS build ends the run failed: the job is not `continue-on-error`, and a
+//!    last job `release-macos-result` (`needs: release-macos`, `if: ${{ !cancelled() }}`) fails with "the macOS
+//!    build did not run" when the build's result is skipped, and with "the macOS build was cancelled while the
+//!    run went on" when the build job alone was cancelled (its timeout-minutes ran out), so a run whose build
+//!    never ran or stalled is not green or merely cancelled; only a run cancelled as a whole (a newer push)
+//!    skips the job;
 //!  - it is not triggered on a pull request: neither macOS-naming workflow's `on:` names one, and no
 //!    workflow that runs on a pull request (pr.yml, coverage.yml) has a non-comment line naming darwin,
 //!    macOS, osx or `--target-platforms`, with two exceptions, both in pr.yml and exactly as written: the
@@ -59,7 +66,7 @@
 //!    the macOS driver, read the quickstart from the smoke artifact (no checkout) and are one job per entry
 //!    of their chain's matrix (promote-macos-arm64's for the PyPI one); promote-macos-arm64 and
 //!    pypi-macos-arm64 run the Linux driver on ubuntu;
-//!  - the pull request's check set (ci/targets shards) names neither the macOS set, the five macOS targets
+//!  - the pull request's check set (the root files of ci/) names neither the macOS set, the five macOS targets
 //!    of the wheel (komira_wheel_macos_arm64, wheel_install_test_macos_arm64, wheel_libs_macos_arm64,
 //!    wheel_same_macos_arm64, pypi_smoke_macos_arm64) nor a macOS runner;
 //!  - the macOS set is the packages of packages.bzl without the excluded ones, in one place: the
@@ -67,6 +74,7 @@
 //!  - the step `build the macOS Python harness tests` builds DARWIN_PYTHON_HARNESS of darwin_libs.bzl, the
 //!    list pr.yml analyses with the set (release_macos_harness_test.zig).
 //! Every defect above is written into the real text and must be refused with its message.
+//! The result step's script is also run, for each result of the build job (release_macos_result_test.zig).
 
 const std = @import("std");
 const t = std.testing;
@@ -74,6 +82,12 @@ const t = std.testing;
 // The harness step builds the list pr.yml analyses (release_macos_harness_test.zig says what each case catches).
 test {
     _ = @import("release_macos_harness_test.zig");
+}
+
+// The result step's script, run for each result of the build job (release_macos_result_test.zig says what each
+// case catches).
+test {
+    _ = @import("release_macos_result_test.zig");
 }
 
 const JOB = "release-macos";
@@ -96,6 +110,13 @@ const BOUND = "    timeout-minutes: 90";
 const CONTINUE_ON_ERROR = "    continue-on-error: true";
 const RESULT_JOB = "release-macos-result";
 const RESULT_REASON = "the macOS build did not run";
+/// The condition of release-macos-result: it runs whatever the build's result, except in a run cancelled as a
+/// whole (a newer push), where the newer run builds.
+const RESULT_IF = "    if: ${{ !cancelled() }}";
+/// The arm for a build job cancelled while the run went on (its timeout-minutes ran out): an error, and a failure.
+const CANCELLED_ARM = "            cancelled)";
+const CANCELLED_REASON = "the macOS build was cancelled while the run went on";
+const CANCELLED_EXIT = "              exit 1 ;;";
 const SAID_RUN = "        run: '\"$RUNNER_TEMP/buck2_failure\" --log \"$RUNNER_TEMP/buck2-farm.log\" --step \"$FAILED_STEP\" --github-output \"$GITHUB_OUTPUT\" --summary-file \"$GITHUB_STEP_SUMMARY\"'";
 const SAID_IF = "        if: failure() && steps.reader.outcome == 'success' && (steps.build.outcome == 'failure' || steps.python.outcome == 'failure')";
 const REPORT_OUTPUT = "      report: ${{ steps.said.outputs.message || ";
@@ -105,6 +126,9 @@ const REPORT_PYTHON = "(steps.python.outcome == 'failure' && 'step `build the ma
 const REPORT_ECHO = "              echo \"::error title=release-macos::the macOS build did not pass: ${REPORT:-";
 const GUESS = "farm-connect refuses when a repository variable is empty";
 const MAX_MINUTES = 120;
+const STEP_BOUND = "        timeout-minutes: ";
+/// The steps that wait on the farm, by the line each starts with or holds just above its bound.
+const BOUNDED_STEPS = [_][]const u8{ FARM_CONNECT, "        id: build", "        id: python" };
 
 fn isComment(line: []const u8) bool {
     const trimmed = std.mem.trim(u8, line, " ");
@@ -279,6 +303,17 @@ fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     } else return "release-macos has no timeout-minutes (a stalled macOS build would hold the next release)");
     if (bound == 0 or bound > MAX_MINUTES) return "release-macos: timeout-minutes is not bounded at 120 or less";
     if (!has(job, BOUND)) return "release-macos: timeout-minutes is not the 90 the comment and docs/ci.md state";
+    // a stalled farm step fails (its own bound), before the job's bound cancels it and the run ends cancelled
+    for (BOUNDED_STEPS) |step| {
+        const at = lineAt(job, step) orelse continue;
+        if (at + 1 >= job.len or !std.mem.startsWith(u8, job[at + 1], STEP_BOUND))
+            return "release-macos: a step that waits on the farm has no timeout-minutes of its own (a stall would run into the job's bound, and the run would end cancelled, not failed)";
+    }
+    var step_minutes: u32 = 0;
+    for (job) |l| if (std.mem.startsWith(u8, l, STEP_BOUND)) {
+        step_minutes += std.fmt.parseInt(u32, std.mem.trim(u8, l[STEP_BOUND.len..], " "), 10) catch return "release-macos: a step's timeout-minutes is not a number";
+    };
+    if (step_minutes >= bound) return "release-macos: the steps' timeout-minutes add up to the job's or more (the job's bound would cancel a stalled step before the step's own bound fails it)";
     // the farm connection: batch priority, with the macOS set, tls as every caller passes it
     const connect_at = lineAt(job, FARM_CONNECT) orelse return "release-macos does not join the farm";
     if (!has(job, QOS)) return "release-macos does not pass farm-qos: batch";
@@ -309,7 +344,7 @@ fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     const res = (try jobLines(ar, text, RESULT_JOB, &rn)) orelse return "release-macos.yml has no job release-macos-result (a skipped macOS build would end the run green)";
     if (rn != 1) return "release-macos-result is defined more than once";
     if (!has(res, "    needs: release-macos")) return "release-macos-result does not need exactly release-macos";
-    if (!has(res, "    if: always()")) return "release-macos-result is not if: always() (a skipped build would skip it too, and the run would end green)";
+    if (!has(res, RESULT_IF)) return "release-macos-result is not if: ${{ !cancelled() }} (with no condition or failure() a skipped build skips it and the run ends green; always() fails a run a newer push cancelled)";
     if (!has(res, "    runs-on: ubuntu-24.04")) return "release-macos-result does not run on ubuntu-24.04";
     if (mentions(res, "continue-on-error")) return "release-macos-result is continue-on-error: its failure would read as success";
     if (!mentions(res, "needs.release-macos.result")) return "release-macos-result does not read the result of release-macos";
@@ -317,6 +352,10 @@ fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (!mentions(res, RESULT_REASON)) return "release-macos-result does not say \"the macOS build did not run\"";
     if (!mentions(res, "exit 1")) return "release-macos-result never fails";
     if (!mentions(res, "::error")) return "release-macos-result writes no ::error annotation";
+    // a build job cancelled while the run went on ran out its timeout-minutes: a stalled build fails the run
+    const arm = lineAt(res, CANCELLED_ARM) orelse return "release-macos-result does not handle a cancelled build (a stalled build that ran out its timeout-minutes)";
+    if (arm + 2 >= res.len or std.mem.indexOf(u8, res[arm + 1], "::error") == null or std.mem.indexOf(u8, res[arm + 1], CANCELLED_REASON) == null or !std.mem.eql(u8, res[arm + 2], CANCELLED_EXIT))
+        return "release-macos-result does not fail a cancelled build with \"the macOS build was cancelled while the run went on\" (a stalled build would end the run cancelled, not failed)";
     if (mentions(res, "uses:")) return "release-macos-result uses an action: it only reads a result";
     // a failed build is reported with what the failed step said, never with a guess at the cause
     if (!has(job, SAID_RUN)) return "release-macos does not read the build's log with buck2_failure (what buck2 said would be lost)";
@@ -771,6 +810,32 @@ fn readData(ar: std.mem.Allocator, rel: []const []const u8) ![]const u8 {
     return std.fs.cwd().readFileAlloc(ar, try std.fs.path.join(ar, parts.items), 1 << 22);
 }
 
+/// Appends to `out` the path (under `path`, from `prefix`) of every file below the directory `path`,
+/// descending into a directory a symlink names too: a data directory may be a tree of symlinks.
+fn filesUnder(ar: std.mem.Allocator, path: []const u8, prefix: []const u8, out: *std.ArrayList([]const u8)) !void {
+    var dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+    defer dir.close();
+    var it = dir.iterate();
+    while (try it.next()) |e| {
+        const sub = try std.fs.path.join(ar, &.{ path, e.name });
+        const rel = if (prefix.len == 0) try ar.dupe(u8, e.name) else try std.fs.path.join(ar, &.{ prefix, e.name });
+        const is_dir = switch (e.kind) {
+            .directory => true,
+            .sym_link => blk: {
+                var d = std.fs.cwd().openDir(sub, .{}) catch break :blk false;
+                d.close();
+                break :blk true;
+            },
+            else => false,
+        };
+        if (is_dir) {
+            try filesUnder(ar, sub, rel, out);
+        } else {
+            try out.append(ar, rel);
+        }
+    }
+}
+
 /// The file names of the directory `sub` of the test's data, sorted.
 fn listDir(ar: std.mem.Allocator, sub: []const u8) ![]const []const u8 {
     const path = try std.fs.path.join(ar, &.{ try work(ar), sub });
@@ -919,6 +984,12 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     try expectRefused(ar, try replaced(ar, text, BOUND ++ "\n", "    timeout-minutes: 360\n"), "not bounded at 120");
     try expectRefused(ar, try replaced(ar, text, BOUND ++ "\n", "    timeout-minutes: 0\n"), "not bounded at 120");
     try expectRefused(ar, try replaced(ar, text, BOUND ++ "\n", "    timeout-minutes: 100\n"), "not the 90");
+    // each farm step carries its own bound, and the bounds fit inside the job's
+    try expectRefused(ar, try replaced(ar, text, FARM_CONNECT ++ "\n        timeout-minutes: 5\n", FARM_CONNECT ++ "\n"), "no timeout-minutes of its own");
+    try expectRefused(ar, try replaced(ar, text, "        id: build\n        timeout-minutes: 65\n", "        id: build\n"), "no timeout-minutes of its own");
+    try expectRefused(ar, try replaced(ar, text, "        id: python\n        timeout-minutes: 10\n", "        id: python\n"), "no timeout-minutes of its own");
+    try expectRefused(ar, try replaced(ar, text, "        id: build\n        timeout-minutes: 65\n", "        id: build\n        timeout-minutes: 75\n"), "add up to the job's or more");
+    try expectRefused(ar, try replaced(ar, text, "        id: build\n        timeout-minutes: 65\n", "        id: build\n        timeout-minutes: sixty\n"), "is not a number");
 
     // the farm connection and its priority
     try expectRefused(ar, try replaced(ar, text, DARWIN_PROPS ++ "\n", ""), "darwin-properties");
@@ -945,17 +1016,28 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     try expectRefused(ar, try replaced(ar, text, BUILD_ARGS, "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_artifacts"), "exactly one buck2 step");
     try expectRefused(ar, try replaced(ar, text, BUILD_ARGS, BUILD_ARGS ++ " --no-remote-cache"), "does not build //release:mopm_darwin_libs for");
     try expectRefused(ar, try replaced(ar, text, BUILD_ARGS ++ "\n" ++ ASSERT ++ "\n      # The Python test harness on macOS arm64", BUILD_ARGS ++ "\n      # The Python test harness on macOS arm64"), "does not assert the build remote");
-    try expectRefused(ar, try replaced(ar, text, "      - name: build the macOS set\n        id: build\n        uses: ./.github/actions/buck2-farm\n", "      - name: build the macOS set\n        id: build\n        uses: ./.github/actions/other\n"), "outside the buck2-farm action");
+    try expectRefused(ar, try replaced(ar, text, "      - name: build the macOS set\n        id: build\n        timeout-minutes: 65\n        uses: ./.github/actions/buck2-farm\n", "      - name: build the macOS set\n        id: build\n        timeout-minutes: 65\n        uses: ./.github/actions/other\n"), "outside the buck2-farm action");
 
     // the run ends failed when the build did not run
     try expectRefused(ar, try replaced(ar, text, "\n  release-macos-result:\n", "\n  release-macos-final:\n"), "has no job release-macos-result");
     try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n", "    needs: [release-macos, other]\n"), "does not need exactly release-macos");
-    try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n"), "not if: always()");
-    try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n    if: failure()\n"), "not if: always()");
+    const res_if = "    needs: release-macos\n" ++ RESULT_IF ++ "\n";
+    try expectRefused(ar, try replaced(ar, text, res_if, "    needs: release-macos\n"), "not if: ${{ !cancelled() }}");
+    try expectRefused(ar, try replaced(ar, text, res_if, "    needs: release-macos\n    if: failure()\n"), "not if: ${{ !cancelled() }}");
+    try expectRefused(ar, try replaced(ar, text, res_if, "    needs: release-macos\n    if: always()\n"), "not if: ${{ !cancelled() }}");
     try expectRefused(ar, try replaced(ar, text, "needs.release-macos.result", "needs.release-macos.outcome"), "does not read the result");
     try expectRefused(ar, try replaced(ar, text, RESULT_REASON, "the macOS build ended"), "does not say");
     try expectRefused(ar, try replaced(ar, text, "exit 1 ;;", "exit 0 ;;"), "never fails");
-    try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n    if: always()\n    continue-on-error: true\n"), "its failure would read as success");
+    try expectRefused(ar, try replaced(ar, text, res_if, res_if ++ "    continue-on-error: true\n"), "its failure would read as success");
+
+    // a build job cancelled while the run went on (its timeout-minutes ran out) fails the run
+    const arm = CANCELLED_ARM ++ "\n              echo \"::error title=release-macos::" ++ CANCELLED_REASON;
+    try expectRefused(ar, try replaced(ar, text, arm, "            canceled)\n              echo \"::error title=release-macos::" ++ CANCELLED_REASON), "does not handle a cancelled build");
+    try expectRefused(ar, try replaced(ar, text, arm, CANCELLED_ARM ++ "\n              echo \"::warning title=release-macos::" ++ CANCELLED_REASON), "does not fail a cancelled build");
+    try expectRefused(ar, try replaced(ar, text, arm, CANCELLED_ARM ++ "\n              echo \"::error title=release-macos::the macOS build was cancelled"), "does not fail a cancelled build");
+    try expectRefused(ar, try replaced(ar, text, "(a stalled build)\"\n" ++ CANCELLED_EXIT ++ "\n", "(a stalled build)\" ;;\n"), "does not fail a cancelled build");
+    // the arm as it was: a warning that blamed a newer push, and no failure
+    try expectRefused(ar, try replaced(ar, text, "              echo \"::error title=release-macos::" ++ CANCELLED_REASON ++ ": it ran past its timeout-minutes (a stalled build)\"\n" ++ CANCELLED_EXIT ++ "\n", "              echo \"::warning title=release-macos::the macOS build was cancelled (a newer push replaces a running build)\" ;;\n"), "does not fail a cancelled build");
 
     // nothing publishes from it
     try expectRefused(ar, try replaced(ar, text, "      - name: the macOS build failed\n", "      - run: mopm publish --staged x --registry prod --oidc\n      - name: the macOS build failed\n"), "publishes");
@@ -1339,28 +1421,31 @@ test "the pull request's check set names neither the macOS set, the macOS wheel'
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    var shards: usize = 0;
-    for (try listDir(ar, "ci_targets")) |name| {
-        const text = try readData(ar, &.{ "ci_targets", name });
-        shards += 1;
-        // the shards hold labels only: the macOS set (a darwin-arm64 build of the packages), its
-        // definition and a runner of a pull request would each be one of these lines
-        if (std.mem.indexOf(u8, text, "mopm_darwin_libs") != null) {
+    // every file under ci_roots/ is a root of the check set, named by its label: its path is the row
+    var paths = std.ArrayList([]const u8).empty;
+    try filesUnder(ar, try std.fs.path.join(ar, &.{ try work(ar), "ci_roots" }), "", &paths);
+    var roots: usize = 0;
+    for (paths.items) |name| {
+        roots += 1;
+        // the roots are labels only: the macOS set (a darwin-arm64 build of the packages), its
+        // definition and a runner of a pull request would each be one of these paths
+        if (std.mem.indexOf(u8, name, "mopm_darwin_libs") != null) {
             std.debug.print("{s} names the macOS set\n", .{name});
             return error.MacosSetInCheck;
         }
         for ([_][]const u8{ "komira_wheel_macos_arm64", "wheel_install_test_macos_arm64", "wheel_libs_macos_arm64", "wheel_same_macos_arm64", "pypi_smoke_macos_arm64" }) |target| {
-            if (std.mem.indexOf(u8, text, target) != null) {
+            if (std.mem.indexOf(u8, name, target) != null) {
                 std.debug.print("{s} names the macOS wheel target {s}\n", .{ name, target });
                 return error.MacosSetInCheck;
             }
         }
-        if (std.mem.indexOf(u8, text, "release/darwin_libs") != null or std.mem.indexOf(u8, text, "runs-on") != null or std.mem.indexOf(u8, text, "--target-platforms") != null) {
+        if (std.mem.indexOf(u8, name, "release/darwin_libs") != null or std.mem.indexOf(u8, name, "runs-on") != null or std.mem.indexOf(u8, name, "--target-platforms") != null) {
             std.debug.print("{s} holds a macOS build\n", .{name});
             return error.MacosSetInCheck;
         }
     }
-    try t.expect(shards >= 8);
+    // the data holds the check set's roots (more than a thousand today), not an empty directory
+    try t.expect(roots >= 100);
 }
 
 /// A DARWIN_EXCLUDED row `    "name": "reason",` has a reason: the quoted value after the name holds

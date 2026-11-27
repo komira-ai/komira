@@ -1,0 +1,1 @@
+UnsupportedOperation: drop_duplicates(subset=['name']) keeps one whole row of each group of rows equal on those columns, which this release does not build: keep only those columns first, as df[['name']].drop_duplicates()

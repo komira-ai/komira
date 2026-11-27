@@ -21,3 +21,52 @@ The readers (`pt_lane_count`, `pt_get`, `pt_overflow_count`) are plain functions
 One query at a time: the slab is process-global.
 
 Resource usage per phase: `pt_ru_begin[phase]()` and `pt_ru_end[phase]()` bracket a phase on the calling thread and add the difference of `getrusage(RUSAGE_THREAD)` to the phase's `FIELD_RU_*` counters: voluntary and involuntary context switches, user and system CPU time (nanoseconds) and minor and major page faults. Each is one system call, so they sit at per-row-group sites only. `RUSAGE_THREAD` is Linux only (the constant is 1 on every Linux architecture); on other targets the counters stay 0 and `pt_ru_available` is False. The kernel fills a buffer that is part of the lane, so nothing is allocated.
+
+## Example
+
+Record one phase and read it back. The example holds with the timers off (the default build: `pt_now` is 0 and nothing is recorded) and with `KOMIRA_PHASE_TIMERS=1` (the call is counted on this thread's lane):
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from phase_timers.phase_timers import (
+    FIELD_CALLS,
+    FIELD_SUM,
+    PH_FILTER,
+    PH_PARSE,
+    PT_LANES,
+    pt_enabled,
+    pt_get,
+    pt_lane_count,
+    pt_now,
+    pt_overflow_count,
+    pt_phase_name,
+    pt_record,
+    pt_record_ns,
+    pt_reset,
+)
+
+pt_reset()
+var t0 = pt_now()
+pt_record[PH_FILTER](t0)
+pt_record_ns[PH_FILTER](5)
+
+assert_equal(pt_phase_name(PH_PARSE), String("parse"))
+assert_equal(pt_phase_name(PH_FILTER), String("filter_mask"))
+assert_equal(pt_overflow_count(), 0)
+assert_true(pt_lane_count() <= PT_LANES)
+
+var calls = 0
+var total = 0
+for lane in range(pt_lane_count()):
+    calls += pt_get(lane, PH_FILTER, FIELD_CALLS)
+    total += pt_get(lane, PH_FILTER, FIELD_SUM)
+if pt_enabled():
+    assert_true(pt_lane_count() >= 1)
+    assert_equal(calls, 2)
+    assert_true(total >= 5)
+else:
+    assert_equal(t0, 0)
+    assert_equal(pt_lane_count(), 0)
+    assert_equal(calls, 0)
+    assert_equal(total, 0)
+```

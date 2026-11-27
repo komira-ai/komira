@@ -1,0 +1,7 @@
+# The npm packages of a release: the names of //release:npm_packages, one per line, sorted.
+# //release:npm_names_cases holds this list equal to the set the build makes (npm_names_test.zig
+# says what each case catches): a package added to or dropped from the set changes this file in the
+# same change. Every name is one the owner creates on npm with its trusted publisher (workflow npm.yml,
+# environment npm) before the first publish (docs/ci.md, "npm.yml: publishing the npm packages").
+@komira-ai/komira
+@komira-ai/komira-linux-x64-gnu

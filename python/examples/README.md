@@ -17,13 +17,13 @@ It needs no file beside it and runs in an empty directory:
 - it makes two mistakes and prints each `komira.KomiraError`: a missing file
   (`komira.BindError`), whose message names the file by its absolute path,
   and a SQL syntax error (`komira.ParseError`), whose message names the line
-  and column;
+  and column (newer than 0.1.1623);
 - it closes the session.
 
 Every value it prints can be checked by eye against the six rows it wrote.
 In `quickstart.expected`, `<version>` stands for the installed version,
-`<abi_version>` for the ABI version of `src/so/abi/komira.tsv` (`1.9` is
-`1009`) and `<cwd>` for the real path of the directory the program ran in.
+`<abi_version>` for the ABI version of `src/so/abi/komira.tsv` (`1.10` is
+`1010`) and `<cwd>` for the real path of the directory the program ran in.
 
 Where it runs, each time compared with `quickstart.expected` exactly, every
 line, with those three filled in:

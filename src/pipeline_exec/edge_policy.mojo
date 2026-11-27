@@ -18,9 +18,10 @@
 #
 # The combine order of a segment (`order_key_kind`) is checked the same way:
 # ORDER_NONE, ORDER_PARTITION_ID and ORDER_ROW_RANGE are served, any other value
-# is refused. ORDER_ROW_RANGE is served for the ungrouped aggregation sink only,
-# which folds each source position on its own and merges in position order;
-# `plan_check` refuses it on any other sink.
+# is refused. ORDER_ROW_RANGE is served for the aggregation sinks only (the
+# ungrouped one, and the grouped ones for their float aggregates), which fold
+# each source position on its own and merge in position order; `plan_check`
+# refuses it on any other sink.
 
 from physical_plan.physical_plan import (
     EDGE_E1_MORSEL_STREAM,

@@ -1,0 +1,1 @@
+ParseError: parse: SQL syntax error: expected keyword 'select' at line 1, column 1

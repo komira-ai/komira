@@ -1,0 +1,1 @@
+AttributeError: 'Series' object has no attribute 'apply'
