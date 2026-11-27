@@ -1,0 +1,2 @@
+[{'id': 1, 'domain': 'shop.example'}, {'id': 2, 'domain': 'mail.example'}, {'id': 3, 'domain': ''}, {'id': 4, 'domain': 'shop.example'}]
+[{'id': 1, 'contact': 'ana@shop.example', 'domain': 'shop.example'}, {'id': 2, 'contact': 'bo@mail.example', 'domain': 'mail.example'}, {'id': 3, 'contact': 'no email', 'domain': ''}, {'id': 4, 'contact': 'cy@shop.example', 'domain': 'shop.example'}]

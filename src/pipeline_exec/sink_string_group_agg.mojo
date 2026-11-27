@@ -8,7 +8,9 @@
 # as the fixed-width sink (`sink_group_agg`) serves them (with no aggregate, one
 # row per distinct key: SELECT DISTINCT): the same `GroupTable`, the same exact
 # folds (`agg_fold`), the same merge rule, the same refusals and the same
-# charging of the segment pool. What differs is the key.
+# charging of the segment pool, float arguments and the fold by source
+# position of an ORDER_ROW_RANGE segment (`by_position`, `group_positions`)
+# included. What differs is the key.
 #
 # A worker keeps an `InternTable` (`string_keys`) beside its `GroupTable`: each
 # distinct key string is stored once with its content hash, and the group table
@@ -94,6 +96,7 @@
 # whose rows arrive in another type than the declared one (or, for a decimal,
 # at another scale or a wider precision).
 
+from std.builtin.swap import swap
 from std.memory import ArcPointer
 
 from arrow.arrow_types import ArrowType
@@ -134,6 +137,7 @@ from .group_keys import (
     key_width,
     read_key_column,
 )
+from .group_positions import GroupPositions, merge_positions
 from .group_table import GroupTable, MAX_GROUP_CAPACITY, mix64
 from .segment_pool import MEMORY_BUDGET_EXCEEDED, SegmentPool, WorkerReservation
 from .string_keys import (
@@ -156,6 +160,7 @@ struct _StringSlot(Movable):
     var scratch_cells: List[Int64]
     var scratch_nulls: List[UInt8]
     var started: Bool
+    var positions: GroupPositions
 
     def __init__(
         out self,
@@ -164,8 +169,10 @@ struct _StringSlot(Movable):
         max_groups: Int,
         max_strings: Int,
         var reservation: WorkerReservation,
+        var position_reservation: WorkerReservation,
     ):
         self.table = GroupTable(nc, na, max_groups)
+        self.positions = GroupPositions(position_reservation^)
         self.intern = InternTable(max_strings)
         self.map = None
         self.reservation = reservation^
@@ -212,6 +219,8 @@ struct StringGroupAggSink(MorselSinkImpl):
     var _merge_intern: InternTable
     var _merged: GroupTable
     var _combined: Bool
+    # Fold the float aggregates by source position (ORDER_ROW_RANGE).
+    var _by_position: Bool
 
     def __init__(
         out self,
@@ -222,6 +231,7 @@ struct StringGroupAggSink(MorselSinkImpl):
         max_groups: Int = MAX_GROUP_CAPACITY,
         max_strings: Int = MAX_INTERN_ENTRIES,
         composite: Bool = False,
+        by_position: Bool = False,
     ) raises:
         var where_ = (
             "pipeline_exec: the string-keyed aggregation sink of"
@@ -344,6 +354,7 @@ struct StringGroupAggSink(MorselSinkImpl):
         self._merge_intern = InternTable(max_strings)
         self._merged = GroupTable(self._nc, na, max_groups)
         self._combined = False
+        self._by_position = by_position
 
     def _refused(
         self, too_many: Bool, what: String, denied_bytes: Int
@@ -385,6 +396,7 @@ struct StringGroupAggSink(MorselSinkImpl):
                         self._max_groups,
                         self._max_strings,
                         WorkerReservation(self._pool.share()),
+                        WorkerReservation(self._pool.share()),
                     )
                 )
             )
@@ -413,6 +425,8 @@ struct StringGroupAggSink(MorselSinkImpl):
             selected = morsel.batch.selection_mask_true_count()
         if selected == 0:
             return
+        var partition_id = morsel.partition_id
+        var origin_hint = morsel.origin_hint
         _ = slot.map.value().execute(morsel)
         var dense = materialize_selection_if_present(morsel^.take_batch())
         var nk = self._nk
@@ -493,6 +507,15 @@ struct StringGroupAggSink(MorselSinkImpl):
                         self._labels[i],
                     )
                 )
+        if self._by_position:
+            if not slot.positions.begin(
+                self._funcs, args, self._labels, partition_id, origin_hint
+            ):
+                raise self._refused(
+                    False,
+                    "float folds by source position",
+                    slot.positions.denied_bytes,
+                )
         for r in range(selected):
             var h = STRING_KEY_SEED
             for k in range(nk):
@@ -528,8 +551,21 @@ struct StringGroupAggSink(MorselSinkImpl):
                     "groups",
                     slot.table.denied_bytes,
                 )
+            # The first of the group's cells in this morsel's grain, when the
+            # sink folds floats by position.
+            var base = -1
+            if slot.positions.np > 0:
+                base = slot.positions.row_for(g)
+                if base < 0:
+                    raise self._refused(
+                        False,
+                        "float folds by source position",
+                        slot.positions.denied_bytes,
+                    )
             for i in range(na):
-                if self._funcs[i] == AGG_COUNT_DISTINCT:
+                if base >= 0 and slot.positions.slot_of[i] >= 0:
+                    slot.positions.fold(base, i, self._funcs[i], args[i], r)
+                elif self._funcs[i] == AGG_COUNT_DISTINCT:
                     admit_distinct(
                         slot.distinct,
                         i,
@@ -561,6 +597,10 @@ struct StringGroupAggSink(MorselSinkImpl):
             scratch_cells.append(0)
             scratch_nulls.append(0)
         var distinct = DistinctMerge(na, WorkerReservation(self._pool.share()))
+        # By position: each worker's grains and the merged group of each of
+        # its groups, merged after every worker's table.
+        var positions = List[GroupPositions]()
+        var group_maps = List[List[Int]]()
         for w in range(len(self._slots)):
             ref slot = self._slots[w][]
             ref t = slot.table
@@ -634,6 +674,23 @@ struct StringGroupAggSink(MorselSinkImpl):
             slot.intern = InternTable(self._max_strings)
             slot.distinct = DistinctSlot(na)
             slot.reservation.give_back_all()
+            # Its grains move out with their own reservation.
+            if self._by_position:
+                var moved = GroupPositions(WorkerReservation(self._pool.share()))
+                swap(moved, slot.positions)
+                positions.append(moved^)
+                group_maps.append(group_map^)
+        if self._by_position:
+            merge_positions(
+                positions,
+                group_maps,
+                self._merged.cells,
+                self._funcs,
+                self._labels,
+                self._where,
+            )
+            for w in range(len(positions)):
+                positions[w].reservation.give_back_all()
         distinct.finish()
         self._combined = True
 

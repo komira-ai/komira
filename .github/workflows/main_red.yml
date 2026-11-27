@@ -25,11 +25,12 @@
 # `workflows:` of the trigger (a name in only one of them is never read, or
 # never started). A push-to-main workflow is added to both lists in the pull
 # request that introduces it, so no run of main goes unwatched in between.
-# It names two workflows: `release`, and `pypi`, whose push run builds the Python wheels
+# It names three workflows: `release`; `pypi`, whose push run builds the Python wheels
 # (the Linux wheel's jobs and the macOS wheel's jobs, independent chains of one run) and
 # installs them from the file and from TestPyPI (its scheduled and manual runs are not
-# push runs, so they are never read). A red macOS chain makes the `pypi` run red, so it is
-# reported. The macOS workflow `release-macos` is not named: a Mac build is reported, not
+# push runs, so they are never read); and `npm`, whose push run builds and tests the npm
+# packages and, once release/npm_publish.txt says so, publishes and smokes them. A red
+# macOS chain makes the `pypi` run red, so it is reported. The macOS workflow `release-macos` is not named: a Mac build is reported, not
 # blocking, so a red one is a red run of its own workflow and opens no issue (docs/ci.md,
 # "main_red.yml").
 #
@@ -56,7 +57,7 @@ name: main-red
 
 on:
   workflow_run:
-    workflows: [release, pypi]
+    workflows: [release, pypi, npm]
     types: [completed]
     branches: [main]
 
@@ -94,7 +95,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
-        run: '"$RUNNER_TEMP/main_red" --repo "$GITHUB_REPOSITORY" --run-id "$RUN_ID" --workflow release --workflow pypi'
+        run: '"$RUNNER_TEMP/main_red" --repo "$GITHUB_REPOSITORY" --run-id "$RUN_ID" --workflow release --workflow pypi --workflow npm'
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true

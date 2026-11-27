@@ -1,0 +1,8 @@
+# The publish gate of .github/workflows/npm.yml: whether its `publish` job publishes the npm packages
+# of //release:npm_packages to the registry (docs/ci.md, "npm.yml: publishing the npm packages").
+# npm publishing starts on the owner's go (docs/design/typescript_package.md, D4): the go is the
+# change of the line below to `publish: on`, after the owner steps of docs/ci.md are done. While it
+# says off, npm.yml builds and tests the packages on every push to main, and the publish and the
+# smoke are skipped. One line, `publish: off` or `publish: on`; //release:npm_publish_gate_cases
+# refuses any other text.
+publish: off

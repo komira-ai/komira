@@ -1,0 +1,9 @@
+rows written: 3
+id,region,amount
+1,north,2.5
+2,south,
+3,north,4.5
+"region","qty"
+"east",1
+"north",5
+"south",5

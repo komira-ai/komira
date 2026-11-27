@@ -1,5 +1,5 @@
 # =============================================================================
-# agg_fold -- the fold of one ungrouped aggregate
+# agg_fold -- the fold of one aggregate
 # =============================================================================
 #
 # An `AggCell` is the whole state of one aggregate on one worker: the count of
@@ -31,11 +31,11 @@
 #              double range is an infinity, +inf plus -inf is NaN, and a NaN
 #              makes the sum NaN (query_semantics 5.7). Rounding depends on
 #              the order of the additions, so the order of the merges decides
-#              the last bits: the sink merges its cells in worker order, or,
+#              the last bits: a sink merges its cells in worker order, or,
 #              for an ORDER_ROW_RANGE segment, one cell per source position
-#              in position order, which is the same on every worker count
-#              (`sink_agg`; the tolerance against DuckDB is in the package
-#              README).
+#              (per group, in a grouped sink) in position order, which is the
+#              same on every worker count (`sink_agg`, `group_positions`; the
+#              tolerance against DuckDB is in the package README).
 #   MIN, MAX   DuckDB's order of floats: NaN is above every other value,
 #              +inf included (query_semantics 2.7), so MAX is NaN when a NaN
 #              is present and MIN is NaN only when every value is. A value
@@ -51,10 +51,13 @@
 #     is refused whatever the grouping;
 #   * SUM or AVG over DATE32, and every aggregate over a type that is not a
 #     signed integer, DECIMAL128, FLOAT32, FLOAT64 or DATE32 (COUNT takes
-#     any);
-#   * a float argument read for a grouped sink (`widen_column`): the grouped
-#     sinks hold 128-bit values per row and fold no float yet;
+#     any), naming the type, in the ungrouped and the grouped sinks alike;
 #   * a column whose type or decimal scale differs from the one the cell saw.
+#
+# A grouped sink reads an argument once per morsel (`widen_column`): a signed
+# integer, DECIMAL128 or DATE32 column into 128-bit values, a FLOAT32 or
+# FLOAT64 column into doubles (a FLOAT32 widened exactly), and folds row by
+# row into the cell of each row's group (`fold_wide`) with the steps above.
 
 from arrow.arrow_types import ArrowType
 from arrow.column import Column
@@ -150,16 +153,25 @@ def _float_less(a: Float64, b: Float64) -> Bool:
 
 
 @always_inline
-def _fstep(mut cell: AggCell, func: UInt8, v: Float64):
+def float_step(mut value: Float64, count: Int, func: UInt8, v: Float64):
+    """Fold the float `v` into `value`, the float fold of `count` values
+    before it (SUM and AVG start at +0.0): the least (MIN) or greatest (MAX)
+    in DuckDB's order of floats, the first kept on a tie, else the sum. The
+    caller adds one to the count."""
     if func == AGG_MIN:
-        if cell.count == 0 or _float_less(v, cell.fvalue):
-            cell.fvalue = v
+        if count == 0 or _float_less(v, value):
+            value = v
     elif func == AGG_MAX:
-        if cell.count == 0 or _float_less(cell.fvalue, v):
-            cell.fvalue = v
+        if count == 0 or _float_less(value, v):
+            value = v
     else:
         # From +0.0, so a sum of -0.0 values is +0.0, as DuckDB's is.
-        cell.fvalue += v
+        value += v
+
+
+@always_inline
+def _fstep(mut cell: AggCell, func: UInt8, v: Float64):
+    float_step(cell.fvalue, cell.count, func, v)
     cell.count += 1
 
 
@@ -338,17 +350,20 @@ def fold_column(
 
 
 struct WideColumn(Movable):
-    """One aggregate argument of a morsel read once into 128-bit values, so
-    the rows can be folded into different cells by a grouped sink. `valid` is
-    empty when the column has no NULL. A COUNT argument holds no values."""
+    """One aggregate argument of a morsel read once, so the rows can be folded
+    into different cells by a grouped sink: into 128-bit values (`vals`), or,
+    for a float column, into doubles (`fvals`). `valid` is empty when the
+    column has no NULL. A COUNT argument holds no values."""
 
     var bind: ColBind
     var vals: List[I128]
+    var fvals: List[Float64]
     var valid: List[Bool]
 
     def __init__(out self):
         self.bind = ColBind()
         self.vals = List[I128]()
+        self.fvals = List[Float64]()
         self.valid = List[Bool]()
 
 
@@ -362,6 +377,18 @@ def _widen_signed[
         if has_nulls:
             out.valid.append(not arr.is_null(r))
         out.vals.append(arr.get(r).cast[DType.int128]())
+
+
+def _widen_float[
+    dtype: DType
+](mut out: WideColumn, ref col: Column[HeapRegion], rows: Int) raises:
+    var arr = col.as_primitive[dtype]()
+    var has_nulls = col.null_count() > 0
+    out.fvals.reserve(rows)
+    for r in range(rows):
+        if has_nulls:
+            out.valid.append(not arr.is_null(r))
+        out.fvals.append(arr.get(r).cast[DType.float64]())
 
 
 def widen_column(
@@ -386,22 +413,18 @@ def widen_column(
             + " selected rows"
         )
     out.bind = bind_column(func, batch, col_idx, label)
-    if out.bind.kind == IN_FLOAT:
-        raise Error(
-            "pipeline_exec: "
-            + label
-            + " over a float column ("
-            + String(col.arrow_type)
-            + ") is served by the ungrouped aggregation sink only; a grouped"
-            " sink folds signed integers, DECIMAL128 and DATE32"
-        )
     var has_nulls = col.null_count() > 0
     if func == AGG_COUNT:
         if has_nulls:
             for r in range(rows):
                 out.valid.append(not col.is_null_at(r))
         return out^
-    if out.bind.kind == IN_DECIMAL:
+    if out.bind.kind == IN_FLOAT:
+        if out.bind.arrow == ArrowType.FLOAT64:
+            _widen_float[DType.float64](out, col, rows)
+        else:
+            _widen_float[DType.float32](out, col, rows)
+    elif out.bind.kind == IN_DECIMAL:
         var arr = col.as_decimal128()
         out.vals.reserve(rows)
         for r in range(rows):
@@ -437,6 +460,9 @@ def fold_wide(
         cell.count += 1
         return
     adopt_bind(cell, w.bind, label)
+    if w.bind.kind == IN_FLOAT:
+        _fstep(cell, func, w.fvals[row])
+        return
     _step(cell, func, w.vals[row], label)
 
 

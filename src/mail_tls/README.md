@@ -60,3 +60,64 @@ each free every entry exactly once.
   older versions the s2n policy still allows. No minimum version is pinned.
 - No client certificates, no session tickets, no SNI-based certificate choice.
 - Server mode only.
+
+## Examples
+
+A table answers for connection ids it holds no TLS state for: `conn_fd` is
+`-1`, and the handshake and `recv` answer `ERROR`. Nothing is created, so the
+entry counters do not move.
+
+```mojo
+from std.testing import assert_equal, assert_false
+from http_core.tls import TlsConfig, tls_init
+from mail_tls import (
+    MailTlsTable,
+    TLS_OUTCOME_ERROR,
+    tls_entries_created,
+    tls_entries_freed,
+)
+
+tls_init()
+var table = MailTlsTable(TlsConfig())
+var created0 = tls_entries_created()
+var freed0 = tls_entries_freed()
+assert_equal(table.tls_conn_count(), 0)
+assert_false(table.is_tls(9))
+assert_false(table.handshake_done(9))
+assert_equal(Int(table.conn_fd(9)), -1)
+assert_equal(Int(table.drive_handshake_burst(9)), Int(TLS_OUTCOME_ERROR))
+var into = List[UInt8]()
+var got = table.recv(9, into, 100)
+assert_equal(Int(got[0]), Int(TLS_OUTCOME_ERROR))
+assert_equal(got[1], -1)
+table.drop(9)
+assert_equal(tls_entries_created() - created0, 0)
+assert_equal(tls_entries_freed() - freed0, 0)
+```
+
+Bytes that arrived in the clear after `STARTTLS` are refused before any TLS
+state is made, and a bad certificate raises while building the table.
+
+```mojo
+from std.testing import assert_equal, assert_false, assert_true
+from http_core.tls import TlsConfig, tls_init
+from mail_tls import MailTlsTable
+
+tls_init()
+var table = MailTlsTable(TlsConfig())
+var refused = False
+try:
+    table.begin_upgrade(1, Int32(500), 5)
+except:
+    refused = True
+assert_true(refused)
+assert_false(table.is_tls(1))
+assert_equal(table.tls_conn_count(), 0)
+
+var raised = False
+try:
+    _ = MailTlsTable.from_cert_pem(String("not a cert"), String("not a key"))
+except:
+    raised = True
+assert_true(raised)
+```

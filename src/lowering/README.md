@@ -270,13 +270,13 @@ projection, leaves no dictionary key to an aggregation above it.
 
 ## Order
 
-An aggregation with no group key and a `SUM` or `AVG` whose argument is
+An aggregation, grouped or not, with a `SUM` or `AVG` whose argument is
 `FLOAT32` or `FLOAT64` in the child's schema is cut with `ORDER_ROW_RANGE`: the
-engine's ungrouped sink then folds each source position on its own and adds
-the positions' sums in position order, so the double sum is the same bits on
-every worker count and schedule of one lowered plan (`pipeline_exec`). Every
-other segment is `ORDER_NONE`: an integer, `DECIMAL`, `COUNT`, `MIN` or `MAX`
-fold is exact in any order, and the grouped sinks fold no float argument. A
+engine's sink then folds each source position on its own (per group, in a
+grouped sink) and adds the positions' sums in position order, so the double
+sum is the same bits on every worker count and schedule of one lowered plan
+(`pipeline_exec`). Every other segment is `ORDER_NONE`: an integer,
+`DECIMAL`, `COUNT`, `MIN` or `MAX` fold is exact in any order. A
 sort's output keeps the sort's order through filters,
 projections and the final collect only as far as the engine's sink-output
 source keeps it; lowering does not state more. A limit that reaches a
@@ -300,3 +300,71 @@ It depends on `host_profile`, `physical_plan`, `plan_ir`,
 `closure_excludes`, so analysis fails if any of them enters the closure,
 directly or through another package. The names are compared exactly:
 `async_api`, a trait surface the closure needs, is not refused.
+
+## Example
+
+This lowers a Parquet scan with a projection and a pushed filter under the
+reference host profile. The plan is one segment that reads the file and
+collects its rows, and `render_lowered_plan` prints it.
+
+```mojo module
+from std.testing import assert_equal, assert_true
+
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, SchemaBuilder
+from host_profile.host_profile import reference_host_profile
+from lowering.lower import lower
+from lowering.lowered_plan import LoweringInputs
+from lowering.render import render_lowered_plan
+from physical_plan.physical_plan import SINK_COLLECT
+from plan_expr.expr import Expr, BIN_LE
+from plan_expr.scalar_value import ScalarValue
+from plan_ir.logical_plan import LogicalPlan, SOURCE_PARQUET
+from plan_stats.table_stats import (
+    ColumnStats,
+    TableStats,
+    STATS_SOURCE_PARQUET_METADATA,
+)
+
+
+def main() raises:
+    var sb = SchemaBuilder()
+    sb.add_field(Field("qty", ArrowType.INT64, False))
+    sb.add_field(Field("price", ArrowType.FLOAT64, False))
+    sb.add_field(Field("ship", ArrowType.INT64, False))
+    var schema = sb.build()
+
+    var projection = List[String]()
+    projection.append("qty")
+    projection.append("price")
+    var keep = Expr.binary(
+        BIN_LE,
+        Expr.col_ref("ship"),
+        Expr.literal(ScalarValue.from_int64(100)),
+    )
+    var plan = LogicalPlan.scan(
+        String("lineitem.parquet"),
+        SOURCE_PARQUET,
+        schema^,
+        Optional[List[String]](projection^),
+        Optional[Expr](keep^),
+    )
+
+    var inputs = LoweringInputs()
+    var stats = TableStats(
+        6000,
+        List[String](),
+        List[ColumnStats](),
+        STATS_SOURCE_PARQUET_METADATA,
+    )
+    inputs.add_scan(Optional[TableStats](stats^), List[String]())
+
+    var lowered = lower(plan, reference_host_profile("example-build"), inputs)
+    assert_equal(len(lowered.segments), 1)
+    assert_equal(lowered.result_seg_id, 0)
+    assert_equal(lowered.segments[0].sink_kind, SINK_COLLECT)
+    assert_equal(
+        lowered.segments[0].source_spec.parquet_path, "lineitem.parquet"
+    )
+    assert_true("SOURCE_PARQUET" in render_lowered_plan(lowered))
+```

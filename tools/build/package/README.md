@@ -400,8 +400,8 @@ What the rule fixes, so no BUCK file states it:
   from the same inputs staged at another path (`[twin]`), and the check refuses
   the wheel unless the two are the same bytes.
 
-The library checks ([`wheel/policy.zig`](wheel/policy.zig)) read every ELF
-member ([`wheel/elf.zig`](wheel/elf.zig), through its program headers, so a
+The library checks ([`native_policy/policy.zig`](native_policy/policy.zig)) read every ELF
+member ([`native_policy/elf.zig`](native_policy/elf.zig), through its program headers, so a
 stripped library reads the same). A refusal names its check:
 
 - `glibc`: the highest `GLIBC_` version it needs is at most the tag's glibc
@@ -420,7 +420,7 @@ stripped library reads the same). A refusal names its check:
 - `size`: no member over 90 MB (90,000,000 bytes; PyPI takes 100 MB a file).
 
 The same checks read every Mach-O member of a macosx wheel
-([`wheel/macho.zig`](wheel/macho.zig), through its load commands; thin arm64
+([`native_policy/macho.zig`](native_policy/macho.zig), through its load commands; thin arm64
 files only, a universal file is refused), with the manylinux ones above left
 out. For a macOS wheel `max_glibcxx` and `max_cxxabi` have nothing to bound and
 `os_floor` is the macOS the tag promises:
@@ -440,7 +440,7 @@ out. For a macOS wheel `max_glibcxx` and `max_cxxabi` have nothing to bound and
   absolute path under `/usr/lib/` or `/System/Library/`. Any other absolute
   path, `@executable_path` and an `@rpath` name nobody provides are refused;
 - `signature`: the member has a code signature (`LC_CODE_SIGNATURE`) that
-  matches it, as `codesign --verify` checks one ([`wheel/codesign.zig`](wheel/codesign.zig)):
+  matches it, as `codesign --verify` checks one ([`native_policy/codesign.zig`](native_policy/codesign.zig)):
   every CodeDirectory covers the file up to the signature, its hash type is
   SHA-1, SHA-256 or SHA-384, every page hashes to its slot, every special slot
   naming a blob of the signature (requirements, entitlements) holds that blob's
@@ -453,14 +453,15 @@ out. For a macOS wheel `max_glibcxx` and `max_cxxabi` have nothing to bound and
 
 `wheel_libs_check` (also [`wheel.bzl`](wheel.bzl)) is a second reader of a
 finished wheel: `komira_wheel libs` ([`wheel/libs.zig`](wheel/libs.zig)) reads
-the wheel's bytes, a few names (the entry library, the Mojo runtime's file
-names, its licence files and the distributions that carry it) and the
+the wheel's bytes, a few names (the entry library, the `opened` libraries the
+package opens itself beside it, the Mojo runtime's file names, its licence
+files and the distributions that carry it) and the
 toolchain's copies of the runtime libraries, and nothing else the rule that
 wrote the wheel was given. It reads the zip as `zip.zig` reads it, so the wheel
 is one this writer wrote: the build's, or the same bytes as an index serves them
 after an upload. Where `needed` above asks only that a name be a member somewhere, this
 check walks the libraries as the loader would load them from an install: from
-the entry library, each DT_NEEDED is a manylinux system library, a library
+the entry library, and from each `opened` library on its own, each DT_NEEDED is a manylinux system library, a library
 already loaded, or the member at one of the needing library's own run path
 entries with `$ORIGIN` its directory. For a Mach-O entry (a macOS wheel) the
 walk is dyld's: each load command names an operating system library (under
@@ -477,7 +478,10 @@ names its check:
   no `\`, no empty, `.` or `..` part);
 - `layout`: every member is under the import package (the entry's top
   directory) or the one `.dist-info`, so no `modular/` beside it;
-- `entry`: the entry is a member and an ELF or a Mach-O file;
+- `entry`: the entry is a member and an ELF or a Mach-O file, and so is each
+  `opened` library (a library the package opens itself beside the entry, such
+  as komira's UDF runtime): a member under the same package, of the entry's
+  format, named once;
 - `runtime`: each Mojo runtime library is in the wheel exactly once, with the
   bytes of the toolchain's runtime: a second copy, one of another build, or none
   is refused;
@@ -486,12 +490,13 @@ names its check:
 - `needed`: every DT_NEEDED of a loaded library resolves as above (a name
   holding `/`, which the loader opens as a path, is refused), and a refusal
   says where in the wheel the library is when the run path misses it;
-- `stray`: every ELF and Mach-O member is one the entry loads;
+- `stray`: every ELF and Mach-O member is one the entry or an `opened`
+  library loads, each walked on its own as the entry is;
 - `licence`: each runtime licence file is a non-empty `.dist-info/licenses/`
   member and a `License-File` of METADATA;
 - `requires`: no Requires-Dist names a distribution that carries the runtime.
 
-The output lists the loaded libraries in load order; with `expect_refusal` the
+The output lists the loaded libraries in load order, the entry's first; with `expect_refusal` the
 target builds only while the wheel is refused with exactly that line.
 python/BUCK runs it on komira's wheel (`:wheel_libs`), on the macOS wheel
 (`:wheel_libs_macos_arm64`), and on four wheels it refuses: a second
@@ -519,14 +524,92 @@ conda.bzl's test stamp (and its default output waits for `[release]` too).
 number `<N>` (version `0.1.<N>`) and the same test commit and commit time, for a
 build that needs wheels of two versions of one package, such as an upgrade test.
 
-The tests: the Zig scenarios `:wheel_zip_unit`, `:wheel_elf_unit`,
-`:wheel_macho_unit`, `:wheel_codesign_unit`, `:wheel_policy_unit`,
-`:wheel_build_unit`, `:wheel_check_unit`, `:wheel_cli_unit`,
-`:wheel_libs_unit` and `:wheel_compare_unit` in
-[`BUCK`](BUCK), on synthetic files and ELF libraries
-([`wheel/testing.zig`](wheel/testing.zig)). The rule on fixtures: `:wheel_fixture`
+The tests: the Zig scenarios `:wheel_zip_unit`, `:wheel_build_unit`,
+`:wheel_check_unit`, `:wheel_cli_unit`, `:wheel_libs_unit` and
+`:wheel_compare_unit` in [`BUCK`](BUCK), on synthetic files
+([`wheel/testing.zig`](wheel/testing.zig)), and those of the native policy
+module `:native_policy` the tool imports (the library checks and the ELF,
+Mach-O and code signature readers, in
+[`native_policy/`](native_policy/native_policy.zig)): `:native_elf_unit`,
+`:native_macho_unit`, `:native_codesign_unit` and `:native_policy_unit`, on
+synthetic ELF and Mach-O libraries
+([`native_policy/testing.zig`](native_policy/testing.zig)). The rule on fixtures: `:wheel_fixture`
 (a linux-x86_64 wheel holding the example Mojo shared library `plain`, with the
 Mojo runtime as `external_needed`), `:wheel_fixture_aarch64_tag` and
 `:wheel_fixture_macosx_tag` (the linux-arm64 and darwin-arm64 rows' tags; built on
 linux like every target). `:wheel_tag_cases` holds each release row's tag
 and the refusal of a member path holding a brace.
+
+## The npm packages
+
+`npm_tarball` ([`npm.bzl`](npm.bzl)) writes the tarball `npm pack` would write
+of the files it is given and the package's manifest, and refuses to write one
+that would be wrong for the platform it is for. `komira_npm`
+([`npm/main.zig`](npm/main.zig)) is the writer and its read-back check, a
+static executable run as build actions: no shell, no Python, no npm. It is
+generic: the packages' own targets are declared with the package
+([node/BUCK](../../../node/BUCK): `//node:package` and
+`//node:package_linux_x64`); the target here is a fixture.
+
+| attribute | what it does |
+|---|---|
+| `package` | the npm name; the manifest's `name` must be it, and the file name is npm pack's, `<name without @, / as ->-<version>.tgz` |
+| `manifest` | the source package.json checked in with the package: `"version": "0.0.0"`, `"private": true`, and every optional dependency at `0.0.0` |
+| `license` | the manifest's `license` must be it |
+| `files` | `{path in the package: file or directory}` (a directory adds every file under it); a native library (ELF or Mach-O) is written 0755, every other file 0644 |
+| `platform` | the row of [tools/build/platforms/table.bzl](../platforms/table.bzl) the package is for; unset, the package holds no native library |
+| `os_floor`, `max_glibcxx`, `max_cxxabi` | the bounds of the native policy, as the wheel's |
+
+- **The manifest is stamped, not written.** The tarball's package.json is the
+  source manifest with the stamp's version on the package and on every
+  optional dependency, and, when stamped, without `private`; every other key
+  keeps its value and place, written as `JSON.stringify(v, null, 2)` writes
+  it. So the manifest the package's tests read is the one npm reads, and they
+  cannot disagree. Unstamped, the package is `0.0.0` and keeps
+  `"private": true`, which npm refuses to publish.
+- **The version** is the wheel's stamp (`0.1.<N>`, [wheel/stamp.zig](wheel/stamp.zig),
+  the module `:package_stamp`), with the same refusal of a half stamp.
+- **Reproducible bytes**: a gzip stream (no name, no time, OS 255; the packer's
+  `deflate.zig`) over a ustar archive of `package/package.json` and every file at
+  `package/<path>`, sorted bytewise; regular files only, owner and group 0
+  with no names, one mtime (499162500 seconds after the epoch, the time
+  `npm pack` writes), modes 0644 and 0755, two zero blocks at the end. A second action
+  writes the tarball again from the same inputs staged at another path
+  (`[twin]`), and the check refuses it unless the two are the same bytes.
+
+Before anything is written, and again on the tarball read back
+([`npm/npm.zig`](npm/npm.zig), [`npm/manifest.zig`](npm/manifest.zig)), a
+refusal names its check:
+
+- `manifest`: the manifest's `name` and `license` are the rule's, the source
+  is the development manifest above, and it is a JSON object of integer
+  numbers;
+- `repository`: `repository.url` is `https://github.com/komira-ai/komira`,
+  which npm's trusted publishing requires;
+- `platform`: `os`, `cpu` and `libc` are exactly the platform's as npm spells
+  them (linux-x86_64: `linux`, `x64`, `glibc`), and absent for a package with
+  no platform, which holds no native library;
+- `files`: every member is one npm packs for the manifest's `files` list
+  (paths, directories and globs with `*` and `**`) or one it always packs
+  (package.json, a README or licence file at the top), so a stray file the
+  manifest leaves out is refused rather than shipped;
+- `scripts`: no `preinstall`, `install` or `postinstall` script;
+- `path`: relative, printable ASCII, no empty, `.` or `..` part, given once;
+  package.json is the rule's own;
+- `size`: no member over 90 MB;
+- for a platform package, the library checks of
+  [`native_policy/policy.zig`](native_policy/policy.zig), as for a wheel:
+  `glibc`, `glibcxx`, `cxxabi`, `runpath`, `needed` (so a native directory
+  missing one of the Mojo runtime libraries its libraries need is refused,
+  naming it), `external`, `arch`, and on macOS `minos`, `installname` and
+  `signature`. The refusals say "package" where a wheel's say "wheel".
+
+Sub-targets: `[default]` is the tarball, copied only after `[check]` passed;
+`[check]` reads it back ([`npm/check.zig`](npm/check.zig)): the gzip and tar
+exactly as this writer writes them, the members exactly (names, order, bytes
+and modes), the package.json read back held to the rule again, every member
+packed by its `files`, the library checks again, and the twin. `[release]` is
+the tarball copied only after `[release_check]` passed: the same check,
+refusing an unstamped package. A publisher reads `[release]` and nothing else.
+`npm_tarball_test_stamped` gives conda.bzl's test stamp (and its default output
+waits for `[release]` too).

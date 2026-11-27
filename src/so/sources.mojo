@@ -38,10 +38,13 @@ and not an abort of the process when a codec first opens it.
 """
 
 from arrow.arrow_types import ArrowType
+from aws_core import AwsClock
 from arrow.table import Table
 from byte_buffer.file_identity import FileIdentity
 from compression.codec_libraries import probe_codec_libraries
 from csv.csv_options import QUOTE_STYLE_TAG_RFC4180
+from http_core.transport.io_stream import Connector
+from parquet_footers.parquet_files import resolve_parquet_source
 from plan_ir.logical_plan import LogicalPlan
 from plan_wire import binding_to_bytes, plan_from_bytes, schema_to_bytes
 from scan_source.csv_source import CsvSource
@@ -49,15 +52,16 @@ from scan_source.json_source import JsonSource
 from scan_source.source_variant import SourceVariant
 from sdk.parquet_footer import read_parquet_footer
 from sdk_exec.arrow_result import ArrowResult, arrow_result
-from sdk_exec.engine_catalog import register_parquet as engine_register_parquet
 from sdk_exec.engine_plan import run_plan
 from sdk_exec.engine_context import RegisteredTable
-from sdk_exec.engine_sql import STEP_EXECUTE, run_sql
+from sdk_exec.engine_sql import STEP_BIND, STEP_EXECUTE, run_sql_with
 from sdk_exec.run_control import RunControl
-from sql.sql_ast import TvfOptions
+from sql.sql_ast import HIVE_PARTITIONING_AUTO, TvfOptions
 from sql.sql_tvf_bind import csv_tvf_schema, json_tvf_schema
 
+from .bindings import forget_table, store_opener
 from .session import Session, step_number
+from .store_fs import StoreConnectors, StoreScanFs, kernel_store_connectors
 
 comptime TABLE_TYPE_UNSUPPORTED = "TABLE_TYPE_UNSUPPORTED"
 """Refusal of `register_arrow`: a column of a nested type (list, large list,
@@ -82,14 +86,21 @@ def register_parquet(mut session: Session, name: String, path: String) raises:
     with the reader's own message and not later as an empty result, and the
     table is in the catalog a query on the session binds against. A flat
     schema only: a nested or repeated column is refused, as are files whose
-    schemas differ and a glob that matches nothing.
+    schemas differ and a glob that matches nothing. A table already under
+    `name` (any kind, any case) is replaced, as `add_sql_binding` replaces
+    it; a refused registration leaves it as it was.
 
     Raises:
         Error `compression: cannot load <soname>: <loader error>` when a codec
         library cannot be loaded, before anything is read.
     """
     probe_codec_libraries()
-    engine_register_parquet(session.engine, name, path)
+    var source = resolve_parquet_source(
+        session.engine.footers, path, HIVE_PARTITIONING_AUTO, True
+    )
+    forget_table(session, name)
+    session.engine.catalog.add_parquet_source(name, source^)
+    session.engine.tables.append(RegisteredTable(name.lower(), path))
 
 
 def register_csv(
@@ -177,15 +188,10 @@ def register_arrow(mut session: Session, name: String, var table: Table) raises:
                 + String(t)
                 + "; only flat columns are registered"
             )
-    _ = session.engine.catalog.remove(name)
     # A Parquet table is also listed with its paths (`EngineContext.tables`),
-    # which lowering reads for every Parquet scan; a replaced one leaves it.
-    var key = name.lower()
-    var kept = List[RegisteredTable]()
-    for i in range(len(session.engine.tables)):
-        if session.engine.tables[i].name != key:
-            kept.append(session.engine.tables[i].copy())
-    session.engine.tables = kept^
+    # which lowering reads for every Parquet scan, and a table bound to an
+    # object store with its bucket; a replaced one leaves both.
+    forget_table(session, name)
     session.engine.catalog.add_in_memory(name, table^)
 
 
@@ -316,7 +322,8 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
 
     The statement reads the tables registered on the session
     (`register_parquet`, `register_csv`, `register_json`,
-    `register_arrow`); it is `sdk_exec.run_sql`: a query, or a
+    `register_arrow`, `add_sql_binding`); it is `sdk_exec.run_sql_with` over
+    the session's bound object stores (`bindings.store_opener`): a query, or a
     `COPY ... TO` a local file, whose answer is one row of the BIGINT
     `Count`. An answer of no rows is one batch of no rows with the answer's
     schema. The result owns its batches and keeps no reference to the
@@ -326,7 +333,7 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
         Error `compression: cannot load <soname>: <loader error>` when a codec
         library cannot be loaded, before the statement is parsed.
 
-        Error `<step>: <reason>` when `run_sql` refuses (the session records
+        Error `<step>: <reason>` when the run refuses (the session records
         it too, with its step and code: `Session.set_refusal`), where `<step>` is the
         step that refused (`parse`, `bind`, `optimize`, `lower` or
         `execute`) and `<reason>` its own message, unchanged, followed by
@@ -355,8 +362,31 @@ def sql_result(
         statement refused before its plan runs raises `<step>: <reason>` as
         without a control, and so does every other refusal.
     """
+    return sql_result_with(session, sql, control, kernel_store_connectors())
+
+
+def sql_result_with[
+    S3C: Connector, AZC: Connector, K: AwsClock & Copyable & Deinitable
+](
+    mut session: Session,
+    sql: String,
+    control: RunControl,
+    var connectors: StoreConnectors[S3C, AZC, K],
+) raises -> ArrowResult:
+    """`sql_result` under `control`, reading the session's bound object stores
+    through the connectors and clock `connectors` gives: the file systems of
+    `store_opener`, built from the credentials sealed on the session now. A
+    credential a bound table names that cannot be read refuses the statement
+    at step `bind` (`<step>: <reason>`, recorded on the session).
+    """
     probe_codec_libraries()
-    var outcome = run_sql(session.engine, sql, control)
+    var opener: StoreScanFs[S3C, AZC, K]
+    try:
+        opener = store_opener(session, connectors^)
+    except e:
+        session.set_refusal(String(STEP_BIND), String(e))
+        raise Error(session.last_error())
+    var outcome = run_sql_with(session.engine, sql, opener^, control)
     if outcome.refusal:
         ref refusal = outcome.refusal.value()
         if refusal.step == String(STEP_EXECUTE) and control.is_cancelled():

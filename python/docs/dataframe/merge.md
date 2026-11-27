@@ -1,5 +1,7 @@
 # merge, and isin with another frame
 
+> **Newer than 0.1.1623.** komira 0.1.1623 and older releases do not have what this page describes. [The changelog](../../CHANGELOG.md) lists what each release added.
+
 ```python
 orders = komira.read_parquet("orders.parquet")
 people = komira.read_parquet("people.parquet")

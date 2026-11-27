@@ -1,0 +1,23 @@
+# A fixture of tools/build/ci/tasks_cases.bzl: the tree of ../before with one task directory more, 3-c,
+# declared by task_examples (python/task_examples.bzl) as python/docs/tasks/BUCK
+# declares the real tree. The cases configure it and ask which of its targets
+# are roots of the check set; nothing builds it (its wheel and driver are
+# placeholders), and the aggregate leaves it out (EXCLUDED of
+# tools/build/ci/rules.bzl).
+load("@komira//python:task_examples.bzl", "task_examples")
+
+_FILES = glob(["*/**"])
+
+filegroup(
+    name = "tree",
+    srcs = _FILES,
+)
+
+task_examples(
+    name = "examples",
+    files = _FILES,
+    tree = ":tree",
+    python = "komira//third_party/python:cpython",
+    wheels = ["placeholder_wheel.txt"],
+    script = "placeholder_driver.txt",
+)

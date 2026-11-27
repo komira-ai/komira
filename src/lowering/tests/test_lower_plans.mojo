@@ -208,7 +208,8 @@ def test_grouped_dictionary_aggregate_then_sort_is_two_segments() raises:
     expected += "  source: SOURCE_PARQUET path=lineitem.parquet total=True filter=" + String(_ship_le(100)) + "\n"
     expected += "  sink: (SINK_AGG, STRING, DICT_ENCODED) param=0 state=0\n"
     expected += "  deps: none\n"
-    expected += "  order: ORDER_NONE partitions=1\n"
+    # AVG(price) is a grouped float AVG: folded by source position.
+    expected += "  order: ORDER_ROW_RANGE partitions=1\n"
     expected += "  estimates: morsel_rows=" + String(policy.agg_morsel_rows(scan_schema)) + " card_rows=6000 mem_bytes=0\n"
     expected += "segment 1\n"
     expected += "  source: SOURCE_SINK_OUTPUT from=0\n"
@@ -689,7 +690,7 @@ def test_an_ungrouped_float_sum_or_avg_is_cut_row_range() raises:
     assert_equal(_order_of(several^), ORDER_ROW_RANGE)
 
 
-def test_exact_and_grouped_aggregates_stay_order_none() raises:
+def test_exact_aggregates_stay_order_none() raises:
     assert_equal(_order_of(_one(_agg(AGG_SUM, "i64"))), ORDER_NONE)
     assert_equal(_order_of(_one(_agg(AGG_MEAN, "i32"))), ORDER_NONE)
     assert_equal(_order_of(_one(_count_star())), ORDER_NONE)
@@ -697,14 +698,33 @@ def test_exact_and_grouped_aggregates_stay_order_none() raises:
     assert_equal(_order_of(_one(_agg(AGG_MIN, "f64"))), ORDER_NONE)
     assert_equal(_order_of(_one(_agg(AGG_MAX, "f32"))), ORDER_NONE)
     assert_equal(_order_of(_one(_agg(AGG_COUNT, "f64"))), ORDER_NONE)
-    # A grouped aggregation is ORDER_NONE even over a float sum: its sinks
-    # fold no float argument and refuse one by name when built.
+    # Grouped, the same: exact folds need no order.
     assert_equal(
-        _order_of(_one(_agg(AGG_SUM, "f64")), _names("i64")), ORDER_NONE
+        _order_of(_one(_agg(AGG_SUM, "i64")), _names("s")), ORDER_NONE
     )
     assert_equal(
-        _order_of(_one(_agg(AGG_MEAN, "f64")), _names("s")), ORDER_NONE
+        _order_of(_one(_agg(AGG_MIN, "f64")), _names("i64")), ORDER_NONE
     )
+
+
+def test_a_grouped_float_sum_or_avg_is_cut_row_range() raises:
+    # A grouped sink folds a float SUM or AVG by source position too, keyed
+    # by a fixed-width column, a string or both.
+    assert_equal(
+        _order_of(_one(_agg(AGG_SUM, "f64")), _names("i64")), ORDER_ROW_RANGE
+    )
+    assert_equal(
+        _order_of(_one(_agg(AGG_MEAN, "f64")), _names("s")), ORDER_ROW_RANGE
+    )
+    assert_equal(
+        _order_of(_one(_agg(AGG_SUM, "f32")), _names("i64", "s")),
+        ORDER_ROW_RANGE,
+    )
+    var mixed = AggExprArray()
+    mixed.append(_count_star())
+    mixed.append(_agg(AGG_SUM, "i64"))
+    mixed.append(_agg(AGG_MEAN, "f32"))
+    assert_equal(_order_of(mixed^, _names("i64")), ORDER_ROW_RANGE)
 
 
 def test_only_the_float_aggregation_segment_is_row_range() raises:

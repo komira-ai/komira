@@ -3,7 +3,7 @@
 The SQL engine of `sql_oracle` ([tools/build/sql](../../tools/build/sql/README.md)),
 which runs this binary as a build action. Test data only: nothing ships it,
 and only test-only users (`komira//src/tests/...`, the test data rules of a few
-packages such as `komira//src/iceberg_catalog`) and the rule's own tests may
+packages such as `komira//src/iceberg_catalog` and `komira//node`) and the rule's own tests may
 declare a `sql_oracle` (the visibility of `:duckdb`).
 
 | target | what |

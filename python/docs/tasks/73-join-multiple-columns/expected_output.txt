@@ -1,0 +1,4 @@
+[{'region': 'east', 'product': 'apple', 'units': 10, 'price': 2}, {'region': 'east', 'product': 'pear', 'units': 5, 'price': 4}, {'region': 'west', 'product': 'apple', 'units': 7, 'price': 3}]
+[{'region': 'east', 'product': 'apple', 'units': 10, 'price': 2}, {'region': 'east', 'product': 'pear', 'units': 5, 'price': 4}, {'region': 'west', 'product': 'apple', 'units': 7, 'price': 3}]
+[{'region': 'east', 'product': 'apple', 'units': 10, 'price': 2}, {'region': 'east', 'product': 'pear', 'units': 5, 'price': 4}, {'region': 'west', 'product': 'apple', 'units': 7, 'price': 3}]
+[{'region': 'east', 'product': 'apple', 'units': 10, 'price': 2}, {'region': 'east', 'product': 'pear', 'units': 5, 'price': 4}, {'region': 'west', 'product': 'apple', 'units': 7, 'price': 3}]

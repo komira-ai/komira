@@ -152,6 +152,8 @@ picked_dir(
         "libAsyncRTRuntimeGlobals.so",
         "libKGENCompilerRTShared.so",
     ]],
+    # The Node package's tests load it too (node/BUCK, :package_test).
+    visibility = ["komira//node:"],
 )
 
 libkomira_dist_load(
