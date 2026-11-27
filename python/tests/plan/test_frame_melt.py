@@ -14,7 +14,7 @@ given. Checked:
   filter in the plan);
 - value columns of one type that differ in allowing missing values: the one
   that never holds one is read through a `try_cast` to its own type, for an
-  integer and for a string; for another type it is refused by name;
+  integer; for another type (a string, a date) it is refused by name;
 - every refusal, by type and full message: pandas' own errors (`value_name`
   that is a column, `id_vars` with a column twice, a name the frame lacks, a
   `var_name` that is a list), value columns of two types (an int and a float,
@@ -180,12 +180,16 @@ def test_melt_of_value_columns_that_all_never_hold_a_missing_value_casts_none():
     assert [f.nullable for f in got._fields] == [True, False, False]
 
 
-def test_melt_casts_a_string_column_that_never_holds_a_missing_value_by_its_arrow_type():
+def test_melt_refuses_a_string_column_that_never_holds_a_missing_value_beside_one_that_can():
     env = Env((("k", "int64"), ("a", "string"), ("b", "string")), required=("b",))
-    got = env.df.melt(id_vars="k")
-    assert got._plan == Union(
-        (block(env.scan, ["k"], "a"), block(env.scan, ["k"], "b", read=Cast(ColRef("b"), None, True, arrow="string")))
+    refuses(
+        lambda: env.df.melt(id_vars="k"),
+        UnsupportedOperation,
+        "melt(): the value column 'b' never holds a missing value and 'a' can, and the engine stacks only "
+        "columns that allow missing values alike, which komira cannot make string columns do yet",
     )
+    both = Env((("k", "int64"), ("a", "string"), ("b", "string")), required=("a", "b")).df
+    assert both.melt(id_vars="k").columns == ["k", "variable", "value"]
 
 
 def test_melt_refuses_a_type_it_cannot_cast_to_allow_missing_values():

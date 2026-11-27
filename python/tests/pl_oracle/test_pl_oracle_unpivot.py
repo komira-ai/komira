@@ -11,11 +11,11 @@ answer's.
 
 The file has a string id with a null, int64 columns with nulls, a column that
 never holds a null written as not nullable, int32 and float64 columns with
-nulls, two string columns with nulls and one written as not nullable. The
+nulls, two string columns with nulls and two written as not nullable. The
 programs cover: `on` and `index` with custom names; the default names; `on`
 None (every column not in `index`); no `index`; one column; two index
-columns; string values; float values with nulls; a not-nullable int64 and a
-not-nullable string column beside nullable ones; unpivot of a filtered and of
+columns; string values; float values with nulls; a not-nullable int64 column
+beside nullable ones; two not-nullable string columns; unpivot of a filtered and of
 a sorted frame; a sort of the unpivot (its answer in order); an unpivot of the
 empty file.
 
@@ -57,6 +57,7 @@ WIDE = {
     "s1": (pa.string(), True, ["a", None, "", "dd", "e", "ff"]),
     "s2": (pa.string(), True, [None, "B", "cc", "D", None, "é"]),
     "s3": (pa.string(), False, ["x", "", "yy", "z", "w", "v"]),
+    "s4": (pa.string(), False, ["p", "q", "", "r", "s", "t"]),
 }
 
 
@@ -112,7 +113,7 @@ CASES = [
     ("unpivot_float_values_with_nulls", lambda P, lf: lf.unpivot(["f1", "f2"], index="k"), False),
     ("unpivot_string_values", lambda P, lf: lf.unpivot(["s1", "s2"], index="name", value_name="text"), False),
     ("unpivot_a_column_that_never_holds_a_null", lambda P, lf: lf.unpivot(["q1", "q3", "q2"], index="name"), False),
-    ("unpivot_a_string_column_that_never_holds_a_null", lambda P, lf: lf.unpivot(["s3", "s1"], index="k"), False),
+    ("unpivot_string_columns_that_never_hold_a_null", lambda P, lf: lf.unpivot(["s3", "s4"], index="k"), False),
     ("unpivot_of_a_filtered_frame", lambda P, lf: lf.filter(P.col("k") > 1).unpivot(["q1", "q2"], index="name"), False),
     ("unpivot_of_a_sorted_frame", lambda P, lf: lf.sort("q1").unpivot(["q1", "q2"], index="name"), False),
     (

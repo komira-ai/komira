@@ -12,13 +12,13 @@ of the first value column, then of the next.
 
 The file has a string id with a missing value, an int64 id, int64 columns
 with missing values and one written as never missing, int32 and float64
-columns, and string columns with missing values and one written as never
+columns, and string columns with missing values and two written as never
 missing. The cases cover: `id_vars`, `value_vars`, `var_name` and
 `value_name` given; the default names; `value_vars` None (every column not in
 `id_vars`); no `id_vars`; one value column; two id columns; `value_vars` in
 another order; a value column that is also an id column and one named twice;
-int32, float64 and string values; a column that never holds a missing value
-(an int64 and a string) beside ones that do; melt of a filtered and of a
+int32, float64 and string values; an int64 column that never holds a missing
+value beside ones that do; two string columns that never hold one; melt of a filtered and of a
 sorted frame; a sort of the melt, compared in order; `komira.melt(frame, ...)`
 against `pandas.melt`.
 
@@ -56,6 +56,7 @@ WIDE = {
     "s1": (pa.string(), True, ["a", None, "", "dd", "e", "ff"]),
     "s2": (pa.string(), True, [None, "B", "cc", "D", None, "é"]),
     "s3": (pa.string(), False, ["x", "", "yy", "z", "w", "v"]),
+    "s4": (pa.string(), False, ["p", "q", "", "r", "s", "t"]),
 }
 
 _STRING_LAYOUTS = (pa.string(), pa.large_string(), pa.string_view())
@@ -113,11 +114,7 @@ CASES = [
         lambda d: d.melt(id_vars="name", value_vars=["q1", "q3", "q2"]),
         False,
     ),
-    (
-        "melt_a_string_column_that_never_holds_a_missing_value",
-        lambda d: d.melt(id_vars="k", value_vars=["s3", "s1"]),
-        False,
-    ),
+    ("melt_string_columns_that_never_hold_a_missing_value", lambda d: d.melt(id_vars="k", value_vars=["s3", "s4"]), False),
     ("melt_of_a_filtered_frame", lambda d: d[d["q3"] > 4].melt(id_vars="name", value_vars=["q1", "q2"]), False),
     ("melt_of_a_sorted_frame", lambda d: d.sort_values("q1").melt(id_vars="name", value_vars=["q1", "q2"]), False),
     (

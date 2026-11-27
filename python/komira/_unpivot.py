@@ -17,8 +17,8 @@ type that differ in allowing missing values are made to allow them alike: a
 column that never holds one is read through a `try_cast` to its own type,
 which the engine types as allowing them (`walk_expr_field`) and which changes
 no value. Only the types `Cast` names a target for (the integers, floats and
-bool) and strings take that cast; another type of mixed nullability is refused
-by name.
+bool) take that cast; another type of mixed nullability (a string, whose cast
+the engine does not compile, a date, a decimal, ...) is refused by name.
 
 The skins check their own arguments (komira/_frame.py, komira/pl/_frame.py)
 and call `unpivot_plan` with the column names resolved.
@@ -34,9 +34,8 @@ from ._errors import UnsupportedOperation
 __all__ = ["unpivot_plan"]
 
 # The types a column that never holds a missing value is cast to, as itself,
-# to allow one: `Cast` targets by name, and strings by Arrow type.
+# to allow one: the `Cast` targets.
 _CAST_TARGETS = _ops.CAST_TARGETS
-_ARROW_CASTS = frozenset({"string"})
 
 
 def _type_key(field: object) -> tuple:
@@ -60,8 +59,6 @@ def _allowing_missing(name: str, arrow: str, verb: str, other: str) -> _ops.Node
     column = _ops.ColRef(name)
     if arrow in _CAST_TARGETS:
         return _ops.Cast(column, arrow, True)
-    if arrow in _ARROW_CASTS:
-        return _ops.Cast(column, None, True, arrow=arrow)
     raise UnsupportedOperation(
         f"{verb}: the value column {name!r} never holds a missing value and {other!r} can, and the "
         "engine stacks only columns that allow missing values alike, which komira cannot make "
