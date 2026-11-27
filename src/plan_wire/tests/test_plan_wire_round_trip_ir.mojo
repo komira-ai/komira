@@ -2643,7 +2643,8 @@ def test_every_declared_extract_unit_round_trips() raises:
     truncations are 16..25, epoch counts are 26..28, and **15 alone is
     declared by NOTHING**. A corpus that swept
     `range(EXTRACT_FIELD_WIRE_MEMBERS)` would therefore be testing units
-    0..27 — one of which does not exist — so the sweep enumerates the
+    0..27 — one of which does not exist, and missing 28 — so the sweep
+    enumerates the
     CONSTANTS, and the count is pinned against the derived
     `EXTRACT_FIELD_WIRE_MEMBERS` so a new unit cannot arrive untested.
 

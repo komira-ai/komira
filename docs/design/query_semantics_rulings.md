@@ -64,7 +64,7 @@ Each gap is refused by name today and must answer as DuckDB does once built; its
 | §7.1 | Grapheme-cluster functions: `length_grapheme`, `left_grapheme`, `right_grapheme`, `substring_grapheme` | [komira#1222](https://github.com/komira-ai/komira/issues/1222) | none known |
 | §7.5 | CONCAT and CONCAT_WS over non-string arguments | [komira#1223](https://github.com/komira-ai/komira/issues/1223) | none known |
 | §7.7 | ILIKE and `LIKE ... ESCAPE` | [komira#1224](https://github.com/komira-ai/komira/issues/1224) | none known |
-| §8.15 | EXTRACT and `date_part` of `epoch` and `julian` (DOUBLE) | [komira#1225](https://github.com/komira-ai/komira/issues/1225) | none known |
+| §8.15 | EXTRACT and `date_part` of `julian` (DOUBLE; `epoch` is served) | [komira#1225](https://github.com/komira-ai/komira/issues/1225) | none known |
 | §9.5 | `IGNORE NULLS` for LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE | [komira#1226](https://github.com/komira-ai/komira/issues/1226) | none known |
 | §9.8 | RANGE frames with fractional and interval offsets | [komira#1228](https://github.com/komira-ai/komira/issues/1228) | none known |
 | §11.3 | INTERSECT ALL and EXCEPT ALL | [komira#1229](https://github.com/komira-ai/komira/issues/1229) | none known |

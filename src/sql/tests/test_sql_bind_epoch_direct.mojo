@@ -19,7 +19,7 @@
 from std.testing import TestSuite, assert_equal
 
 from arrow.arrow_types import ArrowType
-from arrow.schema import Field, Schema, SchemaBuilder
+from arrow.schema import Field, SchemaBuilder
 from plan_expr.expr import Expr
 
 from sql.sql_bind_expr import _bind_scalar
@@ -112,10 +112,6 @@ def _got(sql: String) raises -> String:
         return out + pad + "Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     except e:
         return String("ERR: ") + String(e)
-
-
-def _check(sql: String, want: String) raises:
-    assert_equal(_got(sql), want, sql)
 
 
 def _check(sql: String, want: String) raises:

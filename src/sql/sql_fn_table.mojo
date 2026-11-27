@@ -4595,11 +4595,12 @@ def sql_date_trunc_unit(name: String) -> Optional[UInt8]:
     it is the one date in the set that cannot discriminate. A fixture of
     Mondays proves nothing here.
 
-    ⚠ `julian` AND `epoch` ARE PERIODS HERE AND ARE REFUSED AS
+    ⚠ `julian` AND `epoch` ARE PERIODS HERE AND MEAN SOMETHING ELSE AS
     `date_part` SPECIFIERS — namespace (2) reads a raw DOUBLE for both
-    (2461360.43…, 1794738030.12…) which no `EXTRACT_*` unit on this wire
-    carries, while the PERIOD meaning is a plain truncation this engine
-    already does. Same spelling, two tables, one served and one not.
+    (2461360.43…, 1794738030.12…): `epoch` is `EXTRACT_EPOCH` there, and
+    `julian` is refused there because no `EXTRACT_*` unit carries a Julian
+    day number. The PERIOD meaning is a plain truncation this engine already
+    does. Same spelling, two tables, two meanings.
 
     ⚠ VERIFIED PRE-EPOCH, because a seconds-resolution truncation is where a
     floor-vs-truncate-toward-zero split would show: `date_trunc('epoch',
