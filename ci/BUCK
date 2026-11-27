@@ -9,7 +9,7 @@
 # the change owns paths of that row. tools/build/ci/default_guard.bxl holds it
 # to that: it reaches no heavy target and leaves out only roots that reach one.
 load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
-load("@komira//tools/build/ci:mojo_next.bzl", "is_coverage_root")
+load("@komira//tools/build/ci:mojo_next.bzl", "default_only")
 load("@komira//tools/build/ci:rules.bzl", "HEAVY")
 load(":targets.bzl", "TARGETS", "TESTS")
 
@@ -35,18 +35,18 @@ ci_aggregate(
     tests = [t for t in TESTS if t not in _HEAVY_ROOTS],
 )
 
-# The same two aggregates without their coverage roots: what pr.yml builds and tests with the
-# second Mojo compiler (`linux-x86_64-mojo-1.2.0`) when a change is built as an aggregate. Coverage
-# is measured with the default compiler only (tools/build/ci/mojo_next.bzl says why and what a
-# coverage root is); `cases.bxl:run` holds each twin to its aggregate minus those roots.
+# The same two aggregates without the targets built with the default compiler only (the coverage
+# roots and the Python surface): what pr.yml builds and tests with the second Mojo compiler
+# (`linux-x86_64-mojo-1.2.0`) when a change is built as an aggregate. tools/build/ci/mojo_next.bzl
+# says why and which targets those are; `cases.bxl:run` holds each twin to its aggregate minus them.
 ci_aggregate(
     name = "pr_mojo_next",
-    deps = [t for t in TARGETS if not is_coverage_root(t)],
-    tests = [t for t in TESTS if not is_coverage_root(t)],
+    deps = [t for t in TARGETS if not default_only(t)],
+    tests = [t for t in TESTS if not default_only(t)],
 )
 
 ci_aggregate(
     name = "pr_default_mojo_next",
-    deps = [t for t in TARGETS if t not in _HEAVY_ROOTS and not is_coverage_root(t)],
-    tests = [t for t in TESTS if t not in _HEAVY_ROOTS and not is_coverage_root(t)],
+    deps = [t for t in TARGETS if t not in _HEAVY_ROOTS and not default_only(t)],
+    tests = [t for t in TESTS if t not in _HEAVY_ROOTS and not default_only(t)],
 )

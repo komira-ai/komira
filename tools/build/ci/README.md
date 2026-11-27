@@ -99,12 +99,12 @@ its failure.
 | The selector's answer | The kind and what is printed |
 |---|---|
 | a list that holds `komira//ci:pr` or `komira//ci:pr_default` | `WHOLE`: the twin aggregate, `komira//ci:pr_mojo_next` or `komira//ci:pr_default_mojo_next` |
-| labels, some of them not coverage roots (a package's `:coverage` or `:coverage_floor`, the coverage tools' fixtures) | `SOME`: every label but the coverage roots, in the list's order, once each |
-| labels that are all coverage roots, or no label | `NONE`: nothing, and the build step is skipped |
+| labels, some of them neither coverage roots (a package's `:coverage` or `:coverage_floor`, the coverage tools' fixtures) nor of the Python surface (a package of PYTHON_SURFACE, tests/python_closure_allowlist.bzl, or under one) | `SOME`: every label but those, in the list's order, once each |
+| labels that are all coverage roots or of the Python surface, or no label | `NONE`: nothing, and the build step is skipped |
 | a line that is not a target label | fails: `BROKEN` |
 
 The twins are declared in `ci/BUCK`: `//ci:pr_mojo_next` and `//ci:pr_default_mojo_next` are `//ci:pr` and
-`//ci:pr_default` without the coverage roots, which are measured with the default compiler only.
+`//ci:pr_default` without the coverage roots and the Python surface, which are built with the default compiler only.
 
 ## The aggregate: `//ci:pr`
 

@@ -4,15 +4,16 @@
 
 `affected` is the list the selector printed (tools/build/ci/affected.bxl: one label per line, the
 targets a change reaches, or an aggregate of the check set). `aggregates` maps each aggregate of the
-check set to its twin without the coverage roots (ci/BUCK: `//ci:pr` -> `//ci:pr_mojo_next`,
-`//ci:pr_default` -> `//ci:pr_default_mojo_next`).
+check set to its twin without the targets left to the default compiler (ci/BUCK: `//ci:pr` ->
+`//ci:pr_mojo_next`, `//ci:pr_default` -> `//ci:pr_default_mojo_next`).
 
 pr.yml builds the answer with `--target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0`
 (tools/build/toolchains/mojo_versions.bzl), then tests the standalone tests of it:
 
-  WHOLE    the list holds an aggregate: its twin, the same check set without the coverage roots.
-  SOME     every label of the list except the coverage roots, in the list's order, once each.
-  NONE     the change reaches nothing but coverage roots, or nothing: no 1.2.0 build.
+  WHOLE    the list holds an aggregate: its twin, the same check set without the targets left to
+           the default compiler.
+  SOME     every label of the list except those, in the list's order, once each.
+  NONE     the change reaches nothing but those, or nothing: no 1.2.0 build.
   BROKEN   a line of `affected` is not a target label: the selector's output changed shape, and
            reading it as NONE would pass a change 1.2.0 never built. mojo_next.bxl fails on it.
 
@@ -20,13 +21,22 @@ Coverage is measured with the default compiler only (pr.yml's `build`, and cover
 branch figures, and the IR the branch tools read, are the compiler's, so one compiler's are the
 floors. A coverage root is a package's `:coverage` or `:coverage_floor`, or a target of the coverage
 tools' own fixtures (`tests//functional/coverage`, `tests//negative/coverage`), which hold one
-compiler's counters and reports. Every other target, the libraries, binaries and tests of the same
-packages included, is built and tested with both compilers.
+compiler's counters and reports.
+
+The Python surface is built with the default compiler only as well: the wheel bundles the default
+compiler's runtime and its tests are keyed to that pin, and the graph check `//:python_closure`
+allows Python only in the surface's packages (PYTHON_SURFACE of tests/python_closure_allowlist.bzl,
+read here so the two lists are one) and in `//ci:pr` and `//ci:pr_default`, not in their twins. A
+target is of the surface when its package (komira cell) is one of PYTHON_SURFACE or under it.
+
+Every other target, the libraries, binaries and tests of the same packages included, is built and
+tested with both compilers.
 """
 
+load("@komira//tests:python_closure_allowlist.bzl", "PYTHON_SURFACE")
 load(":rules.bzl", "AGGREGATE", "DEFAULT")
 
-# Each aggregate of the check set, and its twin without the coverage roots (ci/BUCK).
+# Each aggregate of the check set, and its twin without the targets left to the default compiler (ci/BUCK).
 TWINS = {
     AGGREGATE: "komira//ci:pr_mojo_next",
     DEFAULT: "komira//ci:pr_default_mojo_next",
@@ -60,6 +70,20 @@ def is_coverage_root(label):
             return True
     return False
 
+def is_python_surface(label):
+    """Whether `label` (cell-qualified) is of the Python surface: see the module documentation."""
+    if not label.startswith("komira//"):
+        return False
+    package = label[len("komira//"):].rpartition(":")[0]
+    for path in PYTHON_SURFACE:
+        if package == path or package.startswith(path + "/"):
+            return True
+    return False
+
+def default_only(label):
+    """Whether `label` is built with the default compiler only: a coverage root or of the Python surface."""
+    return is_coverage_root(label) or is_python_surface(label)
+
 def mojo_next_select(affected, aggregates):
     """See the module documentation."""
     labels = []
@@ -76,10 +100,10 @@ def mojo_next_select(affected, aggregates):
     for label in labels:
         if label in aggregates:
             return struct(kind = WHOLE, targets = [aggregates[label]], reason = "the change is built as {}, so 1.2.0 builds {}".format(label, aggregates[label]))
-    picked = [t for t in labels if not is_coverage_root(t)]
+    picked = [t for t in labels if not default_only(t)]
     if not picked:
-        return struct(kind = NONE, targets = [], reason = "the change reaches no target but coverage roots" if labels else "the change reaches no target")
-    return struct(kind = SOME, targets = picked, reason = "{} of the {} affected targets ({} coverage roots left to the default compiler)".format(len(picked), len(labels), len(labels) - len(picked)))
+        return struct(kind = NONE, targets = [], reason = "the change reaches no target but ones left to the default compiler" if labels else "the change reaches no target")
+    return struct(kind = SOME, targets = picked, reason = "{} of the {} affected targets ({} left to the default compiler: coverage roots and the Python surface)".format(len(picked), len(labels), len(labels) - len(picked)))
 
 def mojo_next_answer(affected, aggregates):
     """What mojo_next.bxl:select does with `affected`: struct(failure, log, stdout).

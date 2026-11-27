@@ -31,7 +31,7 @@
 #   5b. the selection once more with Mojo 1.2.0, the next compiler
 #      (tools/build/toolchains/mojo_versions.bzl), by naming the platform
 #      linux-x86_64-mojo-1.2.0: tools/build/ci/mojo_next.bxl selects the list minus the
-#      coverage roots (coverage is measured with the default compiler only), `build` and
+#      coverage roots and the Python surface (both built with the default compiler only), `build` and
 #      `test` of that selection run, so a change that only 1.2.0 refuses fails its own
 #      pull request while 1.1.0, the default, stays what ships;
 #   6. the macOS part (docs/ci.md, "The macOS part of the check"): the libraries
@@ -270,8 +270,9 @@ jobs:
       # linux-x86_64-mojo-1.2.0 is the linux platform plus the buildrules constraint
       # mojo_1_2_0, which komira's toolchain and every Mojo package select on, so no
       # target changes. The selector (tools/build/ci/mojo_next.bxl) prints the targets
-      # above minus the coverage roots, or their twin aggregate: coverage is measured
-      # with the default compiler only, so one compiler's figures are the floors
+      # above minus the coverage roots and the Python surface, or their twin aggregate:
+      # coverage is measured with the default compiler only, so one compiler's figures
+      # are the floors, and the wheel bundles the default compiler's runtime
       # (tools/build/ci/mojo_next.bzl). Every target of the selection is configured
       # anew under that platform, so its actions, the non-Mojo ones (Zig, Rust,
       # protobuf) included, are new to the farm's cache the first time. Bounded at
@@ -284,7 +285,7 @@ jobs:
           args: bxl komira//tools/build/ci/mojo_next.bxl:select @tools/build/ci/mojo_next_affected.args @${{ runner.temp }}/targets.txt
           assert-remote: ${{ steps.assert.outputs.path }}
       # The labels of the selection's log into next_targets.txt, and `any` set when there is
-      # one (nothing is printed when the change reaches only coverage roots).
+      # one (nothing is printed when the change reaches only targets left to the default compiler).
       - name: the Mojo 1.2.0 targets to build
         id: next
         run: grep -E '^[a-z_]+//[^ ]+$' "$RUNNER_TEMP/buck2-farm.log" > "$RUNNER_TEMP/next_targets.txt" && echo "any=true" >> "$GITHUB_OUTPUT" || true

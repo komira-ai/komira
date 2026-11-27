@@ -222,6 +222,7 @@ TARGETS = [
     "komira//tools/build/toolchains:is_linux_arm64",
     "komira//tools/build/toolchains:is_linux_x86_64",
     "komira//tools/build/toolchains:is_macos_arm64",
+    "komira//tools/build/toolchains:mojo_runtime_next",
     "komira//tools/build/toolchains:pixi",
     "komira//tools/build/toolchains:pixi-0.67.2-aarch64-apple-darwin",
     "komira//tools/build/toolchains:pixi-0.67.2-aarch64-unknown-linux-musl",
