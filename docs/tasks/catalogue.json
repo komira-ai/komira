@@ -80,7 +80,6 @@
     "status": "partial",
     "issues": [
       "komira-ai/komira#2372",
-      "komira-ai/komira#2374",
       "komira-ai/komira#2322"
     ]
   },

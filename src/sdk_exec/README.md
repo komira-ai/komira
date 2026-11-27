@@ -50,8 +50,8 @@ do is a free function in a module of its own.
 | `engine_iceberg` | `register_iceberg_table(ctx, name, catalog, namespace, table, allow_moved_paths)`: asks an `iceberg_catalog.IcebergCatalog` where the table's current `metadata.json` is (a bare local path or a `file:///` URI; any other scheme is `ICEBERG_PATH_UNSUPPORTED`), reads the table's columns and current snapshot from it and registers it as `name` (not in `ctx.tables`, which lists Parquet tables) |
 | `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema; a scan of an S3 or GCS bucket or an Azure container has no facts, since `ctx.footers` reads the local file system only; an Iceberg scan is planned by `iceberg_scan.scan_planner.plan_iceberg_scan`, which reads its manifests, prunes by the pushed filter and matches the delete files) and `lower_for_context` |
 | `engine_execute` | `run_lowered_plan_with(ctx, lowered, opener)`: a `RealBuilder` over a per-run metadata cache (keyed per file system) and expression pool, reading a Parquet scan of a bucket through the file system the `ScanFsOpener` opens on it (`objectstore_s3.S3ScanFs` for S3, `objectstore_gcs.GcsScanFs` for GCS, `azure_blob.AzureScanFs` for Azure; one opener, so one remote store kind, per run), the segment pool sized from the memory budget, the context's spill directory (when it has one) on the builder, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation, sort and window sink data (`params.agg`, `params.sort`, `params.window`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch. `run_lowered_plan(ctx, lowered)` is that with `LocalOnlyScanFs`, which refuses a scan of a bucket with `SCAN_FS_UNSERVED`. `run_lowered_plan_with(ctx, lowered, opener, control)` runs under a `RunControl`: `run_plan` polls a clone of its token and counts the plan's segments into its progress; without one the run's token is its own and nothing cancels it |
-| `engine_write` | `write_copy_result(batch, dest, fmt, codec)`: the result batch as a file at the local path `dest` in the format `fmt`, through `fs.atomic_write.write_file_atomic` (all or nothing), returning the rows written; `write_parquet_result(batch, dest, codec)` and `write_text_result(batch, dest, fmt, codec)` (CSV or JSON), which it calls; `count_result(rows)`, the one-row BIGINT `Count` batch a COPY answers; `check_copy_target(dest, fmt, codec)`, the refusals of a URL and of lz4 for CSV or JSON |
-| `engine_write_text` | `encode_csv(batch)` and `encode_ndjson(batch)`: the bytes DuckDB's COPY writes for a result as CSV and as newline-delimited JSON; `compress_text(bytes, codec)`, the whole file as gzip or zstd; `text_writable(type)`; and the cell texts they are made of, `csv_double_text`, `json_double_text`, `date_text`, `decimal_text` |
+| `engine_write` | `write_copy_result(batch, dest, fmt, codec, dialect)`: the result batch as a file at the local path `dest` in the format `fmt` (a CSV file in the `csv.csv_write_dialect.CsvWriteDialect` `dialect`, DuckDB's defaults when it is left out), through `fs.atomic_write.write_file_atomic` (all or nothing), returning the rows written; `write_parquet_result(batch, dest, codec)` and `write_text_result(batch, dest, fmt, codec, dialect)` (CSV or JSON), which it calls; `count_result(rows)`, the one-row BIGINT `Count` batch a COPY answers; `check_copy_target(dest, fmt, codec)`, the refusals of a URL and of lz4 for CSV or JSON |
+| `engine_write_text` | `encode_csv(batch, dialect)` and `encode_ndjson(batch)`: the bytes DuckDB's COPY writes for a result as CSV (in `dialect`, DuckDB's defaults when it is left out) and as newline-delimited JSON; `formatted_timestamp(type)`, the timestamp types TIMESTAMPFORMAT applies to; `compress_text(bytes, codec)`, the whole file as gzip or zstd; `text_writable(type)`; and the cell texts they are made of, `csv_double_text`, `json_double_text`, `date_text`, `decimal_text` |
 | `engine_plan` | `run_plan(ctx, plan) -> SqlOutcome`: a logical plan that is already built (decoded from a `WirePlanEnvelope` by `plan_wire.plan_from_bytes`, or built in Mojo) optimized, lowered and run, with no SQL front end: the module imports none of `sql`'s tokenizer, parser, binder or front end, and a scan leaf carries its own source, so no table need be registered. `run_plan_batch(ctx, plan, opener, step)` is those three steps, which `run_sql` runs after it binds, so both doors share one route from the optimizer down. `run_plan_write(ctx, plan, target)` (and `run_plan_write(ctx, plan, target, opener)`) is the plan door's `COPY <plan> TO <target>`: it refuses the destination as `COPY ... TO` does, at step `bind` and before the plan runs or a file is touched (`STORAGE_URL_REFUSED` for a path with `://`, `COPY_COMPRESSION_UNSUPPORTED` for CSV or JSON with lz4), runs the plan's three steps, writes the result with `engine_write`'s `write_copy_result` and answers `count_result(rows)`, the one-row BIGINT `Count`; the bytes of the file are the ones `run_sql` writes for the same rows. `optimize_for_run(plan)` is `optimize` (refusing a plan that needs a scalar subquery executed first, `OPTIMIZE_UNRESOLVED_SCALAR`) and then `plan_cse_eliminate`, which holds each subtree the plan repeats once (a CTE read twice, two equal UNION ALL branches) so lowering cuts it once and every reference reads it (`lowering.cut_shared`). Nothing raises: `SqlOutcome.refusal` holds the step (`optimize`, `lower`, `execute`) and that step's own message. `run_plan_with(ctx, plan, opener)` runs with the opener a scan of a bucket is read through. `SqlOutcome`, `SqlRefusal` and those step names (`bind` among them) are defined here |
 | `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, then `engine_plan`'s steps (`optimize_for_run`, lower, run), and for a `COPY ... TO` write the file and answer `Count`. Each call adds one to `ctx.statements_parsed` as it starts to parse, so a caller can tell that a run went through the SQL front end. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`), that step's own message, and for `parse` the `SqlPosition` (line and column, from 1) where the text stopped parsing (`SqlRefusal.position`, `None` for every other step and for `run_plan`); `engine_plan`'s `SqlOutcome`, `SqlRefusal`, `OPTIMIZE_UNRESOLVED_SCALAR` and step names are named here too. `run_sql_with(ctx, text, opener)` runs with the opener a scan of a bucket is read through. `run_sql(ctx, text, control)` and `run_sql_with(ctx, text, opener, control)` run under a `RunControl`: a cancel stops the plan's run at its next check and is refused at step `execute` with `pipeline_exec`'s cancelled error; parse, bind, optimize, lower and a COPY's write are not polled |
 | `run_control` | `RunControl`: a cancel token and a segment progress counter (`pipeline_exec.run_progress.RunProgress`) behind a shared handle (`share()`). `cancel()` is one-way and may come from several threads at once: the first call claims the token through an atomic cell and cancels it with `RUN_CANCEL_REASON` (`the caller cancelled the run`), every later one does nothing. `snapshot()` reads the progress (`done` at most `total`); `token()` and `progress()` are what a run is handed |
@@ -128,9 +128,9 @@ DuckDB answers: one row, one BIGINT NOT NULL column `Count`, the rows written.
   before any file is touched.
 - A CSV or JSON file holds the bytes DuckDB's COPY writes for the same rows
   (`engine_write_text`'s header has each rule).
-  - CSV: a header row, `,` between cells, `\n` after each line, NULL as an
-    empty cell, a string quoted only when it is empty or holds `,`, `"` or a
-    line break, DATE as `YYYY-MM-DD`, a timestamp as `YYYY-MM-DD HH:MM:SS`
+  - CSV (with no CSV option): a header row, `,` between cells, `\n` after
+    each line, NULL as an empty cell, a string quoted only when it is empty
+    or holds `,`, `"` or a line break, DATE as `YYYY-MM-DD`, a timestamp as `YYYY-MM-DD HH:MM:SS`
     with the fraction of a second, trailing zeros removed, when it is not
     zero (`2015-09-04 12:30:45.12`), `+00` after a zoned one, and
     `infinity` / `-infinity` for INT64's extremes, DECIMAL exact, DOUBLE in
@@ -141,8 +141,19 @@ DuckDB answers: one row, one BIGINT NOT NULL column `Count`, the rows written.
 - A time, interval, duration, DATE64, BLOB or nested column in a CSV or JSON
   file is `COPY_TYPE_UNSUPPORTED`, and two columns of one name (which DuckDB renames)
   `COPY_DUPLICATE_COLUMN`, both at `execute` before any file is touched.
-- DELIMITER, QUOTE, HEADER false and the other CSV and JSON options are
-  refused by name at `parse`.
+- A CSV file takes DuckDB's CSV options: DELIMITER (DELIM, SEP), QUOTE,
+  ESCAPE, NULL (NULLSTR), HEADER false, DATEFORMAT (DATE_FORMAT) and
+  TIMESTAMPFORMAT (TIMESTAMP_FORMAT), written as DuckDB writes them
+  (`csv.csv_write_dialect`, `csv.csv_temporal_format`): a cell is quoted
+  when it equals the NULL text or holds the delimiter, the quote or a line
+  break, numbers and dates included. A value DuckDB refuses is
+  `CSV_DIALECT_INVALID` with DuckDB's reason, and a delimiter of 2 to 4
+  bytes or an empty one `CSV_DIALECT_UNSUPPORTED`, both at `parse`; a
+  format is parsed when a column uses it, so a bad one, or `%n`, is refused
+  at `execute` before any file is touched, as is TIMESTAMPFORMAT over a
+  TIMESTAMP_MS or a zoned TIMESTAMP_S or _NS column
+  (`COPY_TYPE_UNSUPPORTED`). Any other option, an option given twice and a
+  CSV option on Parquet or JSON are refused by name at `parse`.
 - `CREATE TABLE ... AS` writes into a catalog table, and no catalog is bound:
   it is refused with `STATEMENT_NOT_A_QUERY` at `bind`, naming the COPY that
   writes a file.
@@ -248,6 +259,33 @@ var gz = compress_text(encode_csv(batch), WCOMP_GZIP)
 assert_equal(Int(gz[0]), 0x1F)
 assert_equal(text_writable(ArrowType.TIMESTAMP_US), True)
 assert_equal(text_writable(ArrowType.TIME64_US), False)
+```
+
+The same batch in another CSV dialect (`DELIMITER ';', HEADER false, NULL '2'`:
+a cell equal to the NULL text is quoted):
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.primitive_array import PrimitiveArray
+from arrow.schema import Field, RecordBatchBuilder, SchemaBuilder
+from csv.csv_write_dialect import make_csv_write_dialect
+from sdk_exec.engine_write_text import encode_csv
+
+var k = PrimitiveArray[DType.int64].allocate(2)
+k.set(0, 1)
+k.set(1, 2)
+var sb = SchemaBuilder()
+sb.add_field(Field("k", ArrowType.INT64, False))
+var rb = RecordBatchBuilder()
+rb.add_column(Column.from_primitive[DType.int64](k^))
+var batch = rb.build(sb.build())
+var dialect = make_csv_write_dialect(
+    Optional[String](";"), Optional[String](), Optional[String](),
+    Optional[String]("2"), False, Optional[String](), Optional[String](),
+)
+assert_equal(String(unsafe_from_utf8=Span(encode_csv(batch, dialect))), "1\n\"2\"\n")
 ```
 
 **The footer cache is pinned to a query.** `parquet_footers.FooterCache`

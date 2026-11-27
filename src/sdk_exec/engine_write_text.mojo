@@ -8,12 +8,19 @@
 # file in memory; `compress_text` wraps it for a `.gz` or `.zst` destination;
 # `engine_write.write_copy_result` writes it all or nothing.
 #
-# CSV (DuckDB's defaults: delimiter `,`, quote `"`, a header row, `\n` after
-# every line):
-#   header     the column names, each quoted by the rule for a string cell
-#   NULL       nothing between the delimiters
-#   string     as is; quoted when it is empty (so it is not read as NULL) or
-#              holds `,`, `"`, `\n` or `\r`, with each `"` doubled
+# CSV, in the `csv.csv_write_dialect.CsvWriteDialect` the COPY gives
+# (DuckDB's defaults when it gives none: delimiter `,`, quote and escape `"`,
+# NULL as nothing, a header row), with `\n` after every line:
+#   header     the column names, each written as a cell (below); no header
+#              line for HEADER false
+#   NULL       the NULL text, as it is (nothing by default)
+#   a cell     the text below, quoted by DuckDB's rule (`csv_field_into`):
+#              when it equals the NULL text (the empty string, by default) or
+#              holds the delimiter, the quote, `\n` or `\r`, with the escape
+#              before each quote and escape inside (`"` doubled, by default);
+#              never with QUOTE ''. Numbers, dates and timestamps are cells
+#              too: `1.5` is quoted with DELIMITER '.'
+#   string     as is
 #   integer    decimal digits
 #   BOOLEAN    true / false
 #   DOUBLE     the shortest digits that read back to the value, fixed
@@ -34,7 +41,17 @@
 #              TIMESTAMPTZ, shown in UTC); the largest INT64 as `infinity`
 #              and its negation as `-infinity`, at every unit and with no
 #              `+00`
-# An empty result is the header row alone.
+#   DATEFORMAT a DATE in that format (`csv_temporal_format`)
+#   TIMESTAMPFORMAT  a TIMESTAMP or TIMESTAMPTZ (TIMESTAMP_US or the legacy
+#              tag) in that format, a zoned one in UTC; DuckDB writes a
+#              TIMESTAMP_S or _NS in its own text whatever the format, and
+#              so does this writer. `engine_write` refuses a TIMESTAMP_MS
+#              (DuckDB reads a Parquet one as a TIMESTAMP, which it formats,
+#              and writes a TIMESTAMP_MS in its own text) and a zoned
+#              TIMESTAMP_S or _NS.
+# A format is parsed only when the result has a column it applies to, as
+# DuckDB does, so a format no column uses is never refused.
+# An empty result is the header row alone (no byte with HEADER false).
 #
 # JSON, one object per row, each followed by `\n` (DuckDB's `FORMAT json`,
 # `ARRAY false`): `{"<name>":<value>,...}` in column order, NULL as `null`.
@@ -63,6 +80,8 @@ from arrow.arrow_types import ArrowType
 from arrow.schema import RecordBatch
 from arrow.write_target import WCOMP_GZIP, WCOMP_ZSTD
 from compression.compression_codecs import Gzip
+from csv.csv_temporal_format import TemporalFormat
+from csv.csv_write_dialect import CsvWriteDialect, csv_field_into
 from compression.zstd_frame import (
     ZSTD_DEFAULT_LEVEL,
     zstd_compress_bound,
@@ -122,6 +141,15 @@ struct _Cells(Copyable, Movable):
     def bytes(mut self, var b: List[UInt8]):
         """Append a cell holding `b`."""
         self.data.extend(Span(b))
+        self.ends.append(len(self.data))
+
+    def put(mut self, s: String, json: Bool, dialect: CsvWriteDialect):
+        """Append a cell holding `s`: as it is for JSON, and for CSV quoted
+        and escaped when `dialect` says so (`csv_field_into`)."""
+        if json:
+            self.data.extend(Span(s.as_bytes()))
+        else:
+            csv_field_into(self.data, s, dialect)
         self.ends.append(len(self.data))
 
     def copy_to(self, mut out: List[UInt8], row: Int):
@@ -380,29 +408,6 @@ def json_double_text(v: Float64) raises -> String:
 # --- strings -----------------------------------------------------------------
 
 
-def _csv_quoted(s: String) -> List[UInt8]:
-    """`s` as a CSV field: quoted, with each `"` doubled, when it is empty
-    or holds `,`, `"`, `\\n` or `\\r`; as is otherwise."""
-    var src = s.as_bytes()
-    var needs = len(src) == 0
-    for i in range(len(src)):
-        var b = src[i]
-        if b == _COMMA or b == _QUOTE or b == _NEWLINE or b == _RETURN:
-            needs = True
-            break
-    var out = List[UInt8](capacity=len(src) + 2)
-    if not needs:
-        out.extend(src)
-        return out^
-    out.append(_QUOTE)
-    for i in range(len(src)):
-        if src[i] == _QUOTE:
-            out.append(_QUOTE)
-        out.append(src[i])
-    out.append(_QUOTE)
-    return out^
-
-
 def _hex_upper(n: UInt8) -> UInt8:
     return UInt8(0x30) + n if n < 10 else UInt8(0x41 - 10) + n
 
@@ -448,92 +453,162 @@ def _json_quoted(s: String) -> List[UInt8]:
 # --- columns -----------------------------------------------------------------
 
 
-def _string_cell(mut cells: _Cells, s: String, json: Bool):
+def _string_cell(
+    mut cells: _Cells, s: String, json: Bool, dialect: CsvWriteDialect
+):
     if json:
         cells.bytes(_json_quoted(s))
     else:
-        cells.bytes(_csv_quoted(s))
+        cells.put(s, False, dialect)
+
+
+def _null_text(json: Bool, dialect: CsvWriteDialect) -> String:
+    return String("null") if json else dialect.null_text
 
 
 def _int_cells[
     dtype: DType
-](batch: RecordBatch, c: Int, json: Bool, mut cells: _Cells) raises:
+](
+    batch: RecordBatch,
+    c: Int,
+    json: Bool,
+    dialect: CsvWriteDialect,
+    mut cells: _Cells,
+) raises:
     var arr = batch.column_at(c).as_primitive[dtype]()
-    var null = String("null") if json else String("")
+    var null = _null_text(json, dialect)
     for r in range(batch.num_rows()):
         if arr.is_null(r):
             cells.text(null)
         else:
-            cells.text(String(arr.get(r)))
+            cells.put(String(arr.get(r)), json, dialect)
 
 
 def _float_cells[
     dtype: DType
-](batch: RecordBatch, c: Int, json: Bool, mut cells: _Cells) raises:
+](
+    batch: RecordBatch,
+    c: Int,
+    json: Bool,
+    dialect: CsvWriteDialect,
+    mut cells: _Cells,
+) raises:
     var arr = batch.column_at(c).as_primitive[dtype]()
+    var null = _null_text(json, dialect)
     for r in range(batch.num_rows()):
         if arr.is_null(r):
-            cells.text(String("null") if json else String(""))
+            cells.text(null)
         elif json:
             cells.text(json_double_text(arr.get(r).cast[DType.float64]()))
         else:
-            cells.text(csv_double_text[dtype](arr.get(r)))
+            cells.put(csv_double_text[dtype](arr.get(r)), False, dialect)
 
 
-def _column_cells(batch: RecordBatch, c: Int, json: Bool) raises -> _Cells:
+def formatted_timestamp(at: ArrowType) -> Bool:
+    """True for the timestamp types TIMESTAMPFORMAT applies to: DuckDB's
+    TIMESTAMP and TIMESTAMPTZ, which hold microseconds (TIMESTAMP_US and the
+    legacy tag). DuckDB writes a TIMESTAMP_S or TIMESTAMP_NS in its own text
+    whatever the format (`engine_write` refuses a TIMESTAMP_MS)."""
+    return at == ArrowType.TIMESTAMP_US or at == ArrowType.TIMESTAMP
+
+
+def _date_cells(
+    batch: RecordBatch,
+    c: Int,
+    json: Bool,
+    dialect: CsvWriteDialect,
+    mut cells: _Cells,
+) raises:
+    var arr = batch.column_at(c).as_primitive[DType.int32]()
+    var null = _null_text(json, dialect)
+    var fmt = Optional[TemporalFormat]()
+    if not json and dialect.date_format:
+        fmt = TemporalFormat("DATEFORMAT", dialect.date_format.value())
+    for r in range(batch.num_rows()):
+        if arr.is_null(r):
+            cells.text(null)
+        elif json:
+            cells.text("\"" + date_text(arr.get(r)) + "\"")
+        elif fmt:
+            cells.put(fmt.value().date_text(Int(arr.get(r))), False, dialect)
+        else:
+            cells.put(date_text(arr.get(r)), False, dialect)
+
+
+def _timestamp_cells(
+    batch: RecordBatch,
+    c: Int,
+    json: Bool,
+    dialect: CsvWriteDialect,
+    mut cells: _Cells,
+) raises:
+    var at = batch.schema.field_arrow_type(c)
+    var arr = batch.column_at(c).as_primitive[DType.int64]()
+    var aware = batch.schema.field_tz(c) != ""
+    var null = _null_text(json, dialect)
+    var fmt = Optional[TemporalFormat]()
+    if not json and dialect.timestamp_format and formatted_timestamp(at):
+        fmt = TemporalFormat(
+            "TIMESTAMPFORMAT", dialect.timestamp_format.value()
+        )
+    for r in range(batch.num_rows()):
+        if arr.is_null(r):
+            cells.text(null)
+        elif json:
+            cells.text("\"" + _timestamp_text(arr.get(r), at, aware) + "\"")
+        elif fmt:
+            cells.put(
+                fmt.value().timestamp_text(arr.get(r), aware), False, dialect
+            )
+        else:
+            cells.put(_timestamp_text(arr.get(r), at, aware), False, dialect)
+
+
+def _column_cells(
+    batch: RecordBatch, c: Int, json: Bool, dialect: CsvWriteDialect
+) raises -> _Cells:
     """Column `c` of `batch` encoded cell by cell, for JSON when `json` and
-    for CSV otherwise."""
+    for CSV in `dialect` otherwise."""
     var rows = batch.num_rows()
     var cells = _Cells(rows)
-    var null = String("null") if json else String("")
+    var null = _null_text(json, dialect)
     var at = batch.schema.field_arrow_type(c)
     ref col = batch.column_at(c)
     if at == ArrowType.INT64:
-        _int_cells[DType.int64](batch, c, json, cells)
+        _int_cells[DType.int64](batch, c, json, dialect, cells)
     elif at == ArrowType.INT32:
-        _int_cells[DType.int32](batch, c, json, cells)
+        _int_cells[DType.int32](batch, c, json, dialect, cells)
     elif at == ArrowType.INT16:
-        _int_cells[DType.int16](batch, c, json, cells)
+        _int_cells[DType.int16](batch, c, json, dialect, cells)
     elif at == ArrowType.INT8:
-        _int_cells[DType.int8](batch, c, json, cells)
+        _int_cells[DType.int8](batch, c, json, dialect, cells)
     elif at == ArrowType.UINT64:
-        _int_cells[DType.uint64](batch, c, json, cells)
+        _int_cells[DType.uint64](batch, c, json, dialect, cells)
     elif at == ArrowType.UINT32:
-        _int_cells[DType.uint32](batch, c, json, cells)
+        _int_cells[DType.uint32](batch, c, json, dialect, cells)
     elif at == ArrowType.UINT16:
-        _int_cells[DType.uint16](batch, c, json, cells)
+        _int_cells[DType.uint16](batch, c, json, dialect, cells)
     elif at == ArrowType.UINT8:
-        _int_cells[DType.uint8](batch, c, json, cells)
+        _int_cells[DType.uint8](batch, c, json, dialect, cells)
     elif at == ArrowType.FLOAT64:
-        _float_cells[DType.float64](batch, c, json, cells)
+        _float_cells[DType.float64](batch, c, json, dialect, cells)
     elif at == ArrowType.FLOAT32:
-        _float_cells[DType.float32](batch, c, json, cells)
+        _float_cells[DType.float32](batch, c, json, dialect, cells)
     elif at == ArrowType.BOOL:
         var arr = col.as_boolean()
         for r in range(rows):
             if arr.is_null(r):
                 cells.text(null)
             else:
-                cells.text(String("true") if arr.get(r) else String("false"))
+                cells.put(
+                    String("true") if arr.get(r) else String("false"),
+                    json,
+                    dialect,
+                )
     elif at == ArrowType.DATE32:
-        var arr = col.as_primitive[DType.int32]()
-        for r in range(rows):
-            if arr.is_null(r):
-                cells.text(null)
-            elif json:
-                cells.text("\"" + date_text(arr.get(r)) + "\"")
-            else:
-                cells.text(date_text(arr.get(r)))
+        _date_cells(batch, c, json, dialect, cells)
     elif at.is_timestamp():
-        var arr = col.as_primitive[DType.int64]()
-        var aware = batch.schema.field_tz(c) != ""
-        for r in range(rows):
-            if arr.is_null(r):
-                cells.text(null)
-            elif json:
-                cells.text("\"" + _timestamp_text(arr.get(r), at, aware) + "\"")
-            else:
-                cells.text(_timestamp_text(arr.get(r), at, aware))
+        _timestamp_cells(batch, c, json, dialect, cells)
     elif at == ArrowType.DECIMAL128:
         var arr = col.as_decimal128()
         # 10^scale as the double nearest it (exact through 1e22), as
@@ -554,7 +629,7 @@ def _column_cells(batch: RecordBatch, c: Int, json: Bool) raises -> _Cells:
                 var v = arr.get_i128(r).cast[DType.float64]() / divisor
                 cells.text(json_double_text(v))
             else:
-                cells.text(decimal_text(arr.get_i128(r), arr.scale))
+                cells.put(decimal_text(arr.get_i128(r), arr.scale), False, dialect)
     elif at == ArrowType.NULL:
         for _ in range(rows):
             cells.text(null)
@@ -566,7 +641,7 @@ def _column_cells(batch: RecordBatch, c: Int, json: Bool) raises -> _Cells:
             if arr.is_null(r):
                 cells.text(null)
             else:
-                _string_cell(cells, arr.get(r), json)
+                _string_cell(cells, arr.get(r), json, dialect)
     else:
         # STRING or LARGE_STRING: each row's bytes, at the column's own
         # offset width.
@@ -574,34 +649,46 @@ def _column_cells(batch: RecordBatch, c: Int, json: Bool) raises -> _Cells:
             if col.utf8_is_null_at(r):
                 cells.text(null)
             else:
-                _string_cell(cells, col.utf8_value_at(r), json)
+                _string_cell(cells, col.utf8_value_at(r), json, dialect)
     return cells^
 
 
-def _all_cells(batch: RecordBatch, json: Bool) raises -> List[_Cells]:
+def _all_cells(
+    batch: RecordBatch, json: Bool, dialect: CsvWriteDialect
+) raises -> List[_Cells]:
     var out = List[_Cells](capacity=batch.num_columns())
     for c in range(batch.num_columns()):
-        out.append(_column_cells(batch, c, json))
+        out.append(_column_cells(batch, c, json, dialect))
     return out^
 
 
 # --- files -------------------------------------------------------------------
 
 
-def encode_csv(batch: RecordBatch) raises -> List[UInt8]:
-    """`batch` as the CSV file DuckDB's COPY writes: the header row, then a
-    line per row. Every column's type must be `text_writable`."""
-    var cols = _all_cells(batch, False)
+def encode_csv(
+    batch: RecordBatch, dialect: CsvWriteDialect = CsvWriteDialect()
+) raises -> List[UInt8]:
+    """`batch` as the CSV file DuckDB's COPY writes in `dialect` (DuckDB's
+    defaults when it is not given): the header line when the dialect has one,
+    then a line per row. Every column's type must be `text_writable`.
+
+    Raises:
+        `csv_temporal_format`'s refusal of the dialect's DATEFORMAT when
+        `batch` has a DATE column, or of its TIMESTAMPFORMAT when it has a
+        column `formatted_timestamp` holds.
+    """
+    var cols = _all_cells(batch, False, dialect)
     var out = List[UInt8]()
-    for c in range(batch.num_columns()):
-        if c > 0:
-            out.append(_COMMA)
-        out.extend(Span(_csv_quoted(batch.schema.field_name(c))))
-    out.append(_NEWLINE)
+    if dialect.header:
+        for c in range(batch.num_columns()):
+            if c > 0:
+                out.append(dialect.delimiter)
+            csv_field_into(out, batch.schema.field_name(c), dialect)
+        out.append(_NEWLINE)
     for r in range(batch.num_rows()):
         for c in range(len(cols)):
             if c > 0:
-                out.append(_COMMA)
+                out.append(dialect.delimiter)
             cols[c].copy_to(out, r)
         out.append(_NEWLINE)
     return out^
@@ -611,7 +698,7 @@ def encode_ndjson(batch: RecordBatch) raises -> List[UInt8]:
     """`batch` as the newline-delimited JSON file DuckDB's COPY writes: one
     object per row, keys in column order. Every column's type must be
     `text_writable`."""
-    var cols = _all_cells(batch, True)
+    var cols = _all_cells(batch, True, CsvWriteDialect())
     var keys = List[List[UInt8]](capacity=batch.num_columns())
     for c in range(batch.num_columns()):
         var k = _json_quoted(batch.schema.field_name(c))

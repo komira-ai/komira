@@ -150,7 +150,7 @@ def run_sql_with[
         var outcome = SqlOutcome()
         if bound.kind == STMT_COPY:
             var rows = write_copy_result(
-                batch^, bound.dest_path, bound.fmt, bound.codec
+                batch^, bound.dest_path, bound.fmt, bound.codec, bound.csv
             )
             outcome.batches.append(count_result(rows))
         else:

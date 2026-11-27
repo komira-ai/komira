@@ -43,6 +43,7 @@ from sql.sql_bind_window_order import (
     _classify_order_keys, _order_output_column, _bind_order,
 )
 from sql.sql_catalog import SqlCatalog
+from csv.csv_write_dialect import CsvWriteDialect
 
 
 struct BoundStatement(Movable):
@@ -64,6 +65,8 @@ struct BoundStatement(Movable):
         fmt         - the WFMT_* write format (STMT_COPY).
         codec       - the WCOMP_* write compression (STMT_COPY).
         register_as - the STMT_CREATE_TABLE_AS table name ("" otherwise).
+        csv         - the CSV options of a STMT_COPY to CSV
+                      (`CsvWriteDialect`; DuckDB's defaults otherwise).
 
     Move-only (it holds a move-only `LogicalPlan`)."""
 
@@ -73,6 +76,7 @@ struct BoundStatement(Movable):
     var fmt: UInt8
     var codec: UInt8
     var register_as: String
+    var csv: CsvWriteDialect
 
     def __init__(
         out self,
@@ -82,6 +86,7 @@ struct BoundStatement(Movable):
         fmt: UInt8,
         codec: UInt8,
         register_as: String,
+        var csv: CsvWriteDialect = CsvWriteDialect(),
     ):
         self.kind = kind
         self._plan = Optional[LogicalPlan](plan^)
@@ -89,6 +94,7 @@ struct BoundStatement(Movable):
         self.fmt = fmt
         self.codec = codec
         self.register_as = register_as
+        self.csv = csv^
 
     def take_plan(mut self) -> LogicalPlan:
         """Move the source/query `LogicalPlan` out (leaving `_plan` empty)."""
@@ -119,7 +125,8 @@ def bind_statement[P: SqlParquetFooters](
         if stmt.dest_path == "":
             raise Error("SQL bind error: COPY ... TO requires a destination path")
         return BoundStatement(
-            STMT_COPY, plan^, stmt.dest_path, stmt.fmt, stmt.codec, String("")
+            STMT_COPY, plan^, stmt.dest_path, stmt.fmt, stmt.codec, String(""),
+            stmt.csv.copy(),
         )
     if stmt.kind == STMT_CREATE_TABLE_AS:
         if stmt.target_table == "":

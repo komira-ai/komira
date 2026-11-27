@@ -24,6 +24,13 @@ CSV writer for the engine's sinks.
   one cell.
 - **Writing.** `csv.csv_sink.CsvSink(path, delimiter, header)` writes the
   batches it is given to a file, quoting a cell only when it must.
+- **The CSV options of a COPY.** `csv.csv_write_dialect.make_csv_write_dialect`
+  checks the DELIMITER, QUOTE, ESCAPE, NULL, HEADER,
+  DATEFORMAT and TIMESTAMPFORMAT as DuckDB checks them and answers a
+  `CsvWriteDialect`; `csv_field` writes one cell as DuckDB's COPY quotes and
+  escapes it in that dialect; `csv.csv_temporal_format.TemporalFormat`
+  parses a DuckDB strftime format and writes a date or a microsecond
+  timestamp with it.
 
 The reader does not stream: a body is parsed whole into one batch.
 
@@ -101,4 +108,24 @@ assert_equal(batch.num_columns(), 1)
 assert_equal(batch.num_rows(), 2)  # the blank line is skipped
 ref b = batch.column_at(0)
 assert_equal(b.as_primitive[DType.int64]().get(1), 4)
+```
+
+The CSV options of a COPY: a dialect checked as DuckDB checks it, a cell
+quoted and escaped in it, and a date written with a DATEFORMAT:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from csv.csv_temporal_format import TemporalFormat
+from csv.csv_write_dialect import csv_field, make_csv_write_dialect
+
+var dialect = make_csv_write_dialect(
+    Optional[String](";"), Optional[String]("'"), Optional[String]("\\"),
+    Optional[String]("NA"), False, Optional[String]("%d/%m/%Y"),
+    Optional[String](),
+)
+assert_equal(String(unsafe_from_utf8=Span(csv_field("x;it's", dialect))), "'x;it\\'s'")
+assert_equal(String(unsafe_from_utf8=Span(csv_field("NA", dialect))), "'NA'")
+assert_equal(String(unsafe_from_utf8=Span(csv_field("", dialect))), "")
+var fmt = TemporalFormat("DATEFORMAT", dialect.date_format.value())
+assert_equal(fmt.date_text(18263), "02/01/2020")
 ```

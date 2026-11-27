@@ -69,6 +69,11 @@ _COPY_FILES = [
     "times_default.parquet",
     "times_csv.csv",
     "times_json.json",
+    "quoted_semicolon_csv.csv",
+    "nulls_tab_csv.csv",
+    "quoted_escape_csv.csv",
+    "typed_dateformat_csv.csv",
+    "times_format_csv.csv",
 ]
 
 _COPY_CASES = [f.split(".")[0] for f in _COPY_FILES]

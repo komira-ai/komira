@@ -13,7 +13,10 @@
 -- 290309 BC, 294247 and year 10000: DuckDB cannot read those back from text
 -- (its type detection overflows on them), and test_copy_text_encoding holds
 -- their text. read_parquet file names are replaced by their paths
--- as read_csv ones are.
+-- as read_csv ones are. The last five cases write CSV with DuckDB's CSV
+-- options (DELIMITER and its spellings, QUOTE, ESCAPE, NULL, HEADER false,
+-- DATEFORMAT, TIMESTAMPFORMAT); readback.sql reads them back with the same
+-- options, every column as VARCHAR.
 COPY (SELECT id, qty, price, day, name, qty > 10 AS big FROM read_csv('typed.csv')) TO 'typed_default.parquet';
 COPY (SELECT * FROM read_csv('typed.csv')) TO 'typed_zstd.parquet' (FORMAT parquet, COMPRESSION zstd);
 COPY (SELECT * FROM read_csv('nulls.csv')) TO 'nulls_gzip.parquet' (COMPRESSION gzip);
@@ -36,3 +39,8 @@ COPY (SELECT * FROM read_csv('typed.csv') ORDER BY id) TO 'typed_zstd_json.json.
 COPY (SELECT * FROM read_parquet('times.parquet') ORDER BY id) TO 'times_default.parquet';
 COPY (SELECT * FROM read_parquet('times.parquet') WHERE id NOT IN (11, 12, 15) ORDER BY id) TO 'times_csv.csv';
 COPY (SELECT * FROM read_parquet('times.parquet') WHERE id NOT IN (11, 12, 15) ORDER BY id) TO 'times_json.json';
+COPY (SELECT * FROM read_csv('quoted.csv') ORDER BY id) TO 'quoted_semicolon_csv.csv' (FORMAT csv, DELIMITER ';', NULL 'NA');
+COPY (SELECT * FROM read_csv('nulls.csv') ORDER BY id) TO 'nulls_tab_csv.csv' (DELIM '\t', HEADER false, NULLSTR 'NA');
+COPY (SELECT * FROM read_csv('quoted.csv') ORDER BY id) TO 'quoted_escape_csv.csv' (QUOTE '''', ESCAPE '\');
+COPY (SELECT id, day, name, price FROM read_csv('typed.csv') ORDER BY id) TO 'typed_dateformat_csv.csv' (SEP '.', DATEFORMAT '%d.%m.%Y');
+COPY (SELECT id, ts, ns, tz FROM read_parquet('times.parquet') WHERE id NOT IN (11, 12, 15) ORDER BY id) TO 'times_format_csv.csv' (TIMESTAMPFORMAT '%Y-%m-%dT%H:%M:%S.%f %z %Z', DATEFORMAT '%x');

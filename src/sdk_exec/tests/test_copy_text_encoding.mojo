@@ -61,7 +61,26 @@
 #   * test_text_writable: true for every type above and false for a
 #     time, duration, DATE64, binary, FLOAT16, DECIMAL256 and the nested
 #     types.
+#   * test_every_type_in_a_dialect: the every-type batch with DELIMITER '5',
+#     NULL 'N', QUOTE '|', ESCAPE '\' and DATEFORMAT '%d %b %Y' is DuckDB's
+#     file for the same rows and options: every cell holding a `5` quoted
+#     with `|`, integers, doubles and decimals included, `N` for every
+#     NULL, the empty string bare, `a"b` bare, dates in the format (1 BC as
+#     year `0000`), and a dictionary read through its values. Catches a
+#     number left unquoted, the default `"` or `,` used, and a type whose
+#     NULL is still written empty.
+#   * test_timestamp_units_under_timestampformat: TIMESTAMPFORMAT formats a
+#     TIMESTAMP_US and a legacy TIMESTAMP column and leaves TIMESTAMP_NS and
+#     _S in DuckDB's own text, as DuckDB does; JSON ignores the dialect.
+#     Catches a format applied to a unit DuckDB writes as it is.
+#   * test_write_refuses_a_timestamp_format_it_cannot_apply:
+#     `write_text_result` with a TIMESTAMPFORMAT refuses a TIMESTAMP_MS
+#     column (DuckDB formats one it read from Parquet and not a
+#     TIMESTAMP_MS) and a zoned TIMESTAMP_NS (DuckDB has no such type),
+#     each by exact message before any file is made; it writes them without
+#     the format, and as JSON with it.
 
+from std.os import listdir, makedirs
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from arrow.arrow_types import ArrowType
@@ -81,11 +100,16 @@ from arrow.write_target import (
     WCOMP_SNAPPY,
     WCOMP_UNCOMPRESSED,
     WCOMP_ZSTD,
+    WFMT_CSV,
+    WFMT_JSONL,
 )
 from byte_buffer.heap_region import HeapRegion
 from byte_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from compression.compression_codecs import Gzip
 from compression.zstd_frame import zstd_decompress_into
+from csv.csv_write_dialect import CsvWriteDialect, make_csv_write_dialect
+from runtime_paths import test_tmpdir
+from sdk_exec.engine_write import write_copy_result, write_text_result
 from sdk_exec.engine_write_text import (
     compress_text,
     csv_double_text,
@@ -596,6 +620,112 @@ def test_text_writable() raises:
     no.append(ArrowType.MAP)
     for i in range(len(no)):
         assert_false(text_writable(no[i]), String(no[i]))
+
+
+def _opt(v: String) -> Optional[String]:
+    return Optional[String](v)
+
+
+def test_every_type_in_a_dialect() raises:
+    var dialect = make_csv_write_dialect(
+        _opt("5"), _opt("|"), _opt("\\"), _opt("N"), True,
+        _opt("%d %b %Y"), Optional[String](),
+    )
+    var want = String(
+        "i645i325i165i85u645u325u165u85f645f325b5s5ls5dict5dec5d5n\n"
+        "|-5|5-75-3005-85|18446744073709551615|5|4294967295|5|65535|5|255|5|1.5|50.15true5a\"b5L,M5x5|2.50|508 Jan 20225N\n"
+        "N5N5N5N5N5N5N5N5N5N5N5N5N5N5N5N5N\n"
+        "|9223372036854775807|521474836475327675127505152535-1e+165|1.5|5false55|cr\r|5y5|-0.05|531 Dec 00005N\n"
+    )
+    assert_equal(_text(encode_csv(_every_type_batch(ArrowType.DICTIONARY), dialect)), want)
+    assert_equal(_text(encode_csv(_every_type_batch(ArrowType.STRING), dialect)), want)
+
+
+def _units_batch() raises -> RecordBatch:
+    """One row of 2020-01-02 03:04:05 with a fraction, in each unit."""
+    var sb = SchemaBuilder()
+    var rbb = RecordBatchBuilder()
+    var units: List[ArrowType] = [
+        ArrowType.TIMESTAMP_NS, ArrowType.TIMESTAMP_S, ArrowType.TIMESTAMP_US,
+        ArrowType.TIMESTAMP,
+    ]
+    var names: List[String] = ["ns", "s", "us", "legacy"]
+    var values: List[Int64] = [
+        1577934245123456789, 1577934245, 1577934245123456, 1577934245123456,
+    ]
+    for i in range(len(units)):
+        var arr = PrimitiveArray[DType.int64].allocate(1)
+        arr.set(0, values[i])
+        sb.add_field(Field.timestamp(names[i], units[i], "", True))
+        rbb.add_column(Column.from_primitive_with_arrow_type[DType.int64](arr^, units[i]))
+    return rbb.build(sb.build())
+
+
+def test_timestamp_units_under_timestampformat() raises:
+    var dialect = make_csv_write_dialect(
+        Optional[String](), Optional[String](), Optional[String](),
+        Optional[String](), True, Optional[String](), _opt("%Y|%f"),
+    )
+    assert_equal(
+        _text(encode_csv(_units_batch(), dialect)),
+        "ns,s,us,legacy\n"
+        "2020-01-02 03:04:05.123456789,2020-01-02 03:04:05,2020|123456,"
+        "2020|123456\n",
+    )
+    assert_equal(
+        _text(encode_ndjson(_units_batch())),
+        '{"ns":"2020-01-02 03:04:05.123456789","s":"2020-01-02 03:04:05",'
+        '"us":"2020-01-02 03:04:05.123456","legacy":"2020-01-02 03:04:05.123456"}\n',
+    )
+
+
+def _one_timestamp(name: String, at: ArrowType, tz: String, v: Int64) raises -> RecordBatch:
+    var sb = SchemaBuilder()
+    var rbb = RecordBatchBuilder()
+    var arr = PrimitiveArray[DType.int64].allocate(1)
+    arr.set(0, v)
+    sb.add_field(Field.timestamp(name, at, tz, True))
+    rbb.add_column(Column.from_primitive_with_arrow_type[DType.int64](arr^, at))
+    return rbb.build(sb.build())
+
+
+def _refused_write(var batch: RecordBatch, dest: String, dialect: CsvWriteDialect, want: String) raises:
+    try:
+        _ = write_text_result(batch^, dest, WFMT_CSV, WCOMP_UNCOMPRESSED, dialect)
+    except e:
+        assert_equal(String(e), want)
+        return
+    assert_true(False, "not refused: " + want)
+
+
+def test_write_refuses_a_timestamp_format_it_cannot_apply() raises:
+    var dir = test_tmpdir() + "/copy_text_timestamp_format"
+    makedirs(dir, exist_ok=True)
+    var dest = dir + "/t.csv"
+    var dialect = make_csv_write_dialect(
+        Optional[String](), Optional[String](), Optional[String](),
+        Optional[String](), True, Optional[String](), _opt("%c"),
+    )
+    var head = "COPY_TYPE_UNSUPPORTED: COPY ... TO '" + dest + "' (TIMESTAMPFORMAT): column "
+    _refused_write(
+        _one_timestamp("ms", ArrowType.TIMESTAMP_MS, "", 1577934245123), dest, dialect,
+        head + "'ms' has type timestamp[ms], which DuckDB formats when it read"
+        " it from Parquet (as a TIMESTAMP) and writes in its own text when it"
+        " is a TIMESTAMP_MS; cast it to TIMESTAMP",
+    )
+    _refused_write(
+        _one_timestamp("zns", ArrowType.TIMESTAMP_NS, "UTC", 1577934245123456789), dest, dialect,
+        head + "'zns' has type timestamp[ns] with a time zone, which DuckDB"
+        " holds only at microseconds; cast it to TIMESTAMPTZ",
+    )
+    assert_equal(len(listdir(dir)), 0)
+    assert_equal(write_copy_result(_one_timestamp("ms", ArrowType.TIMESTAMP_MS, "", 1577934245123), dest, WFMT_CSV, WCOMP_UNCOMPRESSED), 1)
+    var fh = open(dest, "r")
+    assert_equal(fh.read(), "ms\n2020-01-02 03:04:05.123\n")
+    fh.close()
+    assert_equal(
+        write_copy_result(_one_timestamp("zns", ArrowType.TIMESTAMP_NS, "UTC", 1577934245123456789), dir + "/t.json", WFMT_JSONL, WCOMP_UNCOMPRESSED, dialect), 1
+    )
 
 
 def main() raises:

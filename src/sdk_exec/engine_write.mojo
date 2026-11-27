@@ -23,13 +23,20 @@
 #                                type for (times, durations, intervals,
 #                                DATE64, binary, nested), or, for CSV and
 #                                JSON, a time, duration, interval, DATE64,
-#                                binary or nested column (step `execute`)
+#                                binary or nested column, or, for CSV with a
+#                                TIMESTAMPFORMAT, a TIMESTAMP_MS or a zoned
+#                                TIMESTAMP_S or _NS (step `execute`)
+#   CSV_DIALECT_INVALID,         a DATEFORMAT or TIMESTAMPFORMAT a column
+#   CSV_DIALECT_UNSUPPORTED      uses that DuckDB refuses, or `%n`
+#                                (`csv.csv_temporal_format`, step `execute`)
 #   COPY_DUPLICATE_COLUMN        CSV or JSON of a result with two columns of
 #                                one name, which DuckDB would have renamed
 #                                (step `execute`)
 #
 # A CSV or JSON file holds the bytes DuckDB's COPY writes for the same
-# result (`engine_write_text` says which); COMPRESSION gzip (level 6) or zstd
+# result (`engine_write_text` says which), a CSV file in the delimiter,
+# quoting, NULL text, header and date formats the COPY's CSV options give
+# (`csv.csv_write_dialect`); COMPRESSION gzip (level 6) or zstd
 # (level 3), or a `.gz` or `.zst` destination with no COMPRESSION, compresses
 # the whole file.
 #
@@ -61,6 +68,7 @@ from arrow.write_target import (
     write_format_name,
 )
 from column_kernels.compiler_helpers import materialize_selection_if_present
+from csv.csv_write_dialect import CsvWriteDialect
 from fs.atomic_write import write_file_atomic
 from parquet_api.types import CompressionCodec
 from parquet_writer.record_batch_writer import write_record_batch_to_parquet_bytes
@@ -69,6 +77,7 @@ from .engine_write_text import (
     compress_text,
     encode_csv,
     encode_ndjson,
+    formatted_timestamp,
     text_writable,
 )
 
@@ -172,18 +181,43 @@ def write_parquet_result(
     return rows.num_rows()
 
 
+def _unformatted_reason(at: ArrowType, zoned: Bool) -> String:
+    """Why TIMESTAMPFORMAT cannot be applied to a column of type `at`, which
+    is not a microsecond timestamp."""
+    if zoned:
+        return (
+            " with a time zone, which DuckDB holds only at microseconds; cast"
+            " it to TIMESTAMPTZ"
+        )
+    return (
+        ", which DuckDB formats when it read it from Parquet (as a TIMESTAMP)"
+        " and writes in its own text when it is a TIMESTAMP_MS; cast it to"
+        " TIMESTAMP"
+    )
+
+
 def write_text_result(
-    var batch: RecordBatch, dest: String, fmt: UInt8, codec: UInt8
+    var batch: RecordBatch,
+    dest: String,
+    fmt: UInt8,
+    codec: UInt8,
+    dialect: CsvWriteDialect = CsvWriteDialect(),
 ) raises -> Int:
-    """Write `batch` to the local file `dest` as CSV (`fmt` WFMT_CSV) or
-    newline-delimited JSON (any other `fmt`), compressed by the WCOMP_*
-    `codec` (`compress_text`), all or nothing, and return the rows written.
+    """Write `batch` to the local file `dest` as CSV in `dialect` (`fmt`
+    WFMT_CSV) or newline-delimited JSON (any other `fmt`), compressed by the
+    WCOMP_* `codec` (`compress_text`), all or nothing, and return the rows
+    written.
 
     Raises:
         `COPY_TYPE_UNSUPPORTED` naming the first column of a type that is not
-        written, or `COPY_DUPLICATE_COLUMN` naming a name two columns have,
-        before any file is touched; `STORAGE_NOT_FOUND` or `STORAGE_IO` from
-        `write_file_atomic`, with `dest` unchanged.
+        written (for CSV with a TIMESTAMPFORMAT, also a TIMESTAMP_MS, whose
+        DuckDB type depends on where it was read from, and a zoned
+        TIMESTAMP_S or _NS, which DuckDB has no type for), or
+        `COPY_DUPLICATE_COLUMN`
+        naming a name two columns have, or `csv_temporal_format`'s refusal of
+        a DATEFORMAT or TIMESTAMPFORMAT a column uses, before any file is
+        touched; `STORAGE_NOT_FOUND` or `STORAGE_IO` from `write_file_atomic`,
+        with `dest` unchanged.
     """
     var name = String("CSV") if fmt == WFMT_CSV else String("JSON")
     for c in range(batch.num_columns()):
@@ -193,6 +227,19 @@ def write_text_result(
                 String(COPY_TYPE_UNSUPPORTED) + ": COPY ... TO '" + dest
                 + "': column '" + batch.schema.field_name(c) + "' has type "
                 + String(at) + ", which is not written to " + name + " yet"
+            )
+        if (
+            fmt == WFMT_CSV
+            and dialect.timestamp_format
+            and at.is_timestamp()
+            and not formatted_timestamp(at)
+            and (at == ArrowType.TIMESTAMP_MS or batch.schema.field_tz(c) != "")
+        ):
+            raise Error(
+                String(COPY_TYPE_UNSUPPORTED) + ": COPY ... TO '" + dest
+                + "' (TIMESTAMPFORMAT): column '" + batch.schema.field_name(c)
+                + "' has type " + String(at)
+                + _unformatted_reason(at, batch.schema.field_tz(c) != "")
             )
         for p in range(c):
             if batch.schema.field_name(p) == batch.schema.field_name(c):
@@ -205,7 +252,7 @@ def write_text_result(
     var rows = materialize_selection_if_present(batch^)
     var bytes: List[UInt8]
     if fmt == WFMT_CSV:
-        bytes = encode_csv(rows)
+        bytes = encode_csv(rows, dialect)
     else:
         bytes = encode_ndjson(rows)
     var file = compress_text(bytes^, codec)
@@ -214,14 +261,19 @@ def write_text_result(
 
 
 def write_copy_result(
-    var batch: RecordBatch, dest: String, fmt: UInt8, codec: UInt8
+    var batch: RecordBatch,
+    dest: String,
+    fmt: UInt8,
+    codec: UInt8,
+    dialect: CsvWriteDialect = CsvWriteDialect(),
 ) raises -> Int:
     """Write `batch` to the local file `dest` in the WFMT_* format `fmt`
     with the WCOMP_* compression `codec` (`write_parquet_result` or
-    `write_text_result`), all or nothing, and return the rows written."""
+    `write_text_result`, a CSV file in `dialect`), all or nothing, and return
+    the rows written."""
     if fmt == WFMT_PARQUET:
         return write_parquet_result(batch^, dest, codec)
-    return write_text_result(batch^, dest, fmt, codec)
+    return write_text_result(batch^, dest, fmt, codec, dialect)
 
 
 def count_result(rows: Int) raises -> RecordBatch:

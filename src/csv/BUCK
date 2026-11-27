@@ -4,7 +4,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # SIMD structural scanner (byte-class masks and carry-less-multiply quote
 # regions), quote-safe chunk splitting, typed cell parsers and column
 # builders, schema sampling and type inference, the parallel reader on the
-# async_rt dispatcher, and the CSV sink. It depends on the core packages
+# async_rt dispatcher, the CSV sink, and the CSV options of a COPY with the
+# DuckDB DATEFORMAT / TIMESTAMPFORMAT writer (csv_write_dialect,
+# csv_temporal_format). It depends on the core packages
 # (Arrow types, record batches, SIMD byte classes), row_format (the row
 # format the sink drains) and async_rt (the dispatcher, cancellation
 # and the local filesystem). runtime_paths is declared because two
@@ -63,8 +65,10 @@ mojo_library(
         "tests/test_csv_simd_string_column.mojo",
         "tests/test_csv_simd_temporal_parsers.mojo",
         "tests/test_csv_sink_quoting.mojo",
+        "tests/test_csv_temporal_format.mojo",
         "tests/test_csv_temporal_range.mojo",
         "tests/test_csv_typed_column_builders.mojo",
+        "tests/test_csv_write_dialect.mojo",
         "tests/test_phase_4_stage_breakdown_default_off.mojo",
         "tests/test_phase_4_stage_breakdown_mixed_parity.mojo",
         "tests/test_phase_4_stage_breakdown_string_parity.mojo",

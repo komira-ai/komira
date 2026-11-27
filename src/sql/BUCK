@@ -6,7 +6,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the expression binder (sql_bind_expr, sql_bind_decimal, sql_bind_call, sql_bind_cast, sql_bind_fn_args, sql_bind_fn_nested, sql_bind_timestamp),
 # the aggregate, window and ORDER BY binders (sql_bind_agg_expr, sql_bind_aggregate, sql_bind_window_order),
 # and the join, subquery and set-operation binders with the statement entry (sql_bind_join, sql_bind_subquery, sql_bind_union, sql_bind_set_op, sql_binder),
-# the format and codec a COPY ... TO takes from its destination's extension (sql_copy_format),
+# the format and codec a COPY ... TO takes from its destination's extension (sql_copy_format) and from its option list, with its CSV options (sql_copy_options),
 # the parser's limit on nesting (sql_nesting),
 # the line and column where a text stopped parsing (sql_position, a plain value) and the parse that finds it (sql_parse_text),
 # and the text entry over all three (sql_frontend: statement_from_sql, plan_from_sql).
@@ -90,6 +90,7 @@ mojo_library(
         "tests/test_sql_binder_direct.mojo",
         "tests/test_sql_catalog_tables.mojo",
         "tests/test_sql_copy_format.mojo",
+        "tests/test_sql_copy_options.mojo",
         "tests/test_sql_fn_table_date_parts.mojo",
         "tests/test_sql_fn_table_direct.mojo",
         "tests/test_sql_fn_table_lowering_rows.mojo",

@@ -22,7 +22,8 @@
 #      (catches: the qualifier dropping the last component; a wrong default)
 #   4. COPY options: FORMAT / COMPRESSION / CODEC / COMPRESSION_LEVEL /
 #      HEADER / ARRAY in any order, each value spelled quoted or bare, every
-#      codec word, every refusal of the validation pass. (catches: a codec
+#      codec word, HEADER false read as no header line, every refusal of the
+#      validation pass (the CSV options are test_sql_copy_options'). (catches: a codec
 #      word mapped to the wrong code; a level other than the wired one
 #      accepted; an option validated before FORMAT is known)
 #   5. CREATE [OR REPLACE] TABLE [IF NOT EXISTS] <name> AS [(]<query>[)] and
@@ -427,9 +428,11 @@ def test_copy_options() raises:
         "(FORMAT 'csv', COMPRESSION 'snappy') — no wired write sink",
     )
     _refuses("COPY t TO 'o.parquet' (HEADER true)", "HEADER applies to FORMAT 'csv', not 'parquet'")
-    _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER false)", "(HEADER false)")
-    _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER 'off')", "(HEADER false)")
-    _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER '0')", "(HEADER false)")
+    _copy_pair("(FORMAT csv, HEADER false)", WFMT_CSV, WCOMP_UNCOMPRESSED)
+    assert_false(_copy("(FORMAT csv, HEADER false)").csv.header)
+    assert_false(_copy("(HEADER 'off', FORMAT csv)").csv.header)
+    assert_false(_copy("(FORMAT csv, HEADER '0')").csv.header)
+    assert_true(_copy("(FORMAT csv, HEADER on)").csv.header)
     _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER maybe)", "HEADER expects true/false, got 'maybe'")
     _refuses("COPY t TO 'o.parquet' (FORMAT csv, ARRAY false)", "ARRAY applies to FORMAT 'json', not 'csv'")
     _refuses("COPY t TO 'o.parquet' (FORMAT json, ARRAY true)", "(ARRAY true)")
