@@ -78,4 +78,4 @@ Output:
 - [How do I read a CSV file?](../1-read-csv-file/page.md) (rank 1, works)
 - [How do I read a Parquet file?](../15-read-parquet-file/page.md) (rank 15, works)
 - [How do I concatenate (stack) tables with the same columns?](../18-concatenate-tables-same-columns/page.md) (rank 18, works)
-- How do I convert a folder of CSV files to Parquet? (rank 99, works; no page yet)
+- [How do I convert a folder of CSV files to Parquet?](../99-convert-folder-csv-files-parquet/page.md) (rank 99, works)

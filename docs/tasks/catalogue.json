@@ -809,7 +809,10 @@
     "slug": "query-iceberg-table",
     "category": "Cloud storage",
     "question": "How do I query an Iceberg table?",
-    "status": "partial"
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2363"
+    ]
   },
   {
     "rank": 95,
@@ -860,6 +863,10 @@
     "slug": "read-csv-odd-delimiter-no-header",
     "category": "Read",
     "question": "How do I read a CSV with an odd delimiter, no header or extra lines?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2364",
+      "komira-ai/komira#2365"
+    ]
   }
 ]
