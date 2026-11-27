@@ -54,7 +54,9 @@ clickhouse.com	ClickHouse documentation cited by docs/design/storage_stack.md
 confluent.io	Confluent documentation cited by docs/design/storage_stack.md
 databricks.com	Databricks documentation cited by docs/design/storage_stack.md
 dremio.com	Dremio documentation cited by docs/design/storage_stack.md
-duckdb.org	DuckDB documentation cited by docs/design/storage_stack.md and docs/design/optimized_plan_udfs.md
+duckdb.org	DuckDB documentation cited by docs/design/storage_stack.md, docs/design/optimized_plan_udfs.md and docs/design/object_store_urls.md
+pydata.org	pandas documentation cited by docs/design/object_store_urls.md
+pola.rs	polars documentation cited by docs/design/object_store_urls.md
 ducklake.select	the DuckLake specification cited by docs/design/storage_stack.md
 estuary.dev	Estuary documentation cited by docs/design/storage_stack.md
 fivetran.com	Fivetran documentation cited by docs/design/storage_stack.md
