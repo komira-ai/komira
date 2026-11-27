@@ -346,21 +346,30 @@
     "slug": "lowercase-trim-replace-text-column",
     "category": "Strings",
     "question": "How do I lowercase, trim and replace text in a column?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2371"
+    ]
   },
   {
     "rank": 43,
     "slug": "concatenate-string-columns",
     "category": "Strings",
     "question": "How do I concatenate string columns?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2373"
+    ]
   },
   {
     "rank": 44,
     "slug": "split-string-column-columns",
     "category": "Strings",
     "question": "How do I split a string column into several columns?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2375"
+    ]
   },
   {
     "rank": 45,
@@ -387,7 +396,10 @@
     "slug": "get-top-n-rows-per-group",
     "category": "Aggregate",
     "question": "How do I get the top N rows per group?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2377"
+    ]
   },
   {
     "rank": 48,
@@ -408,7 +420,11 @@
     "slug": "percent-of-group-total",
     "category": "Aggregate",
     "question": "How do I compute each row's percent of its group total?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2379",
+      "komira-ai/komira#2381"
+    ]
   },
   {
     "rank": 51,
