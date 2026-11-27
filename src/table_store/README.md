@@ -19,3 +19,65 @@ One more property is stated here and not in the code: isolation is snapshot isol
 ## The `PGC` magic
 
 Every commit chunk starts with the magic bytes `PGC` followed by an ASCII format-version digit (`PGC2`, `PGC3`). The bytes are part of the on-disk format and are unchanged, so existing logs still decode. Only the constants' names changed (`TS_COMMIT_MAGIC_PREFIX`, `TS_COMMIT_MAGIC`, `TS_COMMIT_MAGIC_V3` in `table_store_codec.mojo`); their values are the same. The comments and error messages that describe the format still spell the bytes `PGC`, because that is what is on disk.
+
+## Example
+
+A commit loses to an earlier commit of the same key (first committer wins) and a reader keeps its snapshot, over the in-memory conditional store:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo module
+from objectstore.cas_manifest import CasManifestStore, RetryPolicy
+from objectstore.in_memory_conditional_store import InMemoryConditionalStore
+from table_store.table_store import TableStore, is_occ_conflict
+from table_store.table_store_codec import bytes_eq
+
+
+def _b(s: String) -> List[UInt8]:
+    var out = List[UInt8]()
+    var sb = s.as_bytes()
+    for i in range(len(sb)):
+        out.append(sb[i])
+    return out^
+
+
+def main() raises:
+    var wal = CasManifestStore[InMemoryConditionalStore](
+        store=InMemoryConditionalStore(),
+        prefix=String("ts/readme"),
+        retry=RetryPolicy.fast_test(),
+    )
+    var ts = TableStore[InMemoryConditionalStore].open(wal^)
+
+    var first = ts.begin()
+    first.insert(_b("k"), _b("v0"))
+    var r0 = ts.commit(first^)
+    assert_equal(r0.commit_lsn, Int64(0))
+
+    var reader = ts.begin()
+    var a = ts.begin()
+    var b = ts.begin()
+    a.update(_b("k"), _b("vA"))
+    b.update(_b("k"), _b("vB"))
+    var ra = ts.commit(a^)
+    assert_equal(ra.commit_lsn, Int64(1))
+
+    var conflicted = False
+    try:
+        var rb = ts.commit(b^)
+        _ = rb
+    except e:
+        if is_occ_conflict(String(e)):
+            conflicted = True
+        else:
+            raise e^
+    assert_true(conflicted)
+
+    var old = ts.get(reader, _b("k"))
+    assert_true(Bool(old))
+    assert_true(bytes_eq(old.value(), _b("v0")))
+    var fresh = ts.begin()
+    var latest = ts.get(fresh, _b("k"))
+    assert_true(Bool(latest))
+    assert_true(bytes_eq(latest.value(), _b("vA")))
+    assert_equal(ts.wal_head_seq(), Int64(1))
+```

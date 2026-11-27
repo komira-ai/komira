@@ -4,7 +4,8 @@
 # copy of a source tree. A Zig tool, as every build tool under tools/build is;
 # built behind its unit tests.
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64", "TOOL_EXEC")
+load("@komira//tools/build/platforms:table.bzl", "row")
 
 # Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
 # that the pin is that release.
@@ -81,6 +82,23 @@ zig_exe(
     src = "node_act.zig",
     deps = ["//tools/build/act_util:act_util"],
     unit_tests = [":node_act_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The same sources built for macOS arm64 by the same zig on the linux execution
+# platform, run on a macOS worker by the macOS Node.js dists and the macOS
+# install test of the npm packages (third_party/node/BUCK, node/BUCK), which
+# run the macOS `node` and so need a macOS worker.
+zig_exe(
+    name = "node_act_darwin",
+    exec_compatible_with = TOOL_EXEC,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-node
+    src = "node_act.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":node_act_unit", "komira//tools/build/toolchains:zig_next_version"],
+    target = row("darwin-arm64")["zig_triple"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],

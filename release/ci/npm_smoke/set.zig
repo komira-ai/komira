@@ -13,7 +13,10 @@
 //! The platform packages come first, sorted by name, and the main package last: the main package names the
 //! platform packages, so it is published only after them. One version for every package (the stamp's,
 //! `0.1.<N>`, or `0.0.0` unstamped), and each file is the name `npm pack` gives the package at that version.
-//! `build` makes the set from the tarballs, `render` writes it, `parse` reads it back and refuses anything
+//! The main package names exactly the set's platform packages as its optional dependencies
+//! (`checkOptional`): one it names that the set does not hold would be a name npm finds nothing for, and
+//! one the set holds that it does not name would never be installed. `build` makes the set from the
+//! tarballs, `render` writes it, `parse` reads it back and refuses anything
 //! `render` would not have written (a reader ignores a key it does not know), and `verifyDir` holds a directory
 //! of tarballs to it.
 const std = @import("std");
@@ -171,6 +174,28 @@ pub fn build(a: Allocator, why: *[]const u8, main: []const u8, inputs: []const I
     std.mem.sort(Package, platforms.items, {}, lessByName);
     try platforms.append(a, m);
     return .{ .main = main, .version = version.?, .packages = platforms.items };
+}
+
+/// `optional` (the main package's optional dependencies, comma-separated, as its rule names them) is
+/// exactly the platform packages of `set`, each named once.
+pub fn checkOptional(a: Allocator, why: *[]const u8, set: Set, optional: []const u8) Error!void {
+    var names = std.ArrayList([]const u8).empty;
+    if (optional.len > 0) {
+        var it = std.mem.splitScalar(u8, optional, ',');
+        while (it.next()) |n| try names.append(a, n);
+    }
+    for (names.items, 0..) |n, i| {
+        for (names.items[0..i]) |prev| {
+            if (std.mem.eql(u8, prev, n)) return refuse(a, why, "the main package {s} names the optional dependency {s} twice", .{ set.main, n });
+        }
+        if (std.mem.eql(u8, n, set.main) or set.find(n) == null)
+            return refuse(a, why, "the main package {s} names {s} as an optional dependency, which is no platform package of the set: npm would find nothing to install for it", .{ set.main, n });
+    }
+    for (set.packages[0 .. set.packages.len - 1]) |p| {
+        var named = false;
+        for (names.items) |n| named = named or std.mem.eql(u8, n, p.name);
+        if (!named) return refuse(a, why, "the platform package {s} is not an optional dependency of the main package {s}: npm would never install it", .{ p.name, set.main });
+    }
 }
 
 /// The text of npm_set.json for `set`, which `build` or `parse` made (so no value needs escaping).

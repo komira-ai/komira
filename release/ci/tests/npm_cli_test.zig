@@ -58,9 +58,10 @@ test "a usage error exits 2 with the reason and the usage, before anything is re
     try expectUsage(&c, &.{ "gate", "--file", "f" }, "npm_smoke: --github-output is missing");
     try expectUsage(&c, &.{ "gate", "--file", "f", "--file", "g", "--github-output", "o" }, "npm_smoke: --file is given twice");
     try expectUsage(&c, &.{ "gate", "--file" }, "npm_smoke: --file needs a value");
-    try expectUsage(&c, &.{ "set", "--main", h.MAIN, "--require-stamped", "true", "--out", "o" }, "npm_smoke: --package is missing");
-    try expectUsage(&c, &.{ "set", "--main", h.MAIN, "--require-stamped", "yes", "--out", "o", "--package", "x=y" }, "npm_smoke: --require-stamped is true or false, not yes");
-    try expectUsage(&c, &.{ "set", "--main", h.MAIN, "--require-stamped", "true", "--out", "o", "--package", "x" }, "npm_smoke: --package is <name>=<tarball>, not x");
+    try expectUsage(&c, &.{ "set", "--main", h.MAIN, "--main-optional", h.LINUX, "--require-stamped", "true", "--out", "o" }, "npm_smoke: --package is missing");
+    try expectUsage(&c, &.{ "set", "--main", h.MAIN, "--require-stamped", "true", "--out", "o", "--package", "x=y" }, "npm_smoke: --main-optional is missing");
+    try expectUsage(&c, &.{ "set", "--main", h.MAIN, "--main-optional", h.LINUX, "--require-stamped", "yes", "--out", "o", "--package", "x=y" }, "npm_smoke: --require-stamped is true or false, not yes");
+    try expectUsage(&c, &.{ "set", "--main", h.MAIN, "--main-optional", h.LINUX, "--require-stamped", "true", "--out", "o", "--package", "x" }, "npm_smoke: --package is <name>=<tarball>, not x");
     try expectUsage(&c, &.{ "verify", "--set", "s", "--dir", "d" }, "npm_smoke: --github-output is missing");
     try expectUsage(&c, &.{ "publish", "--set", "s", "--dir", "d", "--node", "n", "--npm", "m" }, "npm_smoke: --work is missing");
     try expectUsage(&c, &.{ "smoke", "--set", "s", "--node", "/n", "--npm", "/m", "--work", "/w", "--attempts", "0" }, "npm_smoke: --attempts is a number from 1 to 20");
@@ -81,7 +82,7 @@ test "set writes npm_set.json for the tarballs given, the main package last" {
     var fake = h.FakeNpm{ .alloc = c.a(), .work = "/nowhere" };
     const out = try c.p("npm_set.json");
     const r = try c.exec(&fake, &.{
-        "set",       "--main", h.MAIN, "--require-stamped", "true", "--out", out,
+        "set",       "--main", h.MAIN, "--main-optional", h.LINUX, "--require-stamped", "true", "--out", out,
         "--package", try std.fmt.allocPrint(c.a(), "{s}={s}", .{ h.MAIN, inputs[0].path }),
         "--package", try std.fmt.allocPrint(c.a(), "{s}={s}", .{ h.LINUX, inputs[1].path }),
     });
@@ -96,7 +97,7 @@ test "set refuses an unstamped set when it must be stamped, and a tarball it can
     const inputs = try h.writeTarballs(c.a(), &c.tmp, "in", &.{ h.MAIN, h.LINUX }, "0.0.0");
     var fake = h.FakeNpm{ .alloc = c.a(), .work = "/nowhere" };
     const args = [_][]const u8{
-        "set",       "--main", h.MAIN, "--require-stamped", "true", "--out", try c.p("npm_set.json"),
+        "set",       "--main", h.MAIN, "--main-optional", h.LINUX, "--require-stamped", "true", "--out", try c.p("npm_set.json"),
         "--package", try std.fmt.allocPrint(c.a(), "{s}={s}", .{ h.MAIN, inputs[0].path }),
         "--package", try std.fmt.allocPrint(c.a(), "{s}={s}", .{ h.LINUX, inputs[1].path }),
     };
@@ -107,12 +108,28 @@ test "set refuses an unstamped set when it must be stamped, and a tarball it can
     try t.expect(!h.exists(&c.tmp, "npm_set.json"));
     // the same tarballs make a set of a pull request
     var unstamped = args;
-    unstamped[4] = "false";
+    unstamped[6] = "false";
     try t.expectEqual(@as(u8, 0), (try c.exec(&fake, &unstamped)).code);
 
-    const gone = try c.exec(&fake, &.{ "set", "--main", h.MAIN, "--require-stamped", "false", "--out", try c.p("x.json"), "--package", "@komira-ai/komira=/nowhere/komira-ai-komira-0.1.7.tgz" });
+    const gone = try c.exec(&fake, &.{ "set", "--main", h.MAIN, "--main-optional", h.LINUX, "--require-stamped", "false", "--out", try c.p("x.json"), "--package", "@komira-ai/komira=/nowhere/komira-ai-komira-0.1.7.tgz" });
     try t.expectEqual(@as(u8, 1), gone.code);
     try t.expectEqualStrings("npm_smoke: FAILED: cannot read the tarball /nowhere/komira-ai-komira-0.1.7.tgz: FileNotFound\n", gone.err);
+}
+
+test "set refuses, with exit 1 and no record, a main package that names a platform package the set does not hold" {
+    var c = newCase();
+    defer c.deinit();
+    const inputs = try h.writeTarballs(c.a(), &c.tmp, "in", &.{ h.MAIN, h.LINUX }, "0.1.7");
+    var fake = h.FakeNpm{ .alloc = c.a(), .work = "/nowhere" };
+    // The set without the macOS package (its install test did not pass), and a main package that names it.
+    const r = try c.exec(&fake, &.{
+        "set",       "--main", h.MAIN, "--main-optional", try std.fmt.allocPrint(c.a(), "{s},{s}", .{ h.DARWIN, h.LINUX }), "--require-stamped", "true", "--out", try c.p("npm_set.json"),
+        "--package", try std.fmt.allocPrint(c.a(), "{s}={s}", .{ h.MAIN, inputs[0].path }),
+        "--package", try std.fmt.allocPrint(c.a(), "{s}={s}", .{ h.LINUX, inputs[1].path }),
+    });
+    try t.expectEqual(@as(u8, 1), r.code);
+    try t.expectEqualStrings("npm_smoke: FAILED: the main package @komira-ai/komira names @komira-ai/komira-darwin-arm64 as an optional dependency, which is no platform package of the set: npm would find nothing to install for it\n", r.err);
+    try t.expect(!h.exists(&c.tmp, "npm_set.json"));
 }
 
 test "gate appends publish=false or publish=true after what the output file held" {

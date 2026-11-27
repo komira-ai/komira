@@ -25,17 +25,17 @@ changes its row in the same change. Do not edit it by hand: copy the lines the c
 | with a `mojo_adopted_library` gate | 66 |
 | with a `mojo_library` gate | 197 |
 | with no gate | 2 |
-| with at least one example | 249 |
+| with at least one example | 263 |
 | refused by the README examples tool | 0 |
 | run by the release e2e | 66 |
-| run by a build gate | 249 |
-| run by nobody | 16 |
+| run by a build gate | 263 |
+| run by nobody | 2 |
 
 ## Left out
 
-Run by a build gate and not by the release e2e: 183 READMEs. Their packages have no `mopm.toml`, so the release does not publish them; [UNPUBLISHED.md](UNPUBLISHED.md) says why for each library.
+Run by a build gate and not by the release e2e: 197 READMEs. Their packages have no `mopm.toml`, so the release does not publish them; [UNPUBLISHED.md](UNPUBLISHED.md) says why for each library.
 
-Run by nobody (16): [`op_agg_stage`](../src/op_agg_stage/README.md), [`op_join_sinks`](../src/op_join_sinks/README.md), [`op_sources`](../src/op_sources/README.md), [`op_window`](../src/op_window/README.md), [`operator_api`](../src/operator_api/README.md), [`optimizer`](../src/optimizer/README.md), [`phase_timers`](../src/phase_timers/README.md), [`search_http`](../src/search_http/README.md), [`shuffle_streaming`](../src/shuffle_streaming/README.md), [`smtp_server`](../src/smtp_server/README.md), [`table_store`](../src/table_store/README.md), [`telemetry_read`](../src/telemetry_read/README.md), [`telemetry_store`](../src/telemetry_store/README.md), [`udf`](../src/udf/README.md), [`udf_abi`](../src/udf_abi/README.md), [`udf_python`](../src/udf_python/README.md).
+Run by nobody (2): [`udf_abi`](../src/udf_abi/README.md), [`udf_python`](../src/udf_python/README.md).
 
 ## The READMEs
 
@@ -215,23 +215,23 @@ Run by nobody (16): [`op_agg_stage`](../src/op_agg_stage/README.md), [`op_join_s
 | [`op_agg_hash`](../src/op_agg_hash/README.md) | no | no | mojo_library | yes | build gate |
 | [`op_agg_row_api`](../src/op_agg_row_api/README.md) | no | no | mojo_library | yes | build gate |
 | [`op_agg_slab`](../src/op_agg_slab/README.md) | no | no | mojo_library | yes | build gate |
-| [`op_agg_stage`](../src/op_agg_stage/README.md) | no | no | mojo_library | no | nobody |
+| [`op_agg_stage`](../src/op_agg_stage/README.md) | no | no | mojo_library | yes | build gate |
 | [`op_agg_state`](../src/op_agg_state/README.md) | no | no | mojo_library | yes | build gate |
 | [`op_asof`](../src/op_asof/README.md) | no | no | mojo_library | yes | build gate |
 | [`op_fused_kernels`](../src/op_fused_kernels/README.md) | no | no | mojo_library | yes | build gate |
 | [`op_join_build`](../src/op_join_build/README.md) | no | no | mojo_library | yes | build gate |
 | [`op_join_probe`](../src/op_join_probe/README.md) | no | no | mojo_library | yes | build gate |
-| [`op_join_sinks`](../src/op_join_sinks/README.md) | no | no | mojo_library | no | nobody |
+| [`op_join_sinks`](../src/op_join_sinks/README.md) | no | no | mojo_library | yes | build gate |
 | [`op_join_stage`](../src/op_join_stage/README.md) | no | no | mojo_library | yes | build gate |
 | [`op_sort`](../src/op_sort/README.md) | no | no | mojo_library | yes | build gate |
-| [`op_sources`](../src/op_sources/README.md) | no | no | mojo_library | no | nobody |
+| [`op_sources`](../src/op_sources/README.md) | no | no | mojo_library | yes | build gate |
 | [`op_spill_rows`](../src/op_spill_rows/README.md) | no | no | mojo_library | yes | build gate |
 | [`op_typed_source_api`](../src/op_typed_source_api/README.md) | no | no | mojo_library | yes | build gate |
-| [`op_window`](../src/op_window/README.md) | no | no | mojo_library | no | nobody |
-| [`operator_api`](../src/operator_api/README.md) | no | no | mojo_library | no | nobody |
+| [`op_window`](../src/op_window/README.md) | no | no | mojo_library | yes | build gate |
+| [`operator_api`](../src/operator_api/README.md) | no | no | mojo_library | yes | build gate |
 | [`optimized_plan`](../src/optimized_plan/README.md) | no | no | mojo_library | yes | build gate |
 | [`optimized_plan_header`](../src/optimized_plan_header/README.md) | no | no | mojo_library | yes | build gate |
-| [`optimizer`](../src/optimizer/README.md) | no | no | mojo_library | no | nobody |
+| [`optimizer`](../src/optimizer/README.md) | no | no | mojo_library | yes | build gate |
 | [`orc`](../src/orc/README.md) | no | no | mojo_library | yes | build gate |
 | [`parquet`](../src/parquet/README.md) | no | no | mojo_library | yes | build gate |
 | [`parquet_api`](../src/parquet_api/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
@@ -239,7 +239,7 @@ Run by nobody (16): [`op_agg_stage`](../src/op_agg_stage/README.md), [`op_join_s
 | [`parquet_footers`](../src/parquet_footers/README.md) | no | no | mojo_library | yes | build gate |
 | [`parquet_scan`](../src/parquet_scan/README.md) | no | no | mojo_library | yes | build gate |
 | [`parquet_writer`](../src/parquet_writer/README.md) | no | no | mojo_library | yes | build gate |
-| [`phase_timers`](../src/phase_timers/README.md) | no | no | mojo_library | no | nobody |
+| [`phase_timers`](../src/phase_timers/README.md) | no | no | mojo_library | yes | build gate |
 | [`physical_plan`](../src/physical_plan/README.md) | no | no | mojo_library | yes | build gate |
 | [`pipeline_exec`](../src/pipeline_exec/README.md) | no | no | mojo_library | yes | build gate |
 | [`plan_expr`](../src/plan_expr/README.md) | no | no | mojo_library | yes | build gate |
@@ -265,7 +265,7 @@ Run by nobody (16): [`op_agg_stage`](../src/op_agg_stage/README.md), [`op_join_s
 | [`search`](../src/search/README.md) | no | no | mojo_library | yes | build gate |
 | [`search_catalog`](../src/search_catalog/README.md) | no | no | mojo_library | yes | build gate |
 | [`search_compaction`](../src/search_compaction/README.md) | no | no | mojo_library | yes | build gate |
-| [`search_http`](../src/search_http/README.md) | no | no | mojo_library | no | nobody |
+| [`search_http`](../src/search_http/README.md) | no | no | mojo_library | yes | build gate |
 | [`search_scan`](../src/search_scan/README.md) | no | no | mojo_library | yes | build gate |
 | [`secret_env`](../src/secret_env/README.md) | no | no | mojo_library | yes | build gate |
 | [`secret_registry`](../src/secret_registry/README.md) | no | no | mojo_library | yes | build gate |
@@ -275,10 +275,10 @@ Run by nobody (16): [`op_agg_stage`](../src/op_agg_stage/README.md), [`op_join_s
 | [`secrets_conjur`](../src/secrets_conjur/README.md) | no | no | mojo_library | yes | build gate |
 | [`secrets_keychain`](../src/secrets_keychain/README.md) | no | no | mojo_library | yes | build gate |
 | [`shuffle`](../src/shuffle/README.md) | no | no | mojo_library | yes | build gate |
-| [`shuffle_streaming`](../src/shuffle_streaming/README.md) | no | no | mojo_library | no | nobody |
+| [`shuffle_streaming`](../src/shuffle_streaming/README.md) | no | no | mojo_library | yes | build gate |
 | [`simd_ops`](../src/simd_ops/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`smtp_client`](../src/smtp_client/README.md) | no | no | mojo_library | yes | build gate |
-| [`smtp_server`](../src/smtp_server/README.md) | no | no | mojo_library | no | nobody |
+| [`smtp_server`](../src/smtp_server/README.md) | no | no | mojo_library | yes | build gate |
 | [`snapshotter`](../src/snapshotter/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`so`](../src/so/README.md) | no | no | mojo_library | yes | build gate |
 | [`source_url`](../src/source_url/README.md) | no | no | mojo_library | yes | build gate |
@@ -287,15 +287,15 @@ Run by nobody (16): [`op_agg_stage`](../src/op_agg_stage/README.md), [`op_join_s
 | [`supervisor`](../src/supervisor/README.md) | no | no | mojo_library | yes | build gate |
 | [`supervisor_proto`](../src/supervisor_proto/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`sync`](../src/sync/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
-| [`table_store`](../src/table_store/README.md) | no | no | mojo_library | no | nobody |
-| [`telemetry_read`](../src/telemetry_read/README.md) | no | no | mojo_library | no | nobody |
-| [`telemetry_store`](../src/telemetry_store/README.md) | no | no | mojo_library | no | nobody |
+| [`table_store`](../src/table_store/README.md) | no | no | mojo_library | yes | build gate |
+| [`telemetry_read`](../src/telemetry_read/README.md) | no | no | mojo_library | yes | build gate |
+| [`telemetry_store`](../src/telemetry_store/README.md) | no | no | mojo_library | yes | build gate |
 | [`test_run_id`](../src/test_run_id/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`test_verdict`](../src/test_verdict/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`textproto`](../src/textproto/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`tpch_answers`](../src/tpch_answers/README.md) | no | no | mojo_library | yes | build gate |
 | [`trace`](../src/trace/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
-| [`udf`](../src/udf/README.md) | no | no | mojo_library | no | nobody |
+| [`udf`](../src/udf/README.md) | no | no | mojo_library | yes | build gate |
 | [`udf_abi`](../src/udf_abi/README.md) | no | no | none | no | nobody |
 | [`udf_python`](../src/udf_python/README.md) | no | no | none | no | nobody |
 | [`uuid`](../src/uuid/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |

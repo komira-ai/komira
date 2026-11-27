@@ -43,6 +43,10 @@
 //!    are red after one run, with no first log and nothing in the summary; a
 //!    subcommand other than build, test or bxl is never run again; a second
 //!    run that ran an action locally is refused by the tool step;
+//!  - a job the farm failed to start (`input-unavailable`, a recorded release
+//!    build): then a pass, green after two runs, the summary naming the
+//!    farm's `input-unavailable` and the failed log kept; three times, red
+//!    after three runs, never four, saying the third failed on the farm too;
 //!  - a buck2 ended by a signal is never run again, and a second run ended by
 //!    one fails saying so; a job summary that cannot be written, a log that
 //!    cannot be written and a buck2 that cannot be run end the step with the
@@ -567,6 +571,43 @@ test "a cut three times: red after three runs, never a fourth, saying the third 
     try t.expect((try c.file(a, "buck2-farm.second.log")) != null);
     // the third run's log stays where the tool step and later steps read it
     try t.expectEqualStrings(try recorded(a, "build_cut.log"), (try c.file(a, "buck2-farm.log")).?);
+}
+
+// ---- a job the farm failed to start ---------------------------------------------
+
+const unavailable_summary = "buck2-farm: the first run of `build` had jobs the farm failed to start (the farm's `input-unavailable` in each of 2 failed block(s)); the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log\n";
+const unavailable_summary_second = "buck2-farm: the second run of `build` had jobs the farm failed to start (the farm's `input-unavailable` in each of 2 failed block(s)); the farm answered at once; ran again (run 3 of at most 3); the second run's log is buck2-farm.second.log\n";
+
+test "a job the farm failed to start, then a pass: green after two runs, the summary names input-unavailable, the first log kept" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCase(a, "build", &.{ fixture("build_input_unavailable.log", 2), fixture("build_remote.log", 0) });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 2), c.step);
+    try t.expectEqual(@as(u8, 0), c.code);
+    try t.expectEqual(@as(usize, 2), c.runs);
+    try t.expectEqualStrings(unavailable_summary, (try c.file(a, "summary.md")).?);
+    try t.expect(has(c.out1, unavailable_summary));
+    try t.expect(has(c.out1, "buck2-farm: the second run passed\n"));
+    try t.expectEqualStrings(try recorded(a, "build_input_unavailable.log"), (try c.file(a, "buck2-farm.first.log")).?);
+    try t.expectEqualStrings(try recorded(a, "build_remote.log"), (try c.file(a, "buck2-farm.log")).?);
+    try t.expect(std.mem.startsWith(u8, c.out2, "assert_remote: ok"));
+}
+
+test "a job the farm failed to start three times: red after three runs, never a fourth, saying the third failed on the farm too" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const u = fixture("build_input_unavailable.log", 2);
+    const c = try runCase(a, "build", &.{ u, u, u, fixture("build_remote.log", 0) });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 2), c.code); // buck2's own exit code
+    try t.expectEqual(@as(usize, 3), c.runs);
+    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: FAILED: the third run failed on the farm too, as each of 3 runs did: it had jobs the farm failed to start (the farm's `input-unavailable` in each of 2 failed block(s)); not run again\n"));
+    try t.expectEqualStrings(unavailable_summary ++ unavailable_summary_second, (try c.file(a, "summary.md")).?);
+    try t.expectEqualStrings(try recorded(a, "build_input_unavailable.log"), (try c.file(a, "buck2-farm.log")).?);
 }
 
 test "a cut while the farm does not answer within the longest wait: red after one run, the summary names the wait" {

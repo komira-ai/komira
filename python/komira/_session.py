@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING
 from . import _arrow, _display, _native, _run
 from ._credentials import _BuiltIn, _Credential
 from ._errors import KomiraError, UnsupportedOperation
+from ._sources import _FileSource
 
 if TYPE_CHECKING:
     import pandas
@@ -256,6 +257,51 @@ class Session:
         with self._held():
             return self._native.json_binding(self._live(), path)
 
+    def add_sql_binding(self, name: str, source: _FileSource) -> None:
+        """Binds the SQL name `name` to `source`, a `komira.files` source, so
+        that `sql` reads it as a table; binding a name again replaces its
+        table, of any kind, as `register_parquet` does.
+
+        The source's credential is sealed on the session first, as the
+        session's value of its name: every table bound with that name reads
+        with the latest value (docs/design/credentials_and_writes.md,
+        decision 2). Then the source is bound through
+        `komira_add_sql_binding`, which reads the footers now: a local file,
+        or the objects of an `s3://` or Azure location (a glob is listed
+        now), through the store with the sealed value. Queries read the
+        objects through the same store. No secret is in what the library is
+        given to bind, and the package writes none to a log or a message.
+
+        Each refusal raises the library's named error, `status` -3 and step
+        "bind", and binds nothing; the name keeps the table it had. A
+        credential the library refuses is a `CredentialsError`, as is a
+        remote source with `AMBIENT` (`CREDENTIALS_NOT_FOUND`: the library does
+        not resolve the process's identity yet) or a credential of another
+        store (`CREDENTIAL_KIND_MISMATCH`); a location no store of the library
+        reads, `gs://` among them, is an `UnsupportedOperation`
+        (`STORAGE_URL_REFUSED`); a store that refuses the read, a missing
+        object or an S3 location with no `region` a `StorageError`; any other
+        refusal (`BIND_SOURCE_UNSUPPORTED`, `BIND_SCOPE_NOT_A_TABLE`,
+        `BIND_STORE_CONFLICT`, a missing local file) a `BindError`. A
+        refused binding still leaves its credential sealed as the session's
+        value of its name. A `name` that is not a non-empty `str`, or that
+        holds a NUL byte or a lone surrogate, and a `source` that is not a
+        `komira.files` source, raise `TypeError` or `ValueError` before the
+        library is called. Needs libkomira ABI 1.10; an older one raises
+        `KomiraError` and seals nothing.
+        """
+        _check_name(name)
+        _native._c_string("name", name)
+        if not isinstance(source, _FileSource):
+            raise TypeError("source must be a komira.files source, not {}".format(type(source).__name__))
+        wire = source._wire()
+        with self._held():
+            ctx = self._live()
+            # Refuse an older library before anything is sealed.
+            self._native._fn("komira_add_sql_binding")
+            self._seal(ctx, source._credential)
+            self._native.add_sql_binding(ctx, name, wire)
+
     def _seal_credential(self, credential: _Credential | _BuiltIn) -> None:
         """Makes `credential` the session's value of its name, replacing any
         earlier one (src/so/README.md, Credentials): `komira_credential_add`,
@@ -263,26 +309,29 @@ class Session:
         `komira_credential_seal` with the session scope. `AMBIENT` and
         `ANONYMOUS` need no definition, so nothing is called for them.
 
-        This is the step `add_sql_binding` takes for each credential a source
-        names, before it binds the source; it is private until that call
-        lands. A credential the library refuses raises `CredentialsError` with
-        the library's message, and the library discards the definition, so
-        the session's value of the name is unchanged; any other failed call
-        raises `KomiraError`. Anything other than a credential is a
-        `TypeError`, raised before the library is called.
+        `add_sql_binding` takes this step, under the same hold of the lock,
+        for the credential of the source it binds. A credential the library
+        refuses raises `CredentialsError` with the library's message, and
+        the library discards the definition, so the session's value of the
+        name is unchanged; any other failed call raises `KomiraError`.
+        Anything other than a credential is a `TypeError`, raised before the
+        library is called.
         """
-        if isinstance(credential, _BuiltIn):
-            self._live()
-            return
-        if not isinstance(credential, _Credential):
+        if not isinstance(credential, (_Credential, _BuiltIn)):
             raise TypeError("credential must be a komira credential, not {}".format(type(credential).__name__))
-        kind, name, fields = credential._definition()
         with self._held():
-            ctx = self._live()
-            cred_id = self._native.credential_add(ctx, kind, name)
-            for field, value in fields:
-                self._native.credential_set(ctx, cred_id, field, value.encode("utf-8"))
-            self._native.credential_seal(ctx, cred_id)
+            self._seal(self._live(), credential)
+
+    def _seal(self, ctx: int, credential: _Credential | _BuiltIn) -> None:
+        """`_seal_credential`'s calls, on the live context `ctx`, with the
+        session's lock held by the caller."""
+        if isinstance(credential, _BuiltIn):
+            return
+        kind, name, fields = credential._definition()
+        cred_id = self._native.credential_add(ctx, kind, name)
+        for field, value in fields:
+            self._native.credential_set(ctx, cred_id, field, value.encode("utf-8"))
+        self._native.credential_seal(ctx, cred_id)
 
     def close(self) -> None:
         """Frees the context, after the call running on another thread, if

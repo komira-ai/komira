@@ -54,7 +54,7 @@
 //!    writes none (so a pull-request check sends no header and queues as `ci`); any
 //!    other value, or one with a line break, is refused. Every workflow step that uses
 //!    the action in release.yml, release-macos.yml, pypi.yml (both of pypi.yml's build jobs) or npm.yml
-//!    (its build and test jobs) passes `farm-qos: batch`,
+//!    (its build, test and macOS jobs) passes `farm-qos: batch`,
 //!    and no step of any other
 //!    workflow passes `farm-qos` at all, so the release work queues behind the
 //!    pull-request checks and the pull-request checks are never lowered.
@@ -1025,7 +1025,7 @@ test "every workflow step that uses the action passes tls from FARM_TLS, and far
     try t.expect(macos_callers > 0);
     // pypi.yml holds the farm-connect steps of both builds, the Linux one and the macOS one
     try t.expect(pypi_callers >= 2);
-    // npm.yml holds the farm-connect steps of its build and its test
-    try t.expect(npm_callers >= 2);
+    // npm.yml holds the farm-connect steps of its build, its test and its macOS job
+    try t.expect(npm_callers >= 3);
     try t.expectEqual(@as(usize, 0), wrong);
 }
