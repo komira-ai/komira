@@ -1,0 +1,7 @@
+[{'id': 1, 'name': 'Ana', 'score': 9.5}, {'id': 2, 'name': 'Bo', 'score': 7.0}, {'id': 3, 'name': 'Cy', 'score': None}]
+[{'name': 'Ana'}, {'name': 'Bo'}, {'name': 'Cy'}]
+[{'n': 3}]
+['id', 'name', 'score']
+int64 string float64
+[{'id': 1, 'name': 'Ana'}, {'id': 2, 'name': 'Bo'}, {'id': 3, 'name': 'Cy'}]
+[{'id': 1, 'score': 9.5}, {'id': 2, 'score': 7.0}, {'id': 3, 'score': None}]

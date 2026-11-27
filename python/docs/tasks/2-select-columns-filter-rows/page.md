@@ -61,6 +61,6 @@ Output:
 ## Related
 
 - [How do I filter rows where a value is in a list?](../29-filter-rows-value-list/page.md) (rank 29, works)
-- How do I select or drop columns? (rank 34, works; no page yet)
-- How do I filter rows where a text column contains a substring? (rank 41, works; no page yet)
-- How do I filter rows by a date range? (rank 83, works)
+- [How do I select or drop columns?](../34-select-drop-columns/page.md) (rank 34, partial)
+- [How do I filter rows where a text column contains a substring?](../41-filter-rows-text-column-contains-substring/page.md) (rank 41, works)
+- [How do I filter rows by a date range?](../83-filter-rows-date-range/page.md) (rank 83, works)

@@ -75,7 +75,7 @@ Output:
 
 ## Related
 
-- How do I remove duplicate rows? (rank 13, works; no page yet)
+- [How do I remove duplicate rows?](../13-remove-duplicate-rows/page.md) (rank 13, partial)
 - How do I count how many times each value appears? (rank 9, works; no page yet)
 - [How do I validate data: nulls, uniqueness, ranges?](../59-validate-data-nulls-uniqueness-ranges/page.md) (rank 59, works)
 - [How do I standardize inconsistent category spellings?](../58-standardize-inconsistent-category-spellings/page.md) (rank 58, works)

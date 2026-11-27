@@ -111,6 +111,114 @@ test "dist: each way an archive can be no Node.js release is refused in words, e
     try t.expectEqual(@as(u8, 2), (try c.run(&.{ "dist", "--bogus", "x" }, &.{})).code);
 }
 
+// A dist built for macOS arm64: its bin/node is never run, so a program that
+// could not run here (a Mach-O) stands in, and node_version.h states the version.
+
+const macho_arm64 = [_]u8{ 0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01 } ++ [_]u8{0} ** 24;
+
+const version_h = "#define NODE_MAJOR_VERSION 7\n#define NODE_MINOR_VERSION 8\n#define NODE_PATCH_VERSION 9\n";
+
+fn foreignEntries(node_bytes: []const u8, header: []const u8) [6]tt.Entry {
+    return .{
+        .{ .name = "node-x/", .kind = '5', .mode = 0o755 },
+        .{ .name = "node-x/bin/node", .mode = 0o755, .data = node_bytes },
+        .{ .name = "node-x/LICENSE", .mode = 0o644, .data = "licence text\n" },
+        .{ .name = "node-x/include/node/node_api.h", .mode = 0o644, .data = "H" },
+        .{ .name = "node-x/include/node/node_version.h", .mode = 0o644, .data = header },
+        .{ .name = "node-x/lib/node_modules/npm/bin/npm-cli.js", .mode = 0o755, .data = "NPM" },
+    };
+}
+
+test "dist --foreign macho-arm64: a Mach-O arm64 node whose header states the pin is kept without being run" {
+    var c = try newCtx("dist_foreign_ok");
+    defer c.deinit();
+    try c.write("a.tgz", try tgzOf(&c, &foreignEntries(&macho_arm64, version_h)), 0o644);
+    const r = try c.run(&.{ "dist", "--archive", "a.tgz", "--out", "out", "--top", "node-x", "--version", "7.8.9", "--foreign", "macho-arm64" }, &.{});
+    if (r.code != 0) std.debug.print("[node_act stderr] {s}\n", .{r.stderr});
+    try t.expectEqual(@as(u8, 0), r.code);
+    try t.expectEqualStrings(&macho_arm64, try c.read("out/bin/node"));
+    try t.expectEqual(@as(std.fs.File.Mode, 0o755), try c.mode("out/bin/node"));
+    try t.expectEqualStrings(version_h, try c.read("out/include/node/node_version.h"));
+    try t.expectEqualStrings("H", try c.read("out/include/node/node_api.h"));
+    try t.expectEqualStrings("licence text\n", try c.read("out/LICENSE"));
+    try t.expect(!c.exists("out/lib"));
+}
+
+test "dist --foreign macho-arm64: a node that is no Mach-O arm64 executable, or a header that does not state the pin, is refused in words, exit 2" {
+    var c = try newCtx("dist_foreign_bad");
+    defer c.deinit();
+    const elf = try fakeBytes(&c);
+    var x86_64 = macho_arm64;
+    x86_64[4] = 0x07;
+    const Case = struct { name: []const u8, node: []const u8, header: []const u8, version: []const u8, want: []const u8 };
+    const cases = [_]Case{
+        .{ .name = "elf", .node = elf, .header = version_h, .version = "7.8.9", .want = "node_dist: the bin/node in a.tgz is not a Mach-O 64-bit arm64 executable: it is an ELF file\n" },
+        .{ .name = "x86_64", .node = &x86_64, .header = version_h, .version = "7.8.9", .want = "not a Mach-O 64-bit arm64 executable: its Mach-O cputype is not arm64\n" },
+        .{ .name = "script", .node = "#!/bin/sh\nexit 0\n", .header = version_h, .version = "7.8.9", .want = "executable: it does not start with the Mach-O 64-bit magic\n" },
+        .{ .name = "short", .node = macho_arm64[0..6], .header = version_h, .version = "7.8.9", .want = "executable: it is shorter than a Mach-O header\n" },
+        .{ .name = "empty", .node = "", .header = version_h, .version = "7.8.9", .want = "executable: it is shorter than a Mach-O header\n" },
+        .{ .name = "wrong_version", .node = &macho_arm64, .header = version_h, .version = "7.8.0", .want = "node_dist: include/node/node_version.h in a.tgz states v7.8.9, the pin says v7.8.0\n" },
+        .{ .name = "version_prefix", .node = &macho_arm64, .header = version_h, .version = "7.8", .want = "states v7.8.9, the pin says v7.8\n" },
+        .{ .name = "no_minor", .node = &macho_arm64, .header = "#define NODE_MAJOR_VERSION 7\n#define NODE_PATCH_VERSION 9\n", .version = "7.8.9", .want = "node_dist: include/node/node_version.h in a.tgz does not define NODE_MINOR_VERSION as a number\n" },
+        .{ .name = "not_a_number", .node = &macho_arm64, .header = "#define NODE_MAJOR_VERSION seven\n", .version = "7.8.9", .want = "does not define NODE_MAJOR_VERSION as a number\n" },
+    };
+    for (cases) |cs| {
+        try c.write("a.tgz", try tgzOf(&c, &foreignEntries(cs.node, cs.header)), 0o644);
+        const out = try std.fmt.allocPrint(c.alloc(), "out_{s}", .{cs.name});
+        const r = try c.run(&.{ "dist", "--archive", "a.tgz", "--out", out, "--top", "node-x", "--version", cs.version, "--foreign", "macho-arm64" }, &.{});
+        if (r.code != 2 or !has(r.stderr, cs.want)) std.debug.print("[{s}] code {d}: {s}\n", .{ cs.name, r.code, r.stderr });
+        try t.expectEqual(@as(u8, 2), r.code);
+        try t.expect(has(r.stderr, cs.want));
+    }
+}
+
+test "dist --foreign macho-arm64: an archive without node_version.h, or without the files a dist needs, is refused by name" {
+    var c = try newCtx("dist_foreign_missing");
+    defer c.deinit();
+    var no_version_h = foreignEntries(&macho_arm64, version_h);
+    no_version_h[4] = .{ .name = "node-x/include/node/other.h", .data = "H" };
+    try c.write("a.tgz", try tgzOf(&c, &no_version_h), 0o644);
+    var r = try c.run(&.{ "dist", "--archive", "a.tgz", "--out", "out_no_version_h", "--top", "node-x", "--version", "7.8.9", "--foreign", "macho-arm64" }, &.{});
+    try t.expectEqual(@as(u8, 2), r.code);
+    try t.expect(has(r.stderr, "node_dist: include/node/node_version.h in a.tgz does not define NODE_MAJOR_VERSION as a number\n"));
+
+    var no_license = foreignEntries(&macho_arm64, version_h);
+    no_license[2] = .{ .name = "node-x/NOTICE", .data = "N" };
+    try c.write("a.tgz", try tgzOf(&c, &no_license), 0o644);
+    r = try c.run(&.{ "dist", "--archive", "a.tgz", "--out", "out_no_license", "--top", "node-x", "--version", "7.8.9", "--foreign", "macho-arm64" }, &.{});
+    try t.expectEqual(@as(u8, 2), r.code);
+    try t.expect(has(r.stderr, "node_dist: a.tgz holds no node-x/LICENSE\n"));
+
+    var not_exec = foreignEntries(&macho_arm64, version_h);
+    not_exec[1].mode = 0o644;
+    try c.write("a.tgz", try tgzOf(&c, &not_exec), 0o644);
+    r = try c.run(&.{ "dist", "--archive", "a.tgz", "--out", "out_not_exec", "--top", "node-x", "--version", "7.8.9", "--foreign", "macho-arm64" }, &.{});
+    try t.expectEqual(@as(u8, 2), r.code);
+    try t.expect(has(r.stderr, "holds no node-x/bin/node or node-x/include/node/node_api.h"));
+}
+
+test "dist: --foreign takes only macho-arm64 and no --libs, and a dist that is not foreign still needs --libs" {
+    var c = try newCtx("dist_foreign_flags");
+    defer c.deinit();
+    try c.write("a.tgz", try tgzOf(&c, &foreignEntries(&macho_arm64, version_h)), 0o644);
+    try c.mkdir("libs");
+    const base = [_][]const u8{ "dist", "--archive", "a.tgz", "--out", "out", "--top", "node-x", "--version", "7.8.9" };
+    var r = try c.run(&(base ++ [_][]const u8{ "--foreign", "elf" }), &.{});
+    try t.expectEqual(@as(u8, 2), r.code);
+    try t.expect(has(r.stderr, "node_act: dist: --foreign is macho-arm64, not elf\n"));
+    r = try c.run(&(base ++ [_][]const u8{ "--foreign", "macho-arm64", "--libs", "libs" }), &.{});
+    try t.expectEqual(@as(u8, 2), r.code);
+    try t.expect(has(r.stderr, "node_act: dist: --foreign takes no --libs\n"));
+    r = try c.run(&base, &.{});
+    try t.expectEqual(@as(u8, 2), r.code);
+    try t.expect(has(r.stderr, "node_act: dist needs --libs\n"));
+    r = try c.run(&(base ++ [_][]const u8{"--foreign"}), &.{});
+    try t.expectEqual(@as(u8, 2), r.code);
+    try t.expect(has(r.stderr, "dist: MissingValue: --foreign"));
+    // Nothing was unpacked by a refused command line.
+    try t.expect(!c.exists("out"));
+}
+
 // ---- npm-package ------------------------------------------------------------------
 
 const js = "// the program is the pinned node's; the stand-in ignores it\n";

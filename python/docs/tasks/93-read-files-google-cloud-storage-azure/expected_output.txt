@@ -1,0 +1,4 @@
+AzureSas('reports-reader', account='salesacct', sas=<set>)
+{'product': 'cake', 'units': Decimal('21')}
+{'product': 'tea', 'units': Decimal('71')}
+UnsupportedOperation STORAGE_URL_REFUSED

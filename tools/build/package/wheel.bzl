@@ -81,9 +81,10 @@ the entry's format, its loads walked as the entry's are; every ELF and Mach-O me
 carried once with the bytes of the runtime's copy, its licence files
 `runtime_licenses` in `.dist-info/licenses/` and named by METADATA, and no
 Requires-Dist of a distribution in `runtime_dists`. The runtime is the
-toolchain's (`toolchains//:mojo`), or the directory `runtime` names (a
-`mojo_runtime`: a macOS wheel's check runs on Linux, and the darwin toolchain
-executes on macOS). Beside the wheel it reads only those names and the
+toolchain's (`toolchains//:mojo`, for linux x86_64 only: a darwin-arm64 build
+skips the target), or the directory `runtime` names (a `mojo_runtime`: a macOS
+wheel's check runs on Linux, and the darwin toolchain executes on macOS).
+Beside the wheel it reads only those names and the
 runtime libraries, nothing else the rule that wrote the wheel was given.
 The output, `<name>.libs`, lists the libraries `entry` loads, in
 load order, then those each of `opened` adds; with `expect_refusal`, it exists only if the wheel is refused with
@@ -428,7 +429,13 @@ def _wheel_libs_check_macro(**kwargs):
     if "runtime" in kwargs:
         _wheel_libs_check_runtime(exec_compatible_with = LINUX_X86_64, **kwargs)
     else:
-        _wheel_libs_check(exec_compatible_with = LINUX_X86_64, **kwargs)
+        # The toolchain's runtime is the Linux one: the toolchain executes on
+        # the target platform, so another platform has no such check.
+        _wheel_libs_check(
+            exec_compatible_with = LINUX_X86_64,
+            target_compatible_with = LINUX_X86_64,  # komira-limit:manylinux-wheel-linux-x86-64
+            **kwargs
+        )
 
 wheel_libs_check = declares_docs(_wheel_libs_check_macro)
 

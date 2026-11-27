@@ -3,7 +3,7 @@
 ## Responsibility
 
 The logical plan IR on the wire: the protobuf schema `komira.plan.v1` and
-the Mojo structs generated from it. Three files:
+the Mojo structs generated from it. Four files:
 
 - `plan_vocabulary.proto`: every enumerated tag space a plan or expression
   node can name (`PlanTag`, `ExprTag`, `AggFn`, `JoinType`, `ColSide`, ...).
@@ -33,6 +33,13 @@ the Mojo structs generated from it. Three files:
   header and runs its admission checks; the package `optimized_plan`
   (`src/optimized_plan`) reads and writes the body and the segments, the
   canonical form and the digests.
+- `bound_source.proto`: the input of `komira_add_sql_binding`
+  (`docs/design/credentials_and_writes.md`, decisions 4 and 8). A
+  `WireBoundSource` is the source a caller binds to a SQL name; its one kind
+  so far is a `WireFileSource` (a location, a `WireSourceAccess` and
+  `hive_partitioning`). `WireSourceAccess` carries the NAME of a credential
+  and the store's endpoint, region, `AddressingStyleWire` and signing
+  service, never a value. No plan carries these messages.
 
 This package is the schema, not the codec. `plan_wire` converts a
 `LogicalPlan` to and from these messages and checks sizes, versions and
@@ -52,7 +59,7 @@ shipped number never changes. `optimized_plan.proto` has its own ledger,
 `tests/test_optimized_plan_field_numbers.mojo`, which also requires that no
 declared field takes a number the file holds free or reserves.
 `tests/test_plan_reservations.mojo` reads every `reserved` number and name
-of the three files against its own table, and requires that a number held
+of the four files against its own table, and requires that a number held
 free for a later field is not reserved. Its goldens
 (`tests/fixtures/optimized/golden/`, one per message) are read by protoc
 (the `optimized_plan_golden_fixtures` target) and by the generated codec
@@ -64,6 +71,7 @@ free for a later field is not reserved. Its goldens
 |---|---|---|
 | `WirePlanEnvelope`, `WirePlan`, `WireExpr`, ... | [plan.proto](https://github.com/komira-ai/komira/blob/main/src/plan_proto/plan.proto) | the message layer (module `plan_proto.plan`) |
 | `OptimizedPlan`, `OptimizedPlanBody`, `OptimizedSegment`, ... | [optimized_plan.proto](https://github.com/komira-ai/komira/blob/main/src/plan_proto/optimized_plan.proto) | the optimized plan (module `plan_proto.optimized_plan`) |
+| `WireBoundSource`, `WireFileSource`, `WireSourceAccess`, `AddressingStyleWire` | [bound_source.proto](https://github.com/komira-ai/komira/blob/main/src/plan_proto/bound_source.proto) | the source a binding call takes (module `plan_proto.bound_source`) |
 | `PlanTag`, `ExprTag`, `ColSide`, ... | [plan_vocabulary.proto](https://github.com/komira-ai/komira/blob/main/src/plan_proto/plan_vocabulary.proto) | the tag spaces (module `plan_proto.plan_vocabulary`) |
 
 Each message is a struct whose constructor takes its fields in declaration

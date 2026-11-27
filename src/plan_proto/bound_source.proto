@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package komira.plan.v1;
+
+// A SOURCE AS A CALLER DECLARES IT — the input of `komira_add_sql_binding`.
+//
+// The design is docs/design/credentials_and_writes.md: decision 4 (the plan
+// carries a location and a credential name, never a value) and decision 8 (the
+// C ABI: `source` is the bytes of a `WireBoundSource`). This file holds the
+// messages of those two decisions that a binding call needs now: the access
+// settings of one source, the addressing style, a source of files and the
+// message that names which kind of source a binding is.
+//
+// A `WireBoundSource` is never part of a plan. The library reads it when a SQL
+// name is bound, and a plan still carries only the plan's own source messages.
+//
+// NO SECRET IS EVER IN THESE BYTES. `WireSourceAccess.credential` is the NAME
+// of a credential the session sealed earlier (`komira_credential_add`,
+// `komira_credential_set`, `komira_credential_seal`); the library reveals the
+// value inside itself when it reads, and nothing here can carry one.
+//
+// FIELD NUMBERS ARE PERMANENT. Add fields only, never renumber, reuse or
+// retype one (rule B8).
+//
+// HELD NUMBERS. The numbers 2 to 4 of `WireBoundSource.kind` are the design's
+// and are held for the arms below; each will be added with exactly that
+// meaning, so no line here claims them:
+//   2  WireIcebergCatalog iceberg        (decision 4: an Iceberg REST catalog)
+//   3  WirePlanEnvelope   view           (decision 4: a frame's plan)
+//   4  IcebergTableRef    iceberg_table  (decision 4: one table of a catalog)
+// A reader that meets one of these numbers today skips it as an unknown field,
+// so the bytes of a source it does not yet serve bind no kind and are refused.
+
+// How a store's bucket is put in a request's address.
+enum AddressingStyleWire {
+  // The store's default for its scheme.
+  ADDRESSING_STYLE_WIRE_UNSPECIFIED = 0;
+  // The bucket is in the host name: `bucket.endpoint`.
+  ADDRESSING_STYLE_WIRE_VHOST = 1;
+  // The bucket is the first segment of the path: `endpoint/bucket`.
+  ADDRESSING_STYLE_WIRE_PATH = 2;
+}
+
+// How to reach and authenticate one source. Never a secret.
+message WireSourceAccess {
+  // A credential NAME: `ambient`, `anonymous`, or the name of a credential
+  // sealed on the session. Never a value. Empty means the source names none.
+  string credential = 1;
+  // The store's endpoint when it is not the scheme's default; empty otherwise.
+  // It carries no user information, query or fragment.
+  string endpoint = 2;
+  // The region requests are routed to and signed for; empty means the
+  // credential's or the store's own.
+  string region = 3;
+  // Vhost or path addressing; UNSPECIFIED means the store's default.
+  AddressingStyleWire addressing = 4;
+  // The SigV4 service name for a catalog (for example "glue"); empty means no
+  // SigV4. A file source leaves it empty.
+  string signing_service = 5;
+}
+
+// A source of data files: a location and how to reach it.
+message WireFileSource {
+  // A path, glob or URL. A path with no scheme is a local file; `s3://`,
+  // `az://`, `abfs://` and `abfss://` name an object store.
+  string location = 1;
+  // How to reach and authenticate `location`; absent means a local file.
+  WireSourceAccess access = 2;
+  // True reads the location as a Hive-partitioned directory.
+  bool hive_partitioning = 3;
+}
+
+// The input of `komira_add_sql_binding`: a source as the caller declared it.
+// An empty message sets no kind, and a binding refuses it by name.
+message WireBoundSource {
+  oneof kind {
+    // Data files at a location.
+    WireFileSource files = 1;
+  }
+}

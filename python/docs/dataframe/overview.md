@@ -35,6 +35,7 @@ again. The install test runs this program on the installed wheel.
 - [Row order](row_order.md): which verbs keep an order.
 - [No index, and nothing runs by accident](no_index.md): what is refused.
 - [Explain](explain.md): the engine's text of a plan.
+- [Writing files](writing_files.md): `to_parquet`, `to_csv`, `to_json`.
 - [Group-by and aggregates](groupby.md), with
   [what the engine runs today](aggregates_engine.md) and
   [drop_duplicates](drop_duplicates.md).

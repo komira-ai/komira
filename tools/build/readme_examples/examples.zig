@@ -26,6 +26,15 @@
 //! runs to the first `-->`), so a `<!-- mojo-hidden` line inside another
 //! comment is part of that one and is refused too.
 //!
+//! Includes (include.zig): a fence on the line just after an include marker,
+//! `<!-- include examples/<name>.mojo -->`, shows a file whole, so it is an
+//! example in module mode whatever its info string says: the filled fence is
+//! the file, a whole program with its own `main`. That is how `generate`
+//! reads a source-first README, and the installed copy of one
+//! (tools/build/readme_e2e). A library still on the inline model (its BUCK
+//! file lists no `readme_examples`) refuses includes (`refuse_includes`):
+//! nothing would hold such a fence to its file.
+//!
 //! What is code, a fence and a link is the shared Markdown reader's
 //! (`@import("markdown")`, tools/build/markdown). Every refusal names
 //! `<readme>:<line>` (1-based), and all of them are reported at once, in
@@ -33,6 +42,7 @@
 
 const std = @import("std");
 const md = @import("markdown");
+const MARKERS = @import("task_page.zig").MARKERS;
 const Allocator = std.mem.Allocator;
 
 pub const Example = struct {
@@ -217,6 +227,13 @@ fn byLine(_: void, a: Refusal, b: Refusal) bool {
     return a.line < b.line;
 }
 
+/// Whether `line` is an include marker, whole: `<!-- include <path> -->`
+/// at the start of the line (task_page.zig spells the words).
+pub fn isInclude(line: []const u8) bool {
+    const head = MARKERS.open ++ MARKERS.include;
+    return line.len >= head.len + MARKERS.close.len and std.mem.startsWith(u8, line, head) and std.mem.endsWith(u8, line, MARKERS.close);
+}
+
 /// The examples of README `text`, named `display` in every message.
 ///
 /// With `refuse_relative_links` (a README that ships in its package), a
@@ -224,6 +241,20 @@ fn byLine(_: void, a: Refusal, b: Refusal) bool {
 /// the repository's other files do not. Anchors and absolute URLs pass.
 /// Otherwise `.refused` holds every refusal, one per line, in line order.
 pub fn extract(alloc: Allocator, text: []const u8, display: []const u8, refuse_relative_links: bool) Allocator.Error!Extracted {
+    return extractWith(alloc, text, display, .{ .refuse_relative_links = refuse_relative_links });
+}
+
+pub const Options = struct {
+    /// See `extract`.
+    refuse_relative_links: bool = false,
+    /// Refuse every include marker: the README of a library still on the
+    /// inline model.
+    refuse_includes: bool = false,
+};
+
+/// `extract` with every option.
+pub fn extractWith(alloc: Allocator, text: []const u8, display: []const u8, opts: Options) Allocator.Error!Extracted {
+    const refuse_relative_links = opts.refuse_relative_links;
     const lines = try md.splitLines(alloc, text);
     const mask = try md.codeMask(alloc, lines);
     var refusals = std.ArrayList(Refusal).empty;
@@ -269,9 +300,10 @@ pub fn extract(alloc: Allocator, text: []const u8, display: []const u8, refuse_r
                 try code_lines.appendSlice(alloc, h.code_lines.items);
             }
         }
+        const included = f.open_line > 0 and isInclude(lines[f.open_line - 1]);
         try out.append(alloc, .{
             .line = at,
-            .module = isModule(f.info),
+            .module = included or isModule(f.info),
             .code = try code.toOwnedSlice(alloc),
             .code_lines = try code_lines.toOwnedSlice(alloc),
         });
@@ -280,6 +312,13 @@ pub fn extract(alloc: Allocator, text: []const u8, display: []const u8, refuse_r
         if (!used[k]) {
             try refuse(alloc, &refusals, display, h.first + 1, "a mojo-hidden comment must end on the line just before a ```mojo fence" ++
                 " or start on the line just after its closing fence; this one runs nowhere", .{});
+        }
+    }
+    if (opts.refuse_includes) {
+        for (lines, 0..) |l, i| {
+            if (mask[i] or !isInclude(l)) continue;
+            try refuse(alloc, &refusals, display, i + 1, "an include marker in the README of a library that lists no readme_examples:" ++
+                " list the files in its BUCK file (readme_examples = glob([\"examples/*.mojo\"])), so the freshness check holds each fence to its file", .{});
         }
     }
     if (refuse_relative_links) {

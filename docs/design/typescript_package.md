@@ -146,15 +146,22 @@ Fixed before this design, and not reopened here:
 
 ### Toolchain
 
-- **EXISTS** One Node pin: 24.21.0, linux-x64 only (`third_party/node/pins.bzl`).
+- **EXISTS** Node 24.21.0 pinned for every node rule on linux-x64 (`third_party/node/pins.bzl`).
+  The install test of §5 also has 22.23.5 and 26.13.1 (`:node_22`, `:node_26`), and npm 11.20.0
+  (`:npm`), visible to `//node` alone; the macOS install test has the same three lines' darwin-arm64
+  archives (`NODE_MACOS`: `:node_22_macos_arm64`, `:node_macos_arm64`, `:node_26_macos_arm64`).
+  The 24.21.0 one is also `NODE_DARWIN_ARM64`, which `//third_party/node:node_runtime` stages beside
+  a macOS test, checked on linux and run by no action.
   - The addon is compiled by `c_shared_lib` with
     `zig cc -target x86_64-linux-gnu.2.34 -shared -Wl,-z,undefs`, so the `napi_*` symbols resolve
     against `node` at load.
   - `node_dist` keeps only `bin/node`, `include/node` and `LICENSE` from the archive. npm, npx and
-    corepack are left out, so the repository has no npm CLI.
-  - The "Limits" section of [tools/build/node/README.md](../../tools/build/node/README.md) lists
-    what macOS needs: a `darwin-arm64` pin, the macOS execution platform, and
-    `-undefined dynamic_lookup`. None of it exists yet. linux-arm64 has neither a
+    corepack are left out; the one npm CLI is the pin of §4, which only `//node:install_test` runs.
+  - **EXISTS** for macOS arm64: the `darwin-arm64` archives of the same three lines
+    (`:node_macos_arm64`, `:node_22_macos_arm64`, `:node_26_macos_arm64`), unpacked and run by the
+    macOS build of `node_act` on a macOS worker, for the macOS install test alone, and the addon
+    linked for the target platform's OS (`target_os`: Mach-O with `-undefined dynamic_lookup` on
+    macOS). linux-arm64 has neither a
     Node pin nor a registered build platform (`tools/build/platforms/table.bzl`,
     `komira-limit:linux-arm64-unregistered`).
 - **EXISTS** The Node rules also hold `npm_modules` (an offline `npm ci --ignore-scripts` from a
@@ -176,13 +183,14 @@ Fixed before this design, and not reopened here:
   `node/package.json` (`"private": true`, named by D1's option A as a placeholder), the TypeScript
   sources in `node/src/`, `Session.sql` and `Result` among them, and the `.js` and `.d.ts` files
   `//node:dist` compiles from them. The private Arrow import of part 2
-  (`node/src/arrow_import.ts`) is one of those sources, read by `Result`. No platform package is
-  built and nothing is published. No workflow mentions npm
-  publishing. The only use of npm in a workflow is the pin check in `kpin-update.yml`.
+  (`node/src/arrow_import.ts`) is one of those sources, read by `Result`. Nothing is published:
+  `.github/workflows/npm.yml` (§4) builds the release set and runs the install test on every push to
+  `main`, and its publish job stays off until the owner's go (D4), which is the change of
+  `release/npm_publish.txt` to `publish: on`.
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.9, with twenty-five exports
+- **EXISTS** `libkomira` is at ABI 1.10, with twenty-six exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
   - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream.
     `komira_sql_stream_run` (1.6) runs it under a run handle that another thread cancels
@@ -196,6 +204,8 @@ Fixed before this design, and not reopened here:
     the step that refused it. The addon binds them, and `KomiraError` carries them.
   - `komira_register_arrow_stream` (1.9) drains a host's Arrow C stream into a table held in
     memory and registers it by name, replacing a table of that name; it releases the stream.
+  - `komira_add_sql_binding` (1.10) binds a table name to the protobuf bytes of a
+    `WireBoundSource` (a Parquet location), replacing a table of that name.
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,
@@ -430,8 +440,8 @@ the host.
   - 26 became the active LTS on 2026-10-28;
   - 20 is past its end of life.
 
-  `third_party/node` still calls 24 the active line and 26 not an LTS line. Its README is updated
-  when the 26 pin lands.
+  `third_party/node` pins 22.23.5 and 26.13.1 beside 24.21.0 for the install test, and its README
+  names each line as the release index does.
   - 22.12 is the first 22 that loads an ES module through `require`, so CommonJS users need no
     second build.
   - The package is ESM only, with an `exports` map and `types`.
@@ -441,9 +451,8 @@ the host.
   - It needs nothing newer: externals with type tags (8), thread-safe functions (4), async work
     and external `ArrayBuffer`s (1).
   - N-API is ABI-stable, so one `.node` per platform serves every Node major.
-- **Only what is true.** The install test runs on pins of Node 22, 24 and 26 (§5). Until it does,
-  the README claims only the majors it runs. Today there is one pin, 24.21.0. Electron, Deno and
-  Bun are not claimed.
+- **Only what is true.** The install test runs on pins of Node 22, 24 and 26 (§5): 22.23.5, 24.21.0
+  and 26.13.1. The README claims only the majors it runs. Electron, Deno and Bun are not claimed.
 
 ### Types
 
@@ -526,7 +535,8 @@ is under [D2](#d2-where-the-mojo-runtime-comes-from). What follows from the ruli
   ([tools/build/mojo/README.md](../../tools/build/mojo/README.md)).
 - npm writes files without the quarantine attribute, and Node's macOS binary allows libraries that
   are not signed by its own team. So `dlopen` of an ad-hoc-signed library works
-  *(inferred; the macOS install test checks it)*.
+  *(inferred; the macOS install test, `//node:install_test_macos_arm64`, checks it on the farm's
+  macOS workers in `npm.yml`)*.
 - No notarization is planned.
 
 ## 4. Release
@@ -577,36 +587,51 @@ top-level `pypi.yml` and the macOS arm64 wheel by `pypi-macos-arm64.yml`, each t
     hold only `_conda` targets, and `release_json names` checks that.
   - The package names are listed in `release/npm_names.txt`, and a Zig case holds the set equal to
     the list, as `prod_claimed_names.txt` does for mopm.
+  - **EXISTS**: `//release:npm_packages` (`release/npm_packages.bzl`), whose `npm_set.json`
+    `//release/ci:npm_smoke set` writes, the platform packages first and the main package last, and
+    `//release:npm_names_cases`.
 - **The platforms.** linux-x86_64 is built on the farm's Linux workers. macos-arm64 is built by the
-  macOS leg (`release-macos.yml`'s farm macOS workers), never in a pull request (rule B9).
-  linux-arm64 waits for that platform to be registered.
-  - The main package lists only the platform packages that are published.
+  macOS leg, `npm.yml`'s job `build-macos-arm64` on the farm's macOS workers (as `pypi.yml`'s macOS
+  wheel is), never in a pull request (rule B9). **EXISTS**: `//node:package_macos_arm64` and
+  `//node:install_test_macos_arm64`. linux-arm64 waits for that platform to be registered.
+  - The main package lists only the platform packages that are published. **EXISTS**: `npm_tarball`'s
+    `optional_dependencies` keeps of `node/package.json`'s list only the names it gives, and the set
+    refuses a main package that does not name exactly its platform packages. `//node:package` names
+    the linux-x64 package (the set `//release:npm_packages`) and `//node:package_with_macos_arm64`
+    both (`//release:npm_packages_macos_arm64`); `npm.yml` publishes the second only when the macOS
+    install test passed, and the first otherwise, so a failed macOS build never holds the Linux
+    packages back.
   - A platform added later is a new optional dependency in a later version. That is additive, and
     a user of an older version is not affected.
 
 ### The workflow
 
-A top-level `.github/workflows/npm.yml`. Trusted publishing names a workflow file, so publishing
-has a file of its own, as PyPI does. It runs on push to `main` and has `permissions: {}` at the
-top. Its jobs:
+A top-level `.github/workflows/npm.yml` (**EXISTS**, [docs/ci.md](../ci.md#npmyml-publishing-the-npm-packages);
+its publish job is gated off until D4's go, by `release/npm_publish.txt`). Trusted publishing names a
+workflow file, so publishing has a file of its own, as PyPI does. It runs on push to `main` and has
+`permissions: {}` at the top. Its jobs:
 
 1. **build** (environment `build`, farm): `//release:npm_packages`, stamped with the run's `N`.
 2. **test** (environment `build`, no npm identity): the install test of §5, on each pinned Node.
    - The job's only identity is the farm join, the one `prod-test` already uses
      ([docs/ci.md](../ci.md)).
    - It tests the tarballs that the build job uploaded as a workflow artifact, after checking each
-     against `npm_set.json`.
+     against `npm_set.json`. As built, the job holds the downloaded tarballs to `npm_set.json` and
+     that record to the one it builds again from the build job's stamp (`npm_smoke verify --built`);
+     the install test it then builds from the same stamp installs tarballs the farm builds, which are
+     those bytes because the tarballs are reproducible.
 3. **publish** (environment `npm`, `contents: read` and `id-token: write`, no token). Each
    platform tarball first, then the main package, with `npm publish <file> --access public`.
    - Trusted publishing exchanges the job's OIDC token, so no `NPM_TOKEN` exists anywhere.
    - Provenance is generated automatically for a public repository and a public package.
    - The CLI must be npm 11.5.1 or later, under Node 22.14 or later (npm's trusted-publishing page,
      read 2026-11-20).
-   - The repository has no npm today, so the CLI is a new pin, by URL and SHA-256 (rule B10). It is
-     the npm tarball from the registry, run by the pinned Node, and visible only to this job's
-     target.
-4. **smoke** (no identity): one named Zig tool, `//release/ci:npm_smoke`, run as one step (rule
-   B4).
+   - The CLI is a pin, by URL and SHA-256 (rule B10). It is the npm tarball from the registry, run
+     by the pinned Node, and visible only to the install test's target. **EXISTS**:
+     `//third_party/node:npm`, npm 11.20.0 (the npm Node 26.13.1 bundles), which
+     `//node:install_test` runs.
+4. **smoke** (no identity): one named Zig tool, `//release/ci:npm_smoke` (**EXISTS**), run as one
+   step (rule B4).
    - It installs the exact version from the registry into an empty directory, compares each
      package's `integrity` with `npm_set.json`, and runs `SELECT 1`. There is no step between the
      install and the query.
@@ -618,7 +643,8 @@ How it holds the rules:
 - No `pull_request` trigger and no pull-request job (rule B9).
 - It runs automatically from `main`, with no tag (rule B12).
 - A Zig case file like `release_workflow_test.zig` holds the jobs' permissions and environments,
-  with a negative case for each (rule T15).
+  with a negative case for each (rule T15). **EXISTS**: `//:npm_workflow_cases`
+  (`.github/workflows/npm_workflow_test.zig`).
 
 **Failure.** npm creates a (name, version) once, like the mopm registry.
 - A run that fails before the main package is published leaves only platform packages that
@@ -631,7 +657,9 @@ How it holds the rules:
 
 **Owner steps outside the repository**, before the first publish:
 - confirm that the `komira-ai` scope on npm is the company's;
-- create the four packages and their trusted publishers (workflow `npm.yml`, environment `npm`);
+- create each package of `release/npm_names.txt` (today the main package and the linux-x64 one; the
+  darwin-arm64 package is on it, and the linux-arm64 one joins it when it is built) and its trusted publisher
+  (workflow `npm.yml`, environment `npm`);
 - create the `npm` environment on GitHub, deployable from `main` only.
 
 The npm documentation does not say whether a trusted publisher can be configured before its
@@ -692,28 +720,42 @@ linux-x86_64.
 ### From the installed package, on each platform
 
 `//node:install_test` installs the built tarballs into an empty project with the pinned npm of §4
-(`npm ci --ignore-scripts --offline`, from `file:` tarballs and the pinned `apache-arrow`). It is
-the one build action that runs npm.
+(`npm install --offline --ignore-scripts --engine-strict`, from `file:` tarballs and the pinned
+`apache-arrow`). It is the one build action that runs npm. **EXISTS** (`npm_install_test`,
+[tools/build/node/README.md](../../tools/build/node/README.md)).
+- The project's `package.json` names `@komira-ai/komira` alone, a `file:` tarball, and overrides
+  every other name to its tarball: the platform package, `apache-arrow` and the packages it
+  depends on. npm resolves the rest itself, as for a user.
+- It is `npm install` and not `npm ci`: `npm ci` refuses a lock that lacks an optional dependency
+  (`Missing: @komira-ai/komira-darwin-arm64@ from lock file`), and while the main package names
+  platform packages that are not built here, an offline npm cannot write one that has them. With no
+  lock, npm skips an optional package it cannot get, as it does for a user.
 - It uses npm rather than the Zig `npm_modules`, because the test is that npm itself installs the
   package: the `optionalDependencies` and `os`/`cpu`/`libc` selection, and the peer dependency.
-- `--ignore-scripts` holds that the package needs no install script.
+- `--ignore-scripts` holds that the package needs no install script, and a package npm's
+  `package-lock.json` marks `hasInstallScript` (a script, or a `binding.gyp`) fails the test.
 - It then runs behaviour tests that import `@komira-ai/komira` by its name, never by a path into
   the repository:
   - the version;
   - the public names;
   - the load of `libkomira` from the installed platform package alone, with no Mojo toolchain, no
-    `mojo-compiler` and no library path in the test's environment, which is what a user's machine
-    has;
+    `mojo-compiler` and no library path in the test's environment but the one naming node's own
+    C++ runtime (`libstdc++`, `libgcc_s`, and `libatomic` for Node 26, which a user's system has and the build workers do
+    not), which is what a user's machine has;
   - `SELECT 1`;
-  - a `GROUP BY` over Parquet, CSV and NDJSON fixtures, once those registrations exist;
+  - a `GROUP BY` over Parquet, CSV and NDJSON fixtures: the Parquet one registered, the CSV and
+    NDJSON ones through `read_csv` and `read_json` until those registrations exist;
   - an `apache-arrow` `instanceof` check on the result;
   - a `require()` of the package from CommonJS.
-- It runs once per pinned Node: 22, 24 and 26 on linux-x64.
+- It runs once per pinned Node: 22, 24 and 26 on linux-x64, each its own action
+  (`//node:install_test[node_22]` and so on).
 - The test stages no runtime of its own: the runtime is whatever the platform tarball holds, so the
   test runs the bytes that are published.
 - On macos-arm64 and linux-arm64 the same target runs in the release workflows only, never in a
   pull request (rule B9). The published package names a platform only after that platform's
-  install test passed.
+  install test passed. **EXISTS** for macos-arm64: `//node:install_test_macos_arm64`, in `npm.yml`'s
+  job `build-macos-arm64`, installs the main package that names the macOS package on the macOS
+  Node.js 22, 24 and 26.
 
 ### SQL conformance, reused
 
@@ -857,6 +899,10 @@ The owner gave the go for PyPI releases from the workflow. npm has no go yet.
 Recommendation: **A**. With the scope held there is no name to protect early, and an npm package
 that runs no query would be a release with nothing in it.
 
+Whichever option is ruled, the go itself is one reviewed change: `release/npm_publish.txt` from
+`publish: off` to `publish: on`. `npm.yml` publishes only while it says on
+([docs/ci.md](../ci.md#the-publish-gate)).
+
 ## What must always hold?
 
 - The packages carry the self-contained native directory (`libkomira`, its native owners and the
@@ -876,11 +922,10 @@ that runs no query would be a release with nothing in it.
   with it, are on `main`.
 - Tests in `.ts` run with type stripping on the pinned 24, and on a Node 22 pin only from 22.18,
   so the Node 22 pin is 22.18 or later.
-- linux-arm64 waits for its build platform. macos-arm64 waits for the macOS build of the addon;
-  `libkomira` itself builds and loads on macOS, and the macOS arm64 wheel carries
-  `libkomira.dylib` and the three runtime libraries. Both platforms also need a Node pin of their
-  own (the one pin is linux-x64, [third_party/node/pins.bzl](../../third_party/node/pins.bzl)).
-- Whether ad-hoc signing is enough on macOS is inferred, not tested.
+- linux-arm64 waits for its build platform and a Node pin of its own. macos-arm64's package, its
+  Node pins and its install test exist, and run on the farm's macOS workers in `npm.yml` only.
+- Whether ad-hoc signing is enough on macOS is inferred until `npm.yml`'s macOS job first runs on
+  `main`: `//node:install_test_macos_arm64` is the test of it, and no pull request runs it.
 - Whether a trusted publisher can be configured before its package exists is not stated by npm's
   documentation.
 - Electron, Deno and Bun are not claimed. Electron refuses external `ArrayBuffer`s.
@@ -895,8 +940,8 @@ Each part is its own change, with its tests:
 5. errors, session options, and CSV and NDJSON registration, each after its library change;
 6. the package rule and the release set, consuming the self-contained directory of the libkomira
    target (`//src/so:libkomira[dist]`, which the wheel already uses);
-7. the macOS and linux-arm64 builds;
-8. the install tests;
+7. the macOS and linux-arm64 builds (the macOS one **EXISTS**);
+8. the install tests (the linux-x64 one **EXISTS**: `//node:install_test`);
 9. `npm.yml`;
 10. the SQL conformance runner.
 
@@ -911,5 +956,6 @@ The Excel SDK and the `ts_polars` builder follow, on a shared plan encoder.
 
 Today: [node/](../../node/README.md), [tools/build/node](../../tools/build/node/README.md),
 [third_party/node](../../third_party/node/README.md), [src/so](../../src/so/README.md), and `node/src/`
-for the TypeScript, and `tools/build/package/` for `npm_tarball`. Later: `release/` for the npm set,
-and `.github/workflows/npm.yml`.
+for the TypeScript, `tools/build/package/` for `npm_tarball`, `release/` for the npm set
+(`npm_packages.bzl`, `npm_names.txt`, `npm_publish.txt`) and its tool (`release/ci/npm_smoke`), and
+`.github/workflows/npm.yml`.

@@ -1,4 +1,5 @@
 load("@komira//tools/build/kpin:cargo.bzl", "kpin_cargo")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":crates.bzl", "crates")
 
 # The crates.io closure of the protobuf codec (prost) and its derive macro,
@@ -36,6 +37,9 @@ kpin_cargo(
     cargo_metadata = "cargo/metadata.json",
     overrides = "cargo/overrides.json",
     sizes = "cargo/sizes.txt",
+    # Linux-only: it checks the metadata filtered for x86_64-unknown-linux-gnu and runs on the
+    # rust toolchain, which has no other platform.
+    target_compatible_with = LINUX_X86_64,  # komira-limit:rust-toolchain-x86-64
 )
 
 crates()

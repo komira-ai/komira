@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:run_check.bzl", "run_check_wired")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/rust:defs.bzl", "rust_binary")
 
 # A Rust binary using a derive macro from a registry crate: exercises the
@@ -18,4 +19,7 @@ rust_binary(
 run_check_wired(
     name = "run_check_wired",
     binaries = [":prost_roundtrip"],
+    # prost_roundtrip builds for linux x86_64 only; a dependent of an incompatible target is an
+    # error, not a skip, so this marks itself.
+    target_compatible_with = LINUX_X86_64,  # komira-limit:rust-toolchain-x86-64
 )

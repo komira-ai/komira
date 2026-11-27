@@ -348,6 +348,40 @@ def test_write_target_refuses_bad_path_and_format():
     refused(lambda: WriteTarget("o", None), TypeError, "WriteTarget format op must be a str, not NoneType")
 
 
+def test_write_target_codec_defaults_to_none_and_is_part_of_its_identity():
+    assert WriteTarget("o", "parquet").codec is None
+    assert WriteTarget("o", "parquet", "zstd").codec == "zstd"
+    assert WriteTarget("o", "csv", "gzip") == WriteTarget("o", "csv", "gzip")
+    assert hash(WriteTarget("o", "csv", "gzip")) == hash(WriteTarget("o", "csv", "gzip"))
+    assert WriteTarget("o", "csv") != WriteTarget("o", "csv", "gzip")
+    assert WriteTarget("o", "csv", "gzip") != WriteTarget("o", "csv", "zstd")
+    assert hash(WriteTarget("o", "csv")) != hash(WriteTarget("o", "csv", "gzip"))
+    for codec in ("snappy", "uncompressed", "zstd", "gzip", "lz4"):
+        assert WriteTarget("o", "parquet", codec).codec == codec, codec
+    for codec in ("uncompressed", "zstd", "gzip", "lz4"):
+        for fmt in ("csv", "jsonl"):
+            assert WriteTarget("o", fmt, codec).codec == codec, (fmt, codec)
+
+
+def test_write_target_refuses_a_bad_codec():
+    refused(
+        lambda: WriteTarget("o", "parquet", "brotli"),
+        ValueError,
+        "WriteTarget codec op 'brotli' is not one of: gzip, lz4, snappy, uncompressed, zstd",
+    )
+    refused(lambda: WriteTarget("o", "parquet", 3), TypeError, "WriteTarget codec op must be a str, not int")
+    refused(
+        lambda: WriteTarget("o", "csv", "snappy"),
+        ValueError,
+        "WriteTarget: no file sink writes csv with snappy",
+    )
+    refused(
+        lambda: WriteTarget("o", "jsonl", "snappy"),
+        ValueError,
+        "WriteTarget: no file sink writes jsonl with snappy",
+    )
+
+
 def test_write_refuses_wrong_child_and_target_types():
     refused(
         lambda: Write(people(), ("o", "parquet")),

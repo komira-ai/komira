@@ -256,8 +256,7 @@ def main(argv):
         except komira.KomiraError as e:
             want = (
                 "decode: PLAN_WIRE_UDFS_DROPPED: these bytes carry 1 UdfRef entries (`WirePlanEnvelope.udfs`), and "
-                "`plan_from_bytes` returns a `LogicalPlan`, which cannot carry the list its UDF calls index. Call "
-                "`plan_envelope_from_bytes`, which returns it."
+                "the plan door runs no user function yet"
             )
             assert str(e) == want, "the frame with a UDF column is refused with {!r} ({}), not {!r}".format(str(e), type(e).__name__, want)
         else:

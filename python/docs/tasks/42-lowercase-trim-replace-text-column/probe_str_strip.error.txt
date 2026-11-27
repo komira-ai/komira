@@ -1,0 +1,1 @@
+AttributeError: .str.strip() is not supported yet: the engine trims spaces only, and pandas trims all whitespace

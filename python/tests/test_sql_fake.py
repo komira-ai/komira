@@ -100,7 +100,7 @@ def main(args):
     directory = os.path.join(lib_dir, "fake_v1_3")
     native = _native.load(directory)
     assert native.abi_version == 1003, native.abi_version
-    counts = Counts(ctypes.CDLL(os.path.join(directory, "libkomira.so")))
+    counts = Counts(ctypes.CDLL(os.path.join(directory, _native._LIB_NAME)))
     schema = pa.schema([pa.field("n", pa.int32())])
 
     with komira.Session() as s:

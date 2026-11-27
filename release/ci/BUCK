@@ -5,7 +5,9 @@
 # release_json are the release workflow's (.github/workflows/release.yml,
 # docs/ci.md, "release.yml"), built behind //release/ci/tests:test_release the
 # same way. buck2_failure is release-macos.yml's: it reads a failed buck2
-# step's log and says what buck2 said.
+# step's log and says what buck2 said. npm_smoke is the npm release's
+# (//release:npm_packages and .github/workflows/npm.yml, docs/ci.md, "npm.yml:
+# publishing the npm packages"), built behind //release/ci/tests:test_npm_smoke.
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
@@ -116,4 +118,36 @@ zig_test(
     exec_tools = {"BUCK2_FAILURE": ":buck2_failure"},
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
+)
+
+# The npm release's tool (npm_smoke/cli.zig says what each command does): `set` writes npm_set.json, the record
+# of //release:npm_packages (a build action of that target); `gate` reads the publish gate,
+# release/npm_publish.txt; `verify`, `publish` and `smoke` are the steps of .github/workflows/npm.yml that
+# hold the downloaded tarballs to the set, publish them with the pinned npm, and install the published version
+# from the registry and query it. What it does, as a module the program and its cases both import.
+zig_module(
+    name = "npm_smoke_lib",
+    src = "npm_smoke/lib.zig",
+    imports = [
+        "npm_smoke/cli.zig",
+        "npm_smoke/common.zig",
+        "npm_smoke/gate.zig",
+        "npm_smoke/npm.zig",
+        "npm_smoke/publish.zig",
+        "npm_smoke/set.zig",
+        "npm_smoke/smoke.zig",
+    ],
+    visibility = ["//release/ci/tests:", "//release:"],
+)
+
+# Built behind its cases (//release/ci/tests:test_npm_smoke): npm and node in memory, no network, no clock.
+zig_exe(
+    name = "npm_smoke",
+    exec_compatible_with = LINUX_X86_64,
+    src = "npm_smoke.zig",
+    deps = [":npm_smoke_lib"],
+    unit_tests = ["//release/ci/tests:test_npm_smoke", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
 )

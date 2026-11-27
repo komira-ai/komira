@@ -7,7 +7,7 @@ its nine calls.
     test_load.py --lib-dir <dir> --runtime-dir <dir>
 
 `<dir>/libkomira/` is `//src/so:libkomira[runnable]` (the library with its
-lib/ beside it), `<dir>/fake_<case>/libkomira.so` the stand-ins of
+lib/ beside it), `<dir>/fake_<case>/libkomira.so` (`libkomira.dylib` on macOS) the stand-ins of
 fake_libkomira.c, and `<dir>/two_columns.parquet` a Parquet file
 (`--runtime-dir`, which the rule passes, is not read). A process holds one
 library, so the refusals come first (each leaves nothing loaded) and the real
@@ -57,6 +57,18 @@ def engine_error(call, ctx, native, step=None):
     raise AssertionError("the call raised nothing")
 
 
+def assert_missing(got, path):
+    """`got`, the refusal to open `path`, a file that is not there, carries the
+    system loader's own text: glibc's, word for word, on Linux; on macOS dyld's,
+    whose list of the places it tried depends on the machine, so its head
+    (the path as dlopen was given it) and its ending are held."""
+    head = "cannot load libkomira from {}: ".format(path)
+    if sys.platform == "darwin":
+        assert got.startswith(head + "dlopen({}, ".format(path)) and got.endswith(" (no such file)"), got
+    else:
+        assert got == head + "{}: cannot open shared object file: No such file or directory".format(path), got
+
+
 def main(args):
     # Absolute, since the paths the rule passes are relative to where the
     # action started.
@@ -66,16 +78,24 @@ def main(args):
         return os.path.join(lib_dir, "fake_" + case)
 
     def so(directory):
-        return os.path.join(os.path.abspath(directory), "libkomira.so")
+        return os.path.join(os.path.abspath(directory), _native._LIB_NAME)
 
     def load(directory):
         return _native.load(directory)
 
     # The public names, and importing the package loaded no library.
     want = [
+        "AMBIENT",
+        "ANONYMOUS",
+        "AwsKeys",
+        "AwsProfile",
+        "AzureKey",
+        "AzureSas",
         "BindError",
         "CredentialsError",
         "DataFrame",
+        "GcpServiceAccount",
+        "GcpToken",
         "GroupBy",
         "KomiraError",
         "LibraryLoadError",
@@ -90,6 +110,7 @@ def main(args):
         "__version__",
         "abi_version",
         "concat",
+        "files",
         "read_csv",
         "read_json",
         "read_parquet",
@@ -136,18 +157,15 @@ def main(args):
     # holds: here it is absent, and the refusal names the file. Session() and
     # abi_version() load it the same way.
     own = so(os.path.join(os.path.dirname(komira.__file__), "_lib"))
-    want = "cannot load libkomira from {0}: {0}: cannot open shared object file: No such file or directory".format(own)
     calls.clear()
-    assert refused(lambda: _native.load()) == want
+    assert_missing(refused(lambda: _native.load()), own)
     assert calls == ["cpu", ("runtime", os.path.join(os.path.dirname(own), "lib"))], calls
-    assert refused(komira.Session) == want
-    assert refused(komira.abi_version) == want
+    assert_missing(refused(komira.Session), own)
+    assert_missing(refused(komira.abi_version), own)
 
     # A directory with no library carries the loader's message.
     missing = os.path.join(lib_dir, "no_such_dir")
-    got = refused(lambda: load(missing))
-    want = "cannot load libkomira from {0}: {0}: cannot open shared object file: No such file or directory".format(so(missing))
-    assert got == want, got
+    assert_missing(refused(lambda: load(missing)), so(missing))
 
     # Another ABI major version, above and below, and a version that is not
     # one at all, are refused with the version the library reported.

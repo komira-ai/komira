@@ -16,7 +16,8 @@ Around the context:
 
 - `arrow_result` readies those batches for the Arrow C stream.
 - `COPY ... TO` writes a query's result to a local Parquet, CSV or
-  newline-delimited JSON file.
+  newline-delimited JSON file, and `run_plan_write` writes the result of a plan
+  built without SQL the same way.
 
 Views, other writes, the plan cache and the plan gates' call sites are not wired
 into the context yet.
@@ -51,7 +52,7 @@ do is a free function in a module of its own.
 | `engine_execute` | `run_lowered_plan_with(ctx, lowered, opener)`: a `RealBuilder` over a per-run metadata cache (keyed per file system) and expression pool, reading a Parquet scan of a bucket through the file system the `ScanFsOpener` opens on it (`objectstore_s3.S3ScanFs` for S3, `objectstore_gcs.GcsScanFs` for GCS, `azure_blob.AzureScanFs` for Azure; one opener, so one remote store kind, per run), the segment pool sized from the memory budget, the context's spill directory (when it has one) on the builder, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation, sort and window sink data (`params.agg`, `params.sort`, `params.window`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch. `run_lowered_plan(ctx, lowered)` is that with `LocalOnlyScanFs`, which refuses a scan of a bucket with `SCAN_FS_UNSERVED`. `run_lowered_plan_with(ctx, lowered, opener, control)` runs under a `RunControl`: `run_plan` polls a clone of its token and counts the plan's segments into its progress; without one the run's token is its own and nothing cancels it |
 | `engine_write` | `write_copy_result(batch, dest, fmt, codec)`: the result batch as a file at the local path `dest` in the format `fmt`, through `fs.atomic_write.write_file_atomic` (all or nothing), returning the rows written; `write_parquet_result(batch, dest, codec)` and `write_text_result(batch, dest, fmt, codec)` (CSV or JSON), which it calls; `count_result(rows)`, the one-row BIGINT `Count` batch a COPY answers; `check_copy_target(dest, fmt, codec)`, the refusals of a URL and of lz4 for CSV or JSON |
 | `engine_write_text` | `encode_csv(batch)` and `encode_ndjson(batch)`: the bytes DuckDB's COPY writes for a result as CSV and as newline-delimited JSON; `compress_text(bytes, codec)`, the whole file as gzip or zstd; `text_writable(type)`; and the cell texts they are made of, `csv_double_text`, `json_double_text`, `date_text`, `decimal_text` |
-| `engine_plan` | `run_plan(ctx, plan) -> SqlOutcome`: a logical plan that is already built (decoded from a `WirePlanEnvelope` by `plan_wire.plan_from_bytes`, or built in Mojo) optimized, lowered and run, with no SQL front end: the module imports none of `sql`'s tokenizer, parser, binder or front end, and a scan leaf carries its own source, so no table need be registered. `run_plan_batch(ctx, plan, opener, step)` is those three steps, which `run_sql` runs after it binds, so both doors share one route from the optimizer down. `optimize_for_run(plan)` is `optimize` (refusing a plan that needs a scalar subquery executed first, `OPTIMIZE_UNRESOLVED_SCALAR`) and then `plan_cse_eliminate`, which holds each subtree the plan repeats once (a CTE read twice, two equal UNION ALL branches) so lowering cuts it once and every reference reads it (`lowering.cut_shared`). Nothing raises: `SqlOutcome.refusal` holds the step (`optimize`, `lower`, `execute`) and that step's own message. `run_plan_with(ctx, plan, opener)` runs with the opener a scan of a bucket is read through. `SqlOutcome`, `SqlRefusal` and those step names are defined here |
+| `engine_plan` | `run_plan(ctx, plan) -> SqlOutcome`: a logical plan that is already built (decoded from a `WirePlanEnvelope` by `plan_wire.plan_from_bytes`, or built in Mojo) optimized, lowered and run, with no SQL front end: the module imports none of `sql`'s tokenizer, parser, binder or front end, and a scan leaf carries its own source, so no table need be registered. `run_plan_batch(ctx, plan, opener, step)` is those three steps, which `run_sql` runs after it binds, so both doors share one route from the optimizer down. `run_plan_write(ctx, plan, target)` (and `run_plan_write(ctx, plan, target, opener)`) is the plan door's `COPY <plan> TO <target>`: it refuses the destination as `COPY ... TO` does, at step `bind` and before the plan runs or a file is touched (`STORAGE_URL_REFUSED` for a path with `://`, `COPY_COMPRESSION_UNSUPPORTED` for CSV or JSON with lz4), runs the plan's three steps, writes the result with `engine_write`'s `write_copy_result` and answers `count_result(rows)`, the one-row BIGINT `Count`; the bytes of the file are the ones `run_sql` writes for the same rows. `optimize_for_run(plan)` is `optimize` (refusing a plan that needs a scalar subquery executed first, `OPTIMIZE_UNRESOLVED_SCALAR`) and then `plan_cse_eliminate`, which holds each subtree the plan repeats once (a CTE read twice, two equal UNION ALL branches) so lowering cuts it once and every reference reads it (`lowering.cut_shared`). Nothing raises: `SqlOutcome.refusal` holds the step (`optimize`, `lower`, `execute`) and that step's own message. `run_plan_with(ctx, plan, opener)` runs with the opener a scan of a bucket is read through. `SqlOutcome`, `SqlRefusal` and those step names (`bind` among them) are defined here |
 | `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, then `engine_plan`'s steps (`optimize_for_run`, lower, run), and for a `COPY ... TO` write the file and answer `Count`. Each call adds one to `ctx.statements_parsed` as it starts to parse, so a caller can tell that a run went through the SQL front end. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`), that step's own message, and for `parse` the `SqlPosition` (line and column, from 1) where the text stopped parsing (`SqlRefusal.position`, `None` for every other step and for `run_plan`); `engine_plan`'s `SqlOutcome`, `SqlRefusal`, `OPTIMIZE_UNRESOLVED_SCALAR` and step names are named here too. `run_sql_with(ctx, text, opener)` runs with the opener a scan of a bucket is read through. `run_sql(ctx, text, control)` and `run_sql_with(ctx, text, opener, control)` run under a `RunControl`: a cancel stops the plan's run at its next check and is refused at step `execute` with `pipeline_exec`'s cancelled error; parse, bind, optimize, lower and a COPY's write are not polled |
 | `run_control` | `RunControl`: a cancel token and a segment progress counter (`pipeline_exec.run_progress.RunProgress`) behind a shared handle (`share()`). `cancel()` is one-way and may come from several threads at once: the first call claims the token through an atomic cell and cancels it with `RUN_CANCEL_REASON` (`the caller cancelled the run`), every later one does nothing. `snapshot()` reads the progress (`done` at most `total`); `token()` and `progress()` are what a run is handed |
 | `arrow_result` | `arrow_result(outcome) -> ArrowResult`: the batches of a `SqlOutcome` and their schema, each batch's selection mask applied, checked to cross the Arrow C Stream Interface whole (`arrow_ipc.c_data_stream_check`). Raises with the step and message of a refusal, for an outcome with no batch, and naming a column the export cannot carry |
@@ -168,6 +169,47 @@ var ts = run_sql(ctx, "COPY (SELECT TIMESTAMP '2015-09-04 12:30:45.120' AS at) T
 assert_equal(Int(ts.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 1)
 with open(dir + "/at.csv", "r") as f:
     assert_equal(f.read(), "at\n2015-09-04 12:30:45.12\n")
+```
+
+A plan built without SQL text writes the same file through `run_plan_write`,
+here a CSV file, then a Parquet file through the overload that takes the scan
+opener; a destination URL is refused at `bind` and nothing runs:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from std.tempfile import mkdtemp
+from arrow.write_target import WCOMP_SNAPPY, WCOMP_UNCOMPRESSED, WFMT_CSV, WFMT_PARQUET, WriteTarget
+from pipeline_exec.source_parquet import LocalOnlyScanFs
+from sdk_exec.engine_context import EngineContext
+from sdk_exec.engine_options import EngineOptions
+from sdk_exec.engine_plan import run_plan_write
+from sdk_exec.engine_sql import run_sql
+from sql.sql_frontend import plan_from_sql
+
+var ctx = EngineContext(EngineOptions(worker_count=1))
+var dir = mkdtemp(prefix="komira_plan_write_readme_")
+var query = String("SELECT 1 AS n UNION ALL SELECT 2 ORDER BY n")
+var csv = run_plan_write(
+    ctx, plan_from_sql(query, ctx.catalog, ctx.footers), WriteTarget(dir + "/n.csv", WFMT_CSV, WCOMP_UNCOMPRESSED)
+)
+assert_equal(csv.batches[0].schema.field_name(0), "Count")
+assert_equal(Int(csv.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 2)
+with open(dir + "/n.csv", "r") as f:
+    assert_equal(f.read(), "n\n1\n2\n")
+var pq = run_plan_write(
+    ctx,
+    plan_from_sql(query, ctx.catalog, ctx.footers),
+    WriteTarget(dir + "/n.parquet", WFMT_PARQUET, WCOMP_SNAPPY),
+    LocalOnlyScanFs(),
+)
+assert_equal(Int(pq.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 2)
+var back = run_sql(ctx, "SELECT count(*) AS rows FROM '" + dir + "/n.parquet'")
+assert_equal(Int(back.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 2)
+var url = run_plan_write(
+    ctx, plan_from_sql(query, ctx.catalog, ctx.footers), WriteTarget("s3://bucket/n.parquet", WFMT_PARQUET, WCOMP_SNAPPY)
+)
+assert_equal(url.refusal.value().step, "bind")
+assert_true(url.refusal.value().reason.startswith("STORAGE_URL_REFUSED: "))
 ```
 
 The encoders on their own:

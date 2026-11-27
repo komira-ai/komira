@@ -10,13 +10,21 @@
  *     use in every malloc zone), for test_leaks.
  *   - the number of open file descriptors (Linux: /proc/self/fd; macOS:
  *     /dev/fd, which lists this process's descriptors).
- *   - descriptor 0: closing it, whether it is open, and whether it names the
- *     native runtime's library memory file (test_stdin_closed).
+ *   - descriptor 0: closing it, whether it is open, and whether it is the
+ *     native runtime's private copy of a verified library (Linux: the memory
+ *     file; macOS: a file in the runtime's private directory), for
+ *     test_stdin_closed.
+ *   - the files the runtime holds as private copies on macOS (none on
+ *     Linux, where the copy is a memory file and a descriptor): after a
+ *     refused load none is left.
+ *   - the longest path the system accepts (PATH_MAX), which the runtime's
+ *     path buffer has as well.
  * test_probe holds each of these to what it should count, on the system it
  * runs on.
  */
 #define _GNU_SOURCE
 #include <dirent.h>
+#include <limits.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #include <malloc/malloc.h>
@@ -27,9 +35,17 @@
 #include <stddef.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+/* macOS: the runtime names its private directory this prefix and six random
+ * characters, and a copy by the 64 hex digits of its sha256
+ * (native_runtime.c, PRIVATE_DIR_PREFIX and open_bytes). */
+#define PRIVATE_DIR_PREFIX "komira-udf-"
+#define PRIVATE_DIR_RANDOM 6
+#define COPY_NAME_LEN 64
 
 #ifdef __APPLE__
 int64_t komira_udf_spike_loaded_objects(void) { return (int64_t)_dyld_image_count(); }
@@ -101,12 +117,22 @@ int64_t komira_udf_spike_close_stdin(void) { return close(0) == 0 ? 1 : 0; }
 /* 1 when descriptor 0 is open. */
 int64_t komira_udf_spike_stdin_open(void) { return fcntl(0, F_GETFD) != -1 ? 1 : 0; }
 
-/* 1 when descriptor 0 names the native runtime's library memory file. The
- * runtime makes that file on Linux only (native_runtime.c, open_bytes), so
- * on macOS descriptor 0 never names it. */
-int64_t komira_udf_spike_stdin_is_library_memfd(void) {
+/* 1 when descriptor 0 is the native runtime's private copy of a verified
+ * library. Linux: the memory file the runtime makes (named
+ * "memfd:komira-udf-native-library"). macOS: a file whose name is 64 hex
+ * digits in a directory named PRIVATE_DIR_PREFIX and six characters. */
+int64_t komira_udf_spike_stdin_is_library_copy(void) {
 #ifdef __APPLE__
-  return 0;
+  char path[PATH_MAX];
+  if (fcntl(0, F_GETPATH, path) == -1) return 0;
+  const char* name = strrchr(path, '/');
+  if (name == NULL || strlen(name + 1) != COPY_NAME_LEN) return 0;
+  for (const char* c = name + 1; *c != 0; c++)
+    if (!((*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'f'))) return 0;
+  size_t dir_len = strlen(PRIVATE_DIR_PREFIX) + PRIVATE_DIR_RANDOM;
+  if ((size_t)(name - path) < dir_len + 1) return 0;
+  const char* dir = name - dir_len;
+  return dir[-1] == '/' && strncmp(dir, PRIVATE_DIR_PREFIX, strlen(PRIVATE_DIR_PREFIX)) == 0 ? 1 : 0;
 #else
   char buf[256];
   ssize_t n = readlink("/proc/self/fd/0", buf, sizeof(buf) - 1);
@@ -115,3 +141,44 @@ int64_t komira_udf_spike_stdin_is_library_memfd(void) {
   return strstr(buf, "memfd:komira-udf-native-library") != NULL ? 1 : 0;
 #endif
 }
+
+/* The files held as private copies by the runtimes of this process: on
+ * macOS, the entries of every directory under the scratch directory (TMPDIR
+ * when set and not empty, else the user's temporary directory, as the
+ * runtime reads it) named PRIVATE_DIR_PREFIX and six characters; on Linux 0,
+ * the copy being a memory file counted among the descriptors. -1 when the
+ * scratch directory is not readable. */
+int64_t komira_udf_spike_private_copies(void) {
+#ifdef __APPLE__
+  char base[PATH_MAX];
+  const char* tmp = getenv("TMPDIR");
+  if (tmp != NULL && tmp[0] != 0) {
+    if (strlen(tmp) >= sizeof(base)) return -1;
+    strcpy(base, tmp);
+  } else {
+    size_t got = confstr(_CS_DARWIN_USER_TEMP_DIR, base, sizeof(base));
+    if (got == 0 || got > sizeof(base)) return -1;
+  }
+  DIR* top = opendir(base);
+  if (top == NULL) return -1;
+  int64_t n = 0;
+  size_t want = strlen(PRIVATE_DIR_PREFIX) + PRIVATE_DIR_RANDOM;
+  for (struct dirent* d = readdir(top); d != NULL; d = readdir(top)) {
+    if (strlen(d->d_name) != want || strncmp(d->d_name, PRIVATE_DIR_PREFIX, strlen(PRIVATE_DIR_PREFIX)) != 0) continue;
+    char sub[PATH_MAX];
+    if (snprintf(sub, sizeof(sub), "%s/%s", base, d->d_name) >= (int)sizeof(sub)) continue;
+    DIR* inner = opendir(sub);
+    if (inner == NULL) continue;
+    for (struct dirent* f = readdir(inner); f != NULL; f = readdir(inner))
+      if (f->d_name[0] != '.') n++;
+    closedir(inner);
+  }
+  closedir(top);
+  return n;
+#else
+  return 0;
+#endif
+}
+
+/* The longest path the system takes, with its terminator (PATH_MAX). */
+int64_t komira_udf_spike_path_max(void) { return (int64_t)PATH_MAX; }

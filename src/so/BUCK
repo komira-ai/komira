@@ -29,7 +29,11 @@ NATIVE_OWNERS = [
 # the credentials), the source and render operations (`sources.mojo`) the C
 # calls are made of, and the session's credentials (`credentials.mojo`), held
 # in a `SecretStore` (`secret_store`) and bound for a reveal in a
-# `SecretBindings` table (`secret_registry`). The library is plain
+# `SecretBindings` table (`secret_registry`), and the SQL bindings
+# (`bindings.mojo`): a name bound to a `WireBoundSource`, a local path or
+# Parquet objects of an S3 bucket or an Azure container, read through the
+# object-store file systems of `store_fs.mojo` (objectstore_s3, azure_blob and
+# their closure are deps for them). The library is plain
 # Mojo with no pointer in it; `_c_abi.mojo`, the one file that holds pointers,
 # is not part of it but the source of the `libkomira` target below.
 #
@@ -56,14 +60,30 @@ NATIVE_OWNERS = [
 # test_plan_result holds plan_result, komira_plan_stream's
 # answer on values: a plan built from SQL on one session, serialized and run
 # on a fresh session with no table, equals the SQL answer and parses no SQL
-# statement, and every refusal is `<step>: <reason>` (`decode` for bytes that
-# are not a plan, SQL text among them, and for an envelope with a write target
-# or UDFs; `lower` and `execute` from run_plan); test_credentials holds the three steps of a definition, each
+# statement, an envelope with a write target writes its file (Parquet, CSV
+# and JSON lines, byte-equal to the SQL door's COPY) and answers the rows
+# written as `Count`, and every refusal is `<step>: <reason>` (`decode` for
+# bytes that are not a plan, SQL text among them, and for an envelope with
+# UDFs; `bind` for a destination URL or CSV/JSON with lz4; `lower` and
+# `execute` from run_plan and the write); test_credentials holds the three steps of a definition, each
 # kind's fields and every named refusal, word for word, and the generations of
 # a name; test_credentials_reveal reads sealed values through sdk_exec's
 # SecretCapability and reads an object of a fake S3 with them, where a wrong
-# key is refused by name (the S3 store and the fake are test_deps: they reach
-# these tests, not the library).
+# key is refused by name (the fakes of S3 and Azure are test_deps: they reach
+# these tests, not the library); test_add_sql_binding binds a local file, an
+# S3 object, an S3 glob and Azure blobs (with a key and with a SAS) through
+# add_sql_binding over the fake S3 and Azure stores and reads them by SQL
+# through sql_result_with, equal to the local file's answer, one statement
+# over both stores, the value sealed when the statement runs (a re-sealed
+# wrong key refused at execute, the right one answering again), a rebound name
+# replacing its table (register_parquet's too), every refusal word for word,
+# no secret in any refusal, one bucket read one way per session, and a
+# credential re-sealed as another kind refusing the statement at bind;
+# test_store_fs holds StoreFs's delegation to an S3 bucket and an Azure
+# container (footers, sizes, ranges, listings, writes), a handle of the other
+# store refused, and StoreScanFs serving exactly the buckets it was given, each
+# with its own credential, refusing any other with SCAN_FS_UNSERVED word for
+# word and a bucket added twice by name.
 mojo_library(
     name = "so",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "_c_abi.mojo"]),
@@ -76,7 +96,11 @@ mojo_library(
         "//src/async_rt:async_rt",
         "//src/atomic_alias:atomic_alias",
         "//src/avro:avro",
+        "//src/aws_core:aws_core",
+        "//src/aws_s3:aws_s3",
         "//src/awslc:awslc",
+        "//src/azure_blob:azure_blob",
+        "//src/azure_core:azure_core",
         "//src/batch_eval:batch_eval",
         "//src/byte_buffer:byte_buffer",
         "//src/clock:clock",
@@ -87,6 +111,7 @@ mojo_library(
         "//src/counters:counters",
         "//src/crypto:crypto",
         "//src/csv:csv",
+        "//src/datetime:datetime",
         "//src/dynamic_filter:dynamic_filter",
         "//src/encoding:encoding",
         "//src/engine_runtime:engine_runtime",
@@ -115,6 +140,7 @@ mojo_library(
         "//src/name_registry:name_registry",
         "//src/net:net",
         "//src/objectstore:objectstore",
+        "//src/objectstore_s3:objectstore_s3",
         "//src/op_agg_state:op_agg_state",
         "//src/op_join_probe:op_join_probe",
         "//src/op_sort:op_sort",
@@ -139,6 +165,7 @@ mojo_library(
         "//src/plan_wire:plan_wire",
         "//src/proto_codec:proto_codec",
         "//src/protobuf:protobuf",
+        "//src/retry:retry",
         "//src/row_format:row_format",
         "//src/scalar_arithmetic:scalar_arithmetic",
         "//src/scan_planning:scan_planning",
@@ -155,10 +182,12 @@ mojo_library(
         "//src/trace:trace",
         "//src/udf:udf",
         "//src/uuid:uuid",
+        "//src/xml:xml",
         "//src/zlib:zlib",
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
+        "tests/test_add_sql_binding.mojo",
         "tests/test_credentials.mojo",
         "tests/test_credentials_reveal.mojo",
         "tests/test_plan_result.mojo",
@@ -168,10 +197,10 @@ mojo_library(
         "tests/test_sources.mojo",
         "tests/test_sql_cancel.mojo",
         "tests/test_status.mojo",
+        "tests/test_store_fs.mojo",
     ],
     test_deps = [
-        "//src/aws_core:aws_core",
-        "//src/objectstore_s3:objectstore_s3",
+        "//src/tests/helpers/komira_test_fake_azure:komira_test_fake_azure",
         "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
     ],
     test_data = {
@@ -183,7 +212,7 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): twenty-five exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): twenty-six exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). Every context it creates owns
 # an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
 # komira_sql_stream runs SQL on that engine and answers an Arrow C stream; the
@@ -195,9 +224,13 @@ mojo_library(
 # front end, and answers the same way.
 # komira_register_arrow_stream goes the other way: it drains a caller's
 # Arrow C stream into a table the session holds, and releases it.
+# komira_add_sql_binding binds a table name to the bytes of a WireBoundSource:
+# a local Parquet path, or Parquet objects of an s3:// or az:// location read
+# with a credential sealed on the session; komira_sql_stream then reads them
+# through the object store.
 # It is published only if every gate driver passes, each of which dlopens it
 # with RTLD_NOW and calls it as a foreign host would:
-#   gate_version       the version is 1009 (1.9);
+#   gate_version       the version is 1010 (1.10);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op, and a context (with its
 #                      engine's workers) is created and freed again;
@@ -240,6 +273,13 @@ mojo_library(
 #                      with TABLE_NAME_EMPTY, a name that is not UTF-8 -3;
 #                      NULL ctx -1, NULL name or stream -2 with the named last
 #                      error; each refusal leaves the name free.
+#   gate_add_sql_binding  a local Parquet file is bound by name, and again
+#                      under the same name; NULL ctx -1, NULL name or source -2
+#                      with the named last error; source_len 64 MiB plus one
+#                      -5; scope 2, an empty name, a name that is not UTF-8, a
+#                      one-byte source, a zero-length source and a missing file
+#                      -3 with the named error, step bind and code; a good call
+#                      afterwards leaves no error.
 #   gate_credentials  a credential added, set and sealed is 0 at each step;
 #                      one sealed without its secret, a field of another
 #                      kind, an empty value, a 4097-byte value, an unknown
@@ -277,9 +317,11 @@ _LIBKOMIRA = dict(
         "komira_sql_stream_run",
         "komira_plan_stream",
         "komira_register_arrow_stream",
+        "komira_add_sql_binding",
     ],
     exports_exact = True,
     gate_srcs = [
+        "tests/gate/gate_add_sql_binding.mojo",
         "tests/gate/gate_credentials.mojo",
         "tests/gate/gate_fresh_error.mojo",
         "tests/gate/gate_new_free.mojo",
@@ -382,6 +424,7 @@ staged_files(
     srcs = [
         "tests/c/abi_driver.c",
         "tests/c/abort_driver.c",
+        "tests/c/binding_cases.h",
         "tests/c/plan_cases.h",
     ],
 )
@@ -390,7 +433,11 @@ staged_files(
 cxx_binary(
     name = "abi_driver",
     srcs = [":c_driver_files[tests/c/abi_driver.c]"],
-    headers = {"komira.h": ":komira_abi", "plan_cases.h": ":c_driver_files[tests/c/plan_cases.h]"},
+    headers = {
+        "binding_cases.h": ":c_driver_files[tests/c/binding_cases.h]",
+        "komira.h": ":komira_abi",
+        "plan_cases.h": ":c_driver_files[tests/c/plan_cases.h]",
+    },
     header_namespace = "",
     # The run-handle cases call komira_run_cancel and komira_run_progress from
     # a second thread.

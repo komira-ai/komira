@@ -28,7 +28,8 @@ error. Nothing here holds a pointer.
   recorded on the session as its last error, with the step and the code.
 - `plan_result`: a serialized plan (a `WirePlanEnvelope`) decoded and run on
   a session's engine, with no SQL text anywhere on the way, its answer as
-  `sql_result`'s is.
+  `sql_result`'s is; an envelope that carries a write target writes its
+  answer to that file and answers the rows written.
 
 Every operation but `plan_render_text` and `register_arrow` (which read no
 file) first calls `probe_codec_libraries` (libz; zstd and lz4 are linked in),
@@ -38,26 +39,37 @@ and not an abort of the process when a codec first opens it.
 """
 
 from arrow.arrow_types import ArrowType
+from aws_core import AwsClock
 from arrow.table import Table
+from arrow.write_target import WriteTarget
 from byte_buffer.file_identity import FileIdentity
 from compression.codec_libraries import probe_codec_libraries
 from csv.csv_options import QUOTE_STYLE_TAG_RFC4180
+from http_core.transport.io_stream import Connector
+from parquet_footers.parquet_files import resolve_parquet_source
 from plan_ir.logical_plan import LogicalPlan
-from plan_wire import binding_to_bytes, plan_from_bytes, schema_to_bytes
+from plan_wire import (
+    PLAN_WIRE_UDFS_DROPPED,
+    binding_to_bytes,
+    plan_envelope_from_bytes,
+    plan_from_bytes,
+    schema_to_bytes,
+)
 from scan_source.csv_source import CsvSource
 from scan_source.json_source import JsonSource
 from scan_source.source_variant import SourceVariant
 from sdk.parquet_footer import read_parquet_footer
 from sdk_exec.arrow_result import ArrowResult, arrow_result
-from sdk_exec.engine_catalog import register_parquet as engine_register_parquet
-from sdk_exec.engine_plan import run_plan
+from sdk_exec.engine_plan import SqlOutcome, run_plan, run_plan_write
 from sdk_exec.engine_context import RegisteredTable
-from sdk_exec.engine_sql import STEP_EXECUTE, run_sql
+from sdk_exec.engine_sql import STEP_BIND, STEP_EXECUTE, run_sql_with
 from sdk_exec.run_control import RunControl
-from sql.sql_ast import TvfOptions
+from sql.sql_ast import HIVE_PARTITIONING_AUTO, TvfOptions
 from sql.sql_tvf_bind import csv_tvf_schema, json_tvf_schema
 
+from .bindings import forget_table, store_opener
 from .session import Session, step_number
+from .store_fs import StoreConnectors, StoreScanFs, kernel_store_connectors
 
 comptime TABLE_TYPE_UNSUPPORTED = "TABLE_TYPE_UNSUPPORTED"
 """Refusal of `register_arrow`: a column of a nested type (list, large list,
@@ -82,14 +94,21 @@ def register_parquet(mut session: Session, name: String, path: String) raises:
     with the reader's own message and not later as an empty result, and the
     table is in the catalog a query on the session binds against. A flat
     schema only: a nested or repeated column is refused, as are files whose
-    schemas differ and a glob that matches nothing.
+    schemas differ and a glob that matches nothing. A table already under
+    `name` (any kind, any case) is replaced, as `add_sql_binding` replaces
+    it; a refused registration leaves it as it was.
 
     Raises:
         Error `compression: cannot load <soname>: <loader error>` when a codec
         library cannot be loaded, before anything is read.
     """
     probe_codec_libraries()
-    engine_register_parquet(session.engine, name, path)
+    var source = resolve_parquet_source(
+        session.engine.footers, path, HIVE_PARTITIONING_AUTO, True
+    )
+    forget_table(session, name)
+    session.engine.catalog.add_parquet_source(name, source^)
+    session.engine.tables.append(RegisteredTable(name.lower(), path))
 
 
 def register_csv(
@@ -177,15 +196,10 @@ def register_arrow(mut session: Session, name: String, var table: Table) raises:
                 + String(t)
                 + "; only flat columns are registered"
             )
-    _ = session.engine.catalog.remove(name)
     # A Parquet table is also listed with its paths (`EngineContext.tables`),
-    # which lowering reads for every Parquet scan; a replaced one leaves it.
-    var key = name.lower()
-    var kept = List[RegisteredTable]()
-    for i in range(len(session.engine.tables)):
-        if session.engine.tables[i].name != key:
-            kept.append(session.engine.tables[i].copy())
-    session.engine.tables = kept^
+    # which lowering reads for every Parquet scan, and a table bound to an
+    # object store with its bucket; a replaced one leaves both.
+    forget_table(session, name)
     session.engine.catalog.add_in_memory(name, table^)
 
 
@@ -316,7 +330,8 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
 
     The statement reads the tables registered on the session
     (`register_parquet`, `register_csv`, `register_json`,
-    `register_arrow`); it is `sdk_exec.run_sql`: a query, or a
+    `register_arrow`, `add_sql_binding`); it is `sdk_exec.run_sql_with` over
+    the session's bound object stores (`bindings.store_opener`): a query, or a
     `COPY ... TO` a local file, whose answer is one row of the BIGINT
     `Count`. An answer of no rows is one batch of no rows with the answer's
     schema. The result owns its batches and keeps no reference to the
@@ -326,7 +341,7 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
         Error `compression: cannot load <soname>: <loader error>` when a codec
         library cannot be loaded, before the statement is parsed.
 
-        Error `<step>: <reason>` when `run_sql` refuses (the session records
+        Error `<step>: <reason>` when the run refuses (the session records
         it too, with its step and code: `Session.set_refusal`), where `<step>` is the
         step that refused (`parse`, `bind`, `optimize`, `lower` or
         `execute`) and `<reason>` its own message, unchanged, followed by
@@ -355,8 +370,31 @@ def sql_result(
         statement refused before its plan runs raises `<step>: <reason>` as
         without a control, and so does every other refusal.
     """
+    return sql_result_with(session, sql, control, kernel_store_connectors())
+
+
+def sql_result_with[
+    S3C: Connector, AZC: Connector, K: AwsClock & Copyable & Deinitable
+](
+    mut session: Session,
+    sql: String,
+    control: RunControl,
+    var connectors: StoreConnectors[S3C, AZC, K],
+) raises -> ArrowResult:
+    """`sql_result` under `control`, reading the session's bound object stores
+    through the connectors and clock `connectors` gives: the file systems of
+    `store_opener`, built from the credentials sealed on the session now. A
+    credential a bound table names that cannot be read refuses the statement
+    at step `bind` (`<step>: <reason>`, recorded on the session).
+    """
     probe_codec_libraries()
-    var outcome = run_sql(session.engine, sql, control)
+    var opener: StoreScanFs[S3C, AZC, K]
+    try:
+        opener = store_opener(session, connectors^)
+    except e:
+        session.set_refusal(String(STEP_BIND), String(e))
+        raise Error(session.last_error())
+    var outcome = run_sql_with(session.engine, sql, opener^, control)
     if outcome.refusal:
         ref refusal = outcome.refusal.value()
         if refusal.step == String(STEP_EXECUTE) and control.is_cancelled():
@@ -387,40 +425,63 @@ def plan_result(mut session: Session, var plan_bytes: List[UInt8]) raises -> Arr
     and run it on `session`'s engine, returning its answer as `sql_result`
     does: every batch checked to cross the Arrow C Stream Interface whole.
 
-    The plan is decoded with `plan_wire.plan_from_bytes` (the wire's admission,
-    value and UDF checks) and then optimized, lowered and run in-process
-    (`sdk_exec.engine_plan.run_plan`); it is never turned into SQL text, and
-    the SQL front end does not run. A scan carries its own source, so the
-    plan needs no table registered on the session. The result owns its
+    The envelope is decoded with `plan_wire.plan_envelope_from_bytes` (the
+    wire's admission, value and UDF checks) and then optimized, lowered and run
+    in-process (`sdk_exec.engine_plan.run_plan`); it is never turned into SQL
+    text, and the SQL front end does not run. A scan carries its own source, so
+    the plan needs no table registered on the session. The result owns its
     batches and keeps no reference to the session.
+
+    An envelope with a write target (`WirePlanEnvelope.write_target`) is run by
+    `sdk_exec.engine_plan.run_plan_write` instead: the plan's rows are written
+    to the destination as a local Parquet, CSV or newline-delimited JSON file,
+    all or nothing, and the answer is one row, the NOT NULL BIGINT column
+    `Count` holding the rows written. The destination is checked at `bind`
+    before the plan runs, so a refused write touches no file.
 
     Raises:
         Error `compression: cannot load <soname>: <loader error>` when a codec
         library cannot be loaded, before the plan is decoded.
 
         Error `<step>: <reason>`, where `<step>` is `decode` when the bytes are
-        not a plan this build runs (among them an envelope that carries a
-        write target, `PLAN_WIRE_WRITE_TARGET_DROPPED`, or UDFs,
-        `PLAN_WIRE_UDFS_DROPPED`), and otherwise the step of `run_plan` that
-        refused (`optimize`, `lower` or `execute`); `<reason>` is that step's
-        own message, unchanged. The session records the refusal too
-        (`Session.set_refusal`): its step is `step_number(<step>)`, which is
-        `KOMIRA_STEP_NONE` for `decode`, and its code `error_code(<reason>)`.
-        And the export check's error naming the column when a result column
-        cannot cross the stream (`arrow_result`), which the session does not
-        record.
+        not a plan this build runs (among them an envelope that carries UDFs,
+        `PLAN_WIRE_UDFS_DROPPED`: the plan door runs no user function yet),
+        `bind` when a write's destination or compression is refused
+        (`STORAGE_URL_REFUSED`, `COPY_COMPRESSION_UNSUPPORTED`), and otherwise
+        the step of `run_plan` that refused (`optimize`, `lower` or `execute`;
+        a destination that cannot be written, `STORAGE_NOT_FOUND`, is refused
+        at `execute`); `<reason>` is that step's own message, unchanged. The
+        session records the refusal too (`Session.set_refusal`): its step is
+        `step_number(<step>)`, which is `KOMIRA_STEP_NONE` for `decode`, and
+        its code `error_code(<reason>)`. And the export check's error naming
+        the column when a result column cannot cross the stream
+        (`arrow_result`), which the session does not record.
     """
     probe_codec_libraries()
     var plan: LogicalPlan
+    var target: Optional[WriteTarget]
     try:
-        plan = plan_from_bytes(plan_bytes^)
+        var decoded = plan_envelope_from_bytes(plan_bytes^)
+        if len(decoded.udfs) > 0:
+            raise Error(
+                String(PLAN_WIRE_UDFS_DROPPED)
+                + ": these bytes carry "
+                + String(len(decoded.udfs))
+                + " UdfRef entries (`WirePlanEnvelope.udfs`), and the plan"
+                " door runs no user function yet"
+            )
+        target = decoded.write_target.copy()
+        plan = decoded.take_plan()
     except e:
         # `decode` is no `KOMIRA_STEP_*` step: `step_number` gives it
-        # `KOMIRA_STEP_NONE`, and the code is the decoder's
-        # (`PLAN_WIRE_WRITE_TARGET_DROPPED`).
+        # `KOMIRA_STEP_NONE`, and the code is the decoder's.
         session.set_refusal(String(STEP_DECODE), String(e))
         raise Error(session.last_error())
-    var outcome = run_plan(session.engine, plan^)
+    var outcome: SqlOutcome
+    if target:
+        outcome = run_plan_write(session.engine, plan^, target.value())
+    else:
+        outcome = run_plan(session.engine, plan^)
     if outcome.refusal:
         ref refusal = outcome.refusal.value()
         session.set_refusal(refusal.step, refusal.reason.copy())

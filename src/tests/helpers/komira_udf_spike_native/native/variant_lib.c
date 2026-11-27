@@ -48,7 +48,7 @@
  * under komira_udf_native_init_v1 (refrt/variant_*_so.mojo). The inner table,
  * the host and the deferred queue are kept in this file's statics: one
  * runtime per loaded copy of a library, which is how the tests use them (the
- * native runtime maps a library once per runtime, from its own memory file).
+ * native runtime maps a library once per runtime, from its own private copy).
  */
 #include <pthread.h>
 #include <stddef.h>

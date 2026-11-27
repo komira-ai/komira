@@ -74,7 +74,7 @@ Output:
 
 ## Related
 
-- How do I lowercase, trim and replace text in a column? (rank 42, works; no page yet)
+- [How do I lowercase, trim and replace text in a column?](../42-lowercase-trim-replace-text-column/page.md) (rank 42, partial)
 - How do I add a column with if/else (case when) logic? (rank 30, works; no page yet)
 - [How do I find (not drop) duplicate rows?](../57-find-duplicate-rows/page.md) (rank 57, works)
 - [How do I replace specific values such as 'N/A' with null?](../55-replace-values-with-null/page.md) (rank 55, partial)

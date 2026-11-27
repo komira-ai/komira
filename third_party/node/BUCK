@@ -1,18 +1,21 @@
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_libs")
 load("@komira//tools/build/node:defs.bzl", "node_dist", "npm_package")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
-load(":pins.bzl", "NODE", "NPM", "npm_target")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "setting_name")
+load(":pins.bzl", "NODE", "NODE_DARWIN_ARM64", "NODE_LINES", "NODE_MACOS", "NPM", "NPM_CLI", "NPM_INSTALL_ONLY", "npm_target")
 
 # The hermetic Node.js of the tests (README.md): the Node 24 LTS runtime from
-# its linux-x64 release archive and the npm packages the tests bundle, every
-# file pinned by sha256 and size in pins.bzl and fetched like any other pinned
-# download; each npm tarball's registry integrity is checked again when it is
-# unpacked. Nothing here is shipped: the runtime and the packages are visible
-# only to the test-only packages listed in _TEST_ONLY, and a node_test hands
-# its dependents nothing but its pass marker (README.md, Never shipped). A new
-# consumer is a new line here.
+# its linux-x64 release archive (and, for a macOS target platform, its
+# darwin-arm64 archive: `node_runtime`) and the npm packages the tests bundle,
+# and, for the install test of the npm packages alone, the Node 22 and 26
+# runtimes and the npm CLI; every file pinned by sha256 and size in pins.bzl and
+# fetched like any other pinned download; each npm tarball's registry
+# integrity is checked again when it is unpacked. Nothing here is shipped: the
+# runtime and the packages are visible only to the test-only packages listed
+# in _TEST_ONLY (the other lines and npm only to _INSTALL_TEST), and a
+# node_test hands its dependents nothing but its pass marker (README.md, Never
+# shipped). A new consumer is a new line here.
 _TEST_ONLY = [
     "komira//src/tests/helpers/komira_test_node/...",
     # The node_modules rules (tools/build/node/modules.bzl) and their tests.
@@ -30,6 +33,10 @@ _TEST_ONLY = [
 # checkout has; a label naming it would fail to load in a repository that
 # uses komira as a cell, so it is named only when the cell exists.
 _NEGATIVE = ["tests//negative/node:", "tests//negative/npm_modules:"] if read_root_config("cells", "tests") else []
+
+# The install test of the npm packages (node/BUCK, :install_test), the one
+# consumer of the other Node.js lines, of npm and of the tarballs npm installs.
+_INSTALL_TEST = ["komira//node:"]
 
 pinned_file(
     name = NODE["archive"],
@@ -59,6 +66,20 @@ conda_libs(
     visibility = _NEGATIVE,
 )
 
+# The same, with libatomic.so.1 (from the same libgcc package), which Node 26's
+# `node` also links.
+conda_libs(
+    name = "native_libs_atomic",
+    exec_compatible_with = LINUX_X86_64,
+    libs = {
+        "lib/libatomic.so.1": ":" + pinned_kwargs("linux-x86_64", "libgcc")["name"],
+        "lib/libgcc_s.so.1": ":" + pinned_kwargs("linux-x86_64", "libgcc")["name"],
+        "lib/libstdc++.so.6": ":" + pinned_kwargs("linux-x86_64", "libstdcxx")["name"],
+    },
+    unpacker = "komira//tools/build/toolchains:conda_unpack",
+    visibility = _NEGATIVE,
+)
+
 # `:node`; its sub-target `:node[include]` is the Node-API headers.
 node_dist(
     name = NODE["name"],
@@ -69,13 +90,110 @@ node_dist(
     visibility = _TEST_ONLY + _NEGATIVE,
 )
 
+# The darwin-arm64 runtime, for what a macOS target platform bundles
+# (`:node_runtime`), from the 24.21.0 archive of NODE_MACOS below. No action
+# runs it: the dist is unpacked on the linux execution platform and checked
+# there without running it (`:node_macos_arm64` is the same archive run on a
+# macOS worker, for the macOS install test). `:node` stays the linux runtime
+# every action (`exec_dep`) runs. Node's darwin build links only system
+# libraries, so it has no native_libs.
+node_dist(
+    name = NODE_DARWIN_ARM64["name"],
+    archive = ":" + NODE_DARWIN_ARM64["archive"],
+    foreign = "macho-arm64",
+    top = NODE_DARWIN_ARM64["top"],
+    version = NODE_DARWIN_ARM64["version"],
+    # komira//ci: the pull request check builds it as a root of its own (on
+    # Linux nothing reaches it but :node_runtime's darwin branch); building it
+    # unpacks the archive and checks its Mach-O node and header on the linux
+    # execution platform, running nothing.
+    visibility = _TEST_ONLY + _NEGATIVE + ["komira//ci:"],
+)
+
+# The node a target platform bundles: the darwin-arm64 dist for a macOS
+# target, `:node` for every other. Only for a bundle's contents; an action
+# that runs node takes `:node`.
+alias(
+    name = "node_runtime",
+    actual = select({
+        "DEFAULT": ":" + NODE["name"],
+        "komira//tools/build/toolchains:" + setting_name("darwin-arm64"): ":" + NODE_DARWIN_ARM64["name"],
+    }),
+    visibility = _TEST_ONLY,
+)
+
+# `:node_22` and `:node_26`, the other Node.js lines (pins.bzl, NODE_LINES),
+# reduced as `:node` is.
+[pinned_file(
+    name = n["archive"],
+    url = n["url"],
+    sha256 = n["sha256"],
+    size_bytes = n["size"],
+) for n in NODE_LINES]
+
+[node_dist(
+    name = n["name"],
+    archive = ":" + n["archive"],
+    native_libs = n["native_libs"],
+    top = n["top"],
+    version = n["version"],
+    visibility = _INSTALL_TEST + _NEGATIVE,
+) for n in NODE_LINES]
+
+# `:node_22_macos_arm64`, `:node_macos_arm64` and `:node_26_macos_arm64`, the
+# same lines' darwin-arm64 archives (pins.bzl, NODE_MACOS), for the macOS
+# install test of the npm packages alone: unpacked and run (`node --version`)
+# by the macOS build of node_act on a macOS worker. A macOS node links only the
+# system's libraries: no native_libs.
+[pinned_file(
+    name = n["archive"],
+    url = n["url"],
+    sha256 = n["sha256"],
+    size_bytes = n["size"],
+    # The 24.21.0 archive is also `NODE_DARWIN_ARM64`'s, which the negative
+    # node fixtures unpack; the others keep the package's default.
+    **({"visibility": _NEGATIVE} if n["archive"] == NODE_DARWIN_ARM64["archive"] else {})
+) for n in NODE_MACOS]
+
+[node_dist(
+    name = n["name"],
+    act = "komira//tools/build/node_tools:node_act_darwin",
+    archive = ":" + n["archive"],
+    exec_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-node
+    top = n["top"],
+    version = n["version"],
+    visibility = _INSTALL_TEST,
+) for n in NODE_MACOS]
+
+# The packages' tarballs are also what the install test hands npm.
 [pinned_file(
     name = p["file"],
     url = p["url"],
     sha256 = p["sha256"],
     size_bytes = p["size"],
-    visibility = _NEGATIVE,
-) for p in NPM]
+    visibility = _INSTALL_TEST + _NEGATIVE,
+) for p in NPM + NPM_INSTALL_ONLY]
+
+# `:npm`, the npm CLI (pins.bzl, NPM_CLI): its tarball's package/ directory,
+# whose bin/npm-cli.js the pinned node runs. Only the install test depends on
+# it; .github/workflows/npm.yml also builds it (and :node) by name, as the tools
+# its publish and smoke jobs run (README.md, Never shipped).
+pinned_file(
+    name = NPM_CLI["file"],
+    url = NPM_CLI["url"],
+    sha256 = NPM_CLI["sha256"],
+    size_bytes = NPM_CLI["size"],
+)
+
+npm_package(
+    name = npm_target(NPM_CLI["name"]),
+    package = NPM_CLI["name"],
+    version = NPM_CLI["version"],
+    integrity = NPM_CLI["integrity"],
+    tarball = ":" + NPM_CLI["file"],
+    visibility = _INSTALL_TEST + _NEGATIVE,
+)
 
 # One target per package, named by npm_target (`:apache-arrow`,
 # `:esbuild_linux-x64`), with its deps.
