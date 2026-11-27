@@ -24,9 +24,16 @@ load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 # duplicate enum value is a build error here rather than in the first non-Mojo
 # consumer.
 #
+# `bound_source.proto` is the input of `komira_add_sql_binding`
+# (docs/design/credentials_and_writes.md, decisions 4 and 8): `WireBoundSource`,
+# the source a caller binds to a SQL name, with `WireFileSource`,
+# `WireSourceAccess` (the name of a credential and the store's settings, never a
+# value) and `AddressingStyleWire`. It imports nothing and no plan carries it.
+#
 # Reach the surface via:
 #   from plan_proto.plan import WirePlan, WirePlanEnvelope, ...
 #   from plan_proto.plan_vocabulary import PlanTag, ExprTag, ...
+#   from plan_proto.bound_source import WireBoundSource, WireFileSource, ...
 #
 # The generated `plan_vocabulary` module is a second Mojo view of the
 # vocabulary, generated at build time from `plan_vocabulary.proto`. It is not
@@ -80,6 +87,7 @@ _OPTIMIZED_GOLDEN = {
 }
 
 _PROTOS = [
+    "bound_source.proto",
     "optimized_plan.proto",
     "plan.proto",
     "plan_vocabulary.proto",

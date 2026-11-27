@@ -47,3 +47,31 @@ eval -> row_format, kernels, expr, udf,
 
 Operator, compiler, dispatch and SDK packages that run the executor depend on
 `eval`; `eval` must not import any of them.
+
+## Example
+
+The random source of the adaptive filter is a small xorshift generator. Two
+generators built from the same seed give the same stream, a zero seed is
+replaced by a fixed constant, each worker id gets its own seed, and
+`next_in_range` stays below its bound.
+
+```mojo
+from std.testing import assert_equal, assert_true
+from eval.xorshift64 import XorShift64, XORSHIFT64_GOLDEN_RATIO
+
+var a = XorShift64.from_seed(UInt64(123456789))
+var b = XorShift64.from_seed(UInt64(123456789))
+for _ in range(16):
+    assert_equal(a.next_u64(), b.next_u64())
+
+var zero = XorShift64.from_seed(UInt64(0))
+assert_equal(zero.state, XORSHIFT64_GOLDEN_RATIO)
+
+var w0 = XorShift64.from_worker_id(0)
+var w1 = XorShift64.from_worker_id(1)
+assert_true(w0.state != w1.state)
+
+var r = XorShift64.from_seed(UInt64(7))
+for _ in range(100):
+    assert_true(r.next_in_range(UInt64(8)) < UInt64(8))
+```

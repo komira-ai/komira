@@ -1,0 +1,5 @@
+[{'region': 'east', 'orders': 2}, {'region': 'west', 'orders': 2}, {'region': 'north', 'orders': 1}]
+[{'region': 'east', 'size': 2}, {'region': 'north', 'size': 1}, {'region': 'west', 'size': 2}]
+[{'region': 'east', 'size': 2}, {'region': 'west', 'size': 2}]
+[{'region': 'east', 'customer': 'Ana', 'size': 2}, {'region': 'north', 'customer': 'Cy', 'size': 1}, {'region': 'west', 'customer': 'Bo', 'size': 2}]
+[{'region': 'east', 'len': 2}, {'region': 'north', 'len': 1}, {'region': 'west', 'len': 2}]

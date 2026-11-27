@@ -65,3 +65,24 @@ export_file(
     src = "fixtures/buck2_failure/analysis_failed.log",
     visibility = ["//release/ci:"],
 )
+
+# The cases of release/ci/npm_smoke, the npm release's tool: npm_set.json, the publish gate, the publish, the
+# smoke and the command line (what each file holds is in the header of test_npm_smoke.zig), with npm and node
+# in memory (npm_testing.zig). Run as a build action: building the program is running them.
+zig_test(
+    name = "test_npm_smoke",
+    exec_compatible_with = LINUX_X86_64,
+    src = "test_npm_smoke.zig",
+    deps = ["//release/ci:npm_smoke_lib"],
+    imports = [
+        "npm_cli_test.zig",
+        "npm_gate_test.zig",
+        "npm_publish_test.zig",
+        "npm_set_test.zig",
+        "npm_smoke_run_test.zig",
+        "npm_testing.zig",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["//release/ci:"],
+)
