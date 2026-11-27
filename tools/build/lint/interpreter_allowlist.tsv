@@ -16,6 +16,7 @@
 .github/ci/coverage_measure.sh	coverage and mutation tooling: to port to Zig
 .github/ci/tests/coverage_ci_cases.sh	coverage and mutation tooling: to port to Zig
 buck2	a thin wrapper: runs the pinned buck2 release
+python/docs/task_tree_fixture/**/*.py	the probes of the two task trees of tools/build/ci/tasks_cases.bzl: a probe is found by its name, probe_<name>.py, so the fixture needs the file; the trees are analysed and never built, so nothing runs it
 python/docs/tasks/**/*.py	the Python examples and probes of the common tasks: each is the program a page shows, run from the installed wheel and compared with its recorded output (docs/tasks/README.md)
 python/examples/analysis_job.py	the Python package's analysis job example: run from the installed wheel and compared with DuckDB (python/examples/README.md)
 python/examples/quickstart.py	the Python package's quickstart: the example the README shows and the release smoke runs (python/examples/README.md)

@@ -245,6 +245,19 @@ enum JoinAlgo {
 }
 
 // ----------------------------------------------------------------------
+// The input a join's hash table is built on, an optimizer decision.
+// Derived from: src/plan_ir/plan_decisions.mojo (JOIN_BUILD_SIDE_*)
+// Engine prefix: JOIN_BUILD_SIDE_
+// Engine LEFT = 0, RIGHT = 1 and UNSET = 255 are wire 1, 2 and 0: a raw plan
+// states no build side, so the engine's UNSET is the wire's unspecified.
+// ----------------------------------------------------------------------
+enum JoinBuildSide {
+  JOIN_BUILD_SIDE_WIRE_UNSPECIFIED = 0;
+  JOIN_BUILD_SIDE_LEFT = 1;
+  JOIN_BUILD_SIDE_RIGHT = 2;
+}
+
+// ----------------------------------------------------------------------
 // AS-OF join match direction.
 // Derived from: src/plan_ir/logical_plan.mojo
 // Engine prefix: ASOF_
