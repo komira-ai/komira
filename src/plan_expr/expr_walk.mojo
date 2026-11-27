@@ -91,6 +91,7 @@ from plan_expr.expr import (
     EXPR_UDF_APPLY,
     EXPR_EXTRACT,
     EXPR_JSON_EXTRACT,
+    _is_name_unit,
     _is_trunc_unit,
     string_fn_returns_int,
     string_fn_n_returns_int,
@@ -1274,12 +1275,14 @@ def walk_expr_field[P: ColRefFieldPolicy](
         # ★ The eval arm computes `extract(year from d)` and `date_trunc(...)`;
         # without this arm both would be typed `null`.
         #
-        # ⚠ THE RULE IS NOT RESTATED HERE, IT IS DELEGATED. `_is_trunc_unit`
-        # in `expr.mojo` is the SINGLE discriminator between the two
-        # families, and it is the same one `_eval_column_expr` branches on —
-        # copying the unit list into this file would be the very defect this
-        # module exists to delete.
+        # ⚠ THE RULE IS NOT RESTATED HERE, IT IS DELEGATED. `_is_name_unit`
+        # and `_is_trunc_unit` in `expr.mojo` are the discriminators between
+        # the three families, and they are the same ones `_eval_column_expr`
+        # branches on — copying the unit list into this file would be the
+        # very defect this module exists to delete.
         #
+        #   name units   -> STRING (`dayname` / `monthname`), nullable: a
+        #                   NULL value is a NULL name.
         #   trunc units  -> the CHILD's own temporal type. The eval arm
         #                   explicitly re-stamps `col_out.arrow_type` to
         #                   DATE32 / the source TIMESTAMP unit, so the
@@ -1303,6 +1306,8 @@ def walk_expr_field[P: ColRefFieldPolicy](
         #     RENAMED instead, exactly as the alias arm does, which also
         #     carries decimal (p,s), `_dict_index_type`, `_flags`, kv-metadata
         #     and nested children for free.
+        if _is_name_unit(expr.extract_unit()):
+            return Field("extract", ArrowType.STRING, True)
         if _is_trunc_unit(expr.extract_unit()):
             var trunc_child = walk_expr_field[P](
                 expr.extract_child_ref(), schema, missing

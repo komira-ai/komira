@@ -297,8 +297,8 @@ def year_derived_of(which: UInt8, var child: Expr) -> Expr:
         # ⚠ A TYPED NULL LITERAL IS EXPRESSIBLE HERE AND ONLY BECAUSE THE
         # BRANCHES ARE INT64. `broadcast_scalar`'s null arm has exactly two
         # types — float64 and int64 — so the same shape is NOT available to a
-        # string-valued CASE, which is why `dayname`/`monthname` are still
-        # unbound (they need `CASE ... ELSE <string NULL>`).
+        # string-valued CASE. (`dayname`/`monthname` do not need it: they are
+        # EXTRACT units whose kernel carries the input's validity.)
         var ecases = List[WhenCaseData]()
         ecases.append(
             WhenCaseData(

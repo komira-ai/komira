@@ -10,11 +10,13 @@ Path("days.csv").write_text(
     "4,2026-12-25\n"
 )
 
-# SQL: year(), month() and isodow() (Monday is 1 ... Sunday is 7) read a date.
+# SQL: year(), month() and isodow() (Monday is 1 ... Sunday is 7) read a date;
+# dayname() and monthname() name its weekday and month.
 with komira.Session() as s:
     s.register_csv("days", "days.csv")
     parts = s.sql(
-        "SELECT d, year(d) AS yr, month(d) AS mon, isodow(d) AS dow"
+        "SELECT d, year(d) AS yr, month(d) AS mon, isodow(d) AS dow,"
+        " dayname(d) AS day, monthname(d) AS month_name"
         " FROM days ORDER BY id"
     )
     print(parts.to_arrow().to_pylist())
@@ -25,7 +27,9 @@ parts = df.assign(
     year=df["d"].dt.year,
     month=df["d"].dt.month,
     weekday=df["d"].dt.weekday,
-).sort_values("id")[["d", "year", "month", "weekday"]]
+    day_name=df["d"].dt.day_name(),
+    month_name=df["d"].dt.month_name(),
+).sort_values("id")[["d", "year", "month", "weekday", "day_name", "month_name"]]
 print(parts.materialize().to_arrow().to_pylist())
 
 # The parts are ordinary columns: here, the rows that fall on a weekend.

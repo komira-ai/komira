@@ -85,6 +85,7 @@ mojo_library(
         "tests/test_substring_duckdb_semantics.mojo",
         "tests/test_temporal_extract.mojo",
         "tests/test_temporal_extract_part2.mojo",
+        "tests/test_temporal_names.mojo",
         "tests/test_udf_predicate_names_its_own_output_column.mojo",
     ],
     visibility = ["PUBLIC"],

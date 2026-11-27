@@ -235,22 +235,22 @@ Counts of the names in `function_coverage.tsv` (731 names), each from
 
 | names | what was measured |
 |---|---|
-| 173 | lowering rows whose cases all ran and equal DuckDB's answers |
+| 175 | lowering rows whose cases all ran and equal DuckDB's answers |
 | 4 | lowering rows that run and differ from DuckDB only in floats, within 4 ulps (`cos`, `exp`, `log`, `log10`) |
 | 2 | lowering rows with a case whose answer differs from DuckDB's: `json_extract` and `json_extract_string` answer the bytes of the value as the document spells it, where DuckDB writes the value again (`1.50` as `1.5`, `-0` as `0`, a nested value without its spaces) |
 | 1 | lowering rows refused at execute by every case that calls them: `to_hex`, whose row is the VARCHAR overload; DuckDB's `to_hex` of an integer is a second overload, refused by name |
 | 8 | lowering rows no `scalar_fn` case calls: the catalog constants `current_role`, `current_user`, `session_user`, `user` and `pg_table_is_visible` (their answer is the session's, not a function of the row), and `struct_extract`, `struct_extract_at` and `map_extract_value`, which no SQL here can reach (the Parquet scan reads flat columns only, and `struct_pack`, `row` and `map` are refusal rows) |
 | 3 | rows keyed by a constant (`internal`) |
-| 538 | refusal rows; every one is refused at bind by `SELECT name(k) FROM T` |
+| 536 | refusal rows; every one is refused at bind by `SELECT name(k) FROM T` |
 | 2 | common names with no row at all (`initcap`, `current_timestamp`), refused at bind |
 
-So the rows that execute and are checked against DuckDB are 177 of the 188
+So the rows that execute and are checked against DuckDB are 179 of the 190
 lowering-row names (the first two lines); 3 run without DuckDB's answer (two
 differ, one is refused at execute); 8 are unmeasured, each for the reason its
 line gives. The gap list of common analysis
 functions is the `common = yes` lines whose `row` is `FNK_REFUSED` or
 `NO_ROW`: for example `split_part`, `strftime`, `strptime`, `epoch`, `age`,
-`current_date`, `now`, `dayname`, `monthname`, `make_date`, `to_timestamp`,
+`current_date`, `now`, `make_date`, `to_timestamp`,
 `random`, `gcd`, `lcm`, `list_*` and `array_length`, `date_add`, `typeof`,
 `position`, `format` and `printf`, `chr`, `initcap`, `current_timestamp`;
 each carries its reason family in `detail`.

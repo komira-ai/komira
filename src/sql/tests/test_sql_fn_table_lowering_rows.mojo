@@ -2,7 +2,7 @@
 # Row pins: every LOWERING row of sql_scalar_fn_spec, one call per spelling
 # =============================================================================
 #
-# What it proves: each of the 191 spellings on the table's 160 lowering rows
+# What it proves: each of the 193 spellings on the table's 162 lowering rows
 # (every kind except FNK_REFUSED) resolves to its row's kind, op and
 # inclusive arity, claims the name (`lowers_to_a_node` True) and carries no
 # reason. Every alias of a row is called, so every `name == ...` operand of
@@ -23,6 +23,7 @@ from plan_expr.expr import (
     BIN_MUL,
     BIN_SUB,
     EXTRACT_DAY,
+    EXTRACT_DAYNAME,
     EXTRACT_DAYOFWEEK,
     EXTRACT_DAYOFYEAR,
     EXTRACT_HOUR,
@@ -32,6 +33,7 @@ from plan_expr.expr import (
     EXTRACT_MILLISECOND,
     EXTRACT_MINUTE,
     EXTRACT_MONTH,
+    EXTRACT_MONTHNAME,
     EXTRACT_QUARTER,
     EXTRACT_SECOND,
     EXTRACT_WEEK,
@@ -332,6 +334,8 @@ def test_lowering_rows_3() raises:
     _lowers("yearweek", FNK_EXTRACT_FIELD, EXTRACT_YEARWEEK, 1, 1)
     _lowers("millisecond", FNK_EXTRACT_FIELD, EXTRACT_MILLISECOND, 1, 1)
     _lowers("microsecond", FNK_EXTRACT_FIELD, EXTRACT_MICROSECOND, 1, 1)
+    _lowers("dayname", FNK_EXTRACT_FIELD, EXTRACT_DAYNAME, 1, 1)
+    _lowers("monthname", FNK_EXTRACT_FIELD, EXTRACT_MONTHNAME, 1, 1)
     _lowers("date_diff", FNK_DESUGAR, DSG_DATE_DIFF, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     _lowers("datediff", FNK_DESUGAR, DSG_DATE_DIFF, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     _lowers("coalesce", FNK_DESUGAR, DSG_COALESCE, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)

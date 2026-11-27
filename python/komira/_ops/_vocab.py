@@ -134,6 +134,8 @@ EXTRACT_UNITS = frozenset(
         "yearweek",
         "millisecond",
         "microsecond",
+        "dayname",
+        "monthname",
         "trunc_year",
         "trunc_quarter",
         "trunc_month",

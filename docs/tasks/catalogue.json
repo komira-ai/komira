@@ -334,10 +334,7 @@
     "slug": "extract-year-month-weekday-date-column",
     "category": "Time",
     "question": "How do I extract year, month and weekday from a date column?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2393"
-    ]
+    "status": "works"
   },
   {
     "rank": 40,

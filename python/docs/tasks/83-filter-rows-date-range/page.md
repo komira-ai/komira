@@ -71,6 +71,6 @@ date32
 ## Related
 
 - How do I select columns and filter rows? (rank 2, works)
-- [How do I extract year, month and weekday from a date column?](../39-extract-year-month-weekday-date-column/page.md) (rank 39, partial)
+- [How do I extract year, month and weekday from a date column?](../39-extract-year-month-weekday-date-column/page.md) (rank 39, works)
 - How do I add days to a date or take the difference between dates? (rank 79, partial; no page yet)
 - How do I group by month or week? (rank 80, works; no page yet)
