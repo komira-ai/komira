@@ -94,6 +94,10 @@ class Session:
         # the library, which is never unloaded; calling into it then is not
         # needed.
         self._free.atexit = False
+        # The UDF scratch tree is removed at interpreter exit too, after the
+        # context is left to the operating system: a session never closed
+        # leaves no directory behind.
+        self._scratch = weakref.finalize(self, self._udf.remove)
 
     @property
     def closed(self) -> bool:

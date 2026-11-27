@@ -37,7 +37,7 @@ def _options(scratch: str) -> list[str]:
     options = [
         "interpreter=" + sys.executable,
         "zygote=" + str(spec.origin),
-        "abi=cp" + sys.implementation.cache_tag.replace("cpython-", ""),
+        "abi=cp" + (sys.implementation.cache_tag or "").replace("cpython-", ""),
         "scratch=" + scratch,
     ]
     options.extend("sys_path=" + p for p in sys.path if p and os.path.isdir(p) and os.path.realpath(p) not in skip)

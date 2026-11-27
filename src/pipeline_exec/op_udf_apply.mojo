@@ -46,6 +46,7 @@ from morsel.morsel_operator import MorselOperatorImpl
 from physical_plan.physical_plan import MorselOp, OP_UDF_APPLY
 from plan_expr.expr_id import ExprId
 from plan_expr.expr_pool import ExprPool
+from plan_expr.udf_data import UDF_NULL_MANUAL
 from plan_ir.udf_ref import UDF_REF_KIND_ROW
 from udf_host.instance import UdfInstance
 from udf_host.runtime import UdfBinding, result_field
@@ -55,10 +56,14 @@ comptime PIPELINE_UDF_UNBOUND = "PIPELINE_UDF_UNBOUND"
 
 
 def udf_output_field(ref binding: UdfBinding, udf_index: Int, name: String) -> Field:
-    """The field an OP_UDF_APPLY appends: `name`, the UDF's return type,
-    nullable (a UDF may answer NULL on any row unless its type says not)."""
-    var f = result_field(binding.ref_at(udf_index))
+    """The field an OP_UDF_APPLY appends: `name` and the UDF's return type,
+    nullable as the type says, and nullable whatever it says under
+    NULL_PROPAGATE, whose NULL rows the host fills with NULL."""
+    ref u = binding.ref_at(udf_index)
+    var f = result_field(u)
     f.name = name
+    if u.null_mode != UDF_NULL_MANUAL:
+        f.nullable = True
     return f^
 
 

@@ -368,6 +368,8 @@ def open_runtime(path: String, options: List[String]) raises -> Opened:
         lib.free()
         raise Error("UDF_RUNTIME_OPEN_FAILED: " + path + ": " + String(e))
     if not lib[].check_symbol(INIT_SYMBOL):
+        # The slot is kept (never freed): its handle stays open, as every
+        # library this file opens does.
         raise Error("UDF_RUNTIME_MISSING_SYMBOL: " + path + " has no " + INIT_SYMBOL)
     var n = len(options)
     var opts = _zeroed(8 * n)

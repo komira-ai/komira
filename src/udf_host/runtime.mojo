@@ -181,8 +181,10 @@ struct UdfRuntime(Movable):
         if table_major(o.table) != ABI_MAJOR or table_bytes(o.table) < REQUIRED_TABLE_BYTES:
             var major = table_major(o.table)
             var size = table_bytes(o.table)
-            if size >= REQUIRED_TABLE_BYTES:
-                shutdown(o.table, o.rt)
+            # A table of this major that is too short has no shutdown entry
+            # to call, and one of another major has a layout this host does
+            # not read: neither is called. The runtime is left as init made
+            # it (its library is never closed).
             free_host(o.host)
             raise Error(
                 String(UDF_RUNTIME_ABI_MISMATCH) + ": the UDF runtime " + config.library
