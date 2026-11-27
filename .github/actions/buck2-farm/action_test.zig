@@ -46,7 +46,22 @@
 //!  - a buck2 ended by a signal is never run again, and a second run ended by
 //!    one fails saying so; a job summary that cannot be written, a log that
 //!    cannot be written and a buck2 that cannot be run end the step with the
-//!    reason, never with a run passed over.
+//!    reason, never with a run passed over;
+//!  - a run that hangs on a dead connection (the watchdog,
+//!    tools/build/ci/assert_remote/farm_watchdog.zig): the farm of the case is
+//!    then a fake one on its loopback port, served by a thread of the case,
+//!    and the farm config sets the watchdog's bound to 2 s. A farm that
+//!    accepts the connection, reads the request and then sends nothing with
+//!    the socket open is the half-open case: the run is ended, buck2's daemon
+//!    stopped (`./buck2 kill`), the reason in the job log and the summary, and
+//!    the step run again and green; a buck2 that ignores SIGINT is ended with
+//!    SIGKILL; three such runs are red after three, never four; one then a
+//!    real failure is red naming it; a subcommand other than build, test or
+//!    bxl is ended and not run again. A farm that sends a byte every 25 ms is
+//!    slow but alive: a run that reads 200 of them, so lasts at least 5 s,
+//!    more than twice the bound, is never ended, and a real failure after
+//!    talking to it is not run again. Without a farm config there is no
+//!    watchdog, and the step says so and runs as before.
 
 const std = @import("std");
 const t = std.testing;
@@ -208,7 +223,21 @@ const Run = struct {
     code: u8 = 0,
     /// The signal that ends the call, in place of the exit code.
     signal: ?u8 = null,
+    /// The call connects to the farm, sends a request and waits for an answer
+    /// that never comes (`stubborn`: with SIGINT ignored), in place of an exit.
+    hang: enum { no, yes, stubborn } = .no,
+    /// The call connects to the farm, sends a request and reads this many
+    /// bytes of its answers before it exits with `code`.
+    farm_bytes: ?usize = null,
 };
+
+fn hanging(log: []const u8) Run {
+    return .{ .log = .{ .text = log }, .hang = .yes };
+}
+
+/// What a hanging run prints before it waits: buck2's line for an action in
+/// `[re_execute]`, as the console prints it every few seconds.
+const waiting_log = "[2026-11-27T06:15:49.491+00:00] Waiting on komira//src/so:so (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- mojo_build_test test_sources [re_execute]\n";
 
 fn fixture(name: []const u8, code: u8) Run {
     return .{ .log = .{ .fixture = name }, .code = code };
@@ -228,6 +257,8 @@ const Case = struct {
     out2: []const u8,
     /// How many times buck2 ran.
     runs: usize,
+    /// How many times `./buck2 kill` ran.
+    kills: usize,
     dir: []const u8,
 
     /// The file `name` of the case's directory, or null if there is none.
@@ -267,13 +298,59 @@ const Setup = struct {
         /// A machine buckconfig without `farm_wait_seconds`.
         no_wait,
     } = .answers,
+    /// What the farm's port does with a connection once accepted (a farm
+    /// that `answers` only); `none` leaves each in the listener's queue.
+    serve: Serve = .none,
+    /// The watchdog's bound the farm config sets (`dead_connection_seconds`), if any.
+    dead_seconds: ?u32 = null,
 };
+
+const Serve = enum {
+    none,
+    /// Reads what the client sends and never sends anything: the half-open case.
+    silent,
+    /// Sends one byte every 25 ms until the client goes: slow but alive.
+    alive,
+};
+
+/// The fake farm's side of one connection.
+fn answer(stream: std.net.Stream, serve: Serve) void {
+    defer stream.close();
+    switch (serve) {
+        .none => {},
+        .silent => {
+            var buf: [256]u8 = undefined;
+            while (true) {
+                const n = stream.read(&buf) catch return;
+                if (n == 0) return;
+            }
+        },
+        .alive => while (true) {
+            _ = std.posix.send(stream.handle, "o", std.posix.MSG.NOSIGNAL) catch return;
+            std.Thread.sleep(25 * std.time.ns_per_ms);
+        },
+    }
+}
+
+/// The fake farm: every connection the listener takes, answered on a thread
+/// of its own, until the listener is shut down.
+fn serveFarm(server: *std.net.Server, serve: Serve) void {
+    while (true) {
+        const conn = server.accept() catch return;
+        const th = std.Thread.spawn(.{}, answer, .{ conn.stream, serve }) catch {
+            conn.stream.close();
+            continue;
+        };
+        th.detach();
+    }
+}
 
 /// The machine buckconfig farm-connect writes, for a farm at 127.0.0.1:`port`
 /// and a longest wait of `wait` (no `[komira_ci]` when null).
-fn farmConfig(ar: std.mem.Allocator, port: u16, wait: ?u32) ![]u8 {
+fn farmConfig(ar: std.mem.Allocator, port: u16, wait: ?u32, dead: ?u32) ![]u8 {
     var out = std.ArrayList(u8).empty;
     if (wait) |s| try out.print(ar, "[komira_ci]\n  farm_wait_seconds = {d}\n", .{s});
+    if (dead) |s| try out.print(ar, "[komira_ci]\n  dead_connection_seconds = {d}\n", .{s});
     try out.print(ar, "[buck2_re_client]\n  engine_address = grpc://127.0.0.1:{d}\n  instance_name = main\n  tls = false\n[komira_re]\n  linux_x86_64_properties = OSFamily=Linux\n", .{port});
     return out.items;
 }
@@ -315,6 +392,12 @@ fn runCaseWith(ar: std.mem.Allocator, subcommand: []const u8, runs: []const Run,
         };
         if (r.signal) |sig| {
             try args.print(ar, " {s}@sig{d}", .{ path, sig });
+        } else if (r.hang == .yes) {
+            try args.print(ar, " {s}@hang", .{path});
+        } else if (r.hang == .stubborn) {
+            try args.print(ar, " {s}@hang-stubborn", .{path});
+        } else if (r.farm_bytes) |n| {
+            try args.print(ar, " {s}@farm{d}-{d}", .{ path, n, r.code });
         } else {
             try args.print(ar, " {s}@{d}", .{ path, r.code });
         }
@@ -336,24 +419,33 @@ fn runCaseWith(ar: std.mem.Allocator, subcommand: []const u8, runs: []const Run,
     const config: ?[]const u8 = switch (setup.farm) {
         .answers, .no_wait => c: {
             listener = try (try std.net.Address.parseIp("127.0.0.1", 0)).listen(.{});
-            break :c try farmConfig(ar, listener.?.listen_address.getPort(), if (setup.farm == .answers) 1200 else null);
+            break :c try farmConfig(ar, listener.?.listen_address.getPort(), if (setup.farm == .answers) 1200 else null, setup.dead_seconds);
         },
         .never_answers => c: {
             const r = try refusingPort();
             refusing = r.fd;
-            break :c try farmConfig(ar, r.port, 0);
+            break :c try farmConfig(ar, r.port, 0, setup.dead_seconds);
         },
         .no_config => null,
     };
+    // The fake farm, stopped before the listener is closed: a shut-down
+    // listener ends its accept, and each connection's thread ends with its client.
+    var server_thread: ?std.Thread = null;
+    defer if (server_thread) |th| {
+        std.posix.shutdown(listener.?.stream.handle, .both) catch {};
+        th.join();
+    };
+    if (setup.serve != .none) server_thread = try std.Thread.spawn(.{}, serveFarm, .{ &listener.?, setup.serve });
     if (config) |text| {
         const config_dir = try std.fs.path.join(ar, &.{ dir, ".buckconfig.d" });
         try std.fs.cwd().makePath(config_dir);
         try std.fs.cwd().writeFile(.{ .sub_path = try std.fs.path.join(ar, &.{ config_dir, "farm.buckconfig" }), .data = text });
     }
     const first = try runLine(ar, dir, steps[0].run, &env);
-    var c: Case = .{ .code = first.code, .step = 1, .out1 = first.out, .out2 = "", .runs = 0, .dir = dir };
+    var c: Case = .{ .code = first.code, .step = 1, .out1 = first.out, .out2 = "", .runs = 0, .kills = 0, .dir = dir };
     const calls = (try c.file(ar, "stand_in_buck2.calls")) orelse "";
     c.runs = std.mem.count(u8, calls, "\n");
+    c.kills = std.mem.count(u8, (try c.file(ar, "stand_in_buck2.kills")) orelse "", "\n");
     if (first.code != 0) return c;
     const second = try runLine(ar, dir, steps[1].run, &env);
     c.code = second.code;
@@ -367,7 +459,7 @@ fn has(out: []const u8, part: []const u8) bool {
 }
 
 fn show(c: Case) void {
-    std.debug.print("step {d}, code {d}, {d} run(s)\nstep 1:\n{s}\nstep 2:\n{s}\n", .{ c.step, c.code, c.runs, c.out1, c.out2 });
+    std.debug.print("step {d}, code {d}, {d} run(s), {d} kill(s)\nstep 1:\n{s}\nstep 2:\n{s}\n", .{ c.step, c.code, c.runs, c.kills, c.out1, c.out2 });
 }
 
 fn expectPasses(runs: []const Run) !void {
@@ -591,7 +683,7 @@ test "a cut with a machine buckconfig that names no longest wait ends the step w
     try expectNoFarm(.{ .farm = .no_wait }, "names no farm: it has no farm_wait_seconds under [komira_ci]\n");
 }
 
-test "a passing run never reads the farm config" {
+test "a passing run passes without the farm config, with no watchdog and a line saying so" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const c = try runCaseWith(arena.allocator(), "build", &.{fixture("build_remote.log", 0)}, .{ .farm = .no_config });
@@ -599,6 +691,8 @@ test "a passing run never reads the farm config" {
     try t.expectEqual(@as(u8, 2), c.step);
     try t.expectEqual(@as(u8, 0), c.code);
     try t.expectEqual(@as(usize, 1), c.runs);
+    try t.expect(has(c.out1, "buck2-farm: no watchdog on the connection to the farm: cannot read the farm config "));
+    try t.expectEqual(@as(usize, 0), c.kills);
 }
 
 test "a real failure is final without the farm config, with buck2's own exit code" {
@@ -748,4 +842,141 @@ test "a buck2 that cannot be run fails the step with 127 and is not run again" {
     try t.expectEqual(@as(u8, 127), c.code);
     try t.expect(has(c.out1, "assert_remote run: cannot run ./buck2: FileNotFound\n"));
     try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: not run again: an error outside the failed actions and tests: assert_remote run: cannot run ./buck2: FileNotFound\n"));
+}
+
+// ---- a run that hangs on a dead connection to the farm -----------------------------
+
+/// The watchdog's bound in the cases: 2 s, so a hanging case ends in seconds.
+const fast: Setup = .{ .serve = .silent, .dead_seconds = 2 };
+
+/// The line the watchdog writes when it ends a run, but for the time the connection was silent.
+const cut_head = "buck2-farm: watchdog: the connection to the farm from local port ";
+const cut_tail = ", past the bound of 0 min 2 s: the farm has closed it and buck2 would wait on it for ever; ending buck2 (SIGINT)\n";
+const dead_head = "buck2-farm: the first run of `build` hung on a dead connection to the farm (nothing heard for 0 min ";
+const dead_tail = ", past the watchdog's bound of 0 min 2 s), so buck2 and its daemon were ended; the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log\n";
+
+/// The number of lines of `text` that start with `head` and end with `tail`.
+fn linesLike(text: []const u8, head: []const u8, tail: []const u8) usize {
+    var n: usize = 0;
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |l| {
+        if (std.mem.startsWith(u8, l, head) and std.mem.endsWith(u8, l, tail[0 .. tail.len - 1])) n += 1;
+    }
+    return n;
+}
+
+test "a farm that takes the request and then goes silent with the socket open: the run is ended and run again, green" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCaseWith(a, "build", &.{ hanging(waiting_log), fixture("build_remote.log", 0) }, fast);
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 2), c.step);
+    try t.expectEqual(@as(u8, 0), c.code);
+    try t.expectEqual(@as(usize, 2), c.runs);
+    // the client ended, then its daemon stopped, once
+    try t.expectEqual(@as(usize, 1), c.kills);
+    try t.expectEqual(@as(usize, 1), linesLike(c.out1, cut_head, cut_tail));
+    try t.expect(has(c.out1, "buck2-farm: stopping buck2's daemon, which holds the dead connection (`./buck2 kill`)\n"));
+    try t.expect(has(c.out1, "buck2-farm: the first run hung on a dead connection to the farm and was ended; waiting for the farm's port to answer, up to 20 min 0 s\n"));
+    try t.expect(has(c.out1, "buck2-farm: the second run passed\n"));
+    // one line in the job summary, saying why and what followed
+    const summary = (try c.file(a, "summary.md")).?;
+    try t.expectEqual(@as(usize, 1), std.mem.count(u8, summary, "\n"));
+    try t.expectEqual(@as(usize, 1), linesLike(summary, dead_head, dead_tail));
+    // the ended run's log is kept, the tool step read the second
+    try t.expectEqualStrings(waiting_log, (try c.file(a, "buck2-farm.first.log")).?);
+    try t.expectEqualStrings(try recorded(a, "build_remote.log"), (try c.file(a, "buck2-farm.log")).?);
+    try t.expect(std.mem.startsWith(u8, c.out2, "assert_remote: ok"));
+}
+
+test "a hanging buck2 that ignores SIGINT is ended with SIGKILL, and the step runs again" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var stubborn = hanging(waiting_log);
+    stubborn.hang = .stubborn;
+    const c = try runCaseWith(a, "build", &.{ stubborn, fixture("build_remote.log", 0) }, fast);
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 2), c.step);
+    try t.expectEqual(@as(u8, 0), c.code);
+    try t.expectEqual(@as(usize, 2), c.runs);
+    try t.expectEqual(@as(usize, 1), c.kills);
+    try t.expect(has(c.out1, "buck2-farm: buck2 has not ended 10 s after SIGINT; ending it with SIGKILL\n"));
+    try t.expect(has(c.out1, "buck2-farm: the second run passed\n"));
+}
+
+test "three runs that hang: red after three, never a fourth, saying the third hung too" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCaseWith(a, "build", &.{ hanging(waiting_log), hanging(waiting_log), hanging(waiting_log), fixture("build_remote.log", 0) }, fast);
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 130), c.code); // the third run, ended by SIGINT
+    try t.expectEqual(@as(usize, 3), c.runs);
+    try t.expectEqual(@as(usize, 3), c.kills);
+    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: FAILED: the third run hung on a dead connection to the farm too: the connection to the farm was lost in each of 3 runs; not run again\n"));
+    try t.expectEqual(@as(usize, 2), std.mem.count(u8, (try c.file(a, "summary.md")).?, "\n"));
+}
+
+test "a run that hangs, then a real failure: red after two runs, naming the failure" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCaseWith(a, "build", &.{ hanging(waiting_log), derived(try compileError(a), 3), fixture("build_remote.log", 0) }, fast);
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 3), c.code);
+    try t.expectEqual(@as(usize, 2), c.runs);
+    try t.expectEqual(@as(usize, 1), c.kills);
+    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: FAILED: the second run failed: a failure that is not a cut connection: [2026-11-21T13:40:17.627+00:00] Action failed: komira//tools/build/examples/cshim:add (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (c_compile add_files/add.c (pic))\n"));
+}
+
+test "a subcommand other than build, test or bxl that hangs is ended and not run again" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCaseWith(a, "run", &.{ hanging(waiting_log), fixture("build_remote.log", 0) }, fast);
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 130), c.code);
+    try t.expectEqual(@as(usize, 1), c.runs);
+    try t.expectEqual(@as(usize, 1), c.kills);
+    try t.expectEqual(@as(usize, 1), linesLike(c.out1, cut_head, cut_tail));
+    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: not run again: `run` is not build, test or bxl\n"));
+    try t.expect((try c.file(a, "summary.md")) == null);
+}
+
+test "a farm that is slow but alive is never cut: a run longer than twice the bound passes, run once" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // 200 bytes, one every 25 ms: the run lasts at least 5 s on a connection that keeps hearing from the farm
+    var slow = fixture("build_remote.log", 0);
+    slow.farm_bytes = 200;
+    const c = try runCaseWith(a, "build", &.{ slow, fixture("build_remote.log", 0) }, .{ .serve = .alive, .dead_seconds = 2 });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 2), c.step);
+    try t.expectEqual(@as(u8, 0), c.code);
+    try t.expectEqual(@as(usize, 1), c.runs);
+    try t.expectEqual(@as(usize, 0), c.kills);
+    try t.expect(!has(c.out1, "watchdog"));
+    try t.expect((try c.file(a, "summary.md")) == null);
+}
+
+test "a real failure after talking to a live farm is not run again, and nothing is ended" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var failed = derived(try compileError(a), 3);
+    failed.farm_bytes = 40;
+    const c = try runCaseWith(a, "build", &.{ failed, fixture("build_remote.log", 0) }, .{ .serve = .alive, .dead_seconds = 2 });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 3), c.code);
+    try t.expectEqual(@as(usize, 1), c.runs);
+    try t.expectEqual(@as(usize, 0), c.kills);
+    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: not run again: a failure that is not a cut connection: [2026-11-21T13:40:17.627+00:00] Action failed: komira//tools/build/examples/cshim:add (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (c_compile add_files/add.c (pic))\n"));
+    try t.expect((try c.file(a, "summary.md")) == null);
 }

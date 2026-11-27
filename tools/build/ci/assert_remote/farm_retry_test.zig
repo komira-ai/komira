@@ -729,3 +729,17 @@ test "the real clock reads at least the seconds slept" {
     clock.slept = 42; // as after 42 s of sleep
     try t.expect(clock.now() >= 42);
 }
+
+test "the job summary line of a run the watchdog ended names the silence, the bound and the wait" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings(
+        "buck2-farm: the first run of `build` hung on a dead connection to the farm (nothing heard for 5 min 1 s, past the watchdog's bound of 5 min 0 s), so buck2 and its daemon were ended; the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log",
+        try fr.deadSummaryLine(a, "build", 1, 301_400, 300_000, .{ .answered = 0 }, "buck2-farm.first.log"),
+    );
+    try t.expectEqualStrings(
+        "buck2-farm: the second run of `test` hung on a dead connection to the farm (nothing heard for 220 min 0 s, past the watchdog's bound of 5 min 0 s), so buck2 and its daemon were ended; farm unreachable for 20 min 5 s, the longest wait; not run again",
+        try fr.deadSummaryLine(a, "test", 2, 13_200_000, 300_000, .{ .gave_up = 1205 }, "unused"),
+    );
+}

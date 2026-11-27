@@ -21,11 +21,20 @@
 //!     how long the farm was unreachable and that the step was not run again;
 //!     `--log` keeps the failed run's log, and the step fails with its code.
 //! A step runs at most `max_runs` (3) times: a third run that is cut too is
-//! final. The farm config is read only when a run is to be run again, so a
-//! step that passes, or fails for good, never needs it. The exit code is
-//! buck2's own, of the last run; 2 for a wrong command line, a log that cannot
-//! be written or read, a farm config that cannot be read or names no farm, or
-//! a job summary that cannot be written.
+//! final. The exit code is buck2's own, of the last run; 2 for a wrong command
+//! line, a log that cannot be written or read, a farm config that cannot be
+//! read or names no farm when a run is to be run again, or a job summary that
+//! cannot be written.
+//!
+//! A run can also hang on a dead connection instead of failing: buck2 waits
+//! for an answer the farm will never send. While a run runs, the watchdog
+//! (farm_watchdog.zig, which says how it tells a dead connection from a slow
+//! build) reads the runner's connections to the farm named by `--farm-config`;
+//! when one has heard nothing from the farm past its bound, it ends buck2 and
+//! its daemon and says why in one line. Such a run is treated as a cut: the
+//! same wait for the farm, the same kept log and summary line, the same bound
+//! of three runs. A farm config that cannot be read at the start leaves the
+//! run without a watchdog, with a line saying so.
 //!
 //! When the connection between the runner and the farm is cut, buck2 fails
 //! every action in flight at once, each with a block like this (recorded in
@@ -76,6 +85,7 @@
 const std = @import("std");
 const posix = std.posix;
 const farm_wait = @import("farm_wait.zig");
+const farm_watchdog = @import("farm_watchdog.zig");
 
 /// What a failed run's log shows.
 pub const Verdict = union(enum) {
@@ -467,11 +477,61 @@ pub fn retriable(subcommand: []const u8) bool {
 pub const End = union(enum) {
     exited: u8,
     signal: u32,
+    /// The watchdog ended it: a connection to the farm had heard nothing past its bound.
+    cut: Cut,
 };
 
+/// A run the watchdog ended.
+pub const Cut = struct {
+    /// The connection that heard nothing.
+    conn: farm_watchdog.Conn,
+    /// How the ended process exited (128 plus the signal that ended it).
+    code: u8,
+};
+
+/// Milliseconds since `start` on the monotonic clock; when the clock cannot
+/// be read again, `start` itself, so the watchdog never looks early.
+fn msSince(start: std.time.Instant) u64 {
+    const now = std.time.Instant.now() catch return 0;
+    return now.since(start) / std.time.ns_per_ms;
+}
+
+/// Milliseconds from `now` to `at`, as a poll timeout.
+fn msUntil(now: u64, at: u64) i32 {
+    if (at <= now) return 0;
+    return @intCast(@min(at - now, std.math.maxInt(i32)));
+}
+
+/// Runs `<program> kill`, which stops buck2's daemon (and with it the dead
+/// connection and the action it waits on), with its output in the job log.
+/// A daemon that cannot be stopped is said and passed over: the next run's
+/// watchdog ends that one too, within the bound of three runs.
+fn stopDaemon(a: std.mem.Allocator, program: []const u8, w: *std.Io.Writer) !void {
+    try w.print("buck2-farm: stopping buck2's daemon, which holds the dead connection (`{s} kill`)\n", .{program});
+    try w.flush();
+    var child = std.process.Child.init(&.{ program, "kill" }, a);
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Inherit;
+    child.stderr_behavior = .Inherit;
+    const term = child.spawnAndWait() catch |e| {
+        try w.print("buck2-farm: cannot stop buck2's daemon: {s}\n", .{@errorName(e)});
+        try w.flush();
+        return;
+    };
+    switch (term) {
+        .Exited => |c| if (c != 0) try w.print("buck2-farm: `{s} kill` exited {d}\n", .{ program, c }),
+        else => try w.print("buck2-farm: `{s} kill` did not exit\n", .{program}),
+    }
+    try w.flush();
+}
+
 /// Runs `argv` with stdout and stderr on one pipe, copying what it writes to
-/// fd 1 and to a new file at `log` as it arrives, and waits for it.
-fn runTee(a: std.mem.Allocator, argv: []const [:0]const u8, log: []const u8) !End {
+/// fd 1 and to a new file at `log` as it arrives, and waits for it. With a
+/// `watchdog`, it looks at the connections to the farm every
+/// `farm_watchdog.check_ms` while the run runs, and ends the run (SIGINT, then
+/// SIGKILL after `farm_watchdog.grace_ms`, then `<argv[0]> kill`) when one is
+/// dead; what it does goes to `w`.
+fn runTee(a: std.mem.Allocator, argv: []const [:0]const u8, log: []const u8, watchdog: ?*farm_watchdog.Watchdog, w: *std.Io.Writer) !End {
     const argv_z = try a.allocSentinel(?[*:0]const u8, argv.len, null);
     defer a.free(argv_z);
     for (argv, 0..) |arg, i| argv_z[i] = arg.ptr;
@@ -502,19 +562,66 @@ fn runTee(a: std.mem.Allocator, argv: []const [:0]const u8, log: []const u8) !En
 
     var chunk: [64 * 1024]u8 = undefined;
     var write_error: ?anyerror = null;
+    var watch = watchdog;
+    var cut: ?farm_watchdog.Conn = null;
+    var killed = false;
+    const start = try std.time.Instant.now();
+    var next_look: u64 = farm_watchdog.check_ms;
+    var kill_at: u64 = 0;
+    var fds = [_]posix.pollfd{.{ .fd = pipe[0], .events = posix.POLL.IN, .revents = 0 }};
     while (true) {
-        const n = try posix.read(pipe[0], &chunk);
-        if (n == 0) break;
-        // The job log is a copy: a closed stdout must not stop the run or its log.
-        writeAllFd(1, chunk[0..n]);
-        if (write_error == null) file.writeAll(chunk[0..n]) catch |e| {
-            write_error = e;
-        };
+        const before = msSince(start);
+        const timeout: i32 = if (cut != null) (if (killed) -1 else msUntil(before, kill_at)) else if (watch != null) msUntil(before, next_look) else -1;
+        if (try posix.poll(&fds, timeout) > 0) {
+            const n = try posix.read(pipe[0], &chunk);
+            if (n == 0) break;
+            // The job log is a copy: a closed stdout must not stop the run or its log.
+            writeAllFd(1, chunk[0..n]);
+            if (write_error == null) file.writeAll(chunk[0..n]) catch |e| {
+                write_error = e;
+            };
+        }
+        const now = msSince(start);
+        if (cut != null) {
+            if (!killed and now >= kill_at) {
+                try w.print("buck2-farm: buck2 has not ended {d} s after SIGINT; ending it with SIGKILL\n", .{farm_watchdog.grace_ms / std.time.ms_per_s});
+                try w.flush();
+                posix.kill(pid, posix.SIG.KILL) catch {};
+                killed = true;
+            }
+        } else if (watch) |wd| {
+            if (now >= next_look) {
+                next_look = now + farm_watchdog.check_ms;
+                switch (wd.look()) {
+                    .alive => {},
+                    .dead => |c| {
+                        try w.print("buck2-farm: watchdog: the connection to the farm from local port {d} has heard nothing from the farm for ", .{c.local_port});
+                        try farm_watchdog.writeMs(w, c.silent_ms);
+                        try w.writeAll(", past the bound of ");
+                        try farm_watchdog.writeMs(w, wd.bound_ms);
+                        try w.writeAll(": the farm has closed it and buck2 would wait on it for ever; ending buck2 (SIGINT)\n");
+                        try w.flush();
+                        posix.kill(pid, posix.SIG.INT) catch {};
+                        cut = c;
+                        kill_at = now + farm_watchdog.grace_ms;
+                    },
+                    .unreadable => |e| {
+                        try w.print("buck2-farm: watchdog stopped: cannot read the runner's connections to the farm: {s}; the run goes on without it\n", .{@errorName(e)});
+                        try w.flush();
+                        watch = null;
+                    },
+                }
+            }
+        }
     }
     const status = posix.waitpid(pid, 0).status;
     if (write_error) |e| return e;
-    if (posix.W.IFEXITED(status)) return .{ .exited = posix.W.EXITSTATUS(status) };
-    return .{ .signal = posix.W.TERMSIG(status) };
+    const end: End = if (posix.W.IFEXITED(status)) .{ .exited = posix.W.EXITSTATUS(status) } else .{ .signal = posix.W.TERMSIG(status) };
+    if (cut) |c| {
+        try stopDaemon(a, argv[0], w);
+        return .{ .cut = .{ .conn = c, .code = exitCode(end) } };
+    }
+    return end;
 }
 
 fn writeAllFd(fd: posix.fd_t, bytes: []const u8) void {
@@ -622,6 +729,27 @@ fn exitCode(end: End) u8 {
     return switch (end) {
         .exited => |c| c,
         .signal => |s| @truncate(128 +% s),
+        .cut => |c| c.code,
+    };
+}
+
+/// The watchdog of a run, from the farm config at `path`, or null after the
+/// reason there is none is on `w`.
+fn startWatchdog(a: std.mem.Allocator, path: []const u8, w: *std.Io.Writer) !?farm_watchdog.Watchdog {
+    const text = std.fs.cwd().readFileAlloc(a, path, 1 << 20) catch |e| {
+        try w.print("buck2-farm: no watchdog on the connection to the farm: cannot read the farm config {s}: {s}\n", .{ path, @errorName(e) });
+        try w.flush();
+        return null;
+    };
+    const farm = farm_wait.parseConfig(text) catch |e| {
+        try w.print("buck2-farm: no watchdog on the connection to the farm: the farm config {s} names no farm: {s}\n", .{ path, farm_wait.describeConfigError(e) });
+        try w.flush();
+        return null;
+    };
+    return farm_watchdog.Watchdog.init(a, farm.host, farm.port, farm.dead_seconds) catch |e| {
+        try w.print("buck2-farm: no watchdog on the connection to the farm: the farm's address does not resolve: {s}\n", .{@errorName(e)});
+        try w.flush();
+        return null;
     };
 }
 
@@ -632,6 +760,27 @@ pub fn summaryLine(a: std.mem.Allocator, subcommand: []const u8, run: usize, blo
     var out: std.Io.Writer.Allocating = .init(a);
     const w = &out.writer;
     try w.print("buck2-farm: the {s} run of `{s}` was cut by a lost connection to the farm (buck2's `RE channel error` in each of {d} failed block(s)); ", .{ ordinal(run), subcommand, blocks });
+    try writeOutcome(w, run, waited, kept);
+    return out.toOwnedSlice();
+}
+
+/// The job summary line for a step whose `run`-th run the watchdog ended,
+/// its connection silent for `silent_ms` past a bound of `bound_ms`, and whose
+/// wait for the farm ended as `waited` (`kept` as for `summaryLine`).
+pub fn deadSummaryLine(a: std.mem.Allocator, subcommand: []const u8, run: usize, silent_ms: u64, bound_ms: u64, waited: farm_wait.Waited, kept: []const u8) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(a);
+    const w = &out.writer;
+    try w.print("buck2-farm: the {s} run of `{s}` hung on a dead connection to the farm (nothing heard for ", .{ ordinal(run), subcommand });
+    try farm_watchdog.writeMs(w, silent_ms);
+    try w.writeAll(", past the watchdog's bound of ");
+    try farm_watchdog.writeMs(w, bound_ms);
+    try w.writeAll("), so buck2 and its daemon were ended; ");
+    try writeOutcome(w, run, waited, kept);
+    return out.toOwnedSlice();
+}
+
+/// The end of a summary line: how the wait for the farm ended and what followed.
+fn writeOutcome(w: *std.Io.Writer, run: usize, waited: farm_wait.Waited, kept: []const u8) !void {
     switch (waited) {
         .answered => |s| {
             if (s == 0) {
@@ -649,7 +798,6 @@ pub fn summaryLine(a: std.mem.Allocator, subcommand: []const u8, run: usize, blo
             try w.writeAll(", the longest wait; not run again");
         },
     }
-    return out.toOwnedSlice();
 }
 
 /// `assert_remote run <args>`: the header says what it does. `args` are the
@@ -660,7 +808,13 @@ pub fn main(a: std.mem.Allocator, args: []const [:0]const u8, cap: usize, w: *st
         try w.flush();
         return 2;
     };
-    var last = runTee(a, p.command, p.log) catch |e| {
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    var watchdog = try startWatchdog(ar, p.farm_config, w);
+    const wd: ?*farm_watchdog.Watchdog = if (watchdog) |*x| x else null;
+
+    var last = runTee(a, p.command, p.log, wd, w) catch |e| {
         try w.print("buck2-farm: cannot run the command or write {s}: {s}\n", .{ p.log, @errorName(e) });
         try w.flush();
         return 2;
@@ -672,6 +826,7 @@ pub fn main(a: std.mem.Allocator, args: []const [:0]const u8, cap: usize, w: *st
             try w.flush();
             return exitCode(last);
         },
+        .cut => {},
     }
     const subcommand = p.command[1];
     if (!retriable(subcommand)) {
@@ -679,33 +834,44 @@ pub fn main(a: std.mem.Allocator, args: []const [:0]const u8, cap: usize, w: *st
         try w.flush();
         return exitCode(last);
     }
-    var arena = std.heap.ArenaAllocator.init(a);
-    defer arena.deinit();
-    const ar = arena.allocator();
 
     var run: usize = 1;
     while (true) {
-        // `last` is the `run`-th run, which exited non-zero.
-        const log = try readLog(ar, p.log, cap, w) orelse return 2;
-        const v = try classify(ar, log);
-        if (v != .cut) {
-            if (run == 1) {
-                try w.writeAll("buck2-farm: not run again: ");
-            } else {
-                try w.print("buck2-farm: FAILED: the {s} run failed: ", .{ordinal(run)});
-            }
-            try describe(v, w);
-            try w.writeAll("\n");
-            try w.flush();
-            return exitCode(last);
-        }
+        // `last` is the `run`-th run, which exited non-zero or was ended by the watchdog.
+        const blocks: ?usize = switch (last) {
+            .cut => null,
+            else => b: {
+                const log = try readLog(ar, p.log, cap, w) orelse return 2;
+                const v = try classify(ar, log);
+                if (v != .cut) {
+                    if (run == 1) {
+                        try w.writeAll("buck2-farm: not run again: ");
+                    } else {
+                        try w.print("buck2-farm: FAILED: the {s} run failed: ", .{ordinal(run)});
+                    }
+                    try describe(v, w);
+                    try w.writeAll("\n");
+                    try w.flush();
+                    return exitCode(last);
+                }
+                break :b v.cut;
+            },
+        };
         if (run == max_runs) {
-            try w.print("buck2-farm: FAILED: the {s} run was cut too: the connection to the farm was cut in each of {d} runs (buck2's `RE channel error`); not run again\n", .{ ordinal(run), run });
+            if (blocks == null) {
+                try w.print("buck2-farm: FAILED: the {s} run hung on a dead connection to the farm too: the connection to the farm was lost in each of {d} runs; not run again\n", .{ ordinal(run), run });
+            } else {
+                try w.print("buck2-farm: FAILED: the {s} run was cut too: the connection to the farm was cut in each of {d} runs (buck2's `RE channel error`); not run again\n", .{ ordinal(run), run });
+            }
             try w.flush();
             return exitCode(last);
         }
         const farm = try readFarm(ar, p.farm_config, w) orelse return 2;
-        try w.print("buck2-farm: the {s} run was cut by a lost connection to the farm (buck2's `RE channel error` in each of {d} failed block(s)); waiting for the farm's port to answer, up to ", .{ ordinal(run), v.cut });
+        if (blocks) |n| {
+            try w.print("buck2-farm: the {s} run was cut by a lost connection to the farm (buck2's `RE channel error` in each of {d} failed block(s)); waiting for the farm's port to answer, up to ", .{ ordinal(run), n });
+        } else {
+            try w.print("buck2-farm: the {s} run hung on a dead connection to the farm and was ended; waiting for the farm's port to answer, up to ", .{ordinal(run)});
+        }
         try farm_wait.writeDuration(w, farm.wait_seconds);
         try w.writeAll("\n");
         try w.flush();
@@ -718,7 +884,11 @@ pub fn main(a: std.mem.Allocator, args: []const [:0]const u8, cap: usize, w: *st
         const waited = try farm_wait.waitForFarm(&clock, prober, farm.wait_seconds, w);
 
         const kept = try keptLogPath(ar, p.log, ordinal(run));
-        const note = try summaryLine(ar, subcommand, run, v.cut, waited, std.fs.path.basename(kept));
+        const note = switch (last) {
+            // a run the watchdog ended had a watchdog
+            .cut => |c| try deadSummaryLine(ar, subcommand, run, c.conn.silent_ms, if (wd) |x| x.bound_ms else 0, waited, std.fs.path.basename(kept)),
+            else => try summaryLine(ar, subcommand, run, blocks orelse 0, waited, std.fs.path.basename(kept)),
+        };
         if (waited == .answered) {
             std.fs.cwd().rename(p.log, kept) catch |e| {
                 try w.print("buck2-farm: cannot keep the {s} run's log as {s}: {s}\n", .{ ordinal(run), kept, @errorName(e) });
@@ -740,7 +910,7 @@ pub fn main(a: std.mem.Allocator, args: []const [:0]const u8, cap: usize, w: *st
         try w.flush();
 
         run += 1;
-        last = runTee(a, p.command, p.log) catch |e| {
+        last = runTee(a, p.command, p.log, wd, w) catch |e| {
             try w.print("buck2-farm: cannot run the command again or write {s}: {s}\n", .{ p.log, @errorName(e) });
             try w.flush();
             return 2;
@@ -756,6 +926,7 @@ pub fn main(a: std.mem.Allocator, args: []const [:0]const u8, cap: usize, w: *st
                 try w.flush();
                 return exitCode(last);
             },
+            .cut => {},
         }
     }
 }

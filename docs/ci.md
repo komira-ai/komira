@@ -242,9 +242,9 @@ probe as farm-connect's (a TCP connection to the farm's port, 5 s for each try,
 by the same input. Both come from the machine buckconfig farm-connect wrote,
 which the action names as `--farm-config "$HOME/.buckconfig.d/farm.buckconfig"`:
 the farm is buck2's own `engine_address`, and the bound is
-`farm_wait_seconds` under `[komira_ci]`. The tool reads that file only when a
-run is to be run again; a missing file, or one with no address or no bound,
-fails the step with exit 2 and the reason, and nothing runs again.
+`farm_wait_seconds` under `[komira_ci]`. When a run is to be run again, a
+missing file, or one with no address or no bound, fails the step with exit 2
+and the reason, and nothing runs again.
 
 - **The farm answers.** The cut run's output is kept beside the log as
   `buck2-farm.first.log` (`buck2-farm.second.log` after the second run), and
@@ -273,6 +273,64 @@ each time an outage cut it twice. The release workflows' publish and upload
 steps are not buck2-farm steps, so this never runs one of them twice; a
 publish cut half way stays a failed step.
 
+#### A run that hangs on a dead connection
+
+A cut connection does not always fail buck2. When the path between the runner
+and the farm drops for a while, the farm closes the connection, and its closing
+never reaches the runner: buck2 keeps waiting on an action in `[re_execute]`
+over a TCP connection the farm no longer has. Nothing arrives on it, buck2
+sends nothing on it, and its own HTTP/2 keepalive does not end it; two runs of
+`pr / check` sat so for two hours and for 3 h 40 min, printing the same
+`Waiting on ... [re_execute]` line every few seconds, while the farm had
+nothing queued or running for them (komira-ai/komira#2438).
+
+So while a run runs, `assert_remote run` keeps a watchdog on the connection
+([`farm_watchdog.zig`](../tools/build/ci/assert_remote/farm_watchdog.zig)).
+Once a second it asks the kernel (netlink sock_diag, what `ss -ti` reads) for
+the runner's established TCP connections to the farm's address and port (the
+`engine_address` of the same machine buckconfig) and, for each, how long ago it
+last received anything from the farm: the shorter of `tcp_info`'s
+`last_data_recv` and `last_ack_recv`, the measure the kernel's own TCP
+keepalive uses. It never reads the log: a remote action that runs for an hour
+and prints nothing is normal.
+
+The bound comes from what a live farm does on every connection. The farm server
+(komira-ai/kbf) sends each open Execute stream its operation again every 30 s
+(`--progress-interval-secs`), PINGs a connection that has been quiet for 30 s
+(`--http2-keepalive-interval-secs`), and its kernel acknowledges any byte buck2
+sends; it closes a connection that has moved nothing for 30 s plus 120 s
+(`--http2-keepalive-timeout-secs`). Those are the server's defaults, read from
+its source, not measured on the farm. So on a live connection the longest
+silence is about 30 s however slow the build, and a connection silent for more
+than 150 s is one the farm has already closed. The watchdog's bound is twice
+that, **300 s**. The machine buckconfig can set another as
+`dead_connection_seconds` under `[komira_ci]` (whole seconds, at least 1; the
+action's cases set 2 s); farm-connect does not write it, so CI runs with 300 s.
+
+When a connection has been silent past the bound, the job log gets, at that
+moment,
+
+    buck2-farm: watchdog: the connection to the farm from local port 41022 has heard nothing from the farm for 5 min 1 s, past the bound of 5 min 0 s: the farm has closed it and buck2 would wait on it for ever; ending buck2 (SIGINT)
+    buck2-farm: stopping buck2's daemon, which holds the dead connection (`./buck2 kill`)
+
+buck2 is sent SIGINT, as a Ctrl-C, and SIGKILL if it has not ended 10 s later
+(a line says so); then `./buck2 kill` stops its daemon, which holds the dead
+connection and the lost action, so the next run starts with a new one. From
+there the run is treated as a cut: the same wait for the farm, its log kept as
+`buck2-farm.first.log`, one line in the job summary,
+
+    buck2-farm: the first run of `build` hung on a dead connection to the farm (nothing heard for 5 min 1 s, past the watchdog's bound of 5 min 0 s), so buck2 and its daemon were ended; the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log
+
+and the same bound of three runs: a third run that hangs too fails the step
+with `the third run hung on a dead connection to the farm too`. A subcommand
+other than build, test or bxl is ended the same way and not run again. A step
+that hangs now costs about five minutes and a run again instead of its whole
+`timeout-minutes`. Without a readable machine buckconfig, or when the kernel
+cannot be asked, the step says so in one line (`no watchdog on the connection to
+the farm: ...`, `watchdog stopped: ...`) and runs as it would without one.
+
+#### What the step checks after buck2
+
 The tool step fails when a `Commands:` summary line says `local:` anything
 but `0`, when the log ends a failed run (`BUILD FAILED`, `BXL FAILED`), or when
 there is no summary line although the run used the network. A run that executed
@@ -283,9 +341,12 @@ its path as `assert-remote`. That build, and the few other `./buck2` steps
 that do not go through the action (pr.yml's build of its change tool, for
 one), are not run again: a cut during one of them still fails its step. The cases are recorded buck2 output
 (`//tools/build/ci:assert_remote_unit`, `//tools/build/ci:farm_retry_unit`, which also
-runs the wait on a fake clock and a fake farm) and the action's own two lines run over
-it (`//:buck2_farm_cases`), each case with a farm on a loopback port of its own that
-answers at once or never answers (with a bound of 0 s, so no case sleeps).
+runs the wait on a fake clock and a fake farm; `//tools/build/ci:farm_watchdog_unit`,
+the watchdog's judgement over given times and the kernel's answer built byte by byte)
+and the action's own two lines run over it (`//:buck2_farm_cases`), each case with a
+farm on a loopback port of its own that answers at once or never answers (with a bound
+of 0 s, so no case sleeps), and for the watchdog's cases a fake farm on that port that
+takes the request and then goes silent, or sends a byte every 25 ms, with a bound of 2 s.
 
 ## Pull requests from forks
 

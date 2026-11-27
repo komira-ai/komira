@@ -287,7 +287,9 @@ zig_test(
 # says what each catches): action.yml's shape, and its two run lines run
 # end to end over recorded buck2 output with the real //tools/build/ci:assert_remote,
 # a cut connection to the farm run again once a farm on a loopback port of the case's
-# own answers (at most three runs) and every other failure not.
+# own answers (at most three runs) and every other failure not, and a run that hangs on
+# a fake farm that goes silent ended by the watchdog and run again, while one on a slow
+# but live fake farm is never ended.
 zig_test(
     name = "buck2_farm_cases",
     exec_compatible_with = LINUX_X86_64,

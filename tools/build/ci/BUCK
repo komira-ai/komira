@@ -13,7 +13,9 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # and when its only failure is a cut connection to the farm
 # (assert_remote/farm_retry.zig says what counts as one) waits for the farm's
 # port to answer, for a bounded time (assert_remote/farm_wait.zig), and runs it
-# again, at most three runs in all.
+# again, at most three runs in all. While a run runs, its watchdog
+# (assert_remote/farm_watchdog.zig) ends one that hangs on a dead connection to
+# the farm, and that run is run again the same way.
 # Its cases are recorded buck2 output (assert_remote/fixtures); welded: the
 # tool is built only when they pass.
 zig_test(
@@ -24,6 +26,7 @@ zig_test(
         "assert_remote/assert_remote.zig",
         "assert_remote/farm_retry.zig",
         "assert_remote/farm_wait.zig",
+        "assert_remote/farm_watchdog.zig",
         "assert_remote/fixtures/build_cached.log",
         "assert_remote/fixtures/build_failed_unknown_target.log",
         "assert_remote/fixtures/build_remote.log",
@@ -47,6 +50,7 @@ zig_test(
     imports = [
         "assert_remote/farm_retry.zig",
         "assert_remote/farm_wait.zig",
+        "assert_remote/farm_watchdog.zig",
         "assert_remote/fixtures/build_cut.log",
         "assert_remote/fixtures/build_cut_after_file_changes.log",
         "assert_remote/fixtures/build_cut_and_compile_error.log",
@@ -59,12 +63,29 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# How the watchdog tells a dead connection to the farm from a slow build
+# (assert_remote/farm_watchdog_test.zig says what each case holds): the
+# judgement over the times the kernel reports, the kernel's answer read from
+# bytes made in the case, the bound read from the farm config, and the real
+# read of a loopback connection of the case's own.
+zig_test(
+    name = "farm_watchdog_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "assert_remote/farm_watchdog_test.zig",
+    imports = [
+        "assert_remote/farm_wait.zig",
+        "assert_remote/farm_watchdog.zig",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 zig_exe(
     name = "assert_remote",
     exec_compatible_with = LINUX_X86_64,
     src = "assert_remote/assert_remote.zig",
-    imports = ["assert_remote/farm_retry.zig", "assert_remote/farm_wait.zig"],
-    unit_tests = [":assert_remote_unit", ":farm_retry_unit", "komira//tools/build/toolchains:zig_next_version"],
+    imports = ["assert_remote/farm_retry.zig", "assert_remote/farm_wait.zig", "assert_remote/farm_watchdog.zig"],
+    unit_tests = [":assert_remote_unit", ":farm_retry_unit", ":farm_watchdog_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
@@ -176,12 +197,14 @@ export_file(
 )
 
 # What the cases of the buck2-farm action run as `./buck2`: each call prints
-# the next recorded log of the case and exits as told, and counts the calls
-# (assert_remote/stand_in_buck2.zig).
+# the next recorded log of the case and ends as told (an exit code, a signal,
+# a wait on a farm that never answers, or a read of a live farm's answers),
+# and counts the calls and the `kill`s (assert_remote/stand_in_buck2.zig).
 zig_exe(
     name = "stand_in_buck2",
     exec_compatible_with = LINUX_X86_64,
     src = "assert_remote/stand_in_buck2.zig",
+    imports = ["assert_remote/farm_wait.zig"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["//:buck2_farm_cases"],

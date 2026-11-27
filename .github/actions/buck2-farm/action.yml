@@ -17,15 +17,21 @@
 # after a second cut) beside the log and writes one line to the job summary
 # saying how long the farm was unreachable. A step runs at most three times;
 # when the farm does not answer within the wait, or the third run is cut too,
-# the step fails. The second line reads the file the last run wrote. The
-# caller builds the tool first and passes its path; the cases of this file,
-# run against recorded buck2 output, are //:buck2_farm_cases.
+# the step fails. While a run runs, a watchdog
+# (tools/build/ci/assert_remote/farm_watchdog.zig) reads the runner's TCP
+# connections to the farm from the kernel: when one has heard nothing from the
+# farm for longer than a live farm is ever silent (300 s; a run that hangs on a
+# dead connection), it ends buck2 and its daemon, says why in one line, and the
+# run counts as a cut, within the same three runs. The second line reads the
+# file the last run wrote. The caller builds the tool first and passes its
+# path; the cases of this file, run against recorded buck2 output and fake
+# farms on loopback ports, are //:buck2_farm_cases.
 #
 # `args` is split on spaces by the shell and is never a shell script: a
 # pattern is `//path:name`, a list of them is `@file` or `$(cat file)` made
 # by the caller before this step. It reaches the step through `env:` only.
 name: buck2-farm
-description: Run one ./buck2 command (again after a cut connection to the farm, once the farm answers, at most three runs) and fail unless buck2 succeeded and no action ran locally.
+description: Run one ./buck2 command (again after a cut connection to the farm, or a run ended on a dead one, once the farm answers, at most three runs) and fail unless buck2 succeeded and no action ran locally.
 
 inputs:
   args:

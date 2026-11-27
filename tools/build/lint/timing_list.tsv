@@ -8,6 +8,7 @@
 # until it is killed, or a value used as a nonce.
 # Scope: Zig files only. Mojo fixtures under tools/ that hold or sleep (tools/build/tests/functional/mem_cap,
 # mojo_aws_client) are outside this lint; they are positive-direction holds or fixtures that block until killed.
+use	.github/actions/buck2-farm/action_test.zig	Thread.sleep	1	fixture: the live fake farm's pause between the bytes it sends, so a run outlasts the watchdog's bound on a connection that keeps hearing from the farm (no case reads a clock or waits on a deadline)
 use	python/smoke/src/index.zig	Thread.sleep	1	production: the pause between verify attempts while the index catches up with an upload (tests pass a delay of 0)
 use	python/smoke/src/install.zig	Thread.sleep	1	production: the pause between attempts of the komira install while the index catches up with an upload (tests pass a delay of 0)
 use	release/ci/main_red/gh.zig	Thread.sleep	1	production: the backoff between a gh command's attempts
@@ -15,6 +16,7 @@ use	release/ci/npm_smoke/cli.zig	Thread.sleep	1	production: the pause between in
 use	tools/build/bisect/main.zig	milliTimestamp	1	production: the bisect tool's default rerun nonce
 use	tools/build/bisect/probe.zig	milliTimestamp	6	production: the bisect tool's probe has a time limit of its own, and measures its seconds
 use	tools/build/bisect/probe.zig	Thread.sleep	1	production: the poll of the probe's time limit
+use	tools/build/ci/assert_remote/farm_retry.zig	Instant	3	production: the run's clock for the watchdog's next look at the connections to the farm and for the SIGKILL after SIGINT (whether a connection is dead is read from the kernel's own times, never from this clock)
 use	tools/build/ci/assert_remote/farm_wait.zig	Instant	3	production: the real clock of the bounded wait for the farm before a cut buck2 command runs again (the tests give the wait a clock of their own)
 use	tools/build/ci/assert_remote/farm_wait.zig	Thread.sleep	1	production: the pause between two probes of the farm's port in that wait (the tests give the wait a clock of their own)
 use	tools/build/ci/release_beta_fetch/release_staged_verify.zig	Thread.sleep	1	production: the pause between prod smoke passes while the channel catches up (tests pass a delay of 0)
