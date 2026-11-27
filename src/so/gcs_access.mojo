@@ -130,12 +130,13 @@ def _parse_gcs_endpoint(endpoint: String) -> _GcsEndpoint:
         )
     if endpoint.find("?") >= 0 or endpoint.find("#") >= 0:
         return _bad_endpoint("a gs:// endpoint must not carry a query or a fragment")
-    var authority = String(endpoint[byte = 8 : endpoint.byte_length()])
-    var slash = authority.find("/")
+    var rest = String(endpoint[byte = 8 : endpoint.byte_length()])
+    var authority = rest.copy()
+    var slash = rest.find("/")
     if slash >= 0:
-        if slash + 1 != authority.byte_length():
+        if slash + 1 != rest.byte_length():
             return _bad_endpoint("a gs:// endpoint must not carry a path")
-        authority = String(authority[byte=0:slash])
+        authority = String(rest[byte=0:slash])
     if authority.find("@") >= 0:
         return _bad_endpoint("a gs:// endpoint must not carry user information")
     var host = authority.copy()
