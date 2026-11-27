@@ -65,5 +65,5 @@ Output:
 
 - [How do I read a Parquet file?](../15-read-parquet-file/page.md) (rank 15, works)
 - [How do I read many files matching a pattern into one table?](../19-read-many-files-matching-pattern-table/page.md) (rank 19, partial)
-- How do I read Parquet or CSV files from S3? (rank 31, gap; no page yet)
+- [How do I read Parquet or CSV files from S3?](../31-read-parquet-csv-files-s3/page.md) (rank 31, partial)
 - How do I write a dataset partitioned by a column? (rank 97, gap; no page yet)

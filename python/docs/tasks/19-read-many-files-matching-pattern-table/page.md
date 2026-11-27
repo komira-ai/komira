@@ -70,7 +70,7 @@ Output:
 - `probe_glob_pattern.py` beside this page tries SQL `read_csv('sales/sales_*.csv')` and must fail with the line in `probe_glob_pattern.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
 - The files must have the same columns in the same types: `UNION ALL` and `concat` refuse a mismatch rather than fill it in. The rows of a `concat` have no promised order, so sort before printing.
 - A list of paths, and a column holding the name of the file each row came from (DuckDB's `filename=true`), are not available: the second is refused by name.
-- Patterns over `s3://`, `gs://` and `az://` URLs are tracked by komira-ai/komira#2337.
+- A pattern over the Parquet objects of an `s3://` or `az://` location is bound with `Session.add_sql_binding` and `komira.files` ([rank 31](../31-read-parquet-csv-files-s3/page.md)); `gs://`, and a pattern written in the SQL text, are tracked by komira-ai/komira#2337.
 - `komira.concat` is newer than the PyPI release 0.1.1623.
 
 ## Related

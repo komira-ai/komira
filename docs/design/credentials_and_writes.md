@@ -1341,8 +1341,18 @@ through the file system an `objectstore_s3.S3ScanFs`, `objectstore_gcs.GcsScanFs
 `azure_blob.AzureScanFs` opens on the bucket, with one footer cache keyed per bucket
 ([src/lowering/README.md](../../src/lowering/README.md), [src/sdk_exec/README.md](../../src/sdk_exec/README.md)).
 The three credential calls of decision 8 are built ([src/so](../../src/so/README.md)), and so are
-decision 1's credential objects in Python, private until `add_sql_binding` exports them
-(`python/komira/_credentials.py`, sealed by `Session._seal_credential`, refused as `CredentialsError`).
+decision 1's credential objects in Python (`python/komira/_credentials.py`, refused as
+`CredentialsError`): the kinds a file source takes are public (`AwsKeys`, `AwsProfile`,
+`GcpServiceAccount`, `GcpToken`, `AzureKey`, `AzureSas`, `AMBIENT`, `ANONYMOUS`), and `BearerToken`
+and `OAuth2ClientCredentials` stay private until a catalog can be bound.
+`komira.files(location, *, credential=AMBIENT, endpoint=None, region=None, url_style=None)` and
+`Session.add_sql_binding(name, source)` are built over `komira_add_sql_binding`
+(`python/komira/_sources.py`, `_session.py`): the session seals the source's credential, then binds
+the source's `WireBoundSource` bytes, under one hold of its lock. `files` checks types, a
+credential that fits the location's store, and no setting on a local path when it is built;
+`hive_partitioning=` is not taken yet, since the library reads a local path's partitioning by itself
+and refuses it on an object store. The module-level `komira.add_sql_binding`, call bindings
+(`sql(query, **sources)`) and the unnamed source are not built.
 Section 1's `komira.iceberg`, `catalog.table` and `komira.SigV4` are built as Python values, checked when
 built and private until `add_sql_binding` exports them (`python/komira/_iceberg.py`).
 `komira_add_sql_binding` is built at ABI 1.10 ([src/so](../../src/so/README.md), `bindings.mojo`):

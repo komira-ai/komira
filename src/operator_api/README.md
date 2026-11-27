@@ -61,3 +61,68 @@ package `BUCK` file, so the library is not produced unless all of them pass.
 | `test_map_op_total_eval_compact` | `MapOp` evaluates total expressions over the physical rows and compacts their output; a raising one sees only the selected rows |
 | `test_binary_fn_kernel`, `test_hash_fn_kernel`, `test_match_fn_kernel` | the function-operator adapters against their kernels |
 | `test_udf_traits` | conformers of the typed `udf` map, filter and aggregate traits, and the comptime paths over them |
+
+## Examples
+
+A `MemoryReservation` tallies bytes against an optional budget. A refused grow
+leaves the tally alone and is counted, a grow that lands exactly on the budget
+fits, and a release makes room again:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
+```mojo
+from operator_api.memory_reservation import BUDGET_UNSET, MemoryReservation
+
+var unbounded = MemoryReservation()
+assert_false(unbounded.has_budget())
+assert_equal(unbounded.budget_bytes(), BUDGET_UNSET)
+assert_true(unbounded.try_grow(1 << 40))
+assert_equal(unbounded.held_bytes(), 1 << 40)
+
+var budgeted = MemoryReservation.with_budget(100)
+assert_true(budgeted.has_budget())
+assert_true(budgeted.try_grow(60))
+assert_false(budgeted.try_grow(41))
+assert_equal(budgeted.held_bytes(), 60)
+assert_equal(budgeted.try_grow_denied_count(), 1)
+assert_true(budgeted.try_grow(40))
+assert_equal(budgeted.held_bytes(), 100)
+budgeted.release(50)
+assert_true(budgeted.try_grow(41))
+assert_equal(budgeted.held_bytes(), 91)
+assert_equal(budgeted.try_grow_denied_count(), 1)
+
+var negative = MemoryReservation.with_budget(-5)
+assert_false(negative.has_budget())
+assert_true(negative.try_grow(1 << 30))
+```
+
+`SinkPhaseTimings` adds each phase's nanoseconds to its own atomic counter, and
+`dump` prints nothing unless the caller passes `enabled=True`. `SinkCapabilities`
+starts as a plain batch-producing sink and a sink sets the fields it differs in:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
+```mojo
+from operator_api.morsel_sink import SinkCapabilities
+from operator_api.sink_timings import SinkPhaseTimings
+
+var timings = SinkPhaseTimings()
+timings.record_consume(UInt64(100))
+timings.record_consume(UInt64(50))
+timings.record_combine_local(UInt64(20))
+timings.record_combine_partition(UInt64(30))
+timings.record_finalize(UInt64(40))
+assert_equal(timings.load_consume(), UInt64(150))
+assert_equal(timings.load_combine_local(), UInt64(20))
+assert_equal(timings.load_combine_partition(), UInt64(30))
+assert_equal(timings.load_finalize(), UInt64(40))
+timings.dump("example")
+
+var caps = SinkCapabilities()
+assert_true(caps.output_is_batch)
+assert_false(caps.supports_spill)
+assert_equal(caps.max_combine_parallelism, Int16(0))
+caps.supports_spill = True
+caps.max_combine_parallelism = Int16(4)
+assert_true(caps.supports_spill)
+assert_equal(caps.max_combine_parallelism, Int16(4))
+```

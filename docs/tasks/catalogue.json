@@ -263,7 +263,7 @@
     "slug": "read-parquet-csv-files-s3",
     "category": "Cloud storage",
     "question": "How do I read Parquet or CSV files from S3?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
       "komira-ai/komira#2337"
     ]
@@ -811,7 +811,7 @@
     "slug": "read-files-google-cloud-storage-azure",
     "category": "Cloud storage",
     "question": "How do I read files from Google Cloud Storage or Azure Blob?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
       "komira-ai/komira#2337"
     ]
