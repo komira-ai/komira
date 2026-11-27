@@ -35,6 +35,7 @@ from plan_ir.logical_plan import (
     PLAN_PARTITION_TOPN,
     PLAN_ASOF_JOIN,
     PLAN_UNION,
+    PLAN_UNNEST,
     PLAN_VIEW_REF,
     SOURCE_PARQUET,
     JOIN_INNER,
@@ -261,9 +262,10 @@ def test_same_view_twice_in_one_plan_is_not_a_cycle() raises:
 
 
 def _wrap(kind: Int, var child: LogicalPlan) raises -> LogicalPlan:
-    """`child` under one node of the kind numbered `kind` (0..11); kinds 9
+    """`child` under one node of the kind numbered `kind` (0..12); kinds 9
     and 10 put `child` on the right of a two-input node with a scan on the
-    left, and kind 11 puts it second in a Union."""
+    left, kind 11 puts it second in a Union, and kind 12 under an Unnest of
+    a list column projected above it."""
     var desc = List[Bool]()
     desc.append(False)
     if kind == 0:
@@ -305,10 +307,27 @@ def _wrap(kind: Int, var child: LogicalPlan) raises -> LogicalPlan:
         kids.append(OwnedPointer(_scan("u.parquet")))
         kids.append(OwnedPointer(child^))
         return LogicalPlan.union(kids^, _schema())
+    if kind == 12:
+        # An unnest of a list column computed above `child`.
+        var exprs = ExprArray()
+        exprs.append(Expr.col_ref("a"))
+        exprs.append(
+            Expr.alias(
+                Expr.regexp_split_to_array(
+                    Expr.literal(ScalarValue.from_string("x,y")), ","
+                ),
+                String("l"),
+            )
+        )
+        return LogicalPlan.unnest(
+            LogicalPlan.project(exprs^, child^), String("l"), False
+        )
     raise Error("test: unknown wrapper kind " + String(kind))
 
 
 def _tag_of(kind: Int) -> UInt8:
+    if kind == 12:
+        return PLAN_UNNEST
     if kind == 0:
         return PLAN_FILTER
     if kind == 1:
@@ -337,7 +356,7 @@ def _tag_of(kind: Int) -> UInt8:
 def test_walk_resolves_a_ref_under_every_node_kind() raises:
     """A view ref under each of Filter, Project, Aggregate, Sort, Limit,
     Distinct, TopN, PartitionBy, PartitionTopN, the right input of a Join
-    and of an AsOf join, and the second branch of a Union: the invariant
+    and of an AsOf join, the second branch of a Union, and an Unnest: the invariant
     check sees it before the pass and not after, and the wrapper keeps its
     kind.
 
@@ -347,7 +366,7 @@ def test_walk_resolves_a_ref_under_every_node_kind() raises:
     first input."""
     var reg = _Registry()
     reg.add("v", _scan("v.parquet"))
-    for kind in range(12):
+    for kind in range(13):
         var plan = _wrap(kind, _ref("v"))
         assert_true(plan_contains_view_ref(plan))
         var empty_names = List[String]()

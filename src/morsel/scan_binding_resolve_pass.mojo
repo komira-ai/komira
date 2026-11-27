@@ -147,6 +147,7 @@ from plan_ir.logical_plan import (
     PLAN_EXCHANGE,
     PLAN_MAP_BATCHES,
     PLAN_STEP,
+    PLAN_UNNEST,
     plan_tag_name,
 )
 from plan_ir.scan_binding_bind_pass import bind_plan_inmem_payloads
@@ -1016,6 +1017,16 @@ def resolve_plan_binding_leaves(
     if tag == PLAN_STEP:
         # A source with no child and literal arguments: nothing to resolve.
         return 0
+    if tag == PLAN_UNNEST:
+        # A column NAME and a flag; no expression site.
+        if not plan._unnest:
+            return 0
+        return resolve_plan_binding_leaves(
+            plan.unnest_data_ref().child[],
+            resolvers,
+            scan_registry,
+            snapshots,
+        )
 
     # ---- TWO OR MORE CHILDREN ---------------------------------------------------
     if tag == PLAN_JOIN:

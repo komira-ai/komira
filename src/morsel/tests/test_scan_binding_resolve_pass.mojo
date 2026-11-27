@@ -1819,6 +1819,28 @@ def test_every_child_bearing_plan_arm_descends_to_an_open_leaf() raises:
         seen,
     )
 
+    # An unnest: its child only (a column name and a flag carry no Expr).
+    var un_exprs = Slab[Expr]()
+    un_exprs.append(_c())
+    un_exprs.append(
+        Expr.alias(
+            Expr.regexp_split_to_array(
+                Expr.literal(ScalarValue.from_string(String("x,y"))), ","
+            ),
+            String("l"),
+        )
+    )
+    _assert_plan_descends(
+        LogicalPlan.unnest(
+            LogicalPlan.project(un_exprs^, _leaf(set, String("t"))),
+            String("l"),
+            False,
+        ),
+        set,
+        "UNNEST.child",
+        seen,
+    )
+
     # ---- TWO OR MORE CHILDREN.
     _assert_plan_descends(
         LogicalPlan.join(

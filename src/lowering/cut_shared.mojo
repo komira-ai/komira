@@ -77,6 +77,7 @@ from plan_ir.logical_plan import (
     PLAN_JOIN,
     PLAN_CSE_REF,
     PLAN_MAP_BATCHES,
+    PLAN_UNNEST,
 )
 
 
@@ -107,6 +108,8 @@ def _referenced_hashes(plan: LogicalPlan, mut out: List[UInt64]):
         _referenced_hashes(plan.topn_data_ref().child[], out)
     elif tag == PLAN_MAP_BATCHES:
         _referenced_hashes(plan.map_batches_data_ref().child[], out)
+    elif tag == PLAN_UNNEST:
+        _referenced_hashes(plan.unnest_data_ref().child[], out)
     elif tag == PLAN_UNION:
         ref ud = plan.union_data_ref()
         for i in range(len(ud.children)):
@@ -141,6 +144,8 @@ def _scan_count(plan: LogicalPlan) -> Int:
         return _scan_count(plan.topn_data_ref().child[])
     if tag == PLAN_MAP_BATCHES:
         return _scan_count(plan.map_batches_data_ref().child[])
+    if tag == PLAN_UNNEST:
+        return _scan_count(plan.unnest_data_ref().child[])
     if tag == PLAN_UNION:
         ref ud = plan.union_data_ref()
         var n = 0
@@ -216,6 +221,8 @@ def _expand_inplace(mut plan: LogicalPlan, cutter: _Cutter):
         _expand_inplace(plan._topn.value()[].child[], cutter)
     elif tag == PLAN_MAP_BATCHES:
         _expand_inplace(plan._map_batches.value()[].child[], cutter)
+    elif tag == PLAN_UNNEST:
+        _expand_inplace(plan._unnest.value()[].child[], cutter)
     elif tag == PLAN_UNION:
         var n = len(plan._union.value()[].children)
         for i in range(n):

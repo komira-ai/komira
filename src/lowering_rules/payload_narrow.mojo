@@ -28,7 +28,8 @@
 # order, every other node's one child. A node whose tag carries no payload has
 # no children. Plans held inside expressions (subquery payloads) are not
 # walked, and their scans are not counted. A tag outside the sixteen `PLAN_*`
-# tags is refused with `LOWERING_SCAN_ORDER_UNKNOWN_TAG`.
+# tags above and PLAN_UNNEST (walked through to its child) is refused with
+# `LOWERING_SCAN_ORDER_UNKNOWN_TAG`.
 #
 # THE RULE.
 #   A join qualifies when it is INNER, has no residual, and has exactly one key
@@ -94,6 +95,7 @@ from plan_ir.logical_plan import (
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_UNNEST,
     JOIN_INNER,
     SOURCE_PARQUET,
 )
@@ -230,6 +232,9 @@ def _walk(
     if tag == PLAN_PARTITION_TOPN:
         if node._partition_topn:
             _walk(node._partition_topn.value()[].child[], live, footer_stats, out)
+        return
+    if tag == PLAN_UNNEST:
+        _walk(node.unnest_data_ref().child[], live, footer_stats, out)
         return
     raise Error(
         String(LOWERING_SCAN_ORDER_UNKNOWN_TAG)

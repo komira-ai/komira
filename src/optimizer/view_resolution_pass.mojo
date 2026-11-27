@@ -70,6 +70,7 @@ from plan_ir.logical_plan import (
     PLAN_JOIN,
     PLAN_SORT,
     PLAN_LIMIT,
+    PLAN_UNNEST,
     PLAN_DISTINCT,
     PLAN_TOPN,
     PLAN_PARTITION_BY,
@@ -306,6 +307,11 @@ def _resolve_view_refs_inplace(
             plan._asof_join.value()[].right[], view_slab, view_name_to_idx,
             cte_names, cte_plans, name_stack, depth,
         )
+    elif plan.tag == PLAN_UNNEST:
+        _resolve_view_refs_inplace(
+            plan._unnest.value()[].child[], view_slab, view_name_to_idx,
+            cte_names, cte_plans, name_stack, depth,
+        )
     elif plan.tag == PLAN_UNION:
         var n = len(plan._union.value()[].children)
         for i in range(n):
@@ -393,6 +399,8 @@ def plan_contains_view_ref(plan: LogicalPlan) -> Bool:
         if plan_contains_view_ref(plan._asof_join.value()[].left[]):
             return True
         return plan_contains_view_ref(plan._asof_join.value()[].right[])
+    if plan.tag == PLAN_UNNEST:
+        return plan_contains_view_ref(plan._unnest.value()[].child[])
     if plan.tag == PLAN_UNION:
         var n = len(plan._union.value()[].children)
         for i in range(n):

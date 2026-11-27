@@ -30,6 +30,7 @@ from physical_plan.physical_plan import (
     OP_JOIN_PROBE,
     OP_UDF_APPLY,
     OP_UDF_FRAME,
+    OP_UNNEST,
     EDGE_E1_MORSEL_STREAM,
     EDGE_E2_INGEST_STREAM,
     EDGE_E3_PUBLISH_WAIT,
@@ -205,6 +206,13 @@ def _op_line(op: MorselOp) -> String:
         return "UDF_APPLY " + _call_text(op.udf.value())
     if op.tag == OP_UDF_FRAME:
         return "UDF_FRAME " + _call_text(op.udf.value())
+    if op.tag == OP_UNNEST:
+        return (
+            "UNNEST "
+            + op.unnest_column
+            + " keep_empty="
+            + ("true" if op.unnest_keep_empty else "false")
+        )
     return "OP_" + String(Int(op.tag))
 
 
