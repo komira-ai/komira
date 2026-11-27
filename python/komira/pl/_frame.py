@@ -18,12 +18,18 @@ projection that keeps every sort key, `rename`, `head`, `limit`, `slice` and
 below it, a limit above it; over a limit, the sort is written again on top).
 Every other verb makes the frame unordered. `tail` and `slice` with an offset
 need an ordered frame.
+
+The sinks, `sink_csv`, `sink_parquet` and `sink_ndjson`, run the plan once with
+a write target in the envelope (komira/_write.py, the steps the pandas-shaped
+frame's `to_csv` takes) and return None: the engine writes the file, and no row
+comes back into Python.
 """
 
 from __future__ import annotations
 
 import os
 
+from komira import _write
 from komira._errors import UnsupportedOperation
 from komira._ops import (
     Aggregate,
@@ -51,7 +57,7 @@ from komira._ops import (
 )
 from komira._session import Result, Session, _local_path, default_session
 
-from . import _join, _names, _window
+from . import _join, _names, _sink, _window
 from ._expr import Expr, col, lit
 from ._group import LazyGroupBy, group_keys
 from ._scope import Broadcast, Scope, Windows
@@ -526,6 +532,81 @@ class LazyFrame:
     def explain(self) -> str:
         """The engine's text of the plan, which is not run."""
         return self._session._plan_render(self._encode())
+
+    # Each sink runs the plan once on the frame's session and writes its rows
+    # to the local file `path` through the plan entry, with a write target in
+    # the envelope (komira/_write.py): the file `COPY (<the frame's query>)
+    # TO path` writes with the same format and codec, in the frame's order
+    # when it is ordered. The format follows the verb and the codec the
+    # `compression` argument, never the file's extension. The
+    # file is written all or nothing: an existing file is replaced, or left as
+    # it was when the write is refused. Each returns None. Arguments are
+    # checked before the library is called (komira/pl/_sink.py).
+
+    def sink_csv(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        include_bom: bool = False,
+        compression: str = "uncompressed",
+        compression_level: int | None = None,
+        include_header: bool = True,
+        separator: str = ",",
+        line_terminator: str = "\n",
+        quote_char: str = '"',
+        null_value: str | None = None,
+        maintain_order: bool = True,
+        mkdir: bool = False,
+        lazy: bool = False,
+    ) -> None:
+        """Writes the frame's rows to the CSV file `path`: a header line of the
+        column names, then a line per row, cells between commas, NULL as an
+        empty cell, a string quoted only when it needs it. `compression` is
+        "uncompressed", "gzip" or "zstd". A value of another keyword than
+        polars' default (`null_value` also as "") is refused with
+        `UnsupportedOperation` naming it; `maintain_order` is taken either way."""
+        dest = _sink.destination("sink_csv", path)
+        _sink.csv_options(include_header, separator, line_terminator, quote_char, null_value, include_bom)
+        _sink.write_options("sink_csv", compression_level, maintain_order, mkdir, lazy)
+        codec = _sink.text_codec("sink_csv", compression)
+        _write.write(self._session, self._plan, self._sources, dest, "csv", codec)
+
+    def sink_parquet(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        compression: str = "zstd",
+        compression_level: int | None = None,
+        maintain_order: bool = True,
+        mkdir: bool = False,
+        lazy: bool = False,
+    ) -> None:
+        """Writes the frame's rows to the Parquet file `path`, with the frame's
+        column names and types. `compression` is "zstd" (polars' default),
+        "snappy", "gzip", "lz4" or "uncompressed". The other keywords are as
+        for `sink_csv`."""
+        dest = _sink.destination("sink_parquet", path)
+        _sink.write_options("sink_parquet", compression_level, maintain_order, mkdir, lazy)
+        codec = _sink.parquet_codec(compression)
+        _write.write(self._session, self._plan, self._sources, dest, "parquet", codec)
+
+    def sink_ndjson(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        compression: str = "uncompressed",
+        compression_level: int | None = None,
+        maintain_order: bool = True,
+        mkdir: bool = False,
+        lazy: bool = False,
+    ) -> None:
+        """Writes the frame's rows to the newline-delimited JSON file `path`,
+        one object per row. `compression` and the other keywords are as for
+        `sink_csv`."""
+        dest = _sink.destination("sink_ndjson", path)
+        _sink.write_options("sink_ndjson", compression_level, maintain_order, mkdir, lazy)
+        codec = _sink.text_codec("sink_ndjson", compression)
+        _write.write(self._session, self._plan, self._sources, dest, "jsonl", codec)
 
 
 def _carried(order: tuple[SortKey, ...], plan, below) -> tuple[SortKey, ...] | None:

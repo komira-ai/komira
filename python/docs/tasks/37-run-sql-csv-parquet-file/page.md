@@ -81,4 +81,4 @@ Output:
 - [How do I read a Parquet file?](../15-read-parquet-file/page.md) (rank 15, works)
 - [How do I join two tables on a key?](../10-join-two-tables-on-key/page.md) (rank 10, works)
 - [How do I group by a column and sum another column?](../4-group-by-column-and-sum/page.md) (rank 4, works)
-- [How do I write a table to Parquet?](../27-write-table-parquet/page.md) (rank 27, partial)
+- [How do I write a table to Parquet?](../27-write-table-parquet/page.md) (rank 27, works)
