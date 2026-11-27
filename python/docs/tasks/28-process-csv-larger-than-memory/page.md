@@ -1,6 +1,6 @@
 # How do I process a CSV that does not fit in memory?
 
-Register the file and ask for the answer in SQL: the filter and the group-by run in the engine and only the small answer reaches Python, and a big answer is read batch by batch with `to_reader()`. Memory use on a file larger than memory was not measured here.
+Register the file and ask for the answer in SQL: the filter and the group-by run in the engine and only the small answer reaches Python, and a big answer is read batch by batch with `to_reader()`. Or loop over the file as pandas does, `for chunk in komira.read_csv(path, chunksize=n)`: each chunk is a `pyarrow.Table` of at most `n` rows, not a komira `DataFrame`, so the work on it is yours, in Python or pyarrow. Memory use on a file larger than memory was not measured here.
 
 <!-- include example.py -->
 ```python
@@ -32,6 +32,22 @@ with komira.Session() as s:
         amount_sum += sum(batch.column("amount").to_pylist())
     print(rows_seen, amount_sum)
 
+# Or the pandas loop: read_csv(chunksize=n) reads the file as it is asked for,
+# each chunk a pyarrow.Table of at most n rows; the totals kept across the
+# chunks are the ones the query above gave.
+chunks = 0
+n = {}
+total = {}
+for chunk in komira.read_csv("sales.csv", chunksize=1000):
+    chunks += 1
+    for city, amount in zip(chunk["city"].to_pylist(), chunk["amount"].to_pylist()):
+        if amount >= 10:
+            n[city] = n.get(city, 0) + 1
+            total[city] = total.get(city, 0) + amount
+print(chunks, "chunks")
+for city in sorted(n):
+    print(city, n[city], total[city])
+
 # The pandas-shaped frame is lazy too: the filter and the group-by are one query.
 df = komira.read_csv("sales.csv")
 by_city = df[df["amount"] >= 10].groupby("city").agg(n=("id", "count")).sort_values("city")
@@ -46,6 +62,10 @@ Lima 1334 39353
 Oslo 1333 39330
 Pune 1333 39317
 1000 44500
+5 chunks
+Lima 1334 39353
+Oslo 1333 39330
+Pune 1333 39317
 [{'city': 'Lima', 'n': 1334}, {'city': 'Oslo', 'n': 1333}, {'city': 'Pune', 'n': 1333}]
 ```
 
@@ -54,7 +74,7 @@ Pune 1333 39317
 - `register_csv` and `komira.read_csv` do not load the file: they read the start of it to infer the columns, and every query reads the file again. Put the filter and the aggregate in the query, so that only the answer reaches Python.
 - `to_arrow()` and `to_pandas()` hold the whole answer in memory; `to_reader()` gives a `pyarrow.RecordBatchReader` that reads batches as they are asked for. A result is read once.
 - `komira.Session(memory_limit=<bytes>)` caps what a query may use: a query that needs more raises `MemoryLimitError` instead of exhausting the machine, and one the engine can run in less (a `GROUP BY` that spills) does not raise.
-- The loop pandas spells `pd.read_csv(path, chunksize=n)` is not there: `komira.read_csv` has no `chunksize` (komira-ai/komira#2369). `probe_chunksize.py` beside this page tries it and must fail with the line in `probe_chunksize.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it. Today the way to work through a file piece by piece is the query, or `to_reader()` on its answer.
+- `komira.read_csv(path, chunksize=n)` is pandas' loop (pandas documentation, "Iterating through files chunk by chunk"): it returns a reader whose chunks have `n` rows each, the last one the rest, read from the file as the loop asks for them, so the file is never held whole. `iterator=True` and `reader.get_chunk(size)` take the next `size` rows; `close()`, or a `with` block, releases the file early. The column names and types are inferred from the start of the file, as `read_csv` infers them; a later cell that does not fit its column's type is NULL, as the engine reads it, and a malformed row raises `KomiraError` when the loop reaches it. A chunk is a `pyarrow.Table` (`chunk.to_pandas()` with pandas installed), not a komira `DataFrame`, which is a plan over a file and holds no rows.
 - The example writes a 5000-row file so that it runs in the check; the same code is what you would write for a larger file.
 
 ## Related

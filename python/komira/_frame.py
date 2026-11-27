@@ -10,7 +10,9 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
 - Readers (`read_parquet`, `read_csv`, `read_json`) read the file's schema now,
   through libkomira, and build a scan that names the file itself; no table name
   is registered. They take the session as a keyword and use the process's
-  default session without one.
+  default session without one. `read_csv(chunksize=n)` and `iterator=True`
+  return a reader of the file in `pyarrow.Table` chunks instead of a frame
+  (komira/_chunks.py).
 - The verbs are `df["x"]` (a `Series`), `df[["a", "b"]]` (a projection),
   `df[cond]` (a filter), `assign` and `df["x"] = ...` (computed columns),
   `sort_values`, `head` and `tail`. Each derives the output schema now, as the engine
@@ -60,7 +62,7 @@ from collections.abc import Callable
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
-from . import _display, _groupby, _merge, _ops, _refusals, _verbs, _windows, _write
+from . import _chunks, _display, _groupby, _merge, _ops, _refusals, _verbs, _windows, _write
 from ._errors import UnsupportedOperation
 from ._groupby import GroupBy
 from ._missing import present
@@ -1001,13 +1003,26 @@ def read_csv(
     *,
     sep: str = ",",
     header: int | str | None = "infer",
+    chunksize: int | None = None,
+    iterator: bool = False,
     session: Session | None = None,
-) -> DataFrame:
+) -> DataFrame | _chunks.TextFileReader:
     """A frame of the local CSV file at `path`, its column names and types
     inferred by the engine now, from the start of the file. `sep` is the one
     ASCII character between fields; `header` is "infer" or 0 when the first
     line holds the column names, None when it does not. Failures, paths and
-    `session` are as for `read_parquet`."""
+    `session` are as for `read_parquet`.
+
+    With `chunksize=n` or `iterator=True`, as in pandas, the answer is a
+    reader of the file in chunks (komira/_chunks.py): iterating it yields
+    `pyarrow.Table`s of `n` rows, the last one the rest, each read from the
+    file when it is asked for, and `get_chunk(size)` returns the next `size`
+    rows. The chunks have the names and types inferred here; a cell that does
+    not fit its type is NULL, as the engine reads it. A `chunksize` that is
+    not an integer of at least 1 raises pandas' `ValueError`."""
+    chunksize = _chunks.check_size(chunksize, "chunksize", 1)
+    if not isinstance(iterator, bool):
+        raise TypeError(f"read_csv iterator must be a bool, not {type(iterator).__name__}")
     if header is None:
         has_header = False
     elif header == "infer" or (header == 0 and not isinstance(header, bool)):
@@ -1021,6 +1036,9 @@ def read_csv(
     path = _local_path(path)
     binding = session._csv_binding(path, delimiter=sep, header=has_header)
     schema = _wire().pb.WireScanBinding.FromString(binding).schema
+    if chunksize is not None or iterator:
+        columns = [(f.name, _wire().arrow_name(f.arrow_type_id)) for f in schema.fields]
+        return _chunks.TextFileReader(path, columns, sep, has_header, chunksize)
     return _scan_frame(session, path, "csv", schema, _encoder().binding_source(binding))
 
 
