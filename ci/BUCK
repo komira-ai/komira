@@ -1,7 +1,12 @@
 # The aggregate of the pull request check: one target that builds every check
 # (tools/build/ci/aggregate.bzl). `./buck2 build //ci:pr` builds the check
-# set and `./buck2 test //ci:pr` runs its standalone tests. The lists are
-# generated (targets.bzl) and held complete by tools/build/ci/guard.bxl.
+# set and `./buck2 test //ci:pr` runs its standalone tests. Its roots are
+# committed one empty file per root, named by the root's label
+# (tools/build/ci/roots.bzl): `roots/<cell>/<package>:<name>`, and
+# `test_roots/<cell>/<package>:<name>` for a root Buck2 runs as a test. The globs
+# below read them, so adding a root adds a file and edits none.
+# tools/build/ci/guard.bxl holds the files to the graph and names each one to add or delete;
+# tools/build/ci/targets.bxl writes them all.
 #
 # `pr_default` is the same set without the roots of the heavy checks
 # (HEAVY of tools/build/ci/rules.bzl, none today):
@@ -9,20 +14,31 @@
 # the change owns paths of that row. tools/build/ci/default_guard.bxl holds it
 # to that: it reaches no heavy target and leaves out only roots that reach one.
 load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
+load("@komira//tools/build/ci:roots.bzl", "ROOTS_DIR", "TEST_ROOTS_DIR", "labels_of")
 load("@komira//tools/build/ci:rules.bzl", "HEAVY")
-load(":targets.bzl", "TARGETS", "TESTS")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
-# The shards, as a directory, for the zig cases that hold the check set free of the macOS
-# build (//:release_macos_cases).
-export_file(
-    name = "target_shards",
-    src = "targets",
+_TESTS = labels_of(glob([TEST_ROOTS_DIR + "/**"]), TEST_ROOTS_DIR)
+
+TARGETS = sorted(labels_of(glob([ROOTS_DIR + "/**"]), ROOTS_DIR) + _TESTS)
+
+TESTS = _TESTS
+
+# The files of the two trees, for the zig cases that hold the check set free of the macOS
+# build (//:release_macos_cases): their paths are the roots.
+filegroup(
+    name = "root_files",
+    srcs = glob([ROOTS_DIR + "/**", TEST_ROOTS_DIR + "/**"]),
     visibility = ["//:"],
 )
 
+# `pr` and `pr_default` are the Linux part of the pull request check: they hold checks that exist
+# on Linux only, so they are skipped as incompatible for another target platform; the macOS step
+# of `pr / check` builds //release:mopm_darwin_libs instead (tools/build/ci/darwin.bzl).
 ci_aggregate(
     name = "pr",
     deps = TARGETS,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:pr-check-linux-x86-64
     tests = TESTS,
 )
 
@@ -31,5 +47,6 @@ _HEAVY_ROOTS = [root for row in HEAVY for root in row[2]]
 ci_aggregate(
     name = "pr_default",
     deps = [t for t in TARGETS if t not in _HEAVY_ROOTS],
+    target_compatible_with = LINUX_X86_64,  # komira-limit:pr-check-linux-x86-64
     tests = [t for t in TESTS if t not in _HEAVY_ROOTS],
 )

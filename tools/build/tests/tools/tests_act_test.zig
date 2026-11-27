@@ -147,6 +147,121 @@ test "gzipStored: more than one stored block" {
     try t.expectEqual(@as(usize, 0), (try gunzip(a, empty)).len);
 }
 
+/// The files of tar `tar`: name, mode and bytes, in order (directories left out).
+const Member = struct { name: []const u8, mode: u32, data: []const u8 };
+
+fn members(a: std.mem.Allocator, tar: []const u8) ![]Member {
+    var name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var tin: std.Io.Reader = .fixed(tar);
+    var it = std.tar.Iterator.init(&tin, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
+    var out = std.ArrayList(Member).empty;
+    while (try it.next()) |f| {
+        if (f.kind != .file) continue;
+        var data = std.Io.Writer.Allocating.init(a);
+        try it.streamRemaining(f, &data.writer);
+        try out.append(a, .{ .name = try a.dupe(u8, f.name), .mode = f.mode & 0o777, .data = data.written() });
+    }
+    return out.toOwnedSlice(a);
+}
+
+/// An npm tarball of top directory `top`: package.json, a library (0755) and a
+/// file below a directory.
+fn npmTarball(a: std.mem.Allocator, top: []const u8) ![]u8 {
+    var tar = std.ArrayList(u8).empty;
+    try archives.tarEntry(a, &tar, try std.fmt.allocPrint(a, "{s}/", .{top}), '5', 0o755, "");
+    try archives.tarEntry(a, &tar, try std.fmt.allocPrint(a, "{s}/package.json", .{top}), '0', 0o644, "{\"name\":\"p\",\"version\":\"0.0.0\"}");
+    try archives.tarEntry(a, &tar, try std.fmt.allocPrint(a, "{s}/native/libx.so", .{top}), '0', 0o755, "ELF");
+    try archives.tarEntry(a, &tar, try std.fmt.allocPrint(a, "{s}/dist/index.js", .{top}), '0', 0o644, "export {};\n");
+    try tar.appendNTimes(a, 0, 1024);
+    return archives.gzipStored(a, tar.items);
+}
+
+test "tarEntry: a name over 99 bytes keeps its directories in the ustar prefix, and reads back whole" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const long = "package/" ++ "d" ** 60 ++ "/" ++ "f" ** 60 ++ ".so";
+    var tar = std.ArrayList(u8).empty;
+    try archives.tarEntry(a, &tar, long, '0', 0o644, "x");
+    try tar.appendNTimes(a, 0, 1024);
+    const got = try members(a, tar.items);
+    try t.expectEqual(@as(usize, 1), got.len);
+    try t.expectEqualStrings(long, got[0].name);
+    try t.expectEqual(@as(?usize, 68), archives.ustarCut(long));
+    try t.expectEqual(@as(?usize, null), archives.ustarCut("f" ** 120));
+    try t.expectError(error.NameTooLong, archives.tarEntry(a, &tar, "f" ** 120, '0', 0o644, ""));
+}
+
+test "withScripts: a scripts member first in the object, escaped, and never a second one" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    try t.expectEqualStrings(
+        "{\"scripts\":{\"postinstall\":\"node -e \\\"0\\\"\"},\n  \"name\": \"p\"\n}\n",
+        try archives.withScripts(a, "{\n  \"name\": \"p\"\n}\n", &.{.{ .name = "postinstall", .command = "node -e \"0\"" }}),
+    );
+    try t.expectEqualStrings("{\"scripts\":{\"a\":\"1\",\"b\":\"\\u0009\"}}", try archives.withScripts(a, "{}", &.{ .{ .name = "a", .command = "1" }, .{ .name = "b", .command = "\t" } }));
+    try t.expectError(error.HasScripts, archives.withScripts(a, "{\"scripts\":{}}", &.{.{ .name = "a", .command = "1" }}));
+    try t.expectError(error.NotAnObject, archives.withScripts(a, "[]", &.{.{ .name = "a", .command = "1" }}));
+}
+
+test "repackTar: files kept in order with their modes, one dropped, one added, scripts in package.json" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const gz = try npmTarball(a, "package");
+    // No edit: the same files, modes and bytes.
+    const same = try members(a, try archives.repackTar(a, gz, .{}));
+    try t.expectEqual(@as(usize, 3), same.len);
+    try t.expectEqualStrings("package/package.json", same[0].name);
+    try t.expectEqualStrings("package/native/libx.so", same[1].name);
+    try t.expectEqual(@as(u32, 0o755), same[1].mode);
+    try t.expectEqualStrings("ELF", same[1].data);
+    try t.expectEqual(@as(u32, 0o644), same[2].mode);
+    const got = try members(a, try archives.repackTar(a, gz, .{
+        .drops = &.{"native/libx.so"},
+        .adds = &.{.{ .path = "binding.gyp", .data = "{}\n" }},
+        .scripts = &.{.{ .name = "postinstall", .command = "true" }},
+    }));
+    try t.expectEqual(@as(usize, 3), got.len);
+    try t.expectEqualStrings("package/package.json", got[0].name);
+    try t.expectEqualStrings("{\"scripts\":{\"postinstall\":\"true\"},\"name\":\"p\",\"version\":\"0.0.0\"}", got[0].data);
+    try t.expectEqualStrings("package/dist/index.js", got[1].name);
+    try t.expectEqualStrings("package/binding.gyp", got[2].name);
+    try t.expectEqual(@as(u32, 0o644), got[2].mode);
+    // Any top directory is kept as it was.
+    try t.expectEqualStrings("node v25.9/package.json", (try members(a, try archives.repackTar(a, try npmTarball(a, "node v25.9"), .{})))[0].name);
+}
+
+test "repackTar: a drop that is not there, an add that is, scripts with no package.json, a link" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const gz = try npmTarball(a, "package");
+    try t.expectError(error.DropNotInTarball, archives.repackTar(a, gz, .{ .drops = &.{"native/liby.so"} }));
+    try t.expectError(error.DropNotInTarball, archives.repackTar(a, gz, .{ .drops = &.{"package/native/libx.so"} }));
+    try t.expectError(error.AddInTarball, archives.repackTar(a, gz, .{ .adds = &.{.{ .path = "dist/index.js", .data = "" }} }));
+    const no_manifest = try archives.repackTar(a, gz, .{ .drops = &.{"package.json"} });
+    try t.expectError(error.NoManifest, archives.repackTar(a, try archives.gzipStored(a, no_manifest), .{ .scripts = &.{.{ .name = "install", .command = "x" }} }));
+    var linked = std.ArrayList(u8).empty;
+    try archives.tarEntry(a, &linked, "package/l", '2', 0o777, "");
+    try linked.appendNTimes(a, 0, 1024);
+    try t.expectError(error.LinkInTarball, archives.repackTar(a, try archives.gzipStored(a, linked.items), .{}));
+    var loose = std.ArrayList(u8).empty;
+    try archives.tarEntry(a, &loose, "package.json", '0', 0o644, "{}");
+    try loose.appendNTimes(a, 0, 1024);
+    try t.expectError(error.NoTopDirectory, archives.repackTar(a, try archives.gzipStored(a, loose.items), .{}));
+    var two = std.ArrayList(u8).empty;
+    try archives.tarEntry(a, &two, "a/x", '0', 0o644, "");
+    try archives.tarEntry(a, &two, "b/y", '0', 0o644, "");
+    try two.appendNTimes(a, 0, 1024);
+    try t.expectError(error.TwoTopDirectories, archives.repackTar(a, try archives.gzipStored(a, two.items), .{}));
+    var empty = std.ArrayList(u8).empty;
+    try empty.appendNTimes(a, 0, 1024);
+    try t.expectError(error.EmptyTarball, archives.repackTar(a, try archives.gzipStored(a, empty.items), .{}));
+}
+
 const proto_checks = @import("proto_checks.zig");
 
 test "restBlock: the begin and end marker lines and everything between, nothing around" {

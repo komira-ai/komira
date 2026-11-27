@@ -59,6 +59,81 @@ Part 2 is the request dispatcher that routes `_bulk` and `_search` to a store
   `HttpResponse` with `content-type: application/json` and an exact
   `content-length`.
 
+## Examples
+
+A `_bulk` body is parsed per item: the good documents are committed, the
+unsupported `create` action fails its own item (keyed by its own verb) and the
+rest still index. The per-item list renders as the `_bulk` response, and an
+action line with no source line raises:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_raises -->
+```mojo
+from search_http import bulk_response_envelope_items, ndjson_bulk_to_docbatch
+
+var body = String(
+    '{"index":{"_id":"a"}}\n'
+    '{"body":"alpha one","status":"active","price":3}\n'
+    '{"create":{"_id":"b"}}\n'
+    '{"body":"alpha two"}\n'
+    '{"index":{"_id":"c"}}\n'
+    '{"body":"alpha three","status":"sold","price":4}\n'
+)
+var parsed = ndjson_bulk_to_docbatch(Span(body.as_bytes()), String("body"))
+assert_equal(parsed.count, 2)
+assert_equal(parsed.docbatch.num_rows(), 2)
+assert_true(parsed.any_error)
+assert_equal(len(parsed.items), 3)
+assert_equal(parsed.items[0].status, 201)
+assert_equal(parsed.items[1].status, 400)
+assert_equal(parsed.items[1].verb, String("create"))
+assert_equal(parsed.items[1].error_type, String("action_not_supported"))
+assert_equal(parsed.items[1].client_id, String("b"))
+assert_equal(parsed.items[2].client_id, String("c"))
+
+var response = bulk_response_envelope_items(String("docs"), parsed.items, parsed.any_error)
+assert_true(response.find('"errors":true') >= 0)
+assert_true(response.find('"create":{') >= 0)
+assert_true(response.find('"type":"action_not_supported"') >= 0)
+
+var dangling = String('{"index":{"_id":"1"}}\n{"body":"x"}\n{"index":{"_id":"2"}}\n')
+with assert_raises():
+    _ = ndjson_bulk_to_docbatch(Span(dangling.as_bytes()), String("body"))
+```
+
+A `_search` body becomes a `QueryIR` (field, raw query text, `from`/`size`,
+sort). `track_total_hits` is read separately because it only shapes the
+response, and a clause the translator refuses raises:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_raises -->
+```mojo
+from search.source import SORT_ASC
+from search_http import DEFAULT_SIZE, TRACK_TOTAL_FALSE, parse_track_total_hits, search_json_to_queryir, sort_is_by_score
+
+var request = String(
+    '{"query":{"match":{"body":"quick fox"}},"sort":["price"],'
+    '"from":5,"size":3,"track_total_hits":false}'
+)
+var q = search_json_to_queryir(Span(request.as_bytes()), Int64(7), String("body"))
+assert_equal(q.field_name, String("body"))
+assert_equal(q.query_text, String("quick fox"))
+assert_equal(q.generation, Int64(7))
+assert_equal(q.from_offset, 5)
+assert_equal(q.top_k, 3)
+assert_equal(q.sort_field, String("price"))
+assert_equal(Int(q.sort_order), Int(SORT_ASC))
+assert_false(sort_is_by_score(q))
+assert_equal(Int(parse_track_total_hits(Span(request.as_bytes()))), Int(TRACK_TOTAL_FALSE))
+
+var plain = String('{"query":{"match":{"body":"fox"}}}')
+var p = search_json_to_queryir(Span(plain.as_bytes()), Int64(0), String("body"))
+assert_equal(p.top_k, DEFAULT_SIZE)
+assert_equal(p.from_offset, 0)
+
+var should_clause = String('{"query":{"bool":{"should":[{"match":{"body":"fox"}}]}}}')
+with assert_raises():
+    _ = search_json_to_queryir(Span(should_clause.as_bytes()), Int64(0), String("body"))
+```
+
 ## Untrusted input
 
 Both parsers read client bodies. The JSON parser refuses nesting deeper than 128

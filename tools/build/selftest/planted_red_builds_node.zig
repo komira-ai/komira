@@ -12,13 +12,19 @@
 //!     differs (to the last byte), no package.json, a name or version that
 //!     differs or is a prefix, nested or absent, a version that is a number,
 //!     an exe that does not run or prints another version;
-//!   - node_dist's archive and version checks;
+//!   - node_dist's archive and version checks, and for an archive of another
+//!     platform (`foreign`) its executable format and the version its
+//!     node_version.h states, with no node run;
 //!   - c_shared_lib compiles with `-Wall -Werror`;
 //!   - node_binding_test: a failing test, a file that registers no test and a
 //!     skipped test fail though node may exit 0, an addon that is not staged
 //!     fails its test, and an addon that returns the wrong number fails it;
 //!     with covered sources, lines or branches under 99% and a covered source
-//!     no test loaded fail though every test passed.
+//!     no test loaded fail though every test passed;
+//!   - npm_install_test (//node:install_test's files and pins): a platform
+//!     package without a Mojo runtime library installs and fails the test at
+//!     its first load, and a main package with a postinstall script or a
+//!     platform package with a binding.gyp fails before any test runs.
 //!
 //! The analysis refusals of the same rules are analysis_refusals_node.
 const std = @import("std");
@@ -201,6 +207,16 @@ const ROWS = [_]lib.Row{
         .text = "/bin/node does not run",
     },
     .{
+        .name = "node_dist_foreign_given_elf",
+        .target = "tests//negative/node:foreign_given_elf",
+        .text = "is not a Mach-O 64-bit arm64 executable: it is an ELF file",
+    },
+    .{
+        .name = "node_dist_foreign_version_differs",
+        .target = "tests//negative/node:foreign_version_differs",
+        .text = "states v24.21.0, the pin says v24.20.0",
+    },
+    .{
         .name = "node_binding_fails",
         .target = "tests//negative/node:binding_fails",
         .text = "binding_test: node --test exited 1",
@@ -239,6 +255,21 @@ const ROWS = [_]lib.Row{
         .name = "node_binding_cover_not_loaded",
         .target = "tests//negative/node:binding_cover_not_loaded",
         .text = "binding_cover_unloaded.mjs is to be covered, and no test loaded it",
+    },
+    .{
+        .name = "node_install_missing_runtime",
+        .target = "tests//negative/node:install_missing_runtime",
+        .text = "libMSupportGlobals.so: cannot open shared object file",
+    },
+    .{
+        .name = "node_install_postinstall",
+        .target = "tests//negative/node:install_postinstall",
+        .text = "install_test: npm reports an install script in node_modules/@komira-ai/komira, and npm install is the only step",
+    },
+    .{
+        .name = "node_install_binding_gyp",
+        .target = "tests//negative/node:install_binding_gyp",
+        .text = "install_test: npm reports an install script in node_modules/@komira-ai/komira-linux-x64-gnu, and",
     },
     .{
         .name = "node_c_warns",

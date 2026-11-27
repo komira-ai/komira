@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "spec": "https://github.com/komira-ai/komira/blob/main/docs/design/documentation_tests.md#marker-comments",
+  "about": "What a Markdown renderer that draws HTML comments as text must drop from a README: every HTML comment block whose first word is a marker word. Each case is a document (`markdown`) and the same document with exactly the lines of its marker comments removed (`shown`): a renderer passes a case when it renders `markdown` as it renders `shown`. Additions only: a new case or a new word, never a changed or removed one.",
+  "marker_words": ["include", "not-tested:", "mojo-hidden"],
+  "cases": [
+    {
+      "name": "include before a fence",
+      "markdown": "Check a series:\n\n<!-- include examples/validate_series.mojo -->\n```mojo\ndef main():\n    pass\n```\n",
+      "shown": "Check a series:\n\n```mojo\ndef main():\n    pass\n```\n"
+    },
+    {
+      "name": "not-tested reason before a fence",
+      "markdown": "<!-- not-tested: needs a Postgres server -->\n```text\nok\n```\n",
+      "shown": "```text\nok\n```\n"
+    },
+    {
+      "name": "one-line hidden lines of a published README",
+      "markdown": "<!-- mojo-hidden from std.testing import assert_equal -->\n```mojo\nassert_equal(1, 1)\n```\n",
+      "shown": "```mojo\nassert_equal(1, 1)\n```\n"
+    },
+    {
+      "name": "multi-line hidden lines: the whole block",
+      "markdown": "```mojo\nvar x = 1\n```\n<!-- mojo-hidden\nassert_equal(x, 1)\nassert_equal(x + 1, 2)\n-->\n\nAfter.\n",
+      "shown": "```mojo\nvar x = 1\n```\n\nAfter.\n"
+    },
+    {
+      "name": "a marker word ended by the close of the comment",
+      "markdown": "<!-- mojo-hidden-->\nText.\n",
+      "shown": "Text.\n"
+    },
+    {
+      "name": "no space after the opening",
+      "markdown": "<!--include examples/a.mojo -->\n```mojo\ndef main():\n    pass\n```\n",
+      "shown": "```mojo\ndef main():\n    pass\n```\n"
+    },
+    {
+      "name": "indented by up to three spaces",
+      "markdown": "   <!-- include examples/a.mojo -->\n```mojo\ndef main():\n    pass\n```\n",
+      "shown": "```mojo\ndef main():\n    pass\n```\n"
+    },
+    {
+      "name": "two markers on adjacent lines are two blocks",
+      "markdown": "<!-- not-tested: printed by hand -->\n<!-- mojo-hidden var y = 2 -->\nText.\n",
+      "shown": "Text.\n"
+    },
+    {
+      "name": "other comments are kept",
+      "markdown": "<!-- TODO: say more -->\n<!-- includes the sample data -->\n<!-- Include examples/a.mojo -->\n<!-- not-tested -->\n<!-- not tested: by hand -->\n<!-- mojo -->\nText.\n",
+      "shown": "<!-- TODO: say more -->\n<!-- includes the sample data -->\n<!-- Include examples/a.mojo -->\n<!-- not-tested -->\n<!-- not tested: by hand -->\n<!-- mojo -->\nText.\n"
+    },
+    {
+      "name": "a comment that does not start its line is kept",
+      "markdown": "Text <!-- include examples/a.mojo --> more.\n",
+      "shown": "Text <!-- include examples/a.mojo --> more.\n"
+    },
+    {
+      "name": "a marker inside a code fence is code",
+      "markdown": "````markdown\n<!-- include examples/a.mojo -->\n```mojo\n```\n````\n",
+      "shown": "````markdown\n<!-- include examples/a.mojo -->\n```mojo\n```\n````\n"
+    },
+    {
+      "name": "a marker inside another comment goes with that comment",
+      "markdown": "<!-- a note\n<!-- include examples/a.mojo -->\nText.\n",
+      "shown": "<!-- a note\n<!-- include examples/a.mojo -->\nText.\n"
+    }
+  ]
+}

@@ -9,7 +9,9 @@
 # builds a release. So is the pull request's check, pr.yml: it decides what a pull
 # request's code may reach (a tailnet node, no secret). So is the farm-connect action its build job runs: it decides
 # which job joins the farm's tailnet. So are pypi.yml, the one workflow whose jobs hold a PyPI
-# publishing identity, and the smoke driver it runs, python/smoke/.
+# publishing identity, and the smoke driver it runs, python/smoke/; and npm.yml, the one workflow
+# whose job holds an npm publishing identity (its tool is release/ci/npm_smoke, and its publish gate
+# release/npm_publish.txt, both under release/).
 #
 # ⚠ PLACEHOLDER OWNER. `@komira-ai/release-approvers` is a team that does not
 # exist yet: until the organisation creates it (with the release approver as
@@ -22,6 +24,7 @@
 /.github/workflows/release.yml  @komira-ai/release-approvers
 /.github/workflows/pr.yml   @komira-ai/release-approvers
 /.github/workflows/pypi.yml @komira-ai/release-approvers
+/.github/workflows/npm.yml  @komira-ai/release-approvers
 /python/smoke/              @komira-ai/release-approvers
 /.github/actions/farm-connect/  @komira-ai/release-approvers
 /.github/CODEOWNERS         @komira-ai/release-approvers

@@ -1,0 +1,4 @@
+[{'order_id': 1, 'customer': 'Ana', 'amount': 120}, {'order_id': 4, 'customer': 'Cy', 'amount': 200}, {'order_id': 5, 'customer': 'Bo', 'amount': 150}]
+[{'order_id': 1, 'region': 'east'}, {'order_id': 3, 'region': 'east'}, {'order_id': 4, 'region': 'north'}]
+[{'order_id': 1, 'customer': 'Ana', 'amount': 120}, {'order_id': 4, 'customer': 'Cy', 'amount': 200}, {'order_id': 5, 'customer': 'Bo', 'amount': 150}]
+[{'order_id': 5}]

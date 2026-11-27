@@ -1,0 +1,1 @@
+BindError: infer_jsonl_schema: nested JSON value (object or array) at byte 18 — wide-default inference of LIST / STRUCT / MAP is not supported. Pass an explicit schema via ctx.read_json_batch(path, schema) to read this file.

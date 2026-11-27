@@ -29,8 +29,8 @@ stats = df[["value"]].median()            # one row, the column value
   `agg`, `first`, `last` and the other choices by row order, `ddof` other
   than 1, `skipna=False`, `nunique(dropna=False)` and `axis=1`. A missing
   value is NULL: unlike pandas, a NaN in a float column is a value in these
-  reductions, not a missing one ([`fillna` and `dropna`](missing_values.md) do
-  read it as missing).
+  reductions, not a missing one ([`fillna` and `dropna`](missing_values.md)
+  (newer than 0.1.1623) do read it as missing).
 
 Which reductions the engine computes today is on
 [its own page](aggregates_engine.md); [drop_duplicates](drop_duplicates.md)

@@ -10,7 +10,8 @@
 //! absolute install name, with an absolute or @executable_path run path, or
 //! loading a library nobody provides, and a Mach-O file in a manylinux wheel
 //! are each refused; an @rpath library in external_needed and the operating
-//! system's own libraries are accepted.
+//! system's own libraries are accepted. With the policy's `package` set to
+//! `package` (komira_npm's), the refusals name the members' package so.
 
 const std = @import("std");
 const diag = @import("diag.zig");
@@ -101,6 +102,23 @@ test "needed: a DT_NEEDED nobody provides is refused" {
     // The owner is found by its file name in the wheel: without it, refused.
     const ms = try members(a, try fixture.goodLibrary(a));
     try t.expectEqualStrings("needed: komira/_lib/libkomira.so needs libkomira_fs_native.so.1, which is not in the wheel, not a manylinux system library, and not in external_needed", try refusal(a, lib_policy, &.{ ms[0], ms[2] }));
+}
+
+test "package: the refusals name what the policy's package says the members are packed in" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var npm = lib_policy;
+    npm.package = "package";
+    const ms = try members(a, try fixture.goodLibrary(a));
+    try t.expectEqualStrings("needed: komira/_lib/libkomira.so needs libkomira_fs_native.so.1, which is not in the package, not a manylinux system library, and not in external_needed", try refusal(a, npm, &.{ ms[0], ms[2] }));
+    const bundled = try std.mem.concat(a, policy.Member, &.{ ms, &.{.{ .name = "komira/_lib/lib/libKGENCompilerRTShared.so", .data = try fixture.elf(a, .{}) }} });
+    try t.expectEqualStrings("external: the package carries komira/_lib/lib/libKGENCompilerRTShared.so, which external_needed says comes from another package and never from this package", try refusal(a, npm, bundled));
+    try t.expectEqualStrings("platform: komira/_lib/libkomira.so is a Mach-O file, and a manylinux package holds none", try refusal(a, npm, try members(a, try fixture.goodDylib(a))));
+    var mac = npm;
+    mac.glibc = null;
+    mac.macos = "11.0";
+    try t.expectEqualStrings("platform: komira/_lib/libkomira.so is an ELF file, and a macOS package holds none", try refusal(a, mac, try members(a, try fixture.goodLibrary(a))));
 }
 
 test "external: a bundled Mojo runtime library is refused" {

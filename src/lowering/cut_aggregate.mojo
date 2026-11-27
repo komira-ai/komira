@@ -20,12 +20,12 @@
 # or final aggregation; and (LOWERING_UDF_UNSERVED) one whose group key or
 # aggregate argument calls a `UdfRef` (an EXPR_UDF_APPLY).
 #
-# The segment's combine order is ORDER_ROW_RANGE when the aggregation has no
-# group key and a SUM or AVG whose argument is FLOAT32 or FLOAT64 in the
-# child's schema: the sink then folds each source position on its own and adds
-# the positions' sums in position order, so the double sum is the same bits on
-# every worker count and schedule. Every other aggregation is ORDER_NONE: its
-# folds are exact, or a grouped sink that folds no float.
+# The segment's combine order is ORDER_ROW_RANGE when the aggregation has a
+# SUM or AVG whose argument is FLOAT32 or FLOAT64 in the child's schema,
+# grouped or not: the sink then folds each source position on its own (per
+# group, in a grouped sink) and adds the positions' sums in position order, so
+# the double sum is the same bits on every worker count and schedule. Every
+# other aggregation is ORDER_NONE: its folds are exact.
 # =============================================================================
 
 from arrow.arrow_types import ArrowType
@@ -188,11 +188,9 @@ def _aggregate_exprs(node: LogicalPlan) raises -> AggExprArray:
 
 
 def _order_key_kind(node: LogicalPlan) raises -> UInt8:
-    """ORDER_ROW_RANGE for an aggregation with no group key and a float SUM
-    or AVG, else ORDER_NONE."""
+    """ORDER_ROW_RANGE for an aggregation with a float SUM or AVG, grouped
+    or not, else ORDER_NONE."""
     ref ad = node.aggregate_data_ref()
-    if len(ad.group_by) != 0:
-        return ORDER_NONE
     ref schema = ad.child[].output_schema
     for i in range(len(ad.agg_exprs)):
         ref agg = ad.agg_exprs[i]

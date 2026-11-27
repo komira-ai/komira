@@ -1,0 +1,10 @@
+{'region': 'north', 'rep': 'ana', 'amount': 100, 'rnk': 1, 'dense': 1, 'rn': 1}
+{'region': 'north', 'rep': 'bo', 'amount': 100, 'rnk': 1, 'dense': 1, 'rn': 2}
+{'region': 'north', 'rep': 'cy', 'amount': 70, 'rnk': 3, 'dense': 2, 'rn': 3}
+{'region': 'south', 'rep': 'di', 'amount': 90, 'rnk': 1, 'dense': 1, 'rn': 1}
+{'region': 'south', 'rep': 'ed', 'amount': 40, 'rnk': 2, 'dense': 2, 'rn': 2}
+{'rep': 'ana', 'region': 'north', 'amount': 100, 'rnk': 1.0, 'dense': 1.0}
+{'rep': 'bo', 'region': 'north', 'amount': 100, 'rnk': 1.0, 'dense': 1.0}
+{'rep': 'cy', 'region': 'north', 'amount': 70, 'rnk': 3.0, 'dense': 2.0}
+{'rep': 'di', 'region': 'south', 'amount': 90, 'rnk': 1.0, 'dense': 1.0}
+{'rep': 'ed', 'region': 'south', 'amount': 40, 'rnk': 2.0, 'dense': 2.0}

@@ -1,0 +1,6 @@
+{'store': 'north', 'day': 1, 'amount': 10, 'running': 10}
+{'store': 'north', 'day': 2, 'amount': 30, 'running': 40}
+{'store': 'north', 'day': 3, 'amount': 20, 'running': 60}
+{'store': 'south', 'day': 1, 'amount': 5, 'running': 5}
+{'store': 'south', 'day': 2, 'amount': 15, 'running': 20}
+[{'store': 'north', 'day': 1, 'amount': 10, 'running': 10}, {'store': 'north', 'day': 2, 'amount': 30, 'running': 40}, {'store': 'north', 'day': 3, 'amount': 20, 'running': 60}, {'store': 'south', 'day': 1, 'amount': 5, 'running': 5}, {'store': 'south', 'day': 2, 'amount': 15, 'running': 20}]

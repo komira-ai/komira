@@ -162,7 +162,8 @@ Fixed before this design and not reopened:
   the name. So registering a name a second time keeps the first file. The Python package's
   `register_parquet` says a second registration replaces the first
   ([python/komira/_session.py](../../python/komira/_session.py)). Decision 2 makes replacement the
-  rule, and the pull request that adds `add_sql_binding` fixes this with a test that fails today.
+  rule. **FIXED** with `komira_add_sql_binding`: `register_parquet` (`src/so/sources.mojo`) now
+  replaces a taken name (`test_register_parquet_replaces_a_taken_name`).
 - **EXISTS, no credential anywhere in the plan.**
   - `WireParquetSource` (`paths` = 1 to `fs_is_local` = 10, [src/plan_proto/plan.proto](../../src/plan_proto/plan.proto))
     carries verbatim paths, and the codec refuses a non-local file system.
@@ -502,7 +503,8 @@ message WireIcebergCatalog {
                                      // catalog vends none: the scope covering the table's location
 }
 
-// plan.proto, new. The input of komira_add_sql_binding (decision 8): a source as the user declared it.
+// bound_source.proto (EXISTS with `files` only, beside WireSourceAccess and AddressingStyleWire; the
+// other arms are held). The input of komira_add_sql_binding (decision 8): a source as the user declared it.
 // The binder translates it into the plan's own source messages; it is never part of a plan.
 message WireBoundSource {
   oneof kind {
@@ -781,14 +783,16 @@ read for identity A.
 ### 8. The C ABI
 
 The three credential rows **EXIST** at ABI 1.2, with session scope only, the eight kinds and the
-thirteen fields below, and the two error rows **EXIST** at ABI 1.7; the other row is **PROPOSED**,
-additive, in the first minor that lands it, in the golden's spelling ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)):
+thirteen fields below, the two error rows **EXIST** at ABI 1.7, and `komira_add_sql_binding`
+**EXISTS** at ABI 1.10, with session scope only and the `files` kind only (a local path, or
+Parquet objects of an `s3://` or `az://` location; see [Where is the code?](#where-is-the-code)),
+in the golden's spelling ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)):
 
 ```text
 komira_credential_add	Int32	Handle,Int32,CStr,UnsafePointer[Int32]	1.2
 komira_credential_set	Int32	Handle,Int32,Int32,ConstBytes,UInt64	1.2
 komira_credential_seal	Int32	Handle,Int32,Int32	1.2
-komira_add_sql_binding	Int32	Handle,CStr,ConstBytes,UInt64,Int32	1.x
+komira_add_sql_binding	Int32	Handle,CStr,ConstBytes,UInt64,Int32	1.10
 komira_last_error_code	Int32	Handle,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.7
 komira_last_error_step	Int32	Handle	1.7
 ```
@@ -893,8 +897,10 @@ komira_last_error_step	Int32	Handle	1.7
 
 ### 10. Writes
 
-Every Python call in this decision is **PROPOSED**. `komira_sql_stream` and `komira_plan_stream` are
-**PROPOSED** in the ABI design for running a query, and are not built.
+`komira_sql_stream` and `komira_plan_stream` are built. The pandas-shaped write terminals `to_parquet`,
+`to_csv` and `to_json` are **EXISTS**: each sends the plan through `komira_plan_stream` with
+`write_target` set and returns `None`. The polars-shaped `sink_parquet`, `sink_csv` and `sink_ndjson`
+of `komira.pl` are **EXISTS** the same way. `write_table` and the catalog statements are **PROPOSED**.
 
 **One spelling per door.** The SQL door writes with `COPY` and, into a bound catalog, with
 `CREATE TABLE ... AS` and `INSERT`. The DataFrame door writes with the write terminals and, into a
@@ -918,10 +924,12 @@ catalog, with `write_table`. There is no
     `OVERWRITE`, `OVERWRITE_OR_IGNORE`, `APPEND`, `FILE_SIZE_BYTES`, `PER_THREAD_OUTPUT`,
     `USE_TMP_FILE`, `RETURN_FILES`, `DELIMITER`, `HEADER false` and `ARRAY true` (bare `ARRAY`
     included). Each can later become an optional field of `WireWriteTarget` (rule B8).
-  - The Python write terminals take one keyword, `compression=`. A value they cannot honour raises
-    `UnsupportedOperation` by the DataFrame design's policy
-    ([dataframe_surface.md §6](dataframe_surface.md#6-how-a-skin-refuses)). A keyword they do not have
-    is Python's `TypeError`.
+  - The Python write terminals take `compression=`, and the CSV terminals also the keywords of the
+    options the CSV writer has one value of (`to_csv`'s `sep` and `header`; `sink_csv`'s `separator`,
+    `include_header`, `quote_char`, `null_value`, `line_terminator` and `include_bom`), at that value.
+    A value they cannot honour raises `UnsupportedOperation` naming the keyword, by the DataFrame
+    design's policy ([dataframe_surface.md §6](dataframe_surface.md#6-how-a-skin-refuses)). A keyword
+    they do not have is Python's `TypeError`.
 - **Format and codec follow DuckDB, or the write is refused.**
   - With no `FORMAT`, the format comes from the extension after one compression suffix is removed:
     `.parquet` is Parquet; `.csv` is CSV; `.json`, `.jsonl` and `.ndjson` are JSON.
@@ -993,6 +1001,7 @@ is a `KomiraError` too and is **PROPOSED**.
 | `STORAGE_IO` | a local write failed for another reason (no space, a read-only file system, a directory at the path); the message names the `errno` | `execute` | `StorageError` |
 | `STORAGE_URL_REFUSED` | `http://`, an unknown scheme, a URL with user information, a glob over `https://`, and every remote URL in the first release | `bind` | `UnsupportedOperation` |
 | `STORAGE_RANGE_NOT_SUPPORTED` | an `https://` server ignored `Range` | `execute` | `UnsupportedOperation` |
+| `COPY_TYPE_UNSUPPORTED`, `COPY_COMPRESSION_UNSUPPORTED` | a column type the file format cannot carry (BLOB, TIME, INTERVAL, nested), or lz4 for CSV or JSON, refused by name before any file is touched or replaced; `COPY` and the write terminals refuse alike | `bind` or `execute` | `UnsupportedOperation` |
 | `STORAGE_WRITE_UNSUPPORTED` | a `gs://`, `az://` or `https://` destination | `bind` | `UnsupportedOperation` |
 | `PLAN_URL_QUERY_REFUSED` | a plan exported for a job manager has a URL with a query string | none: the export call is the job manager's milestone | `UnsupportedOperation` |
 | `SQL_STATEMENT_UNSUPPORTED`, `COPY_OPTION_UNSUPPORTED`, `COPY_FORMAT_NOT_INFERRED` | decision 10 | `parse` or `bind` | `UnsupportedOperation` |
@@ -1063,7 +1072,7 @@ var result = session.sql("SELECT * FROM sales_catalog.sales.orders LIMIT 10")
 | bindings | `komira_add_sql_binding`, `Session.add_sql_binding`, `sql` with call bindings and the unnamed source, `komira.files` for local files and frames, `BIND_NAME_UNBOUND`. `register_parquet` becomes `add_sql_binding` underneath, which fixes its re-registration defect |
 | object stores | credentials and their ABI calls; `WireSourceAccess` on the wire; the S3 read arm with `ambient`; `https://` reads; the S3 write arm; GCS and Azure reads |
 | catalogs | `komira.iceberg` and the Iceberg statements ([the Iceberg design](#reconciling-with-the-iceberg-design)) |
-| DataFrame surface | the write terminals and `write_table` through `komira_plan_stream`, lifting `PLAN_WIRE_WRITE_TARGET_DROPPED`; `compression=`; readers taking `komira.files` sources |
+| DataFrame surface | built: the pandas-shaped write terminals (`to_parquet`, `to_csv`, `to_json`) with `compression=`, through `komira_plan_stream`, which no longer refuses a write target. Built too: the polars-shaped `sink_parquet`, `sink_csv` and `sink_ndjson` of `komira.pl`. To come: `write_table`, and readers taking `komira.files` sources |
 | job manager | the resolver interface of decision 5, with its header check, kind check and endpoint allow-list; `DeclaredNeeds.credentials`; `PLAN_URL_QUERY_REFUSED` |
 
 Every step is additive:
@@ -1334,10 +1343,31 @@ through the file system an `objectstore_s3.S3ScanFs`, `objectstore_gcs.GcsScanFs
 `azure_blob.AzureScanFs` opens on the bucket, with one footer cache keyed per bucket
 ([src/lowering/README.md](../../src/lowering/README.md), [src/sdk_exec/README.md](../../src/sdk_exec/README.md)).
 The three credential calls of decision 8 are built ([src/so](../../src/so/README.md)), and so are
-decision 1's credential objects in Python, private until `add_sql_binding` exports them
-(`python/komira/_credentials.py`, sealed by `Session._seal_credential`, refused as `CredentialsError`).
+decision 1's credential objects in Python (`python/komira/_credentials.py`, refused as
+`CredentialsError`): the kinds a file source takes are public (`AwsKeys`, `AwsProfile`,
+`GcpServiceAccount`, `GcpToken`, `AzureKey`, `AzureSas`, `AMBIENT`, `ANONYMOUS`), and `BearerToken`
+and `OAuth2ClientCredentials` stay private until a catalog can be bound.
+`komira.files(location, *, credential=AMBIENT, endpoint=None, region=None, url_style=None)` and
+`Session.add_sql_binding(name, source)` are built over `komira_add_sql_binding`
+(`python/komira/_sources.py`, `_session.py`): the session seals the source's credential, then binds
+the source's `WireBoundSource` bytes, under one hold of its lock. `files` checks types, a
+credential that fits the location's store, and no setting on a local path when it is built;
+`hive_partitioning=` is not taken yet, since the library reads a local path's partitioning by itself
+and refuses it on an object store. The module-level `komira.add_sql_binding`, call bindings
+(`sql(query, **sources)`) and the unnamed source are not built.
 Section 1's `komira.iceberg`, `catalog.table` and `komira.SigV4` are built as Python values, checked when
 built and private until `add_sql_binding` exports them (`python/komira/_iceberg.py`).
+`komira_add_sql_binding` is built at ABI 1.10 ([src/so](../../src/so/README.md), `bindings.mojo`):
+session scope only; `WireBoundSource` (`src/plan_proto/bound_source.proto`) with its `files` arm
+only; a local path, or Parquet objects (one key or a glob) of an `s3://`/`s3a://` location read with
+`AwsKeys`, or of an `az://`/`abfs://`/`abfss://` location read with `AzureKey`, `AzureSas` or
+`anonymous`, footers read through the store at the call; `komira_sql_stream` reads those tables
+through `so.store_fs`, revealing the sealed values for each statement. It refuses by name what is
+not built yet: other scopes (`BIND_SCOPE_UNSUPPORTED`), `gs://` and every other scheme
+(`STORAGE_URL_REFUSED`), `ambient` or no credential (`CREDENTIALS_NOT_FOUND`), `anonymous` and
+`AwsProfile` on S3, Hive partitioning and a signing service (`BIND_SOURCE_UNSUPPORTED`), a scope as
+a table (`BIND_SCOPE_NOT_A_TABLE`), and a second table reading a bucket with other settings
+(`BIND_STORE_CONFLICT`). `register_parquet` replaces a taken name.
 No other surface, wire field or error code of this design is built. The parts it builds on are:
 - [src/sql](../../src/sql/sql_binder.mojo) (`sql_binder.mojo`, `sql_catalog.mojo`, `sql_parser.mojo`);
 - [src/so](../../src/so/README.md);

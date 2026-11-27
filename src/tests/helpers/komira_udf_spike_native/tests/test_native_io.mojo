@@ -8,13 +8,17 @@
 #   - a directory where the code object should be is refused as unreadable
 #     (a read error taken for data or for the end of the file).
 #   - descriptors: digest mismatches and libraries that fail dlopen leave no
-#     file descriptor open (the code object's descriptor, or the memory file
-#     of a library that failed to load, never closed).
+#     file descriptor open (the code object's descriptor, or the private
+#     copy of a library that failed to load, never closed).
+#   - private copies: after the same refusals no library copy is left
+#     either (on macOS, the file in the runtime's private directory of a
+#     library that failed to load, never removed; on Linux the copy is the
+#     memory file the descriptor count covers).
 #   - the code object's path: under an empty code root it is "/<hex>"; under
-#     a root that leaves exactly room for the whole name (4095 bytes) the
-#     library loads; under one a byte longer the refusal names the path cut
-#     at the last whole hex pair (a bound on the path buffer off by one; the
-#     name built without the root).
+#     a root that leaves exactly room for the whole name (PATH_MAX - 1 bytes:
+#     4095 on Linux, 1023 on macOS) the library loads; under one a byte
+#     longer the refusal names the path cut at the last whole hex pair (a
+#     bound on the path buffer off by one; the name built without the root).
 #   - the runtime's own checks come first: at load, a descriptor version 2
 #     and non-canonical descriptor bytes are refused with ERR_DESCRIPTOR
 #     although the code object is absent (a check left to the library, which
@@ -38,6 +42,8 @@ from komira_udf_spike_native.code import (
     hex_of,
     host_role,
     open_fds,
+    path_max,
+    private_copies,
     sha256_of,
     stage,
     stage_data,
@@ -95,11 +101,49 @@ def _descriptors(mut rt: UdfRuntime, tmp: String) raises:
     var junk = _junk(100)
     var unloadable = _spec(root, [stage_data(junk, root, host_role(), sha256_of(junk))])
     var before = open_fds()
-    assert_true(before > 0, "/proc/self/fd is not readable")
+    assert_true(before > 0, "the descriptor directory (/proc/self/fd on Linux, /dev/fd on macOS) is not readable")
     for _ in range(3):
         _ = rt.load(mismatch)
         _ = rt.load(unloadable)
     assert_equal(open_fds(), before, "a refused code object left a file descriptor open")
+
+
+def _no_copy_left(mut rt: UdfRuntime, tmp: String) raises:
+    # A library refused for its digest is never copied; one that fails
+    # dlopen is copied and the copy removed. Either way no copy remains, and
+    # one that loads keeps its copy (and descriptor) for the process.
+    var root = tmp + "/copies"
+    # The mismatch names a digest no load has kept: the runtime keeps a
+    # verified library by its sha256, so a digest already loaded (the C
+    # library's, by `_path`) is answered from that and its bytes never read.
+    var want = digest_of("./native_mojo.so")
+    var mismatch = _spec(root, [stage_under("./native_c.so", root, host_role(), want)])
+    var junk = _junk(64)
+    var unloadable = _spec(root, [stage_data(junk, root, host_role(), sha256_of(junk))])
+    var good = _spec(root, [stage("./native_c.so", root, host_role())])
+    # `_path` ran first, so the good library is already mapped (this load is
+    # the runtime's cache) and its private directory exists before the count
+    # is read.
+    var loaded = rt.load(good)
+    assert_true(loaded.outcome.is_ok(), "the C library: " + String(loaded.outcome))
+    var copies = private_copies()
+    var fds = open_fds()
+    assert_true(copies >= 0, "the scratch directory is not readable")
+    _exactly(
+        rt.load(mismatch).outcome,
+        ERR_CODE_DIGEST,
+        "the library's bytes do not match its sha256; it was not loaded",
+        "a digest mismatch",
+    )
+    _exactly(
+        rt.load(unloadable).outcome,
+        ERR_LOAD,
+        "dlopen of the verified library failed",
+        "a file that is not a library",
+    )
+    assert_equal(private_copies(), copies, "a refused library left a private copy")
+    assert_equal(open_fds(), fds, "a refused library left a descriptor open")
+    rt.unload(loaded.handle)
 
 
 def _path(mut rt: UdfRuntime, tmp: String) raises:
@@ -113,9 +157,9 @@ def _path(mut rt: UdfRuntime, tmp: String) raises:
         "an empty code root",
     )
     # A root of `fit` bytes leaves room for "/" and the 64 hex digits in the
-    # runtime's 4096-byte path buffer, with its terminator; one byte more
+    # runtime's PATH_MAX-byte path buffer, with its terminator; one byte more
     # leaves room for 62 of them.
-    var fit = 4096 - 1 - 1 - 64
+    var fit = path_max() - 1 - 1 - 64
     var root = tmp + "/long"
     var remaining = fit - root.byte_length()
     var parts = (remaining + 200) // 201
@@ -124,10 +168,11 @@ def _path(mut rt: UdfRuntime, tmp: String) raises:
         root += "/"
         for _ in range(letters // parts + (letters % parts if p == 0 else 0)):
             root += "a"
+    assert_true(remaining > parts, "the scratch directory leaves no room for the long root: " + tmp)
     assert_equal(root.byte_length(), fit, "the long root's length")
     var one = stage("./native_c.so", root, host_role())
     var u = rt.load(_spec(root, [one.copy()]))
-    assert_true(u.outcome.is_ok(), "a library whose path is 4095 bytes: " + String(u.outcome))
+    assert_true(u.outcome.is_ok(), "a library whose path is PATH_MAX - 1 bytes: " + String(u.outcome))
     rt.unload(u.handle)
     var longer = root + "b"
     makedirs(longer, exist_ok=True)
@@ -185,6 +230,7 @@ def main() raises:
     _directory(rt, tmp)
     _descriptors(rt, tmp)
     _path(rt, tmp)
+    _no_copy_left(rt, tmp)
     _descriptor_first(rt, tmp)
     rt.shutdown()
     print("test_native_io: ok")

@@ -7,12 +7,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "m
 # Spike code: nothing outside src/tests may depend on it.
 #
 #   native/native_runtime.c  the native runtime: a loader that checks a
-#                            library's sha256 before dlopen, dlopens the
-#                            verified bytes, checks the library's describe and
-#                            forwards the C ABI to its table (:native)
+#                            library's sha256 before dlopen, dlopens a private
+#                            copy of the verified bytes (Linux: a memory file;
+#                            macOS: a new file, named by the sha256, in a
+#                            0700 directory the runtime makes under TMPDIR,
+#                            opened with O_EXCL and O_NOFOLLOW), checks the
+#                            library's describe and forwards the C ABI to its
+#                            table (:native)
 #   native/probe.c           the count of objects the dynamic loader mapped,
-#                            the C heap in use and the open descriptors, on
-#                            Linux and on macOS
+#                            the C heap in use, the open descriptors, the
+#                            files held as private copies, whether descriptor
+#                            0 is a private copy and PATH_MAX, on Linux and
+#                            on macOS
 #   native/variant_lib.c     the C library with one change per init, for the
 #                            runtime's refusal and context cases
 #   code.mojo                libraries staged as code objects, code sets
@@ -54,7 +60,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "m
 #                     library context with the runtime context's slot and
 #                     each closed with it, and shutdown reaching each.
 #   test_native_io    reading a code object (large, a directory, the path
-#                     at the buffer's bound), descriptors closed, the
+#                     at the buffer's bound, PATH_MAX), descriptors closed
+#                     and no private copy left after a refused library, the
 #                     runtime's own checks before the library's, describe.
 #   test_library_calls
 #                     both libraries' frames, aggregates and wrong-shape
@@ -62,15 +69,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "m
 #   test_leaks        the C heap grows the same over rounds of calls behind
 #                     native.so as behind echo.so (a block not freed).
 #   test_stdin_closed the C library loaded and called with descriptor 0
-#                     free, so the code object and the memory file each get
-#                     descriptor 0 (an open or memfd result tested `<= 0`).
+#                     free, so the code object and the library's private
+#                     copy each get descriptor 0 (an open or memfd result
+#                     tested `<= 0`).
 #   test_threads      both libraries called from four threads at once, on
 #                     threads the Mojo runtime did not create, every output
 #                     read back.
 #   test_probe        the probe's own readings on the system it runs on
 #                     (Linux or macOS): a dlopen counted once, 8 MiB of heap
-#                     held and freed, a descriptor added and taken away, and
-#                     descriptor 0 closed and restored.
+#                     held and freed, a descriptor added and taken away,
+#                     descriptor 0 closed and restored, the private copies
+#                     read and PATH_MAX.
 # Not welded: :native_bench, the measurements (cold start, per-batch cost,
 # rows/s, threads) as one JSON object on standard output. It fails only on a
 # broken call; no time is asserted. `run_id` is its input, so editing it

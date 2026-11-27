@@ -24,7 +24,8 @@ runtime the host provides (the toolchain's `libstdc++.so.6` and
 owners and the three Mojo runtime libraries to be mapped from the copy. The
 output `<name>.pass` exists only if that passed, or, with `expect_failure`,
 only if the first failure was exactly that line (the copy written `<dir>`).
-Building the target is running the check. Linux x86_64 only.
+Building the target is running the check. Linux x86_64 only: another target
+platform skips it, and the BUCK file marks each `picked_dir` it gives the check.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -115,7 +116,11 @@ def _picked_dir_macro(**kwargs):
     _picked_dir(**kwargs)
 
 def _libkomira_dist_load_macro(**kwargs):
-    _libkomira_dist_load(exec_compatible_with = LINUX_X86_64, **kwargs)
+    _libkomira_dist_load(
+        exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:libkomira-elf-linux-x86-64
+        **kwargs
+    )
 
 picked_dir = declares_docs(_picked_dir_macro)
 libkomira_dist_load = declares_docs(_libkomira_dist_load_macro)

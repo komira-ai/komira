@@ -1,5 +1,6 @@
 load("@komira//tools/build/package:defs.bzl", "mojo_bundle")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "bundle_parity")
 
 mojo_binary(
@@ -18,5 +19,7 @@ bundle_parity(
     name = "parity",
     binary = ":probe",
     bundle = ":probe_bundle",
+    # Reads the bundle, a linux x86_64 product: another target platform skips it.
+    target_compatible_with = LINUX_X86_64,  # komira-limit:image-linux-x86-64-only
 )
 

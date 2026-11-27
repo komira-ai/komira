@@ -149,10 +149,13 @@ The frames are immutable, except for one pandas idiom:
   ([src/plan_proto/plan.proto](../../src/plan_proto/plan.proto)), using the generated protobuf modules
   under `komira/plan/v1/`. The encoder is built (`komira._plan.encode_plan`); the package does not ship
   the generated modules yet. The session sends the bytes through the plan entry, `komira_plan_stream`
-  (`libkomira` ABI 1.8), which no session method calls yet.
+  (`libkomira` ABI 1.8), which the session's `_plan_stream` and `_plan_write` call.
   - The plan entry decodes the bytes with `plan_wire`, binds the scans, optimizes, lowers, runs, and
     returns an Arrow C stream.
-  - A write terminal sets the envelope's `write_target`.
+  - A write terminal sets the envelope's `write_target` (format version 5). The plan entry writes the file
+    and answers the one-row `Count` stream, which the terminal reads and drops, returning `None`
+    ([credentials_and_writes.md §10](credentials_and_writes.md#10-writes)). Built for the pandas-shaped
+    skin; the polars-shaped `sink_*` of `komira.pl` are not built.
   - protobuf becomes a required dependency of the package with this surface, beside pyarrow, as the
     Python package design says. Its range is `PROTOBUF_REQUIREMENT` in `python/dependencies.bzl`, which
     the wheel of the release that first ships the plan modules declares.
@@ -452,8 +455,8 @@ its number).
       input column. That is the rule `select_aggregates.name_unaliased` and `agg_output_naming` apply on
       the Mojo side.
     - Two outputs with one name are refused at the verb.
-13. **Float aggregates are not bit-reproducible** (carried) across runs and worker counts (§2.10), except an ungrouped
-    float sum or mean, which the engine folds in source position order. Tests compare float sums and means with a
+13. **Float aggregates are not bit-reproducible** (carried) across runs and worker counts (§2.10), except a float
+    sum or mean, ungrouped or per group, which the engine folds in source position order. Tests compare float sums and means with a
     stated tolerance. Neither library promises more for parallel input.
 14. **Types.** New with the verbs that take a dtype (D17).
     - A dtype argument (`astype`, `cast`, `return_dtype`) is a `pyarrow.DataType`, or a name from the

@@ -65,7 +65,7 @@ Sub-targets:
     [release_check]  [check] with a stamped wheel required
 
 `wheel_libs_check(name, wheel, entry, runtime_libs, runtime_licenses,
-runtime_dists, expect_refusal = None, runtime = None)` reads a finished wheel
+runtime_dists, opened = [], expect_refusal = None, runtime = None)` reads a finished wheel
 alone (`komira_wheel libs`, wheel/libs.zig) and refuses it unless the
 libraries in it load from it as an install would load them: from the library
 `entry` (a member path), for an ELF entry each DT_NEEDED a manylinux system
@@ -74,17 +74,20 @@ path entry `$ORIGIN`-relative and inside the import package; for a Mach-O
 entry each load command a macOS system library (under /usr/lib or
 /System/Library), a library already loaded, or a member that `@rpath` (through
 the loading library's own LC_RPATH entries) or `@loader_path` reaches, every
-run path entry `@loader_path`-relative and inside the import package; every
-ELF and Mach-O member loaded; and each of `runtime_libs` (the Mojo runtime)
+run path entry `@loader_path`-relative and inside the import package; each
+of `opened` (member paths of libraries the package opens itself beside the
+entry, such as the UDF runtime) a member under the same import package and of
+the entry's format, its loads walked as the entry's are; every ELF and Mach-O member loaded by one of them; and each of `runtime_libs` (the Mojo runtime)
 carried once with the bytes of the runtime's copy, its licence files
 `runtime_licenses` in `.dist-info/licenses/` and named by METADATA, and no
 Requires-Dist of a distribution in `runtime_dists`. The runtime is the
-toolchain's (`toolchains//:mojo`), or the directory `runtime` names (a
-`mojo_runtime`: a macOS wheel's check runs on Linux, and the darwin toolchain
-executes on macOS). Beside the wheel it reads only those names and the
+toolchain's (`toolchains//:mojo`, for linux x86_64 only: a darwin-arm64 build
+skips the target), or the directory `runtime` names (a `mojo_runtime`: a macOS
+wheel's check runs on Linux, and the darwin toolchain executes on macOS).
+Beside the wheel it reads only those names and the
 runtime libraries, nothing else the rule that wrote the wheel was given.
 The output, `<name>.libs`, lists the libraries `entry` loads, in
-load order; with `expect_refusal`, it exists only if the wheel is refused with
+load order, then those each of `opened` adds; with `expect_refusal`, it exists only if the wheel is refused with
 exactly that line (and says `refused: <line>`). Building the target is running
 the check.
 
@@ -375,6 +378,8 @@ def _wheel_libs_check_impl(ctx):
     runtime = ctx.attrs.runtime if hasattr(ctx.attrs, "runtime") else ctx.attrs.toolchain[MojoToolchainInfo].runtime
     out = ctx.actions.declare_output(ctx.label.name + ".libs")
     cmd = cmd_args(ctx.attrs._wheel[RunInfo], "libs", "--wheel", ctx.attrs.wheel, "--entry", ctx.attrs.entry)
+    for path in ctx.attrs.opened:
+        cmd.add("--opened", path)
     for name in ctx.attrs.runtime_libs:
         cmd.add("--runtime-lib", cmd_args(runtime.project(name), format = name + "={}"))
     for name in ctx.attrs.runtime_licenses:
@@ -387,11 +392,12 @@ def _wheel_libs_check_impl(ctx):
     ctx.actions.run(cmd, env = salted(), category = "wheel_libs")
     return [DefaultInfo(default_output = out)]
 
-_LIBS_CHECK_DOC = "Reads the finished wheel `wheel` alone with `komira_wheel libs` (wheel/libs.zig): the libraries the member `entry` (ELF or Mach-O) loads, through each one's run path, must all be in the wheel or be system libraries and be every native member, each of `runtime_libs` carried once with the bytes of the Mojo runtime and its `runtime_licenses` in the dist-info, and no Requires-Dist names one of `runtime_dists`. The output lists the loaded libraries; with `expect_refusal`, it exists only if the wheel is refused with exactly that line."
+_LIBS_CHECK_DOC = "Reads the finished wheel `wheel` alone with `komira_wheel libs` (wheel/libs.zig): the libraries the member `entry` (ELF or Mach-O) and each member of `opened` load, through each one's run path, must all be in the wheel or be system libraries and be every native member, each of `runtime_libs` carried once with the bytes of the Mojo runtime and its `runtime_licenses` in the dist-info, and no Requires-Dist names one of `runtime_dists`. The output lists the loaded libraries; with `expect_refusal`, it exists only if the wheel is refused with exactly that line."
 
 _LIBS_CHECK_ATTRS = {
     "entry": attrs.string(),
     "expect_refusal": attrs.option(attrs.string(), default = None),
+    "opened": attrs.list(attrs.string(), default = []),
     "runtime_dists": attrs.list(attrs.string(), default = []),
     "runtime_libs": attrs.list(attrs.string()),
     "runtime_licenses": attrs.list(attrs.string(), default = []),
@@ -423,7 +429,13 @@ def _wheel_libs_check_macro(**kwargs):
     if "runtime" in kwargs:
         _wheel_libs_check_runtime(exec_compatible_with = LINUX_X86_64, **kwargs)
     else:
-        _wheel_libs_check(exec_compatible_with = LINUX_X86_64, **kwargs)
+        # The toolchain's runtime is the Linux one: the toolchain executes on
+        # the target platform, so another platform has no such check.
+        _wheel_libs_check(
+            exec_compatible_with = LINUX_X86_64,
+            target_compatible_with = LINUX_X86_64,  # komira-limit:manylinux-wheel-linux-x86-64
+            **kwargs
+        )
 
 wheel_libs_check = declares_docs(_wheel_libs_check_macro)
 

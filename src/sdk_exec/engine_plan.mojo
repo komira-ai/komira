@@ -22,14 +22,23 @@
 #
 # A step that refuses ends the call, and the outcome says which step
 # (`optimize`, `lower` or `execute`) and the step's own message unchanged.
-# `run_plan` and `run_plan_with` raise nothing; `optimize_for_run` and
+# `run_plan`, `run_plan_with` and `run_plan_write` raise nothing; `optimize_for_run` and
 # `run_plan_batch` raise, and their callers turn the raise into an outcome.
 #
-# `SqlOutcome`, `SqlRefusal`, the three step names and `optimize_for_run` are
+# `run_plan_write` is the same route for a plan that has a destination (a
+# `WriteTarget`, the envelope's `write_target`): it checks the destination and
+# its compression at step `bind`, before the plan runs or any file is touched,
+# runs the plan, then writes the answer as a local Parquet, CSV or
+# newline-delimited JSON file (`engine_write`, still step `execute`) and
+# answers one row, the BIGINT column `Count`, exactly as a SQL
+# `COPY ... TO` does, and with its messages word for word.
+#
+# `SqlOutcome`, `SqlRefusal`, the four step names and `optimize_for_run` are
 # defined here and imported by `engine_sql`, so callers of either module find
 # them under the names they always had.
 
 from arrow.schema import RecordBatch
+from arrow.write_target import WriteTarget
 from fs.scan_fs import ScanFsOpener
 from optimizer.optimizer_config import OptimizerConfig
 from optimizer.optimizer_driver import optimize
@@ -43,8 +52,12 @@ from sql.sql_position import SqlPosition
 from .engine_context import EngineContext
 from .engine_execute import run_lowered_plan_with
 from .engine_lower import lower_for_context
+from .engine_write import check_copy_target, count_result, write_copy_result
 from .run_control import RunControl
 
+comptime STEP_BIND = "bind"
+"""The step at which `run_plan_write` checks the destination; `engine_sql`
+binds its statement at the same step."""
 comptime STEP_OPTIMIZE = "optimize"
 comptime STEP_LOWER = "lower"
 comptime STEP_EXECUTE = "execute"
@@ -184,6 +197,49 @@ def run_plan_with[
         var batch = run_plan_batch(ctx, plan^, opener^, step, RunControl())
         var outcome = SqlOutcome()
         outcome.batches.append(batch^)
+        return outcome^
+    except e:
+        return SqlOutcome(step^, String(e))
+
+
+def run_plan_write(
+    mut ctx: EngineContext, var plan: LogicalPlan, target: WriteTarget
+) -> SqlOutcome:
+    """`run_plan_write` reading the local file system only (`LocalOnlyScanFs`)."""
+    return run_plan_write(ctx, plan^, target, LocalOnlyScanFs())
+
+
+def run_plan_write[
+    R: ScanFsOpener
+](
+    mut ctx: EngineContext,
+    var plan: LogicalPlan,
+    target: WriteTarget,
+    var opener: R,
+) -> SqlOutcome:
+    """Run the logical plan `plan` on `ctx` and write its answer to `target`,
+    a local Parquet, CSV or newline-delimited JSON file, answering one batch
+    of one row: the NOT NULL BIGINT column `Count` holding the rows written.
+
+    The call is a query of its own (`run_plan_with`). The destination and its
+    compression are checked first, at step `bind`, so a refused write runs
+    nothing and touches no file: `STORAGE_URL_REFUSED` for a path with
+    `://`, `COPY_COMPRESSION_UNSUPPORTED` for CSV or JSON with lz4. The plan
+    then runs (`optimize`, `lower`, `execute`) and the file is written at step
+    `execute`, all or nothing, replacing a file already there; a destination
+    that cannot be written (a missing directory, `STORAGE_NOT_FOUND`) is
+    refused at `execute`. Nothing raises.
+    """
+    ctx.begin_query()
+    var step = String(STEP_BIND)
+    try:
+        check_copy_target(target.path, target.fmt, target.codec)
+        var batch = run_plan_batch(ctx, plan^, opener^, step, RunControl())
+        var rows = write_copy_result(
+            batch^, target.path, target.fmt, target.codec
+        )
+        var outcome = SqlOutcome()
+        outcome.batches.append(count_result(rows))
         return outcome^
     except e:
         return SqlOutcome(step^, String(e))

@@ -1,9 +1,13 @@
 //! analysis_refusals_node: the Node.js rules' analysis refusals
 //! (tools/build/node/defs.bzl), each with its exact message: an empty
 //! expect_error or exe, a source or bundle entry listed twice, a data
-//! destination that is a source or a package, conflicting pins, a
-//! package in its own deps, and a c_shared_lib's target_os with a
-//! zig_triple or with an `out` that is not a `.so` name. Catches the staged-twice check deleted.
+//! destination that is a source or a package, conflicting pins, a package in
+//! its own deps, a node_dist with both native_libs and foreign or, run by the
+//! linux node_act, with neither, and a c_shared_lib's target_os with a
+//! zig_triple or with an `out` that is neither a `.so` nor a `.node` name; an
+//! npm_install_test of no test or no Node.js, of a test that is not staged, of
+//! a file staged where npm writes or reads its configuration, or of two
+//! releases of one Node.js line. Catches the staged-twice check deleted.
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -49,9 +53,49 @@ const ROWS = [_]lib.Row{
         .text = "tests//negative/node:own_dep: tslib is in its own deps",
     },
     .{
+        .name = "node_foreign_with_libs",
+        .target = "tests//negative/node:foreign_with_libs",
+        .text = "tests//negative/node:foreign_with_libs: native_libs is for the node that runs here; a foreign dist is not run and has none",
+    },
+    .{
+        .name = "node_libs_missing",
+        .target = "tests//negative/node:libs_missing",
+        .text = "tests//negative/node:libs_missing: native_libs is empty: name the directory whose lib/ holds the libraries node links, or set foreign",
+    },
+    .{
         .name = "node_binding_no_srcs",
         .target = "tests//negative/node:binding_no_srcs",
         .text = "tests//negative/node:binding_no_srcs: srcs is empty: name the test files node --test runs",
+    },
+    .{
+        .name = "node_install_no_tests",
+        .target = "tests//negative/node:install_no_tests",
+        .text = "tests//negative/node:install_no_tests: test_files is empty: name the test files node --test runs",
+    },
+    .{
+        .name = "node_install_no_nodes",
+        .target = "tests//negative/node:install_no_nodes",
+        .text = "tests//negative/node:install_no_nodes: nodes is empty: name the Node.js lines the package is installed on",
+    },
+    .{
+        .name = "node_install_test_not_staged",
+        .target = "tests//negative/node:install_test_not_staged",
+        .text = "tests//negative/node:install_test_not_staged: test absent.test.mjs is not a destination of data",
+    },
+    .{
+        .name = "node_install_reserved_destination",
+        .target = "tests//negative/node:install_reserved_destination",
+        .text = "tests//negative/node:install_reserved_destination: data destination node_modules/tslib/index.js is the project's own",
+    },
+    .{
+        .name = "node_install_npmrc",
+        .target = "tests//negative/node:install_npmrc",
+        .text = "tests//negative/node:install_npmrc: data destination .npmrc is the project's own",
+    },
+    .{
+        .name = "node_install_two_of_a_line",
+        .target = "tests//negative/node:install_two_of_a_line",
+        .text = "tests//negative/node:install_two_of_a_line: nodes names two Node.js 24 releases",
     },
     .{
         .name = "node_target_os_with_triple",
@@ -61,7 +105,7 @@ const ROWS = [_]lib.Row{
     .{
         .name = "node_target_os_not_so",
         .target = "tests//negative/node:target_os_not_so",
-        .text = "tests//negative/node:target_os_not_so: with target_os, out names the linux file and ends in .so; it is addon.node",
+        .text = "tests//negative/node:target_os_not_so: with target_os, out names the linux file and ends in .so, or is a Node addon's .node; it is addon.dll",
     },
 };
 

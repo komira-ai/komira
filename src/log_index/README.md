@@ -97,3 +97,60 @@ every setting is an argument.
   searches each (routing on `has_l0_posting()`), merges newest first with the
   manifest publish sequence as the tie-break, and filters to the time window.
   It requires a search term: the split catalog carries no time range.
+
+## Examples
+
+Transpose two log records into the frozen eight-column batch. The record's
+`corr_id` lands as an Int64 column and the plan carries the row count.
+
+```mojo
+from log import LogRecordView
+from log_index import (
+    LOG_INDEX_TEXT_FIELD,
+    log_index_schema,
+    build_log_index_plan,
+)
+from std.testing import assert_equal
+
+var views = List[LogRecordView]()
+for i in range(2):
+    views.append(
+        LogRecordView(
+            UInt8(2),
+            UInt16(0),
+            UInt32(7),
+            UInt32(3),
+            UInt64(0),
+            UInt64(0xABCD),
+            Int64(1500 + i),
+            String("request done"),
+            String("readme_demo"),
+            List[String](),
+            List[String](),
+        )
+    )
+
+var schema = log_index_schema()
+assert_equal(schema.num_columns(), 8)
+assert_equal(schema.field_name(0), LOG_INDEX_TEXT_FIELD)
+
+var plan = build_log_index_plan(views)
+assert_equal(plan.row_count, 2)
+assert_equal(plan.batch.num_rows(), 2)
+assert_equal(plan.batch.num_columns(), 8)
+assert_equal(
+    Int(plan.batch.column_at(5).as_primitive[DType.int64]().get(0)), 0xABCD
+)
+```
+
+A metric series id is a pure function of its three ids and is never negative.
+
+```mojo
+from log_index import metric_series_id
+from std.testing import assert_equal, assert_true
+
+var a = metric_series_id(UInt32(1), UInt32(2), UInt32(3))
+var b = metric_series_id(UInt32(1), UInt32(2), UInt32(3))
+assert_equal(a, b)
+assert_true(a >= 0)
+```

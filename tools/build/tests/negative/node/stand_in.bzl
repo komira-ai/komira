@@ -8,6 +8,12 @@ fixture gives it. Nothing reads the file: analysis refuses each fixture first.
 a fixture names: `files` are written with one line of text (mode 644),
 `programs` are copies of the pinned busybox (mode 755), which, run under a
 name that is none of its applets (`node`), fails with "applet not found".
+
+`npm_repack` writes a built npm tarball again with one defect that the
+package rule (npm_tarball) refuses to write: files left out (`drop`), files
+added (`add`, {path: file}) or scripts in its package.json (`scripts`, {name:
+command}), paths below the tarball's top directory. Its output has the
+tarball's file name.
 """
 
 load("@komira//tools/build/node:defs.bzl", "NpmPackageInfo")
@@ -52,3 +58,29 @@ _stand_in_archive = rule(
 
 def stand_in_archive(**kwargs):
     _stand_in_archive(exec_compatible_with = LINUX_X86_64, **kwargs)
+
+def _repack_impl(ctx):
+    out = ctx.actions.declare_output(ctx.label.name + "/" + ctx.attrs.tarball.basename)
+    edits = []
+    for m in ctx.attrs.drop:
+        edits += ["--drop", m]
+    for path, f in sorted(ctx.attrs.add.items()):
+        edits += ["--add", cmd_args(f, format = path + "={}")]
+    for name, command in sorted(ctx.attrs.scripts.items()):
+        edits += ["--script", "{}={}".format(name, command)]
+    ctx.actions.run(cmd_args(ctx.attrs._act[RunInfo], "npm-repack", ctx.attrs.tarball, out.as_output(), edits), category = "npm_repack")
+    return [DefaultInfo(default_output = out)]
+
+_npm_repack = rule(
+    impl = _repack_impl,
+    attrs = {
+        "add": attrs.dict(attrs.string(), attrs.source(), default = {}),
+        "drop": attrs.list(attrs.string(), default = []),
+        "scripts": attrs.dict(attrs.string(), attrs.string(), default = {}),
+        "tarball": attrs.source(),
+        "_act": attrs.exec_dep(default = "tests//tools:tests_act", providers = [RunInfo]),
+    },
+)
+
+def npm_repack(**kwargs):
+    _npm_repack(exec_compatible_with = LINUX_X86_64, **kwargs)

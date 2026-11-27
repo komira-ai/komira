@@ -9,11 +9,14 @@ engine to. Each case is run again by the pinned DuckDB as a `sql_oracle`
 build action ([tools/build/sql](../../../../tools/build/sql/README.md)), and
 the action fails unless its answer equals the committed one byte for byte.
 Test-only data: the corpora are SQL and TSV, and nothing komira builds is an
-input except by the function coverage test below. Three corpora are run through komira (the third, `scalar_fn`, by the function coverage test below): pipeline_exec's
-`tests/test_sink_float_agg_duckdb.mojo` holds the ungrouped aggregation
-sink to the answers of `agg_float_ungrouped`, and sdk_exec's
-`tests/test_run_sql_topn.mojo` holds `run_sql` to the answers of each
-`order_by_limit` case with a LIMIT or an OFFSET.
+input except by the function coverage test below. Every case is run through
+komira by the TypeScript package's runner (see "Runners" below), held to
+its answer or to its line in one of two lists. Three corpora are also run
+through komira in Mojo (the third, `scalar_fn`, by the function coverage
+test below): pipeline_exec's `tests/test_sink_float_agg_duckdb.mojo` holds
+the ungrouped aggregation sink to the answers of `agg_float_ungrouped`, and
+sdk_exec's `tests/test_run_sql_topn.mojo` holds `run_sql` to the answers of
+each `order_by_limit` case with a LIMIT or an OFFSET.
 
 ```sh
 ./buck2 build //src/tests/conformance/komira_sql_conformance:corpus
@@ -33,10 +36,14 @@ sink to the answers of `agg_float_ungrouped`, and sdk_exec's
 | `sql/check.sql` | holds `answer.tsv` to the committed answer |
 | `sql/compare.sql` | `first_difference(got, want)`: where two answers first differ |
 | `sql/compare_check.sql` | `first_difference` over planted pairs |
+| `tables.bzl` | `CORPUS_TABLES`, the tables of each corpus, and `corpus_tables`, which writes them as Parquet |
+| `refusals.tsv` | the cases komira refuses by name, each with its refusal |
+| `differences.tsv` | the cases komira answers otherwise than DuckDB, each with how its answer differs |
 
 `:<corpus>/<case>` runs one case, `:<corpus>` every case of a corpus,
 `:corpus` every case; `:<corpus>_answers` is a corpus's answers as one
-directory, `<case>.tsv` each.
+directory, `<case>.tsv` each; `:<corpus>_tables` its tables as Parquet;
+`:cases_tree` every case as one directory, `<corpus>/<case>.sql` each.
 
 ## A case
 
@@ -81,6 +88,41 @@ action fails with where they first differ:
 ```
 corpus case: answer.tsv differs from the committed expected.tsv, line 2: got "1", want "2"
 ```
+
+## The tables as Parquet
+
+A runner of the corpus through an SDK reads no SQL but the case: it
+registers each corpus's tables from Parquet files. `:<corpus>_tables`
+([tables.bzl](tables.bzl)) runs the corpus's `tables.sql` in the pinned
+DuckDB, then writes every table it created as `<table>.parquet`, a
+sub-target `[<table>.parquet]` each. The tables are named in
+`CORPUS_TABLES`, since `sql_oracle` declares its outputs before it runs;
+the action fails, naming both lists, unless `tables.sql` created exactly
+those tables, and analysis fails unless `CORPUS_TABLES` names exactly the
+corpora of `cases/`.
+
+## Runners
+
+The runners of the corpus through an SDK run every case and hold it to its
+committed answer, or to its line in one of two lists, which every runner
+reads, so two languages cannot disagree on what komira answers:
+
+- `refusals.tsv`: `<corpus>/<case>` TAB the refusal word for word, the last
+  error komira_sql_stream leaves (`<step>: <reason>`). A case's query is its
+  lines but the comment lines, trimmed and joined with a space, so a parse
+  refusal's position reads line 1.
+- `differences.tsv`: `<corpus>/<case>` TAB how komira's answer, written as
+  this corpus writes DuckDB's, differs from the committed one: `header: got
+  "<line>", want "<line>"` when the column names differ, `line <n>: got
+  "<line>", want "<line>"` at the first row line that differs, or both,
+  joined by `; `. These are known gaps, not passes.
+
+A case listed that answers as DuckDB, a case refused or differing otherwise
+than listed or not listed at all, and a line naming no case are each a
+failure, so a fix and a regression both show as a changed line. The runner
+today is the TypeScript package's, `//node:sql_conformance_test`
+([node/tests/conformance](../../../../node/tests/conformance/README.md)): its
+failure ends with the lines to add to or remove from the lists.
 
 ## Regenerating
 
@@ -132,6 +174,8 @@ query calling a function DuckDB does not have.
 | `:corpus` | every case's answer, run again by the pinned DuckDB, equals its committed answer byte for byte | a committed answer DuckDB does not give; a DuckDB bump that changes an answer; a case or table edited without its answer |
 | `:compare_check` | `first_difference` over planted pairs (equal, a changed cell, a changed header, a missing or an extra row, a missing or an extra final LF, a CR, an empty cell for `""`, nothing written, `-0.0` for `0.0`), each against the exact report it must give | a comparison that misses a difference or reports the wrong line |
 | `tests//negative/sql_oracle:corpus_answer_differs`, `:corpus_unordered` (the self-test scenario `sql_oracle`) | the runner fails a case whose committed answer is wrong, and a case whose first line names no row order, each with its message | a runner that stopped comparing, or ran a case with no row order |
+| `tests//negative/sql_oracle:corpus_tables_unlisted`, `:corpus_tables_not_created` (the self-test scenario `sql_oracle`) | the export of a corpus's tables fails, naming both lists, when its `tables.sql` creates a table `CORPUS_TABLES` leaves out, and when `CORPUS_TABLES` names one it does not create | an export that stopped holding the tables to the list, or held them in one direction only |
+| `//node:sql_conformance_test` ([node/tests/conformance](../../../../node/tests/conformance/README.md)) | every case, run through the TypeScript package's `Session.sql` on the tables as Parquet, answers as DuckDB or is refused or differs exactly as `refusals.tsv` and `differences.tsv` say; a fixture corpus with one wrong answer fails that run | a wrong answer, a new or changed refusal or difference, a fixed case still listed |
 
 ## Function coverage
 
@@ -149,6 +193,16 @@ the committed file; the failure message holds each line that changes it
 the file after a change (the test runner prints only the last 200 lines of a
 failing test, fewer than the table has). Its rows come from the source text
 of `sql_scalar_fn_spec`, so a row added to the table is a line here.
+
+The committed table is measured on linux-x86_64, where the pinned DuckDB runs
+on the same libm (glibc) as the engine, and there the test holds it byte for
+byte. On another host (macOS, with Apple's libm) a transcendental function's
+answer is held to DuckDB's within 4 ulp, not bit for bit
+(`komira_plan_harness.libm_rule`). So before comparing, the test folds both
+tables on each line whose every case calls a transcendental function: its
+`equal` and `equal_within_4_ulps` counts are summed into one `equal`.
+`differs` is not folded. A line also credited by a case that calls none is not
+folded either. A table measured off the oracle host is never the one to commit.
 
 Columns: `name`; `row`, the lowering kind of the name's row (`FNK_*`),
 `NO_ROW` when the table has none; `detail`, a refusal's reason family;

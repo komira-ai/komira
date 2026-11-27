@@ -70,8 +70,10 @@ The golden (`src/so/abi/komira.tsv`) holds both.
   built, and building it starts the worker runtime.
 - **EXISTS** `plan_wire.plan_from_bytes` decodes an authored envelope into a
   `LogicalPlan`. The decoder refuses input above `PLAN_WIRE_MAX_BYTES` (16 MiB).
-  `OptimizedPlan` is a schema in `src/plan_proto/optimized_plan.proto` with no
-  codec. Its design ([optimized_plan.md](optimized_plan.md)) is not built.
+  `OptimizedPlan` is a schema in `src/plan_proto/optimized_plan.proto`. Its
+  codec, producer and admission are the `optimized_plan` library
+  (`src/optimized_plan`); its design ([optimized_plan.md](optimized_plan.md))
+  is partly built, and libkomira does not call that library.
 - **EXISTS** The Arrow C stream exporter
   `arrow_ipc.build_record_batch_stream(batches, schema, out_stream)`
   (`src/arrow_ipc/c_data_stream.mojo`).
@@ -179,15 +181,21 @@ to every later run on the context.
 
 The input is an authored `komira.plan.v1.WirePlanEnvelope`. These are the same
 bytes `komira_plan_render` renders, and the format the SDKs' plan builders write.
-- **Envelopes it refuses.** `plan_from_bytes` refuses an envelope that carries a
-  write target (`PLAN_WIRE_WRITE_TARGET_DROPPED`) or a UDF list
-  (`PLAN_WIRE_UDFS_DROPPED`). The door keeps those refusals (-3) until each lands.
-  The write target is lifted by the write design
-  ([credentials_and_writes.md](credentials_and_writes.md#10-writes)), the UDF list
-  by the UDFs' own. `plan_envelope_from_bytes` already decodes both, for the door
-  that carries them later.
-- **The route.** It is `plan_from_bytes`, then `optimize`, `lower_for_context` and
-  `run_lowered_plan`: the tail of `run_sql` after bind. **EXISTS:** `sdk_exec`
+- **Envelopes it refuses.** The door decodes with `plan_envelope_from_bytes` and
+  refuses an envelope that carries a UDF list (`PLAN_WIRE_UDFS_DROPPED`, at
+  `decode`, -3) until the UDFs' own design lands.
+- **Envelopes it writes.** An envelope with a write target (format version 5)
+  is run by `run_plan_write` instead of `run_plan`, as
+  [credentials_and_writes.md](credentials_and_writes.md#10-writes) decides: the
+  plan's rows go to a local Parquet, CSV or newline-delimited JSON file, and the
+  stream answers the one-row BIGINT `Count` that `COPY ... TO` answers. The
+  destination is checked at `bind` before the plan runs (a URL is
+  `STORAGE_URL_REFUSED`, CSV or JSON with lz4 `COPY_COMPRESSION_UNSUPPORTED`),
+  and the file is written all or nothing at `execute`. The signature of
+  `komira_plan_stream` and the ABI version do not change.
+- **The route.** It is `plan_envelope_from_bytes`, then `optimize`, `lower_for_context` and
+  `run_lowered_plan`: the tail of `run_sql` after bind (a write goes on to
+  `write_copy_result`, as `COPY` does). **EXISTS:** `sdk_exec`
   has one `run_plan(mut ctx, var plan: LogicalPlan) -> SqlOutcome`
   (`src/sdk_exec/engine_plan.mojo`), and `run_sql` runs its steps
   (`run_plan_batch`) after binding. SQL and plans share one route from the
@@ -195,8 +203,8 @@ bytes `komira_plan_render` renders, and the format the SDKs' plan builders write
   `run_sql` calls the steps without that, because its binder has already read
   the footers lowering uses.
 - **The error text.** `<step>: <reason>`, where the step is `decode` (the bytes
-  are not a plan this build runs) or the step of `run_plan` that refused
-  (`optimize`, `lower` or `execute`).
+  are not a plan this build runs), `bind` (a write's destination) or the step
+  of `run_plan` that refused (`optimize`, `lower` or `execute`).
 - **No SQL front end.** The door never makes SQL text and never calls the
   tokenizer, parser or binder. `EngineContext.statements_parsed` counts the
   statements `run_sql` parses on a context, and the door's tests hold it at 0
@@ -213,8 +221,9 @@ the "program that links the engine" role of [optimized_plan.md](optimized_plan.m
 - An `OptimizedPlan` is the form a client *submits* to a job manager. It is not an
   input of this door, and a bare `OptimizedPlan` passed here fails the envelope
   decoder by name (-3).
-- Producing an `OptimizedPlan` for a job manager is out of scope until its codec
-  exists.
+- Producing an `OptimizedPlan` for a job manager is out of scope for this door.
+  The producer exists (`optimized_plan.produce_optimized_plan`), but no entry of
+  this ABI calls it.
 
 ## 4. Who calls which entry
 
@@ -334,7 +343,7 @@ The port adds no code. The six codes of ABI 1.1 cover the two run calls:
 | 0 `KOMIRA_OK` | `*out` holds a stream |
 | -1 `KOMIRA_ERR_NULL_CTX` | NULL `ctx` |
 | -2 `KOMIRA_ERR_NULL_ARG` | NULL `sql`, `plan` or `out` |
-| -3 `KOMIRA_ERR_ENGINE` | invalid UTF-8; a parse, bind, optimize, lower or execute refusal; an unsupported feature refused by name (rule B21); a result type the stream cannot carry; a plan the decoder refuses, including an envelope with a write target or UDFs; an engine that fails to build |
+| -3 `KOMIRA_ERR_ENGINE` | invalid UTF-8; a parse, bind, optimize, lower or execute refusal; an unsupported feature refused by name (rule B21); a result type the stream cannot carry; a plan the decoder refuses, including an envelope with UDFs; a write destination the engine refuses; an engine that fails to build |
 | -4 `KOMIRA_ERR_BUFFER_TOO_SMALL` | not returned by the run calls (no byte output) |
 | -5 `KOMIRA_ERR_TOO_LARGE` | `plan_len`, or SQL text, above 64 MiB |
 
@@ -409,7 +418,7 @@ otherwise fail fast. The port keeps that answer and makes it explicit:
      aborts in the middle of a query (for example at the first compressed Parquet
      page).
    - **EXISTS:** every call that can reach a codec (the Parquet, CSV and JSON
-     register calls, the three describe calls, `komira_sql_stream`,
+     register calls, `komira_add_sql_binding`, the three describe calls, `komira_sql_stream`,
      `komira_sql_stream_run` and `komira_plan_stream`; not
      `komira_register_arrow_stream`, which reads no file) first opens libzstd, libz and liblz4 through a
      raising probe (`probe_codec_libraries` in `compression.codec_libraries`),

@@ -278,3 +278,23 @@ test "a shipped readme refuses relative links" {
         try refusal(a, text, true),
     );
 }
+
+test "a fence on the line after an include marker is a module example; the inline model refuses the marker" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const text = "<!-- include examples/a.mojo -->\n```mojo\ndef main():\n    pass\n```\n\n```mojo\nprint(1)\n```\n";
+    const exs = try examplesOf(a, text);
+    try t.expectEqual(@as(usize, 2), exs.len);
+    try t.expect(exs[0].module);
+    try t.expect(!exs[1].module);
+    // A marker with text after it, or not at the start of its line, is no include.
+    const near = try examplesOf(a, " <!-- include examples/a.mojo -->\n```mojo\nprint(1)\n```\n");
+    try t.expect(!near[0].module);
+    const refused = switch (try ex.extractWith(a, text, "R.md", .{ .refuse_includes = true })) {
+        .examples => return error.TestUnexpectedResult,
+        .refused => |why| why,
+    };
+    try t.expectEqualStrings("R.md:1: an include marker in the README of a library that lists no readme_examples:" ++
+        " list the files in its BUCK file (readme_examples = glob([\"examples/*.mojo\"])), so the freshness check holds each fence to its file", refused);
+}

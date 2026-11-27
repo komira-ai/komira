@@ -58,10 +58,10 @@ in the generator. A repository lint fails if you do.
 comptime PLAN_WIRE_UNSPECIFIED_VALUE: Int32 = 0
 """Wire 0, in every space. Never a valid tag."""
 
-comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 357
-"""Total published members across all 32 spaces. A drift tripwire a test can pin."""
+comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 359
+"""Total published members across all 33 spaces. A drift tripwire a test can pin."""
 
-comptime PLAN_WIRE_SPACE_COUNT: Int = 32
+comptime PLAN_WIRE_SPACE_COUNT: Int = 33
 """Number of enumerated tag spaces the vocabulary publishes."""
 
 
@@ -4072,8 +4072,105 @@ def snapshot_policy_wire_name(wire: Int32) -> String:
 
 
 # ==========================================================================
+# JoinBuildSide — engine prefix `JOIN_BUILD_SIDE_`
+# The side an OPTIMIZED plan's join builds its hash table on: LEFT (engine 0)
+# or RIGHT (engine 1). The engine's UNSET (255) is not in this space: it is
+# the wire's unspecified (0), which a raw plan carries and an optimized plan
+# refuses (plan_wire_optimized.mojo).
+# This space is the last index, so that no earlier index moves.
+# Declared in: src/plan_ir/plan_decisions.mojo
+# ==========================================================================
+
+comptime JOIN_BUILD_SIDE_WIRE_MEMBERS: Int = 2
+comptime JOIN_BUILD_SIDE_ENGINE_MIN: UInt8 = 0
+comptime JOIN_BUILD_SIDE_ENGINE_MAX: UInt8 = 1
+comptime JOIN_BUILD_SIDE_WIRE_MIN: Int32 = 1
+comptime JOIN_BUILD_SIDE_WIRE_MAX: Int32 = 2
+
+
+def join_build_side_is_declared(engine_tag: UInt8) -> Bool:
+    """Does the engine declare this JoinBuildSide value?
+
+    Runs: [(0, 1)]. Total, never raising.
+    """
+    return engine_tag <= 1
+
+
+def join_build_side_to_wire(engine_tag: UInt8) raises -> Int32:
+    """Engine tag -> permanent wire number for JoinBuildSide.
+
+    RAISES on a value the engine does not declare: encoding a tag
+    this vocabulary has never heard of would write bytes that no
+    reader can name."""
+    if not join_build_side_is_declared(engine_tag):
+        raise Error("JoinBuildSide: engine tag " + String(Int(engine_tag))
+            + " is not in the plan wire vocabulary")
+    return Int32(Int(engine_tag)) + 1
+
+
+def join_build_side_from_wire(wire: Int32) raises -> UInt8:
+    """Wire number -> engine tag for JoinBuildSide.
+
+    RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
+    field decodes to) and on any value this reader does not know.
+    Fail loud; never guess a plan node."""
+    if wire < 0:
+        raise Error("JoinBuildSide: wire value " + String(Int(wire))
+            + " is negative; no JoinBuildSide value has a negative wire number")
+    if wire == 0:
+        raise Error("JoinBuildSide: wire 0 is JOIN_BUILD_SIDE_WIRE_UNSPECIFIED — an absent"
+            + " proto3 enum field is not a tag")
+    if wire > 256:
+        raise Error("JoinBuildSide: wire value " + String(Int(wire))
+            + " is out of range for a UInt8 engine tag")
+    var engine_tag = UInt8(Int(wire) - 1)
+    if not join_build_side_is_declared(engine_tag):
+        raise Error("JoinBuildSide: wire value " + String(Int(wire))
+            + " is unknown to this reader")
+    return engine_tag
+
+
+def write_join_build_side_wire_name[W: Writer](mut writer: W, wire: Int32):
+    """WRITE the stable wire NAME for a JoinBuildSide value.
+
+    ⚠ THIS WRITES; IT DOES NOT RETURN — see the LADDER SHAPE banner
+    at the top of this file. Every arm writes its literal into
+    `writer`; no string constant is ever selected and returned, so
+    the compiler synthesises no parallel (pointer, length) constant
+    arrays for this ladder and there is no pair for a later link to
+    cross. Total, never raising: this is the diagnostic path, and a
+    diagnostic that raises is one you cannot use inside an error
+    handler. An unknown value renders as `<enum>#<n>`."""
+    if wire == 0:
+        writer.write("JOIN_BUILD_SIDE_WIRE_UNSPECIFIED")
+        return
+    if wire == 1:
+        writer.write("JOIN_BUILD_SIDE_LEFT")
+        return
+    if wire == 2:
+        writer.write("JOIN_BUILD_SIDE_RIGHT")
+        return
+    writer.write("JoinBuildSide#", Int(wire))
+
+
+def join_build_side_wire_name(wire: Int32) -> String:
+    """The stable wire NAME for a JoinBuildSide value, as a String.
+
+    A thin `String`-collecting wrapper over
+    `write_join_build_side_wire_name`, for the many diagnostic call sites
+    that build a message by concatenation and have no `Writer` in
+    scope. The LADDER lives in the writing helper — keep it that
+    way; moving the arms back in here restores the shape the banner
+    describes. Total, never raising.
+    """
+    var out = String()
+    write_join_build_side_wire_name(out, wire)
+    return out^
+
+
+# ==========================================================================
 # SPACE-INDEXED DISPATCH — one generic codec over all
-# 32 spaces, addressed by a stable space index.
+# 33 spaces, addressed by a stable space index.
 #
 # The index is an INTERNAL addressing scheme, not a wire value:
 # it is derived from the generator's space order and may move if
@@ -4113,6 +4210,7 @@ comptime PLAN_WIRE_SPACE_SCALAR_TIME_UNIT: Int = 28
 comptime PLAN_WIRE_SPACE_PARAM_TAG: Int = 29
 comptime PLAN_WIRE_SPACE_PUSHDOWN_GATE_MODE: Int = 30
 comptime PLAN_WIRE_SPACE_SNAPSHOT_POLICY: Int = 31
+comptime PLAN_WIRE_SPACE_JOIN_BUILD_SIDE: Int = 32
 
 
 def write_plan_wire_space_name[W: Writer](mut writer: W, space: Int):
@@ -4217,6 +4315,9 @@ def write_plan_wire_space_name[W: Writer](mut writer: W, space: Int):
     if space == 31:
         writer.write("SnapshotPolicy")
         return
+    if space == 32:
+        writer.write("JoinBuildSide")
+        return
     writer.write("PlanWireSpace#", space)
 
 
@@ -4298,6 +4399,8 @@ def plan_wire_space_member_count(space: Int) raises -> Int:
         return 3
     if space == 31:
         return 3
+    if space == 32:
+        return 2
     raise Error("plan wire: no such space index " + String(space))
 
 
@@ -4367,6 +4470,8 @@ def plan_wire_space_engine_max(space: Int) raises -> UInt8:
         return 2
     if space == 31:
         return 2
+    if space == 32:
+        return 1
     raise Error("plan wire: no such space index " + String(space))
 
 
@@ -4440,6 +4545,8 @@ def plan_wire_is_declared(space: Int, engine_tag: UInt8) raises -> Bool:
         return pushdown_gate_mode_is_declared(engine_tag)
     if space == 31:
         return snapshot_policy_is_declared(engine_tag)
+    if space == 32:
+        return join_build_side_is_declared(engine_tag)
     raise Error("plan wire: no such space index " + String(space))
 
 
@@ -4509,6 +4616,8 @@ def plan_wire_to_wire(space: Int, engine_tag: UInt8) raises -> Int32:
         return pushdown_gate_mode_to_wire(engine_tag)
     if space == 31:
         return snapshot_policy_to_wire(engine_tag)
+    if space == 32:
+        return join_build_side_to_wire(engine_tag)
     raise Error("plan wire: no such space index " + String(space))
 
 
@@ -4578,6 +4687,8 @@ def plan_wire_from_wire(space: Int, wire: Int32) raises -> UInt8:
         return pushdown_gate_mode_from_wire(wire)
     if space == 31:
         return snapshot_policy_from_wire(wire)
+    if space == 32:
+        return join_build_side_from_wire(wire)
     raise Error("plan wire: no such space index " + String(space))
 
 
@@ -4684,6 +4795,9 @@ def write_plan_wire_name[W: Writer](mut writer: W, space: Int, wire: Int32):
         return
     if space == 31:
         write_snapshot_policy_wire_name(writer, wire)
+        return
+    if space == 32:
+        write_join_build_side_wire_name(writer, wire)
         return
     writer.write("PlanWireSpace#", space, "/", Int(wire))
 

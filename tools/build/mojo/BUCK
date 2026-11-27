@@ -155,10 +155,17 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# doc_check: mojo_doc_json takes it as an exec_dep, so it is configured for the
+# execution platform of the check's action: on a darwin-arm64 library that is the
+# macOS one, whose workers cannot run a Linux executable. It is built for the
+# platform it is configured for (`exec_tool_target`; zig still runs on TOOL_EXEC
+# and cross-compiles); on linux x86_64 the triple is the one it always had, so
+# linux action keys are unchanged.
 zig_exe(
     name = "doc_check",
     exec_compatible_with = TOOL_EXEC,
     src = "tools/doc_check.zig",
+    target = exec_tool_target(),
     unit_tests = [":doc_check_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
@@ -281,7 +288,7 @@ zig_test(
 zig_module(
     name = "unified_diff",
     src = "tools/unified_diff.zig",
-    visibility = ["//tools/build/lint:", "//tools/build/toolchains/kcov:", "tests//tools:"],
+    visibility = ["//tools/build/lint:", "//tools/build/readme_examples:", "//tools/build/toolchains/kcov:", "tests//tools:"],
 )
 
 zig_exe(

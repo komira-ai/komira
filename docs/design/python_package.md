@@ -95,7 +95,8 @@ python/
     _session.py     Session, Result, the default session
     _errors.py      KomiraError and its subclasses
     _arrow.py       the Arrow C stream import
-    _lib/           not in the repository: the wheel rule copies libkomira's directory here (decision 6)
+    _lib/           not in the repository: the wheel rule copies libkomira's directory here (decision 6),
+                    and, in the Linux wheel, the UDF runtime libkomira_udf_python.so beside libkomira
   tests/
     BUCK            python_binding_test targets
     test_*.py
@@ -275,16 +276,20 @@ visible from every thread, as a module-level name would be.
 The macOS arm64 wheel (`//python:komira_wheel_macos_arm64`, macOS 11 or later on Apple silicon, tagged
 `py3-none-macosx_11_0_arm64`) is built from its own `[dist]` directory and its own pinned compiler. It is built
 and tested only by the macOS jobs of pypi.yml, never in a pull request (`//python:wheel_install_test_macos_arm64`, on
-the farm's macOS workers), and a run publishes it only from main.
+the farm's macOS workers), and a run publishes it only from main. The manylinux wheel and the tests that install
+or read it are compatible with linux-x86_64 only, so a darwin-arm64 build skips them.
 
 - An installed package loads `komira/_lib/libkomira.so`. The wheel carries
   `//src/so:libkomira[dist]` whole at `komira/_lib/`: `libkomira.so`, and in `_lib/lib/` the native owners
   and the three Mojo runtime libraries. The runtime libraries are the ones of the toolchain's pinned
   `mojo-compiler` package that compiled libkomira, so runtime and compiler match by construction. `[dist]`
   is `[runnable]` without the C++ runtime (`libstdc++.so.6`, `libgcc_s.so.1`); `[runnable]` keeps it,
-  because build workers have none. On macOS arm64 `[dist]` is `libkomira.dylib` and, in `lib/`, the three
+  because Linux build workers have none. On macOS arm64 `[dist]` is `libkomira.dylib` and, in `lib/`, the three
   runtime `.dylib` files, with no owners (the C archives are linked into the dylib) and no C++ runtime; its
-  run path is `@loader_path/lib`.
+  run path is `@loader_path/lib`, and `[runnable]` is the same directory as `[dist]`.
+- The Linux wheel also carries the komira/python UDF runtime at `komira/_lib/libkomira_udf_python.so`.
+  libkomira does not load it, so the wheel's libs check names it `opened`; the macOS wheel does not carry it
+  yet (komira-ai/komira#2333).
 - The library's run path (`$ORIGIN/lib:$ORIGIN`,
   [tools/build/mojo/README.md](../../tools/build/mojo/README.md)) resolves the owners and the runtime in
   `_lib/lib/`, so the loader sets no search path and preloads nothing. It opens `<dir>/libkomira.so` with
@@ -391,7 +396,7 @@ polars = ["polars"]
 [project.urls]
 Source = "https://github.com/komira-ai/komira"
 Issues = "https://github.com/komira-ai/komira/issues"
-Documentation = "https://github.com/komira-ai/komira/blob/main/docs/install.md"
+Documentation = "https://github.com/komira-ai/komira/blob/main/docs/install.md"   # a stamped build: blob/<its commit>/
 Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
 ```
 
@@ -403,9 +408,12 @@ Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
   (`python/changelog`, Zig, with its own cases; the rule is `changelog_file`, target `//python:changelog`)
   puts `## 0.1.<N>` before the first release heading of `CHANGELOG.md`, holding the bullets of every file in
   file-name order, so a release lists every change merged since the newest section `CHANGELOG.md` keeps
-  (a section is kept by moving its files' bullets under their own heading in one change). The wheel's
+  (a section is kept by moving its files' bullets under their own heading in one change; every version on
+  PyPI gets one, the files `changelog.d/` held at the commit it was built from). The wheel's
   description, `METADATA`'s body, is `README.md` followed by that changelog with each heading one level
-  down, so the page of version 0.1.`<N>` on PyPI shows its own section; both wheels read the one target,
+  down, so the page of version 0.1.`<N>` on PyPI shows its own section, and with every link to the
+  repository's `main` pinned to the commit the build is stamped with (`-c komira.package_commit`), so the
+  pages it links to describe that version and not a later `main`; both wheels read the one target,
   so their `METADATA` is the same. The tool refuses, naming the file and the line, a file that is not a
   slug and `.md`, an empty file, a line that is neither a bullet nor an indented continuation, a heading,
   a `## Unreleased` heading in `CHANGELOG.md` and a `CHANGELOG.md` with no release heading; the wheel

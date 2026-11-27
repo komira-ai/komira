@@ -1,8 +1,11 @@
 # The macOS set analyses: //release:mopm_darwin_libs and the macOS Python harness tests
 # (DARWIN_PYTHON_HARNESS, darwin_libs.bzl), configured for darwin-arm64 and analysed, with every
 # target of their closure, as release-macos.yml's two build steps would configure and analyse them;
-# and //release:mopm_release_artifacts, the directory release.yml's mopm-stage stages, configured for
-# linux-x86_64 as that job builds it (its transition configures the macOS set inside it for darwin-arm64).
+# //release:mopm_release_artifacts, the directory release.yml's mopm-stage stages, configured for
+# linux-x86_64 as that job builds it (its transition configures the macOS set inside it for darwin-arm64);
+# and the macOS npm targets of npm.yml's macOS job (DARWIN_NPM, darwin_libs.bzl), configured for
+# darwin-arm64 as that job builds them, with //release:npm_packages_macos_arm64, the npm set it builds,
+# configured for linux-x86_64 (its transition configures the macOS package inside it for darwin-arm64).
 #
 #   ./buck2 bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check
 #
@@ -26,7 +29,7 @@
 # Linux tool configured for the macOS execution platform analyses fine and fails only on the
 # worker, with "cannot execute binary file".
 
-load(":darwin_libs.bzl", "DARWIN_PYTHON_HARNESS")
+load(":darwin_libs.bzl", "DARWIN_NPM", "DARWIN_NPM_SET", "DARWIN_PYTHON_HARNESS")
 load(":exec_tools.bzl", "exec_tool_refusal")
 load("@komira//tools/build/mojo:providers.bzl", "ZigExeInfo")
 
@@ -70,11 +73,17 @@ def _check(ctx):
     _layout_of(ctx, release, RELEASE_SET)
     ctx.output.print("darwin_analysis: {} configured and analysed".format(release.label))
     roots.append(release)
-    for label in DARWIN_PYTHON_HARNESS:
+    for label in DARWIN_PYTHON_HARNESS + DARWIN_NPM:
         t = _configured(ctx, label)
         ctx.analysis(t)
         ctx.output.print("darwin_analysis: {} configured and analysed".format(t.label))
         roots.append(t)
+
+    # The npm set with the macOS package, for Linux, as npm.yml's macOS job builds it.
+    npm_set = _configured(ctx, DARWIN_NPM_SET, LINUX_X86_64)
+    ctx.analysis(npm_set)
+    ctx.output.print("darwin_analysis: {} configured and analysed".format(npm_set.label))
+    roots.append(npm_set)
 
     # The exec deps of every target of the closure, each once.
     q = ctx.cquery()

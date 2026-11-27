@@ -1,0 +1,1 @@
+AttributeError: komira.to_numeric() is not supported; cast a column with s.astype(...)

@@ -26,7 +26,10 @@ Each entry, oldest first:
   3.11.9 and of 3.12 is 3.12.10.
 
 A minor joins with a line here and its interpreter's pin; the farm's macOS
-tests run CPython 3.13 alone (third_party/python, `cpython_macos`).
+tests run CPython 3.13 alone (third_party/python, `cpython_macos`): the other
+minors' interpreters are linux x86_64 builds, so the tests and wheels that name
+one are configured for linux x86_64 only (tools/build/python/defs.bzl) and a
+macOS build skips them.
 """
 
 load("@komira//third_party/python:pins.bzl", "PYTHON", "PYTHON_311", "PYTHON_312", "PYTHON_314")

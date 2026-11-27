@@ -49,6 +49,7 @@ action that runs a test, and returns `rerun_info(ctx)` (the provider
 |---|---|
 | `mojo_library` | each `test_srcs` test and the README's examples (`mojo_gated_test`) |
 | `mojo_test` | the `buck2 test` command (`ExternalRunnerTestInfo.env`) |
+| `mojo_readme_example_failure` | the run that must fail (`mojo_readme_expect_failure`) |
 | `mojo_shared_lib` | each gate driver, the exports check included (`mojo_shared_lib_gate`) |
 | `mojo_binary` | the run check (`mojo_run_check`) |
 | `rust_test` | its harness (`rust_gated_test`) and its `buck2 test` command |

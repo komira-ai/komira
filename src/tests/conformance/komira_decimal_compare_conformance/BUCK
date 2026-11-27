@@ -26,7 +26,10 @@ load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 #   test_double_sites            every place the engine converts a DECIMAL to a
 #                                DOUBLE (a sum() of an integer column, a cast, a
 #                                promotion beside a DOUBLE, a math function)
-#                                answers DuckDB's DOUBLE
+#                                answers DuckDB's DOUBLE; a math function's
+#                                answer within a few ulp off Linux, where libm
+#                                is not the oracle's glibc
+#                                (komira_plan_harness.libm_rule)
 #   test_avg_sites               every place the engine finalizes an avg() of an
 #                                integer or a DECIMAL (grouped, ungrouped)
 #                                answers the bits of DuckDB's own avg()
@@ -192,6 +195,7 @@ mojo_library(
         "//src/spsc_ring:spsc_ring",
         "//src/sql:sql",
         "//src/sync:sync",
+        "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
         "//src/trace:trace",
         "//src/udf:udf",
         "//src/zlib:zlib",
