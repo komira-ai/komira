@@ -639,6 +639,23 @@ _FRAMES = {
     **_ON[p["suffix"]]
 ) for p in PYTHONS if p["suffix"] in _FRAMES]
 
+# Session.register of a pandas and a polars DataFrame, through their Arrow C
+# stream interface (test_register_frames.py): with a NULL in every column, a
+# filter, a NULL test and a group-by aggregate equal DuckDB's answer over the
+# same frame, which DuckDB registers itself; a pandas frame changed after it
+# was registered keeps the rows it had until it is registered again. CPython
+# 3.13 alone, the minor with pinned pandas, polars and DuckDB.
+python_binding_test(
+    name = "register_frames_test",
+    src = "test_register_frames.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira",
+        "komira//third_party/python:duckdb",
+        _PYARROW[""],
+    ] + _FRAMES[""],
+)
+
 # The protobuf runtimes the tests below load the generated plan modules under:
 # 7.36.2, the range's upper edge (third_party/python's `:protobuf`), 5.29.1,
 # the lower edge, and 5.28.3, the release below the range
