@@ -26,6 +26,7 @@ const Kind = struct { rule: []const u8, target: []const u8 };
 const KINDS = [_]Kind{
     .{ .rule = "mojo_library test_srcs", .target = "komira//tools/build/examples/libgate_ok:libgate_ok" },
     .{ .rule = "mojo_library README examples", .target = "tests//functional/readme_examples/ok:ok" },
+    .{ .rule = "mojo_readme_example_failure", .target = "tests//functional/readme_examples/source_first:changed_assert" },
     .{ .rule = "mojo_binary run check", .target = "komira//tools/build/examples:hello" },
     .{ .rule = "mojo_shared_lib gate", .target = "komira//tools/build/examples/shared_lib:plain" },
     .{ .rule = "rust_test", .target = "komira//tools/build/examples/rust/ext:ext_unit" },

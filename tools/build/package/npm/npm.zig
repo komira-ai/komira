@@ -59,12 +59,14 @@ pub const Input = struct {
     arch: []const u8 = "x86_64",
     max_glibcxx: ?[]const u8 = null,
     max_cxxabi: ?[]const u8 = null,
+    /// The optional dependencies the package names (manifest.Want.optional).
+    optional: []const []const u8 = &.{},
 };
 
 pub const max_member: usize = 90_000_000;
 
 pub fn want(in: Input) manifest.Want {
-    return .{ .name = in.name, .version = in.version, .stamped = in.stamped, .license = in.license, .platform = in.platform };
+    return .{ .name = in.name, .version = in.version, .stamped = in.stamped, .license = in.license, .platform = in.platform, .optional = in.optional };
 }
 
 pub fn isNative(data: []const u8) bool {
