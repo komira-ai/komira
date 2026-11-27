@@ -10,6 +10,7 @@ load("@komira//tools/build/lint:doc_tree.bzl", "docs_checked")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/toolchains:mojo_versions.bzl", "MOJO_DEFAULT", "MOJO_NEXT")
+load("@komira//tools/build/selftest:defs.bzl", "graph_check")
 load(":darwin_libs.bzl", "DARWIN_PACKAGES", "mopm_darwin_libs")
 load(":exec_tools.bzl", "exec_tool_cases")
 load(":mopm_artifacts.bzl", "merge_tree_cases", "mopm_artifacts", "mopm_release_artifacts", "native_ids_json", "release_packages_json")
@@ -240,6 +241,29 @@ zig_test(
             zig = "komira//tools/build/toolchains:zig_next",
             visibility = ["PUBLIC"],
         ),
+    )
+    for _ in [1]
+    if docs_checked()
+]
+
+# README_COVERAGE.md lists every src/<name>/README.md and who runs its examples: whether the
+# package has a mopm.toml, whether //release/readme_e2e/verify:<name> exists, which README gate
+# (mojo_adopted_library or mojo_library) runs the examples in the build, whether the README holds
+# an example. The graph check writes that text from the build graph and the READMEs and fails,
+# printing each line that differs, when the committed file is not it
+# (tools/build/selftest/graph/readme_coverage.zig says what it reads and refuses). Building it
+# checks nothing: .github/workflows/pr.yml runs `./buck2 bxl
+# //tools/build/selftest/graph/checks.bxl:check -- --check //release:readme_coverage`, as it does
+# for every graph_check. The files are the cell's root doc_tree's, which only komira's own
+# checkout declares.
+[
+    graph_check(
+        name = "readme_coverage",
+        check = "readme_coverage",
+        checker = "//tools/build/selftest/graph:graph_checks",
+        targets = ["//src/...", "//release/readme_e2e/verify:"],
+        trees = {"": "//:doc_tree"},
+        srcs = ["README_COVERAGE.md"],
     )
     for _ in [1]
     if docs_checked()

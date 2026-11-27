@@ -18,19 +18,23 @@ zig_test(
     name = "graph_checks_unit",
     exec_compatible_with = LINUX_X86_64,
     src = "graph_checks.zig",
-    imports = ["python_closure.zig"],
+    imports = ["python_closure.zig", "readme_coverage.zig"],
+    deps = ["//tools/build/readme_examples:examples"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
 )
 
-# The root package's python_closure check and its negative fixture name it.
+# The root package's python_closure check and its negative fixture name it,
+# and so does the release's readme_coverage check. readme_coverage counts a
+# README's examples with the README examples tool's own reader (`examples`).
 zig_exe(
     name = "graph_checks",
     exec_compatible_with = LINUX_X86_64,
     src = "graph_checks.zig",
-    imports = ["python_closure.zig"],
+    imports = ["python_closure.zig", "readme_coverage.zig"],
+    deps = ["//tools/build/readme_examples:examples"],
     unit_tests = [":graph_checks_unit", _ZIG_VERSION],
-    visibility = ["//:", "tests//negative/python_closure:"],
+    visibility = ["//:", "//release:", "tests//negative/python_closure:"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
 )

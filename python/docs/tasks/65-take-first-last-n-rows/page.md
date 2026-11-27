@@ -61,4 +61,4 @@ Output:
 
 - [How do I sort rows by one or more columns?](../8-sort-rows-by-columns/page.md) (rank 8, works)
 - [How do I look at the first rows, row count and columns of a dataset?](../5-look-at-first-rows-and-columns/page.md) (rank 5, works)
-- How do I remove duplicate rows? (rank 13, works; no page yet)
+- [How do I remove duplicate rows?](../13-remove-duplicate-rows/page.md) (rank 13, partial)

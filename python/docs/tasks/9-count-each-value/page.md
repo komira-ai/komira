@@ -70,5 +70,5 @@ Output:
 
 - [How do I group by a column and sum another column?](../4-group-by-column-and-sum/page.md) (rank 4, works)
 - [How do I sort rows by one or more columns?](../8-sort-rows-by-columns/page.md) (rank 8, works)
-- How do I remove duplicate rows? (rank 13, works; no page yet)
+- [How do I remove duplicate rows?](../13-remove-duplicate-rows/page.md) (rank 13, partial)
 - How do I compute several aggregates at once with named outputs? (rank 25, works; no page yet)

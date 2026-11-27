@@ -60,7 +60,7 @@ Pune 1333 39317
 ## Related
 
 - [How do I read a CSV file?](../1-read-csv-file/page.md) (rank 1, works)
-- How do I write a table to a CSV file? (rank 11, partial; no page yet)
+- [How do I write a table to a CSV file?](../11-write-table-csv-file/page.md) (rank 11, partial)
 - [How do I write a table to Parquet?](../27-write-table-parquet/page.md) (rank 27, partial)
 - How do I run SQL on a CSV or Parquet file (or a DataFrame)? (rank 37, partial; no page yet)
 - How do I convert a folder of CSV files to Parquet? (rank 99, works; no page yet)

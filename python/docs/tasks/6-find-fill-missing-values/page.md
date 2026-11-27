@@ -93,5 +93,5 @@ Output:
 
 - [How do I drop rows with missing values?](../7-drop-rows-missing-values/page.md) (rank 7, works)
 - How do I replace specific values such as 'N/A' with null? (rank 55, works; no page yet)
-- How do I change a column's data type? (rank 12, works; no page yet)
+- [How do I change a column's data type?](../12-change-column-data-type/page.md) (rank 12, works)
 - How do I validate data: nulls, uniqueness, ranges? (rank 59, works; no page yet)

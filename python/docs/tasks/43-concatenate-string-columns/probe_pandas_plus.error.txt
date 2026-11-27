@@ -1,0 +1,1 @@
+KomiraError: execute: [Processor] PipelineCompiler: unsupported column types for binary op: string and string

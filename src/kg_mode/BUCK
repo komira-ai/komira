@@ -46,7 +46,7 @@ mojo_conda(
     visibility = ["PUBLIC"],
 )
 
-# Komira's conda packer over `:kg_mode`: the target `ci/targets.bzl` builds and the one the release
+# Komira's conda packer over `:kg_mode`: the target the check set (ci/roots/) builds and the one the release
 # machine takes, if it takes this library. This library's mopm package is `:conda` above.
 conda_package(
     name = "kg_mode_conda",

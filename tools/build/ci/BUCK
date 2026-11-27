@@ -2,8 +2,8 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_te
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 # The BXL selector of the pull request check (affected.bxl, which runs buildrules'
-# rules/affected) and the aggregate's generator and guards (targets.bxl, guard.bxl,
-# python_guard.bxl) are scripts, not targets; cases.bxl holds their cases. The rows
+# rules/affected) and the generator of the aggregate's committed roots and its guards
+# (targets.bxl, guard.bxl, python_guard.bxl) are scripts, not targets; cases.bxl holds their cases. The rows
 # the selector widens and treats as inert on are data in rules.bzl (README.md).
 
 # assert_remote: reads the output of one ./buck2 run and exits non-zero unless

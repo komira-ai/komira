@@ -1,7 +1,8 @@
 //! The cases of the macOS build of the release, //:release_macos_cases: a `zig_test` run as a build
 //! action. The subjects are the bytes of the workflows (the zig_test's `data`, under
-//! KOMIRA_TEST_WORK/workflows/<name>.yml), the shards of the pull request's check set
-//! (ci_targets/shard_<n>.bzl) and the macOS set's own definition (darwin_libs.bzl).
+//! KOMIRA_TEST_WORK/workflows/<name>.yml), the roots of the pull request's check set (ci_roots/: one
+//! empty file per root, named by its label, tools/build/ci/roots.bzl) and the macOS set's own
+//! definition (darwin_libs.bzl).
 //!
 //! The decision these hold: before the merge, macOS is built only by pr.yml's macOS part (the libraries of
 //! the macOS set a change reaches, on the farm's Macs, through a config file no other step names, bounded),
@@ -79,7 +80,7 @@
 //!    the macOS driver, read the quickstart from the smoke artifact (no checkout) and are one job per entry
 //!    of their chain's matrix (promote-macos-arm64's for the PyPI one); promote-macos-arm64 and
 //!    pypi-macos-arm64 run the Linux driver on ubuntu;
-//!  - the pull request's check set (ci/targets shards) names neither the macOS set, the five macOS targets
+//!  - the pull request's check set (the root files of ci/) names neither the macOS set, the five macOS targets
 //!    of the wheel (komira_wheel_macos_arm64, wheel_install_test_macos_arm64, wheel_libs_macos_arm64,
 //!    wheel_same_macos_arm64, pypi_smoke_macos_arm64) nor a macOS runner;
 //!  - the macOS set is the packages of packages.bzl without the excluded ones, in one place: the
@@ -925,6 +926,32 @@ fn readData(ar: std.mem.Allocator, rel: []const []const u8) ![]const u8 {
     return std.fs.cwd().readFileAlloc(ar, try std.fs.path.join(ar, parts.items), 1 << 22);
 }
 
+/// Appends to `out` the path (under `path`, from `prefix`) of every file below the directory `path`,
+/// descending into a directory a symlink names too: a data directory may be a tree of symlinks.
+fn filesUnder(ar: std.mem.Allocator, path: []const u8, prefix: []const u8, out: *std.ArrayList([]const u8)) !void {
+    var dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+    defer dir.close();
+    var it = dir.iterate();
+    while (try it.next()) |e| {
+        const sub = try std.fs.path.join(ar, &.{ path, e.name });
+        const rel = if (prefix.len == 0) try ar.dupe(u8, e.name) else try std.fs.path.join(ar, &.{ prefix, e.name });
+        const is_dir = switch (e.kind) {
+            .directory => true,
+            .sym_link => blk: {
+                var d = std.fs.cwd().openDir(sub, .{}) catch break :blk false;
+                d.close();
+                break :blk true;
+            },
+            else => false,
+        };
+        if (is_dir) {
+            try filesUnder(ar, sub, rel, out);
+        } else {
+            try out.append(ar, rel);
+        }
+    }
+}
+
 /// The file names of the directory `sub` of the test's data, sorted.
 fn listDir(ar: std.mem.Allocator, sub: []const u8) ![]const []const u8 {
     const path = try std.fs.path.join(ar, &.{ try work(ar), sub });
@@ -1605,28 +1632,31 @@ test "the pull request's check set names neither the macOS set, the macOS wheel'
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    var shards: usize = 0;
-    for (try listDir(ar, "ci_targets")) |name| {
-        const text = try readData(ar, &.{ "ci_targets", name });
-        shards += 1;
-        // the shards hold labels only: the macOS set (a darwin-arm64 build of the packages), its
-        // definition and a runner of a pull request would each be one of these lines
-        if (std.mem.indexOf(u8, text, "mopm_darwin_libs") != null) {
+    // every file under ci_roots/ is a root of the check set, named by its label: its path is the row
+    var paths = std.ArrayList([]const u8).empty;
+    try filesUnder(ar, try std.fs.path.join(ar, &.{ try work(ar), "ci_roots" }), "", &paths);
+    var roots: usize = 0;
+    for (paths.items) |name| {
+        roots += 1;
+        // the roots are labels only: the macOS set (a darwin-arm64 build of the packages), its
+        // definition and a runner of a pull request would each be one of these paths
+        if (std.mem.indexOf(u8, name, "mopm_darwin_libs") != null) {
             std.debug.print("{s} names the macOS set\n", .{name});
             return error.MacosSetInCheck;
         }
         for ([_][]const u8{ "komira_wheel_macos_arm64", "wheel_install_test_macos_arm64", "wheel_libs_macos_arm64", "wheel_same_macos_arm64", "pypi_smoke_macos_arm64" }) |target| {
-            if (std.mem.indexOf(u8, text, target) != null) {
+            if (std.mem.indexOf(u8, name, target) != null) {
                 std.debug.print("{s} names the macOS wheel target {s}\n", .{ name, target });
                 return error.MacosSetInCheck;
             }
         }
-        if (std.mem.indexOf(u8, text, "release/darwin_libs") != null or std.mem.indexOf(u8, text, "runs-on") != null or std.mem.indexOf(u8, text, "--target-platforms") != null) {
+        if (std.mem.indexOf(u8, name, "release/darwin_libs") != null or std.mem.indexOf(u8, name, "runs-on") != null or std.mem.indexOf(u8, name, "--target-platforms") != null) {
             std.debug.print("{s} holds a macOS build\n", .{name});
             return error.MacosSetInCheck;
         }
     }
-    try t.expect(shards >= 8);
+    // the data holds the check set's roots (more than a thousand today), not an empty directory
+    try t.expect(roots >= 100);
 }
 
 /// A DARWIN_EXCLUDED row `    "name": "reason",` has a reason: the quoted value after the name holds
