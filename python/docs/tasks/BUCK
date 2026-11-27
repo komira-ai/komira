@@ -1,6 +1,6 @@
 load("@komira//python:dependencies.bzl", "PROTOBUF_MACOS", "PROTOBUF_WHEEL", "PYARROW_MACOS", "PYARROW_WHEELS")
 load("@komira//python:install_test.bzl", "wheel_install_test")
-load("@komira//python:task_examples.bzl", "task_pages_check")
+load("@komira//python:task_examples.bzl", "task_dirs", "task_examples", "task_pages_check", "task_probes")
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
 
 # The Python examples of the common tasks (docs/tasks/README.md): one
@@ -12,15 +12,11 @@ load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
 # directory the checks below read.
 _FILES = glob(["*/**"])
 
-_TASKS = sorted({f.split("/")[0]: True for f in _FILES}.keys())
+_TASKS = task_dirs(_FILES)
 
 # The probes, `<task>/probe_<name>.py`: programs that show what komira cannot
 # do yet, each failing with the line of its `probe_<name>.error.txt`.
-_PROBES = sorted([
-    f.split("/")[0] + "/" + f.split("/")[1][len("probe_"):-len(".py")]
-    for f in _FILES
-    if f.count("/") == 1 and f.split("/")[1].startswith("probe_") and f.endswith(".py")
-])
+_PROBES = task_probes(_FILES)
 
 filegroup(
     name = "tree",
@@ -51,28 +47,24 @@ _DRIVER = "komira//python/tests:run_task_example.py"
 # the wheel installed into an empty environment of the hermetic CPython 3.13
 # with its pyarrow and protobuf and nothing else, no network, and example.py
 # run there from a new empty directory, what it prints held to
-# expected_output.txt byte for byte (python/tests/run_task_example.py). On
-# linux-x86_64, in the pull request's check.
-[wheel_install_test(
-    name = t,
-    python = "komira//third_party/python:cpython",
-    wheels = _WHEELS,
-    script = _DRIVER,
-    args = ["--task", t],
-    files = {"--tasks-dir": ":tree"},
-) for t in _TASKS]
-
-# Each probe, `<task>__probe_<name>`: it must raise exactly its recorded line.
+# expected_output.txt byte for byte (python/tests/run_task_example.py). And
+# each probe, `<task>__probe_<name>`: it must raise exactly its recorded line.
 # A probe that runs to the end is red: the feature exists, and the page, its
 # catalogue status and the probe change with it.
-[wheel_install_test(
-    name = p.replace("/", "__probe_"),
+#
+# `:examples` is the aggregate of all of them (python/task_examples.bzl): the
+# one root of the check set (its file, ci/roots/komira/python/docs/tasks:examples) for them, so a
+# task directory added or removed changes no file outside its own. Building
+# it, on linux-x86_64 in the pull request's check, builds every example and
+# probe, and one that fails is named by its own label.
+task_examples(
+    name = "examples",
+    files = _FILES,
+    tree = ":tree",
     python = "komira//third_party/python:cpython",
     wheels = _WHEELS,
     script = _DRIVER,
-    args = ["--probe", p],
-    files = {"--tasks-dir": ":tree"},
-) for p in _PROBES]
+)
 
 # The same run on rank 1's example held to an expected output that differs in
 # its second line: it must fail, naming the task and that line.

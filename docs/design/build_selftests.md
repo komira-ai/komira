@@ -482,8 +482,8 @@ filters them. The one change to `build_targets.sh` is for the graph checks, not 
 ### The farm connection
 
 `pr / check` runs on a GitHub-hosted runner. Its `farm-connect` step writes the farm's machine
-buckconfig (`$HOME/.buckconfig.d/farm.buckconfig`: the `[buck2_re_client]` addresses and
-`[komira_re] linux_x86_64_properties`), and the step after it fails the job when that key is empty.
+buckconfig (`$HOME/.buckconfig.d/farm.buckconfig`: the `[buck2_re_client]` addresses,
+`[komira_re] linux_x86_64_properties` and the CI's own `[komira_ci] farm_wait_seconds`), and the step after it fails the job when that key is empty.
 Every buck2 daemon on the runner reads that file, whatever its project root or isolation dir. So a
 scenario's inner daemon, in the checkout under its own isolation dir or in a scratch tree under
 `buck-out/selftest_tmp`, executes on the same farm as the outer build. The scenario needs no flag, variable or

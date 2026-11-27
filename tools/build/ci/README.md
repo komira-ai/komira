@@ -87,23 +87,39 @@ disagrees with the labels fails the step.
 `ci/BUCK` declares one target that builds every check:
 `./buck2 build //ci:pr`, and `./buck2 test //ci:pr` for the standalone tests.
 A target's `deps` are literal labels and no rule can query the graph, so the
-lists are generated and checked in: `ci/targets.bzl` loads eight shards,
-`ci/targets/shard_<n>.bzl`, and exposes `TARGETS` and `TESTS` (the sorted union
-of theirs). One command regenerates the loader and every shard. It assigns the generator's output and
-copies only from a directory that is not `/`: with an empty output (the generator failed) the
-bare `cp ... "$(...)"/. ci/` would copy the whole filesystem into `ci/`:
+roots are committed: one empty file per root, named by the root's label with its
+`//` written as `/` ([`roots.bzl`](roots.bzl)):
+
+| The root | Its file |
+|---|---|
+| `komira//src/avro:avro_conda`, not a test | `ci/roots/komira/src/avro:avro_conda` |
+| `komira//:top`, a root of the root package | `ci/roots/komira/:top` |
+| `komira//src/proto_codec:test_copy_hazard`, a test | `ci/test_roots/komira/src/proto_codec:test_copy_hazard` |
+
+`ci/BUCK` globs the two trees: `TARGETS` is every file's label, `TESTS` the
+labels of `ci/test_roots/`. Nothing lists the files, so adding a root adds a
+file and edits none, and a new target that depends on an old root deletes the
+old root's file. Two pull requests that add targets therefore change different
+paths and merge with no conflict in either order, in one package or two; where
+both change one path they make the same change (both delete a root their new
+targets depend on), which git merges too. A file never stands where another's
+directory would, since only a path's last part holds a `:`. A path that names
+no label builds nothing, and the guard names it.
+
+A change that adds one root can add its file by hand (the guard's failure names
+the path). One command writes every file from the graph. It assigns the
+generator's output and copies only from a directory that is not `/` (with an
+empty output, the generator having failed, a bare `cp ... "$(...)"/. ci/` would
+copy the whole filesystem into `ci/`), and only then deletes the old files of
+both trees, committed or not, copies the new ones in and stages them:
 
 ```sh
-out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL --no-preserve=mode "$out"/. ci/
+out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && git rm -rqf --ignore-unmatch ci/roots ci/test_roots && git clean -fdq -- ci/roots ci/test_roots && cp -rL --no-preserve=mode "$out"/. ci/ && git add ci/roots ci/test_roots
 ```
 
 The script builds the files into a directory of `buck-out` and prints it, so
-the generation is a scratch copy first: if it fails, the checked-in files are
-untouched. Never redirect the script's output onto `ci/targets.bzl`: the shell
-empties the file before the script, which loads it through the guard, runs.
-A package's rows share one shard, chosen by a hash of the package path
-(`ci_graph.bzl` `shard_of`), so adding a package changes one shard and no
-prefix or top-level directory (`src/` holds most of the rows) can fill one.
+the generation is a scratch copy first: if it fails, the committed files are
+untouched.
 
 `TARGETS` is every check of the scope (`UNIVERSE` in `rules.bzl`: this
 repository's targets but the toolchains cell's directory, and the tests
@@ -117,23 +133,34 @@ configuration, and those of the surface capability matrix
 and only analyses it. A test a cell names therefore stays a root, built by
 `//ci:pr` and run by `buck2 test`.
 
+A package whose targets come and go with its files declares an aggregate of
+them, so that the list names the aggregate and not each target: the common
+tasks' examples are `//python/docs/tasks:examples` (`task_examples` of
+`python/task_examples.bzl`), and a pull request that adds a task directory
+changes no generated file. `tasks_cases.bzl` (run by `cases.bxl`) holds that
+over two fixture trees, `python/docs/task_tree_fixture/before` and `after`,
+which differ by one task directory: their roots render the same shards byte
+for byte.
+
 `guard.bxl` is the completeness guard:
 
 ```sh
 ./buck2 bxl komira//tools/build/ci/guard.bxl:check
 ```
 
-It fails when a check target of the scope is not in the closure of `//ci:pr`,
-naming the targets and the command that regenerates the list, so a new package
-that nobody added to the aggregate cannot go untested. Configuring `//ci:pr`
-also fails on a label in the list that no longer exists. It holds the shards to
-the graph both ways: a row of `TARGETS` that is no longer a root of the check
-set, a root with no row, or a `TESTS` row outside `TARGETS` fails, and so does
-a shard that would reach 1000 lines (`LINE_LIMIT`; the failure says to raise
-`SHARDS` in `ci_graph.bzl` and regenerate). A BXL script reads no file's text,
-so the line count is that of the file the generator makes from the rows the
-loader exposes; the cases (`cases.bxl`) hold the placement, the union and each
-refusal.
+It holds the committed files to the graph both ways, before anything
+configures `//ci:pr`: it lists the two trees from the source tree (`ctx.fs`)
+and fails, naming each path, for a root with no file (a new target nothing
+depends on, or a test whose file is under `ci/roots/`: the `ci/test_roots/` one
+is wanted) and for a file no root needs (its target is gone or now has a
+dependent, it is in the wrong tree, or its path names no label). The failure
+names the files to add and to delete, and the command above. Then it fails when
+a check target of the scope is not in the closure of `//ci:pr`, naming the
+targets, so a new package that nobody added to the aggregate cannot go
+untested. The cases (`cases.bxl`) hold the encoding both ways, the two trees,
+merges of two branches that each add targets (in two packages, in one, a new
+test beside a new package, two new dependents of one old root: no conflict in
+either order, and the guard green over the merged tree), and each refusal.
 
 ## The lock-graphs check: `lock_graphs.bxl`
 
@@ -190,7 +217,7 @@ holding `python` or starting `py_`, a target of `third_party/python` or
 `tools/build/python`, a `.py` source; the prelude's bootstrap helpers and a
 `doc_tree`'s data are not) outside the SDK's packages and what their own
 targets reach. It walks the configured closure, every kind of dependency, and
-names the targets and the way out (a row of `EXCLUDED`, then regenerate).
+names the targets and the way out (a row of `EXCLUDED`, then write the roots again).
 `cases.bxl` holds its table cases and one case over the real pinned
 interpreter.
 

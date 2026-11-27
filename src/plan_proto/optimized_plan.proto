@@ -11,7 +11,8 @@ import "komira/plan/v1/plan.proto";
 // header and body, §6 needs, pins and advice, §8 segments. This file is that
 // design's stage 4, the schema. It holds no codec. The header codec is
 // `optimized_plan_header`; the body and segment codecs, the canonical
-// encoder and both digests are stage 5 and not written yet.
+// encoder and both digests are stage 5 and live in the package
+// `optimized_plan` (src/optimized_plan).
 //
 // It imports `plan.proto` and restates none of it. The plan body is a
 // `WirePlan`; the write target is `WireWriteTarget`. One node vocabulary
@@ -49,7 +50,7 @@ import "komira/plan/v1/plan.proto";
 // (§7.1): fields in ascending number order, default scalars omitted, repeated
 // scalars packed, no unknown fields, minimal varints, one NaN bit pattern
 // with -0.0 kept apart from 0.0, and exactly the set arm of a `oneof`. The
-// digests are computed over that form. The encoder that writes it is stage 5;
+// digests are computed over that form. The encoder that writes it is in `optimized_plan`;
 // the generated Mojo encoder of this package writes default scalars and is not
 // that encoder.
 
@@ -58,7 +59,7 @@ import "komira/plan/v1/plan.proto";
 // ===========================================================================
 
 // What a producer submits and a scheduler accepts. A scheduler reads fields
-// 1-7 through the header library (`optimized_plan_header`, stage 5),
+// 1-7 through the header library (`optimized_plan_header`),
 // whose closure excludes the plan codec, and never parses `body`.
 //
 // Invariants (§4.2), checked by the stage 5 libraries, not by this schema:
@@ -87,6 +88,28 @@ message OptimizedPlan {
   // A canonical `OptimizedPlanBody`. `bytes`, not the message, so that a
   // reader of the header does not link the plan codec.
   bytes body = 8;
+}
+
+// What `plan_digest` hashes after the body: plan_digest =
+// sha256(body ‖ canonical(DigestTrailer)) (§7.1). It is never transmitted.
+// Each field is copied from the header: `format_version` from
+// `OptimizedPlan.format_version`, `optimizer_contract_version` from
+// `producer.optimizer_contract_version`, `write_target` from
+// `OptimizedPlan.write_target`, `udfs`, `runtimes` and `data_scopes` from
+// `needs.udfs`, `needs.runtimes` and `needs.data_scopes`. It is encoded in
+// canonical form only to be hashed, so a header field it covers cannot change
+// without changing the digest.
+message DigestTrailer {
+  uint32 format_version = 1;
+  uint32 optimizer_contract_version = 2;
+  WireWriteTarget write_target = 3;
+  repeated UdfRef udfs = 4;
+  repeated RuntimeNeed runtimes = 5;
+  repeated string data_scopes = 6;
+  // held: repeated DataScope scopes = 7 (§15.10.2); it is copied from
+  // `needs.scopes` when that field is declared.
+  // held: repeated string credentials = 8 (credentials_and_writes.md
+  // decisions 4-5); the credential names the plan references.
 }
 
 // Who produced the plan (§4.1).

@@ -1,0 +1,1 @@
+AttributeError: .shift() is not supported yet

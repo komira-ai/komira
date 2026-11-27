@@ -1,0 +1,3 @@
+[{'category': 'books', 'total': Decimal('35')}, {'category': 'games', 'total': Decimal('10')}, {'category': 'toys', 'total': Decimal('18')}]
+[{'category': 'books', 'rows': 3}, {'category': 'games', 'rows': 2}, {'category': 'toys', 'rows': 3}]
+[{'category': 'books', 'amount': 35}, {'category': 'games', 'amount': 10}, {'category': 'toys', 'amount': 15}, {'category': 'tys', 'amount': 3}]
