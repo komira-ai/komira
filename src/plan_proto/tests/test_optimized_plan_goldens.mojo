@@ -36,6 +36,7 @@ from std.testing import assert_equal, assert_true
 from proto_codec import Serializable, decode_proto, encode_proto
 from plan_proto.optimized_plan import (
     DeclaredNeeds,
+    DigestTrailer,
     ExchangeEdge,
     OptimizedPlan,
     OptimizedPlanBody,
@@ -200,6 +201,19 @@ def test_goldens() raises:
 
     _check_stamp(_golden[ProducerStamp]("producer_stamp", bad), "producer_stamp")
 
+    var dt = _golden[DigestTrailer]("digest_trailer", bad)
+    assert_equal(dt.format_version, UInt32(1), "digest_trailer.format_version")
+    assert_equal(dt.optimizer_contract_version, UInt32(1), "digest_trailer.optimizer_contract_version")
+    assert_equal(dt.write_target.value().path, "out/orders/", "digest_trailer.write_target.path")
+    assert_equal(dt.write_target.value().format.json_name(), "WFMT_PARQUET", "digest_trailer.write_target.format")
+    assert_equal(dt.write_target.value().codec.json_name(), "WCOMP_ZSTD", "digest_trailer.write_target.codec")
+    assert_equal(len(dt.udfs), 1, "digest_trailer.udfs: count")
+    assert_equal(dt.udfs[0].code.value().runtime, "komira/python", "digest_trailer.udfs[0].code.runtime")
+    assert_equal(dt.udfs[0].code.value().entry, "f", "digest_trailer.udfs[0].code.entry")
+    assert_equal(len(dt.runtimes), 1, "digest_trailer.runtimes: count")
+    assert_equal(dt.runtimes[0].runtime_abi, "cp312", "digest_trailer.runtimes[0].runtime_abi")
+    _strings(dt.data_scopes, "orders", "digest_trailer.data_scopes")
+
     var rn = _golden[RuntimeNeed]("runtime_need", bad)
     assert_equal(rn.runtime, "komira/python", "runtime_need.runtime")
     assert_equal(rn.runtime_abi, "cp312", "runtime_need.runtime_abi")
@@ -282,4 +296,4 @@ def test_goldens() raises:
 
 def main() raises:
     test_goldens()
-    print("ALL 13 optimized_plan.proto GOLDENS READ AND WRITTEN BY THE GENERATED CODEC")
+    print("ALL 14 optimized_plan.proto GOLDENS READ AND WRITTEN BY THE GENERATED CODEC")

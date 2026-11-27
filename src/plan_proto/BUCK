@@ -11,7 +11,8 @@ load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixtu
 # komira-ai/komira#1094, stage 4): the `OptimizedPlan` header and body, the
 # declared needs, snapshot pins and advice, and the segments of a cut plan. It
 # imports `plan.proto` for the plan body. optimized_plan_header reads
-# its header; no codec reads the body yet (stage 5).
+# its header, and the package `optimized_plan` (src/optimized_plan) reads and
+# writes the body, the canonical form and the digests (stage 5).
 #
 # `plan_vocabulary.proto` is the language-agnostic half of the plan wire: every
 # enumerated tag space a plan or expression node can name. It mirrors the
@@ -62,6 +63,7 @@ _CENSUS = [
 # (`optimized_plan` is `OptimizedPlan`), under tests/fixtures/optimized/golden.
 _OPTIMIZED_GOLDEN = {
     "declared_needs": "DeclaredNeeds",
+    "digest_trailer": "DigestTrailer",
     "exchange_edge": "ExchangeEdge",
     "optimized_plan": "OptimizedPlan",
     "optimized_plan_body": "OptimizedPlanBody",
@@ -223,7 +225,7 @@ _OPTIMIZED_PROTO = [":komira_plan_proto_generated_gen"]
 # encoder writes exactly protoc's bytes, so their `.hex` and `.canonical.hex`
 # are equal and leg 0 can tell no producer there: they are declared
 # `canonical_producer`. The Mojo test still holds the generated encoder to
-# each `.hex`. The other eight hold a default scalar or a repeated scalar,
+# each `.hex`. The other nine hold a default scalar or a repeated scalar,
 # which the generated encoder writes (unpacked) and protoc does not.
 _OPTIMIZED_SAME_BYTES = [
     "declared_needs",
@@ -298,5 +300,31 @@ proto_encode(
         "golden/optimized_plan.canonical.hex",
         "golden/optimized_plan.hex",
         "hostile/optimized_plan_undeclared_write_format.canonical.hex",
+    ]
+]
+
+# protoc's canonical encodings of the optimized-plan goldens, the reference
+# bytes optimized_plan's canonical encoder must equal.
+[
+    export_file(
+        name = "canonical_fixture_" + stem,
+        src = "tests/fixtures/optimized/golden/" + stem + ".canonical.hex",
+        visibility = ["//src/optimized_plan:"],
+    )
+    for stem in [
+        "declared_needs",
+        "digest_trailer",
+        "exchange_edge",
+        "optimized_plan",
+        "optimized_plan_body",
+        "optimized_segment",
+        "optimized_segment_dag",
+        "pin_group",
+        "plan_advice",
+        "producer_stamp",
+        "runtime_need",
+        "scan_pin",
+        "scan_stats",
+        "shared_subplan",
     ]
 ]
