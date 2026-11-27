@@ -50,6 +50,8 @@ docs.rs	Rust crate documentation (DataFusion's GroupsAccumulator) cited by docs/
 ziglang.org	the zig toolchain's distribution
 sqlite.org	SQLite documentation
 postgresql.org	PostgreSQL documentation
+mysql.com	MySQL documentation cited by docs/design/database_table_write.md
+pydata.org	pandas documentation cited by docs/design/database_table_write.md
 clickhouse.com	ClickHouse documentation cited by docs/design/storage_stack.md
 confluent.io	Confluent documentation cited by docs/design/storage_stack.md
 databricks.com	Databricks documentation cited by docs/design/storage_stack.md
