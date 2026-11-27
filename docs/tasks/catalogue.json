@@ -76,7 +76,6 @@
     "question": "How do I write a table to a CSV file?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2372",
       "komira-ai/komira#2374",
       "komira-ai/komira#2322"
     ]
@@ -226,10 +225,7 @@
     "slug": "write-table-parquet",
     "category": "Write",
     "question": "How do I write a table to Parquet?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2368"
-    ]
+    "status": "works"
   },
   {
     "rank": 28,
