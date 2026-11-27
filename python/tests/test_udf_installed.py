@@ -7,9 +7,9 @@ same rows (python/BUCK, `udf_installed_test`).
 
 Run by wheel_install_run.py, which installed komira, pyarrow and protobuf into
 `--site` and starts this from an empty working directory. No engine hosts a
-UDF runtime yet, so the runtime is hosted here through its C ABI by
-`--udf-host` (python/tests/udf_host.py, the host of the runtime's own tests),
-in the engine's place. In order:
+UDF runtime but through a session (below), so the runtime's own checks host it
+here through its C ABI with `--udf-host` (python/tests/udf_host.py, the host of
+the runtime's own tests). In order:
 
 - `import komira` is the package installed in `--site`, and the wheel carries
   the runtime at `<site>/komira/_lib/libkomira_udf_python.so`;
@@ -33,10 +33,16 @@ in the engine's place. In order:
   answer;
 - the row function with the read set is refused by the runtime, which does
   not run that shape yet, with the field it does not read;
-- the engine refuses the frame with the UDF column at `materialize()`, and a
-  SQL query naming the function at `sql()`, each by its exact message: what
-  the engine does with a UDF today;
-- no zygote or worker of a runtime outlives its shutdown.
+- the engine runs the frame with the UDF column at `materialize()`: the
+  session sets the wheel's runtime on its context and writes the code objects
+  its plan names, and the `score` column equals the loop row for row, the
+  other column is untouched, and a second `materialize()` of the same frame
+  gives the same answer; a function that raises on a row is refused with its
+  row, a function that kills its worker is refused as a crash and the next
+  `materialize()` of the score frame runs in a new worker; a SQL query naming
+  the function is refused at `sql()` by its exact message; closing the session
+  removes its scratch tree;
+- no zygote or worker of a runtime hosted here outlives its shutdown.
 
 Any failure raises; its last traceback line is what a failing run names.
 """
@@ -57,6 +63,9 @@ I64_MIN, I64_MAX = -(2**63), 2**63 - 1
 USER_MODULE = "user_udfs"
 
 USER_SOURCE = '''\
+import os
+import signal
+
 import pyarrow.compute as pc
 
 from komira._capture import udf
@@ -77,6 +86,20 @@ def tag(s: str) -> str:
 @udf(kind="map_batches_column", return_dtype="int64")
 def shifted(values):
     return pc.subtract(values, 7)
+
+
+@udf
+def boom(a: int) -> int:
+    if a == 7:
+        raise ValueError("seven is refused")
+    return a
+
+
+@udf
+def die(a: int) -> int:
+    if a == 7:
+        os.kill(os.getpid(), signal.SIGKILL)
+    return a
 
 
 @udf(kind="row", return_dtype="int64", columns=("a", "b"))
@@ -234,6 +257,8 @@ def main(argv):
             ("tag", user.tag.expr(ColRef("s"))),
             ("shifted", user.shifted.expr(ColRef("a"))),
             ("row_total", user.row_total.expr()),
+            ("boom", user.boom.expr(ColRef("a"))),
+            ("die", user.die.expr(ColRef("a"))),
         ]:
             _, envelope = planned_frame((name, call))
             assert len(envelope.udfs) == 1, "{}: {} UdfRefs".format(name, len(envelope.udfs))
@@ -249,18 +274,56 @@ def main(argv):
         assert [f.name for f in refs["row_total"].arg_types] == ["a", "b"], [f.name for f in refs["row_total"].arg_types]
         assert not refs["score"].HasField("read_set"), "a scalar function's UdfRef carries a read set"
 
-        # What the engine does with the frame and with SQL naming the function.
+        # The worker must import the module from its bundle, as a user's
+        # engine would, not from the directory this process imported it from:
+        # the session's runtime takes its sys.path when it is first set, at
+        # the first materialize below.
+        sys.path.remove(user_dir)
+
+        columns = {n: table.column(n).combine_chunks() for n in ROWS}
+        # The plain Python computations the worker's answers are held to.
+        loop_score = [None if a is None or b is None else a * 3 - b for a, b in zip(ROWS["a"], ROWS["b"])]
+        loop_tag = [None if s is None else "<" + s.upper() + ">" for s in ROWS["s"]]
+        loop_shifted = [None if a is None else a - 7 for a in ROWS["a"]]
+        assert loop_score == [user.score(a, b) for a, b in zip(ROWS["a"], ROWS["b"])]
+
+        # What the engine does with the frame: it runs the UDF column through
+        # the runtime the session sets, and refuses a function that fails.
         plan, envelope = planned_frame(("a", ColRef("a")), ("score", user.score.expr(ColRef("a"), ColRef("b"))))
-        try:
-            DataFrame._new(frame._session, plan, frame._sources).materialize()
-        except komira.KomiraError as e:
-            want = (
-                "decode: PLAN_WIRE_UDFS_DROPPED: these bytes carry 1 UdfRef entries (`WirePlanEnvelope.udfs`), and "
-                "the plan door runs no user function yet"
-            )
-            assert str(e) == want, "the frame with a UDF column is refused with {!r} ({}), not {!r}".format(str(e), type(e).__name__, want)
-        else:
-            raise AssertionError("the engine ran the frame with a UDF column, which it has no operator for")
+        score_frame = DataFrame._new(frame._session, plan, frame._sources)
+        for run in ("the first run", "a second run on the same session"):
+            got = score_frame.materialize().to_arrow()
+            assert got.schema.names == ["a", "score"], got.schema.names
+            same_as_loop("a of the frame, " + run, got.column("a").to_pylist(), ROWS["a"])
+            same_as_loop("score of the frame, " + run, got.column("score").to_pylist(), loop_score)
+
+        def refused(name, *args):
+            plan, _ = planned_frame((name, getattr(user, name).expr(*args)))
+            try:
+                DataFrame._new(frame._session, plan, frame._sources).materialize().to_arrow()
+            except komira.KomiraError as e:
+                return str(e)
+            raise AssertionError("the frame with {} ran".format(name))
+
+        text = refused("boom", ColRef("a"))
+        want = "execute: UDF_RAISED: UDF 0 (user_udfs:boom, komira/python) (ERR_RAISED): "
+        assert text.startswith(want), "boom is refused with {!r}, not {!r}...".format(text, want)
+        assert "ValueError: seven is refused" in text and "(row 3 of the batch)" in text, text
+        text = refused("die", ColRef("a"))
+        want = "execute: UDF_WORKER_CRASHED: UDF 0 (user_udfs:die, komira/python) (ERR_WORKER_CRASHED): "
+        assert text.startswith(want), "die is refused with {!r}, not {!r}...".format(text, want)
+        got = score_frame.materialize().to_arrow()
+        same_as_loop("score after a worker crashed", got.column("score").to_pylist(), loop_score)
+
+        # A session of its own runs the frame too, and closing it removes the
+        # scratch tree it made.
+        own = komira.Session()
+        got = DataFrame._new(own, score_frame._plan, frame._sources).materialize().to_arrow()
+        same_as_loop("score on a session of its own", got.column("score").to_pylist(), loop_score)
+        scratch = own._udf.root
+        assert scratch is not None and os.path.isdir(os.path.join(scratch, "code")), scratch
+        own.close()
+        assert not os.path.exists(scratch), "closing the session left {}".format(scratch)
         with komira.Session() as s:
             s.register_parquet("t", path)
             try:
@@ -278,17 +341,6 @@ def main(argv):
         os.mkdir(code_root)
         for fn in (user.score, user.tag, user.shifted, user.row_total):
             write_code(code_root, fn)
-        # The worker must import the module from its bundle, as a user's
-        # engine would, not from the directory this process imported it from.
-        sys.path.remove(user_dir)
-
-        columns = {n: table.column(n).combine_chunks() for n in ROWS}
-        # The plain Python computations the worker's answers are held to.
-        loop_score = [None if a is None or b is None else a * 3 - b for a, b in zip(ROWS["a"], ROWS["b"])]
-        loop_tag = [None if s is None else "<" + s.upper() + ">" for s in ROWS["s"]]
-        loop_shifted = [None if a is None else a - 7 for a in ROWS["a"]]
-        assert loop_score == [user.score(a, b) for a, b in zip(ROWS["a"], ROWS["b"])]
-
         with h.Env(lib_dir) as env:
             env.code_root = code_root
             inst = instance(env, planned, refs["score"])

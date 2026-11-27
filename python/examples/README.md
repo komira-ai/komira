@@ -22,8 +22,8 @@ It needs no file beside it and runs in an empty directory:
 
 Every value it prints can be checked by eye against the six rows it wrote.
 In `quickstart.expected`, `<version>` stands for the installed version,
-`<abi_version>` for the ABI version of `src/so/abi/komira.tsv` (`1.10` is
-`1010`) and `<cwd>` for the real path of the directory the program ran in.
+`<abi_version>` for the ABI version of `src/so/abi/komira.tsv` (`1.11` is
+`1011`) and `<cwd>` for the real path of the directory the program ran in.
 
 Where it runs, each time compared with `quickstart.expected` exactly, every
 line, with those three filled in:

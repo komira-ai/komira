@@ -103,6 +103,7 @@ class Udf:
             _readset.refuse_row_types(name, d.kind, hints)
             read_set = None
         form, code, objects = _code.code_of(where)
+        _code.register_objects(objects)
         spec = UdfSpec(
             name=name,
             kind=d.kind,

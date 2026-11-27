@@ -799,6 +799,7 @@ mojo_library(
         "//src/sync:sync",
         "//src/trace:trace",
         "//src/udf:udf",
+        "//src/udf_host:udf_host",
         "//src/uuid:uuid",
         "//src/zlib:zlib",
         "//tools/build/mojo/runtime_paths:runtime_paths",

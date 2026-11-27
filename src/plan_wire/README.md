@@ -136,7 +136,8 @@ aggregate), `PLAN_MAP_BATCHES` over a child, and `PLAN_STEP` as a source.
 A RAW plan carries the list in its envelope: `plan_to_bytes_with_udfs`
 writes it, and `plan_envelope_from_bytes` returns it beside the plan
 (`plan_from_bytes` refuses such an envelope, `PLAN_WIRE_UDFS_DROPPED`, since
-a `LogicalPlan` cannot carry the list). An optimized plan carries the list in
+a `LogicalPlan` cannot carry the list; libkomira's plan door uses
+`plan_envelope_from_bytes` and runs the list). An optimized plan carries the list in
 its declared needs; `optimized_plan_from_bytes` decodes a bare `WirePlan`
 against it in the OPTIMIZED context, which also refuses the named UDF forms
 (`OPTIMIZED_UDF_LEGACY_FORM`), and `optimized_plan_to_bytes` encodes one and

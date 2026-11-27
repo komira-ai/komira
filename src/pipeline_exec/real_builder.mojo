@@ -36,6 +36,10 @@
 #            OP_JOIN_PROBE        `HashProbeOp` (`op_hash_probe`), over the
 #                                 index made from the rows the build segment
 #                                 it names published
+#            OP_UDF_APPLY         `UdfApplyOp` (`op_udf_apply`), calling the
+#                                 UDF of the run's binding (`set_udfs`) the
+#                                 call names; a plan with such a call and no
+#                                 binding is refused by name
 #   sink     SINK_COLLECT         `CollectSink` (`sink_collect`)
 #            SINK_AGG, key NONE   `AggSink` (`sink_agg`), from the `AggSinkData`
 #                                 the descriptor's `sink_param_id` names; it
@@ -121,7 +125,7 @@
 # none until set, and then those sinks refuse a table the pool cannot grow
 # instead of spilling it).
 
-from std.memory import Pointer
+from std.memory import ArcPointer, Pointer
 
 from arrow.concat import concat_record_batches_nway
 from arrow.schema import RecordBatch, Schema, SchemaBuilder
@@ -149,6 +153,7 @@ from physical_plan.physical_plan import (
     OP_JOIN_PROBE,
     OP_LIMIT,
     OP_PROJECT,
+    OP_UDF_APPLY,
     ORDER_ROW_RANGE,
     AggSinkData,
     SegmentDescPod,
@@ -174,11 +179,13 @@ from physical_plan.physical_plan import (
 from containers.slab import Slab
 from fs.scan_fs import ScanFsOpener, scan_fs_unserved
 from plan_expr.expr_pool import ExprPool
+from udf_host.runtime import UdfBinding
 
 from .op_filter import FilterOp, FilterShared
 from .op_hash_probe import HashProbeOp, HashProbeShared
 from .op_limit import LimitOp, LimitShared
 from .op_project import ProjectShared
+from .op_udf_apply import UdfApplyOp, UdfApplyShared
 from .op_variant import OpVariant
 from .pipeline_sink import PipelineSink
 from .published_outputs import PublishedOutputs
@@ -204,7 +211,7 @@ from .source_parquet import (
 )
 from .source_sink_output import SinkOutputSource
 from .source_variant import SourceVariant
-from .unused_members import NoSource
+from .unused_members import NoOperator, NoSource
 
 
 def _check_reads_a_dependency(ref desc: SegmentDescPod, producer: Int) raises:
@@ -243,6 +250,7 @@ struct _OpParts(Movable):
     var project: Optional[ProjectShared]
     var limit: Optional[LimitShared]
     var probe: Optional[HashProbeShared]
+    var udf: Optional[UdfApplyShared]
 
     def __init__(out self, seg_id: Int, op_index: Int):
         self.seg_id = seg_id
@@ -251,6 +259,7 @@ struct _OpParts(Movable):
         self.project = None
         self.limit = None
         self.probe = None
+        self.udf = None
 
 
 struct RealBuilder[
@@ -261,7 +270,7 @@ struct RealBuilder[
 ](SegmentBuilder):
     """Builds the real members of a segment: Parquet (local, or on the store
     `R` opens), batch, sink-output, CSV, concatenation and JSONL sources;
-    filter, project, limit and join probe operators; the collect, aggregation,
+    filter, project, limit, join probe and UDF apply operators; the collect, aggregation,
     sort, window and hash build sinks."""
 
     comptime ParquetArm = SourceVariant[
@@ -276,7 +285,10 @@ struct RealBuilder[
         BatchSource,
         SinkOutputSource,
     ]
-    comptime Op = OpVariant[FilterOp, MapOp, LimitOp, HashProbeOp]
+    comptime ProbeOrUdf = OpVariant[HashProbeOp, UdfApplyOp, NoOperator]
+    """A join probe (first) or a UDF apply (second): the fourth slot of
+    `Op`, which holds four."""
+    comptime Op = OpVariant[FilterOp, MapOp, LimitOp, Self.ProbeOrUdf]
     comptime Sink = PipelineSink[
         CollectSink, AnyAggSink, SortSink, WindowSink
     ]
@@ -295,6 +307,7 @@ struct RealBuilder[
     var _segment_pool: SegmentPool
     var _opener: Optional[Self.R]
     var _spill_dir: String
+    var _udfs: ArcPointer[UdfBinding]
 
     def __init__(
         out self,
@@ -313,6 +326,7 @@ struct RealBuilder[
         self._segment_pool = SegmentPool()
         self._opener = None
         self._spill_dir = String("")
+        self._udfs = ArcPointer(UdfBinding())
 
     def __init__(
         out self,
@@ -347,6 +361,12 @@ struct RealBuilder[
         `sink_param_id` names."""
         self._window_sinks.append(data^)
         return len(self._window_sinks) - 1
+
+    def set_udfs(mut self, binding: ArcPointer[UdfBinding]):
+        """The UDFs the plan's OP_UDF_APPLY calls name, loaded on their
+        runtime; a builder without them holds an empty binding, which
+        refuses every call by name. Call it before the run."""
+        self._udfs = binding
 
     def set_memory_budget(mut self, bytes: Int):
         """Bound the memory the sinks of later segment runs may draw, in
@@ -405,14 +425,17 @@ struct RealBuilder[
             parts.project = Optional(ProjectShared(spec))
         elif spec.tag == OP_LIMIT:
             parts.limit = Optional(LimitShared(spec))
+        elif spec.tag == OP_UDF_APPLY:
+            parts.udf = Optional(UdfApplyShared(spec, self._udfs))
         else:
             raise Error(
                 "pipeline_exec: operator tag "
                 + String(Int(spec.tag))
                 + " of segment "
                 + String(desc.seg_id)
-                + " is not served (OP_FILTER, OP_PROJECT and OP_LIMIT are,"
-                " and OP_JOIN_PROBE once its segment's source is built)"
+                + " is not served (OP_FILTER, OP_PROJECT, OP_LIMIT and"
+                " OP_UDF_APPLY are, and OP_JOIN_PROBE once its segment's"
+                " source is built)"
             )
         self._parts.append(parts^)
         return len(self._parts) - 1
@@ -587,7 +610,9 @@ struct RealBuilder[
         if parts.project:
             return Self.Op.second(parts.project.value().make())
         if parts.probe:
-            return Self.Op.fourth(parts.probe.value().make())
+            return Self.Op.fourth(Self.ProbeOrUdf.first(parts.probe.value().make()))
+        if parts.udf:
+            return Self.Op.fourth(Self.ProbeOrUdf.second(parts.udf.value().make(worker_id)))
         return Self.Op.third(parts.limit.value().make())
 
     def build_sink(
@@ -785,14 +810,22 @@ struct RealBuilder[
     ) raises -> Schema:
         """The schema of the rows that reach operator `upto` of the chain (the
         segment's output for `upto` = the operator count): the source's, as
-        each projection and join probe before it reshapes it. A projection is
-        asked by running it over a batch of no rows; a probe gives its output
-        schema."""
+        each projection, join probe and UDF apply before it reshapes it. A
+        projection is asked by running it over a batch of no rows; a probe
+        gives its output schema; a UDF apply appends its output's field."""
         var schema = source_schema.copy()
         for i in range(upto):
             if desc.ops[i].tag == OP_JOIN_PROBE:
                 var at = self._parts_index(desc, i)
                 schema = self._parts[at].probe.value().output_schema(schema)
+                continue
+            if desc.ops[i].tag == OP_UDF_APPLY:
+                var at = self._parts_index(desc, i)
+                var sb = SchemaBuilder()
+                for c in range(schema.num_columns()):
+                    sb.add_field(schema.field_at(c))
+                sb.add_field(self._parts[at].udf.value().output_field())
+                schema = sb.build()
                 continue
             if desc.ops[i].tag != OP_PROJECT:
                 continue

@@ -2,7 +2,7 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of so that holds
 # pointers.
 # =============================================================================
-# Twenty-six `@export abi("C")` functions are the library's whole surface today. Their C
+# Twenty-seven `@export abi("C")` functions are the library's whole surface today. Their C
 # prototypes are komira.h, which `//src/so:komira_abi` makes from the golden `abi/komira.tsv`
 # (one row per export, with its types and the version that added it) and builds only while this
 # file's exports are exactly the golden's rows; `src/so/README.md` lists them in prose.
@@ -63,6 +63,7 @@ from arrow_ipc.c_stream_table import drain_record_batch_stream_table
 
 from so.bindings import add_sql_binding
 from so.session import Session, session_options, try_new_session
+from so.udf_runtime import set_udf_runtime
 from sdk_exec.run_control import RunControl
 from so.sources import (
     check_table_name,
@@ -160,16 +161,10 @@ def komira_ctx_new() abi("C") -> Handle:
 def komira_ctx_new_with_options(
     worker_count: Int64, memory_budget_bytes: Int64
 ) abi("C") -> Handle:
-    """Create a session whose engine runs `worker_count` workers within
-    `memory_budget_bytes`, and return its handle; the caller frees it with
-    `komira_ctx_free`.
-
-    0 for either is the host's own value (`komira_ctx_new` is both 0). NULL
-    when the engine does not start: a negative worker count or budget is
-    refused, and so is a host the engine cannot start on. A query whose sinks
-    need more than the budget is refused at step `execute`, naming the sink and
-    the budget, as `komira_sql_stream`'s `KOMIRA_ERR_ENGINE`.
-    """
+    """A session whose engine runs `worker_count` workers within `memory_budget_bytes` (0 for
+    either: the host's own value), freed with `komira_ctx_free`; NULL when the engine does not
+    start (a negative value, a host it cannot start on). A query whose sinks need more than the
+    budget is refused at step `execute`, naming the sink and the budget."""
     var session = try_new_session(
         session_options(worker_count, memory_budget_bytes)
     )
@@ -240,14 +235,9 @@ def komira_last_error(
     out_cap: UInt64,
     out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
-    """Copy the session's last error text into `out_buf` (two-call protocol).
-
-    Returns `KOMIRA_ERR_NULL_CTX` for a NULL `ctx`, `KOMIRA_ERR_NULL_ARG` for a
-    NULL `out_len` (or a NULL `out_buf` when text is to be written),
-    `KOMIRA_ERR_BUFFER_TOO_SMALL` with `*out_len` set when `out_cap` is below
-    the text length, and `KOMIRA_OK` otherwise. A fresh session's text is
-    empty.
-    """
+    """Copy the session's last error text into `out_buf` (two-call protocol): -1 NULL `ctx`, -2
+    NULL `out_len` (or `out_buf` when there is text), -4 with `*out_len` set when `out_cap` is
+    below the length, else 0. A fresh session's text is empty."""
     if Int(ctx) == 0:
         return KOMIRA_ERR_NULL_CTX
     var session = _session(ctx)
@@ -394,15 +384,9 @@ def komira_parquet_schema(
     out_cap: UInt64,
     out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
-    """Write the Arrow schema of the Parquet file at `path` as `WireSchema`
-    bytes (two-call protocol).
-
-    The bytes are what a plan author splices into a Parquet scan. Returns
-    `KOMIRA_ERR_NULL_CTX` for a NULL `ctx`, `KOMIRA_ERR_NULL_ARG` for a NULL
-    `path` or `out_len`, `KOMIRA_ERR_ENGINE` for a file that cannot be read,
-    and `KOMIRA_ERR_BUFFER_TOO_SMALL` with `*out_len` set when `out_cap` is
-    below the length.
-    """
+    """Write the Arrow schema of the Parquet file at `path` as `WireSchema` bytes (two-call
+    protocol), what a plan author splices into a Parquet scan: -1 NULL `ctx`, -2 NULL `path` or
+    `out_len`, -3 a file that cannot be read, -4 with `*out_len` set when `out_cap` is short."""
     if Int(ctx) == 0:
         return KOMIRA_ERR_NULL_CTX
     var session = _session(ctx)
@@ -429,14 +413,9 @@ def komira_csv_binding(
     out_cap: UInt64,
     out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
-    """Write the `WireScanBinding` of the CSV file at `path` (two-call
-    protocol).
-
-    The schema is inferred from a bounded prefix of an uncompressed file; a
-    compressed file is read whole. `has_header` and `all_varchar` are
-    `int32_t` and any non-zero value is true. Errors are those of
-    `komira_parquet_schema`.
-    """
+    """Write the `WireScanBinding` of the CSV file at `path` (two-call protocol), its schema
+    inferred from a bounded prefix (a compressed file is read whole). `has_header` and
+    `all_varchar` are true when non-zero. Errors are those of `komira_parquet_schema`."""
     if Int(ctx) == 0:
         return KOMIRA_ERR_NULL_CTX
     var session = _session(ctx)
@@ -489,16 +468,10 @@ def komira_plan_render(
     out_cap: UInt64,
     out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
-    """Decode the serialized plan `plan[0..plan_len]` and write its text
-    (two-call protocol). The plan is not run.
-
-    The text is UTF-8, not NUL-terminated, and is the plan as authored, before
-    any optimizer rule. A malformed or hostile plan is refused by the decoder
-    as `KOMIRA_ERR_ENGINE`. Returns `KOMIRA_ERR_NULL_CTX` for a NULL `ctx` and
-    `KOMIRA_ERR_NULL_ARG` for a NULL `plan` or `out_len`, and
-    `KOMIRA_ERR_TOO_LARGE` for a `plan_len` above `KOMIRA_MAX_INPUT_BYTES`
-    (64 MiB), checked before the plan is read.
-    """
+    """Decode the serialized plan `plan[0..plan_len]` and write its text, UTF-8 and not
+    NUL-terminated, the plan as authored before any optimizer rule (two-call protocol); the plan
+    is not run. -1 NULL `ctx`, -2 NULL `plan` or `out_len`, -5 `plan_len` above 64 MiB (checked
+    before the plan is read), -3 a plan the decoder refuses."""
     if Int(ctx) == 0:
         return KOMIRA_ERR_NULL_CTX
     var session = _session(ctx)
@@ -932,6 +905,33 @@ def komira_plan_stream(
         # nothing held is the export check's, with neither.
         if not session[].has_error():
             session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+
+
+@export
+def komira_udf_runtime_set(
+    ctx: Handle, library: CStr, code_root: CStr, batch_deadline_ms: Int64, options: ConstBytes, options_len: UInt64
+) abi("C") -> Int32:
+    """Open the UDF runtime `library` with the `key=value` lines of `options[0..options_len]` and
+    make it the session's (`so.udf_runtime`): code objects from `code_root`, a batch's call bounded
+    by `batch_deadline_ms` (0: the default). -1 NULL `ctx`, -2 a NULL argument, -5 `options_len`
+    above the bound, else -3 at step `bind`, the session keeping the runtime it held."""
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(library) == 0 or Int(code_root) == 0 or (Int(options) == 0 and options_len != 0):
+        session[].set_error(String("komira_udf_runtime_set: library, code_root or options is NULL"))
+        return KOMIRA_ERR_NULL_ARG
+    if input_length_status(options_len) != KOMIRA_OK:
+        session[].set_error(String("komira_udf_runtime_set: options_len is above ") + String(KOMIRA_MAX_INPUT_BYTES) + " bytes")
+        return KOMIRA_ERR_TOO_LARGE
+    try:
+        var text = String(from_utf8=Span(_copy_in(options, options_len)))
+        set_udf_runtime(session[], _c_string(library), _c_string(code_root), Int(batch_deadline_ms), text)
+        return KOMIRA_OK
+    except e:
+        session[].set_refusal(String("bind"), String(e))
         return KOMIRA_ERR_ENGINE
 
 

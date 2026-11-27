@@ -157,10 +157,11 @@ _DIST = "komira//src/so:libkomira[dist]"
 _NATIVE_FILES = {"komira/_lib": _DIST}
 
 # The komira/python UDF runtime (src/udf_python, `libkomira_udf_python.so`),
-# beside libkomira at komira/_lib/. Nothing libkomira loads needs it: the
-# package opens it itself, as the test of a UDF from the installed wheel does
-# (`udf_installed_test`, below), so the libs check names it `opened`. The Linux
-# wheels carry it; the macOS wheel does not yet.
+# beside libkomira at komira/_lib/. Nothing libkomira loads needs it: libkomira
+# opens it by path when the SDK sets it for a session that runs a plan with
+# UDFs (`komira_udf_runtime_set`, komira/_udf_runtime.py; `udf_installed_test`,
+# below, runs that), so the libs check names it `opened`. The Linux wheels
+# carry it; the macOS wheel does not yet.
 _UDF_RUNTIME = {"komira/_lib/libkomira_udf_python.so": "komira//src/udf_python:komira_udf_python"}
 
 _LINUX_NATIVE_FILES = _NATIVE_FILES | _UDF_RUNTIME
@@ -453,12 +454,14 @@ wheel_install_test(
 # functions, their calls over a frame of a Parquet file encode as UdfRefs with
 # the module as a bundle (a row function's explicit read set its UdfRef's),
 # and the komira/python runtime the wheel carries at
-# komira/_lib/libkomira_udf_python.so, hosted through its C ABI by
-# tests/udf_host.py in the engine's place, runs each in a worker forked from a
-# zygote of the installed package; every answer equals a Python loop over the
-# same rows, and a code object whose function answers otherwise is found
-# unequal by the same comparison. The engine's refusals of the frame and of SQL
-# naming the function are held to their exact messages.
+# komira/_lib/libkomira_udf_python.so, runs each in a worker forked from a
+# zygote of the installed package, both through its C ABI hosted by
+# tests/udf_host.py and through the engine (a session sets the runtime and
+# writes the code objects; the frame's materialize runs the plan); every answer
+# equals a Python loop over the same rows, a code object whose function answers
+# otherwise is found unequal by the same comparison, and a function that raises
+# or kills its worker is refused by its exact message. The engine's refusal of
+# SQL naming the function is held to its exact message.
 wheel_install_test(
     name = "udf_installed_test",
     python = "komira//third_party/python:cpython",

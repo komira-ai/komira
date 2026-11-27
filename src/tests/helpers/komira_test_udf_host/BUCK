@@ -1,0 +1,40 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: what the welded tests of a host of UDF runtimes share. UdfRefs
+# of the fixtures of komira-test/echo, the reference runtime of the
+# conformance suite (//src/tests/helpers/komira_udf_spike_abi:echo, which a
+# test stages as echo.so), with the spike descriptor that runtime validates
+# encoded canonically; and int64 columns with NULLs and the reads of one back.
+# A library names it in `test_deps`, which reaches that library's welded
+# tests and nothing it ships.
+#
+# The welded test, test_echo_udfs, holds the descriptor's bytes for one
+# fixture to the spike descriptor's canonical form (field order, the shape
+# varint, the unnamed result) and a column's NULLs through a write and a read.
+mojo_library(
+    name = "komira_test_udf_host",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/arrow:arrow",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/compression:compression",
+        "//src/containers:containers",
+        "//src/counters:counters",
+        "//src/libc:libc",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_source:scan_source",
+        "//src/simd_ops:simd_ops",
+    ],
+    test_srcs = ["tests/test_echo_udfs.mojo"],
+    visibility = [
+        "//src/pipeline_exec:",
+        "//src/sdk_exec:",
+        "//src/so:",
+        "//src/udf_host:",
+    ],
+)

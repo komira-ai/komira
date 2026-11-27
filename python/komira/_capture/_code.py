@@ -166,6 +166,22 @@ def code_of(location: Location):
     return "bundle", (("bundle", digest),), {digest: data}
 
 
+# The code objects every captured function produced in this process,
+# `{sha256: bytes}`: what a session writes under its code root for the
+# UdfRefs of a plan.
+_registry: dict = {}
+
+
+def register_objects(objects: dict) -> None:
+    """Remember `objects` (`{sha256: bytes}`) for `registered_object`."""
+    _registry.update(objects)
+
+
+def registered_object(digest: bytes):
+    """The bytes of the captured code object with this sha256, or None."""
+    return _registry.get(digest)
+
+
 def write_objects(code_root, objects: dict) -> None:
     """Write each code object to `code_root/<sha256 hex>`: creates the
     directory, leaves a file that already holds the bytes, and refuses one

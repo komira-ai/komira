@@ -74,7 +74,7 @@ there), Brotli `//third_party/brotli`, aws-lc `//third_party/aws-lc`, s2n-tls
 
 Verified by reading, not by running anything on a developer machine:
 
-- `libkomira`'s dynamic symbol table is exactly the twenty-six `komira_*` exports
+- `libkomira`'s dynamic symbol table is exactly the twenty-seven `komira_*` exports
   (`exports_exact` gate in `src/so/tests/gate/`). None takes a URL, host or
   socket: they take a local file path, a worker count and memory budget, the bytes of a plan, SQL text, or a
   credential's kind, name and field values, a run handle, the bytes of a bound source, or an Arrow C stream the caller
@@ -83,7 +83,7 @@ Verified by reading, not by running anything on a developer machine:
 - The closure holds network code: `async_rt`'s reactor and socket primitives,
   `net`, `http_core` (HTTP and TLS) and `http_client`, which the engine uses
   to read object stores and to call an Iceberg REST catalog. Two exports of the
-  twenty-six reach it, and only for a table the caller bound to an object store:
+  twenty-seven reach it, and only for a table the caller bound to an object store:
   `komira_add_sql_binding`, given an `s3://` or `az://` location, reads the
   objects' footers from that store (and lists it for a glob), with the endpoint
   the caller passed and a credential the caller sealed; and `komira_sql_stream`
@@ -95,7 +95,9 @@ Verified by reading, not by running anything on a developer machine:
   `komira_register_json`, which infer a local file's schema; the `COPY ... TO` of
   `komira_sql_stream` refuses a URL
   (`check_copy_target`); the run-handle calls (`komira_run_new`, `_free`, `_cancel`,
-  `_progress`) touch only a cancel flag and two counters in memory; `komira_plan_stream` runs
+  `_progress`) touch only a cancel flag and two counters in memory; `komira_udf_runtime_set`
+  opens the local library path it is given (`dlopen`) and the runtime starts its worker processes on
+  the machine (the user's own code runs in them; the export itself opens no connection); `komira_plan_stream` runs
   `sdk_exec.run_plan`, with the same local-only scans, and the plan decoder
   refuses a scan of a remote file system (`PLAN_WIRE_UNSUPPORTED_REMOTE_FS`);
   an envelope with a write target is written to a local file

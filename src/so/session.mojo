@@ -10,6 +10,10 @@ from sdk_exec.engine_sql import (
     STEP_PARSE,
 )
 
+from std.memory import ArcPointer
+
+from udf_host.runtime import UdfRuntime
+
 from .bound_store import BoundStores
 from .credentials import SessionCredentials
 from .status import (
@@ -117,6 +121,10 @@ struct Session(Movable):
     """The credentials defined on this session (`komira_credential_add`,
     `_set`, `_seal`), by name; their values are wiped when the session is
     dropped."""
+    var udf_runtime: Optional[ArcPointer[UdfRuntime]]
+    """The UDF runtime a plan's UDFs run on (`komira_udf_runtime_set`); none
+    until one is set. Shut down when the last run holding it ends after the
+    session is dropped."""
     var bound_stores: BoundStores
     """The object store each table bound to an `s3://` or `az://` location
     reads (`add_sql_binding`): the bucket, the credential's name and the
@@ -138,6 +146,7 @@ struct Session(Movable):
         self.engine = EngineContext(options)
         self.credentials = SessionCredentials()
         self.bound_stores = BoundStores()
+        self.udf_runtime = None
 
     def set_error(mut self, var message: String, step: Int32 = KOMIRA_STEP_NONE):
         """Replace the last error with `message`, at `step`; its code is

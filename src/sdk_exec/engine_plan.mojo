@@ -44,10 +44,13 @@ from optimizer.optimizer_config import OptimizerConfig
 from optimizer.optimizer_driver import optimize
 from optimizer.optimizer_scalar_deps import ScalarDepTable
 from optimizer.plan_cse import plan_cse_eliminate
+from std.memory import ArcPointer
+
 from phase_timers.phase_timers import PH_LOWER, PH_OPTIMIZE, pt_now, pt_record
 from pipeline_exec.source_parquet import LocalOnlyScanFs
 from plan_ir.logical_plan import LogicalPlan
 from sql.sql_position import SqlPosition
+from udf_host.runtime import UdfBinding
 
 from .engine_context import EngineContext
 from .engine_execute import run_lowered_plan_with
@@ -161,16 +164,32 @@ def run_plan_batch[
     counts its segments into its progress (`run_lowered_plan_with`); optimize
     and lower do not poll it.
     """
+    return run_plan_batch(ctx, plan^, opener^, step, control, ArcPointer(UdfBinding()))
+
+
+def run_plan_batch[
+    R: ScanFsOpener
+](
+    mut ctx: EngineContext,
+    var plan: LogicalPlan,
+    var opener: R,
+    mut step: String,
+    control: RunControl,
+    udfs: ArcPointer[UdfBinding],
+) raises -> RecordBatch:
+    """`run_plan_batch` for a plan whose UDF calls name the UDFs `udfs`
+    holds, by index: lowering cuts each call with its `UdfRef`, and the run
+    calls it on the binding's runtime."""
     step = String(STEP_OPTIMIZE)
     var t_optimize = pt_now()
     var optimized = optimize_for_run(plan^)
     pt_record[PH_OPTIMIZE](t_optimize)
     step = String(STEP_LOWER)
     var t_lower = pt_now()
-    var lowered = lower_for_context(optimized, ctx)
+    var lowered = lower_for_context(optimized, ctx, udfs[])
     pt_record[PH_LOWER](t_lower)
     step = String(STEP_EXECUTE)
-    return run_lowered_plan_with(ctx, lowered^, opener^, control)
+    return run_lowered_plan_with(ctx, lowered^, opener^, control, udfs)
 
 
 def run_plan(mut ctx: EngineContext, var plan: LogicalPlan) -> SqlOutcome:
@@ -179,9 +198,28 @@ def run_plan(mut ctx: EngineContext, var plan: LogicalPlan) -> SqlOutcome:
     return run_plan_with(ctx, plan^, LocalOnlyScanFs())
 
 
+def run_plan(
+    mut ctx: EngineContext, var plan: LogicalPlan, udfs: ArcPointer[UdfBinding]
+) -> SqlOutcome:
+    """`run_plan` of a plan whose UDF calls name the UDFs `udfs` holds."""
+    return run_plan_with(ctx, plan^, LocalOnlyScanFs(), udfs)
+
+
 def run_plan_with[
     R: ScanFsOpener
 ](mut ctx: EngineContext, var plan: LogicalPlan, var opener: R) -> SqlOutcome:
+    """`run_plan_with` of a plan that calls no UDF."""
+    return run_plan_with(ctx, plan^, opener^, ArcPointer(UdfBinding()))
+
+
+def run_plan_with[
+    R: ScanFsOpener
+](
+    mut ctx: EngineContext,
+    var plan: LogicalPlan,
+    var opener: R,
+    udfs: ArcPointer[UdfBinding],
+) -> SqlOutcome:
     """Run the logical plan `plan` on `ctx` and return its answer as one batch,
     or the refusal of the step (`optimize`, `lower`, `execute`) that ended it.
 
@@ -194,7 +232,7 @@ def run_plan_with[
     ctx.begin_query()
     var step = String(STEP_OPTIMIZE)
     try:
-        var batch = run_plan_batch(ctx, plan^, opener^, step, RunControl())
+        var batch = run_plan_batch(ctx, plan^, opener^, step, RunControl(), udfs)
         var outcome = SqlOutcome()
         outcome.batches.append(batch^)
         return outcome^
@@ -206,7 +244,18 @@ def run_plan_write(
     mut ctx: EngineContext, var plan: LogicalPlan, target: WriteTarget
 ) -> SqlOutcome:
     """`run_plan_write` reading the local file system only (`LocalOnlyScanFs`)."""
-    return run_plan_write(ctx, plan^, target, LocalOnlyScanFs())
+    return run_plan_write(ctx, plan^, target, LocalOnlyScanFs(), ArcPointer(UdfBinding()))
+
+
+def run_plan_write(
+    mut ctx: EngineContext,
+    var plan: LogicalPlan,
+    target: WriteTarget,
+    udfs: ArcPointer[UdfBinding],
+) -> SqlOutcome:
+    """`run_plan_write` of a plan whose UDF calls name the UDFs `udfs`
+    holds, reading the local file system only."""
+    return run_plan_write(ctx, plan^, target, LocalOnlyScanFs(), udfs)
 
 
 def run_plan_write[
@@ -216,6 +265,7 @@ def run_plan_write[
     var plan: LogicalPlan,
     target: WriteTarget,
     var opener: R,
+    udfs: ArcPointer[UdfBinding],
 ) -> SqlOutcome:
     """Run the logical plan `plan` on `ctx` and write its answer to `target`,
     a local Parquet, CSV or newline-delimited JSON file, answering one batch
@@ -234,7 +284,7 @@ def run_plan_write[
     var step = String(STEP_BIND)
     try:
         check_copy_target(target.path, target.fmt, target.codec)
-        var batch = run_plan_batch(ctx, plan^, opener^, step, RunControl())
+        var batch = run_plan_batch(ctx, plan^, opener^, step, RunControl(), udfs)
         var rows = write_copy_result(
             batch^, target.path, target.fmt, target.codec
         )

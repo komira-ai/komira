@@ -39,6 +39,7 @@ from . import _arrow, _display, _native, _run
 from ._credentials import _BuiltIn, _Credential
 from ._errors import KomiraError, UnsupportedOperation
 from ._sources import _FileSource
+from ._udf_runtime import UdfRuntime
 
 if TYPE_CHECKING:
     import pandas
@@ -87,7 +88,8 @@ class Session:
         # holding it, None when no thread does.
         self._lock = threading.Lock()
         self._owner: int | None = None
-        self._free = weakref.finalize(self, native.ctx_free, ctx)
+        self._udf = UdfRuntime()
+        self._free = weakref.finalize(self, self._udf.free, native, ctx)
         # At interpreter exit the operating system reclaims the context with
         # the library, which is never unloaded; calling into it then is not
         # needed.
@@ -226,7 +228,9 @@ class Session:
         terminal of a DataFrame (komira/_frame.py); a refusal raises the
         engine's error, as `sql` does."""
         with self._held():
-            stream = self._native.plan_stream(self._live(), plan)
+            ctx = self._live()
+            self._udf.prepare(self._native, ctx, plan)
+            stream = self._native.plan_stream(ctx, plan)
         try:
             return Result(_arrow.import_stream(stream))
         except _arrow.stream_errors() as e:

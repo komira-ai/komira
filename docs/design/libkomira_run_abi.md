@@ -82,6 +82,16 @@ The golden (`src/so/abi/komira.tsv`) holds both.
   - The exported arrays share column buffers by reference count, so the arrays
     outlive the stream.
   - Its release callbacks null `release`, and they are idempotent.
+- **EXISTS** ABI 1.11: `komira_udf_runtime_set(ctx, library, code_root,
+  batch_deadline_ms, options, options_len)` gives the session a UDF runtime
+  library (komira's Python runtime is `libkomira_udf_python.so`), opened by
+  `src/udf_host` ([src/so/README.md](../../src/so/README.md)). The Python
+  package sets it the first time a plan with UDFs runs on a session
+  (`python/komira/_udf_runtime.py`). The export list is then twenty-seven.
+  Not built: the SQL call of a Python function, the `ROW` and
+  `MAP_BATCHES_FRAME` kinds, grouped UDFs, memory accounting for a UDF, a host
+  cancel of a running UDF call, and a bound on a runtime's start-up and
+  shutdown.
 - **EXISTS** The plan conformance harness speaks the earlier SDK's door ABI
   (`src/tests/helpers/komira_plan_harness/door.mojo`): a `const char *`
   `komira_last_error`, a `komira_plan_stream` like the one below, and
@@ -181,9 +191,17 @@ to every later run on the context.
 
 The input is an authored `komira.plan.v1.WirePlanEnvelope`. These are the same
 bytes `komira_plan_render` renders, and the format the SDKs' plan builders write.
-- **Envelopes it refuses.** The door decodes with `plan_envelope_from_bytes` and
-  refuses an envelope that carries a UDF list (`PLAN_WIRE_UDFS_DROPPED`, at
-  `decode`, -3) until the UDFs' own design lands.
+- **Envelopes with UDFs.** The door decodes with `plan_envelope_from_bytes` and
+  binds the envelope's UDF list at step `bind`, before any row is read: a list
+  on a session with no UDF runtime is refused with `OPTIMIZED_ENV_RUNTIME_MISSING`,
+  and every UDF is admitted and loaded on the runtime the session holds
+  (`komira_udf_runtime_set`, ABI 1.11, §2), with the refusals of
+  [udf_runtime_interface.md](udf_runtime_interface.md) §4 (`OPTIMIZED_ENV_CODE_MISSING`,
+  `OPTIMIZED_UDF_*`). A UDF call in a projection column (`SCALAR` and
+  `MAP_BATCHES_COLUMN`) then runs in the runtime's workers; a failure in a batch
+  is a -3 at `execute` named `UDF_RAISED`, `UDF_WORKER_CRASHED`,
+  `UDF_DEADLINE_EXCEEDED` and the like ([src/udf_host](../../src/udf_host/README.md)).
+  A UDF kind the lowering does not serve is refused by name at `lower`.
 - **Envelopes it writes.** An envelope with a write target (format version 5)
   is run by `run_plan_write` instead of `run_plan`, as
   [credentials_and_writes.md](credentials_and_writes.md#10-writes) decides: the
@@ -248,10 +266,11 @@ given:
   environment variable and as a session argument. Neither is carried. A frame
   always travels as a plan, and configuration is never read from the environment
   (rule S2).
-- **No Python UDFs in either entry yet.** The earlier SDK reached them only
+- **Python UDFs only through the plan door.** The earlier SDK reached them only
   through SQL text, as in-process callbacks. Rule B21 requires Python UDFs to run
-  in zygote-forked workers, so neither entry carries them until that design lands.
-  The plan door refuses an envelope with UDFs by name (§3).
+  in zygote-forked workers, so the SQL entry carries none. The plan door runs an
+  envelope's UDFs on the session's UDF runtime (§3), and refuses one by name when
+  the session holds none. The SQL call of a Python function is not built.
 - **One engine per session.** The earlier SDK built a fresh engine context for
   every call. Here the session keeps one `EngineContext` (§7).
 
@@ -343,7 +362,7 @@ The port adds no code. The six codes of ABI 1.1 cover the two run calls:
 | 0 `KOMIRA_OK` | `*out` holds a stream |
 | -1 `KOMIRA_ERR_NULL_CTX` | NULL `ctx` |
 | -2 `KOMIRA_ERR_NULL_ARG` | NULL `sql`, `plan` or `out` |
-| -3 `KOMIRA_ERR_ENGINE` | invalid UTF-8; a parse, bind, optimize, lower or execute refusal; an unsupported feature refused by name (rule B21); a result type the stream cannot carry; a plan the decoder refuses, including an envelope with UDFs; a write destination the engine refuses; an engine that fails to build |
+| -3 `KOMIRA_ERR_ENGINE` | invalid UTF-8; a parse, bind, optimize, lower or execute refusal; an unsupported feature refused by name (rule B21); a result type the stream cannot carry; a plan the decoder refuses; a UDF the session's runtime does not admit, or one that fails in a batch; a write destination the engine refuses; an engine that fails to build |
 | -4 `KOMIRA_ERR_BUFFER_TOO_SMALL` | not returned by the run calls (no byte output) |
 | -5 `KOMIRA_ERR_TOO_LARGE` | `plan_len`, or SQL text, above 64 MiB |
 
