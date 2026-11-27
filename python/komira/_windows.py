@@ -66,11 +66,11 @@ belongs to no group, and its value is missing.
 from __future__ import annotations
 
 import hashlib
-import math
 from typing import TYPE_CHECKING
 
-from . import _missing, _ops
+from . import _ops
 from ._errors import UnsupportedOperation
+from ._missing import not_nan
 
 if TYPE_CHECKING:
     from ._frame import DataFrame
@@ -401,14 +401,14 @@ def pct_change(frame: DataFrame, column: str, periods: object) -> _Built:
     # The engine may order NaN above every value, as DuckDB does, so `x > 0`
     # is checked with `x` not NaN (komira/_missing.py); `x < 0` does not hold
     # for a NaN in either order, and a NaN over 0 is NaN.
-    positive = _ops.and_all((at_zero, _missing.not_nan(x, "float64"), _ops.Compare("gt", x, zero)))
+    positive = _ops.and_all((at_zero, not_nan(x, "float64"), _ops.Compare("gt", x, zero)))
     negative = _ops.and_all((at_zero, _ops.Compare("lt", x, zero)))
     other = _ops.and_all((at_zero, _ops.Unary("is_not_null", x)))
     node = _ops.When(
         (
-            (positive, _ops.Lit(math.inf)),
-            (negative, _ops.Lit(-math.inf)),
-            (other, _ops.Lit(math.nan)),
+            (positive, _ops.Lit(float("inf"))),
+            (negative, _ops.Lit(float("-inf"))),
+            (other, _ops.Lit(float("nan"))),
         ),
         ratio,
     )

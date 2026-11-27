@@ -946,7 +946,7 @@ ALLOWED_IMPORTS = {
     "._plan:_wire", ".plan.v1:plan_pb2", "._frame:DataFrame", "os", ".:_groupby", "._groupby:GroupBy",
     ".:_merge", ".:_windows", "._series:_Membership", "._windows:Windows", "._windows:merged",
     "._plan._window:window_field", "hashlib",
-    ".:_verbs", ".:_cast", ".:_accessors", "._missing:present", "._series:_fits",
+    ".:_verbs", ".:_cast", ".:_accessors", "._missing:present", "._missing:not_nan", "._series:_fits",
     "typing:Any", "re",
     # The notebook display (komira/_display.py): it escapes HTML and formats
     # a result's rows with pyarrow, and reads no stream.
