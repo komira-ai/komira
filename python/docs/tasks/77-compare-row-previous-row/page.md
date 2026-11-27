@@ -76,7 +76,7 @@ Output:
 - The pandas-shaped verbs read the frame's sort as the row order, so sort first: on a frame that is not sorted, `df["sales"].shift(1)` is refused with `UnsupportedOperation`, as `rolling` is. `shift(n)` goes `n` rows back and `shift(-n)` `n` rows ahead; `diff(n)` is `x - x.shift(n)` and `pct_change(n)` is `x / x.shift(n) - 1`, and both answer float64, as pandas does for an integer column. A previous value of 0 gives `inf`, `-inf` or `NaN` in `pct_change`, as pandas divides.
 - `shift` keeps the column's type, so the frame's `prev` above is an integer column with a NULL; pandas itself holds that column as float64 with `NaN`, which is what `to_pandas()` gives. `fill_value`, `freq` and `suffix` are refused by name.
 - In `komira.pl`, `shift` and `diff` read the frame's sort, or `.over(..., order_by=...)`, and `diff` keeps the integer type as polars does. `diff(null_behavior="drop")` is refused by name.
-- `shift`, `diff` and `pct_change` read int64, float64 and string columns (polars' `shift` and `diff` also int8 to int32 and float32); a column of another type, such as a timestamp, is refused by name, as SQL's `lag` and `lead` refuse it.
+- `shift` reads int64, float64 and string columns, and `diff` and `pct_change` int64 and float64 ones (in `komira.pl` also int8 to int32 and float32); a column of another type, such as a timestamp, is refused by name, as SQL's `lag` and `lead` refuse it. In `pct_change` a previous value of -0.0 counts as 0, so its infinity takes the sign of the value, where pandas flips it.
 
 ## Related
 

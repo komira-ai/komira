@@ -157,7 +157,8 @@ def test_shift_of_a_narrow_column_reads_it_through_the_wide_type_and_casts_back(
     for column, wide, dtype in (("i32", "int64", "int32"), ("f32", "float64", "float32")):
         lf = frame().sort("id").with_columns(kpl.col(column).shift(1).alias("r"))
         pre = [(arg(0), Cast(c(column), wide))]
-        assert lf._plan == sorted_with([(win(0), lag(arg(0), 1))], Cast(c(win(0)), dtype), pre), column
+        # The argument column is made first, so the window is the second column.
+        assert lf._plan == sorted_with([(win(1), lag(arg(0), 1))], Cast(c(win(1)), dtype), pre), column
         assert lf.schema["r"] == pa.type_for_alias(dtype), column
 
 
@@ -183,8 +184,8 @@ def test_diff_subtracts_the_shift_and_keeps_the_int_type_as_polars_does():
 def test_diff_of_an_int32_column_is_an_int32():
     lf = frame().sort("id").with_columns(kpl.col("i32").diff().alias("r"))
     wide = Cast(c("i32"), "int64")
-    want = Cast(Arith("sub", wide, c(win(0))), "int32")
-    assert lf._plan == sorted_with([(win(0), lag(arg(0), 1))], want, [(arg(0), wide)])
+    want = Cast(Arith("sub", wide, c(win(1))), "int32")
+    assert lf._plan == sorted_with([(win(1), lag(arg(0), 1))], want, [(arg(0), wide)])
     assert lf.schema["r"] == pa.int32()
 
 

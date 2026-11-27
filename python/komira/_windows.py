@@ -45,6 +45,19 @@ The verbs, each of one column, and what it builds:
   itself, as float64, as pandas gives it; a missing value has a missing rank
   (`na_option="keep"`), or ranks after every value (`"bottom"`) or before
   every value (`"top"`).
+- `shift(periods=1)` of a column: the value `periods` rows before this one in
+  the frame's sort order (LAG), or `-periods` rows after it when `periods` is
+  negative (LEAD), the column itself for 0; missing where there is no such
+  row. The column keeps its type. LAG and LEAD read int64, float64 and string
+  columns; another type is refused.
+- `diff(periods=1)` of a number column: the column less its `shift(periods)`,
+  computed in the column's type and given as float64, as pandas gives it.
+- `pct_change(periods=1)` of a number column: the column over its
+  `shift(periods)`, less 1, as float64. Over a previous value of 0 the answer
+  is pandas' division by zero: inf for a positive value, -inf for a negative
+  one and NaN for 0 or NaN (the engine's division answers NULL there, so a
+  CASE gives these). A previous value of -0.0 is taken as 0, where pandas'
+  division by -0.0 flips the sign of the infinity.
 
 Under `groupby(dropna=True)`, pandas' default, a row whose key is missing
 belongs to no group, and its value is missing.
@@ -67,6 +80,7 @@ __all__ = [
     "Rolling",
     "Windows",
     "cumulative",
+    "diff",
     "filter_plan",
     "merged",
     "project_plan",

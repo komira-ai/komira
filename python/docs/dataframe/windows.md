@@ -25,7 +25,9 @@ filter by, alone or in an expression:
   no such row; the column keeps its type (int64, float64 or string). **`diff(periods=1)`**
   is `s - s.shift(periods)` and **`pct_change(periods=1)`** is
   `s / s.shift(periods) - 1`, both float64 as pandas gives them; a previous
-  value of 0 makes `pct_change` inf, -inf or NaN, as pandas divides.
+  value of 0 makes `pct_change` inf, -inf or NaN, as pandas divides (a
+  previous -0.0 counts as 0, so the infinity takes the value's sign, where
+  pandas flips it). `diff` and `pct_change` read int64 and float64 columns.
 - **`rank(method="min")` or `rank(method="dense")`** of a column or of a
   group's column, as float64, a missing value's rank missing
   (`na_option="keep"`), last (`"bottom"`) or first (`"top"`).

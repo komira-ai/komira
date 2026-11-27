@@ -406,7 +406,8 @@ class Series:
         (https://pandas.pydata.org/docs/reference/api/pandas.Series.pct_change.html),
         as float64; missing where there is no such row or either value is
         missing. Over a previous value of 0 it is inf, -inf or NaN, as pandas
-        divides. Missing values are not filled first (`fill_method=None`,
+        divides; a previous -0.0 is taken as 0, so its infinity has the sign
+        of the value, where pandas flips it. Missing values are not filled first (`fill_method=None`,
         pandas' default); `freq` and other arguments are refused. The frame
         must be sorted."""
         column = self._column("pct_change()")
