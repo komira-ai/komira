@@ -905,8 +905,8 @@ def komira_plan_stream(
     """Decode the `WirePlanEnvelope` `plan[0..plan_len]`, run it with no SQL
     front end and fill `*out_stream` as `komira_sql_stream` does: -1 NULL
     `ctx`, -2 NULL `plan` or `out_stream`, -5 `plan_len` above the bound (not
-    read), -3 a refusal `<step>: <reason>` (`decode`, `optimize`, `lower`,
-    `execute`)."""
+    read), -3 a refusal `<step>: <reason>` (`decode`, `bind`, `optimize`,
+    `lower`, `execute`)."""
     if Int(ctx) == 0:
         return KOMIRA_ERR_NULL_CTX
     var session = _session(ctx)

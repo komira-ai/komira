@@ -30,6 +30,7 @@ from ._vocab import (
     WINDOW_FUNCS,
     WINDOW_OFFSET,
     WINDOW_RANKING,
+    WRITE_CODECS,
     WRITE_FORMATS,
 )
 from ._walk import column_refs
@@ -628,14 +629,21 @@ class Union:
 
 @dataclass(frozen=True, slots=True)
 class WriteTarget:
-    """Where a plan's rows are written and in which format."""
+    """Where a plan's rows are written, in which format and with which
+    compression. `codec` None is the format's default: snappy for Parquet,
+    uncompressed for CSV and JSONL."""
 
     path: str
     format: str
+    codec: str | None = None
 
     def __post_init__(self) -> None:
         _need_name(self.path, "path", "WriteTarget")
         _need_op(self.format, WRITE_FORMATS, "WriteTarget format")
+        if self.codec is not None:
+            _need_op(self.codec, WRITE_CODECS, "WriteTarget codec")
+            if self.codec == "snappy" and self.format != "parquet":
+                raise ValueError(f"WriteTarget: no file sink writes {self.format} with snappy")
 
 
 @dataclass(frozen=True, slots=True)

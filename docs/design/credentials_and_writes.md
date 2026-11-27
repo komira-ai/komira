@@ -897,8 +897,10 @@ komira_last_error_step	Int32	Handle	1.7
 
 ### 10. Writes
 
-Every Python call in this decision is **PROPOSED**. `komira_sql_stream` and `komira_plan_stream` are
-**PROPOSED** in the ABI design for running a query, and are not built.
+`komira_sql_stream` and `komira_plan_stream` are built. The pandas-shaped write terminals `to_parquet`,
+`to_csv` and `to_json` are **EXISTS**: each sends the plan through `komira_plan_stream` with
+`write_target` set and returns `None`. The polars-shaped `sink_parquet`, `sink_csv` and `sink_ndjson`
+of `komira.pl` are not built yet. `write_table` and the catalog statements are **PROPOSED**.
 
 **One spelling per door.** The SQL door writes with `COPY` and, into a bound catalog, with
 `CREATE TABLE ... AS` and `INSERT`. The DataFrame door writes with the write terminals and, into a
@@ -997,6 +999,7 @@ is a `KomiraError` too and is **PROPOSED**.
 | `STORAGE_IO` | a local write failed for another reason (no space, a read-only file system, a directory at the path); the message names the `errno` | `execute` | `StorageError` |
 | `STORAGE_URL_REFUSED` | `http://`, an unknown scheme, a URL with user information, a glob over `https://`, and every remote URL in the first release | `bind` | `UnsupportedOperation` |
 | `STORAGE_RANGE_NOT_SUPPORTED` | an `https://` server ignored `Range` | `execute` | `UnsupportedOperation` |
+| `COPY_TYPE_UNSUPPORTED`, `COPY_COMPRESSION_UNSUPPORTED` | a column type the file format cannot carry (BLOB, TIME, INTERVAL, nested), or lz4 for CSV or JSON, refused by name before any file is touched or replaced; `COPY` and the write terminals refuse alike | `bind` or `execute` | `UnsupportedOperation` |
 | `STORAGE_WRITE_UNSUPPORTED` | a `gs://`, `az://` or `https://` destination | `bind` | `UnsupportedOperation` |
 | `PLAN_URL_QUERY_REFUSED` | a plan exported for a job manager has a URL with a query string | none: the export call is the job manager's milestone | `UnsupportedOperation` |
 | `SQL_STATEMENT_UNSUPPORTED`, `COPY_OPTION_UNSUPPORTED`, `COPY_FORMAT_NOT_INFERRED` | decision 10 | `parse` or `bind` | `UnsupportedOperation` |
@@ -1067,7 +1070,7 @@ var result = session.sql("SELECT * FROM sales_catalog.sales.orders LIMIT 10")
 | bindings | `komira_add_sql_binding`, `Session.add_sql_binding`, `sql` with call bindings and the unnamed source, `komira.files` for local files and frames, `BIND_NAME_UNBOUND`. `register_parquet` becomes `add_sql_binding` underneath, which fixes its re-registration defect |
 | object stores | credentials and their ABI calls; `WireSourceAccess` on the wire; the S3 read arm with `ambient`; `https://` reads; the S3 write arm; GCS and Azure reads |
 | catalogs | `komira.iceberg` and the Iceberg statements ([the Iceberg design](#reconciling-with-the-iceberg-design)) |
-| DataFrame surface | the write terminals and `write_table` through `komira_plan_stream`, lifting `PLAN_WIRE_WRITE_TARGET_DROPPED`; `compression=`; readers taking `komira.files` sources |
+| DataFrame surface | built: the pandas-shaped write terminals (`to_parquet`, `to_csv`, `to_json`) with `compression=`, through `komira_plan_stream`, which no longer refuses a write target. To come: the polars-shaped `sink_*` with `komira.pl`, `write_table`, and readers taking `komira.files` sources |
 | job manager | the resolver interface of decision 5, with its header check, kind check and endpoint allow-list; `DeclaredNeeds.credentials`; `PLAN_URL_QUERY_REFUSED` |
 
 Every step is additive:

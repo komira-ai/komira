@@ -97,8 +97,9 @@ Verified by reading, not by running anything on a developer machine:
   (`check_copy_target`); the run-handle calls (`komira_run_new`, `_free`, `_cancel`,
   `_progress`) touch only a cancel flag and two counters in memory; `komira_plan_stream` runs
   `sdk_exec.run_plan`, with the same local-only scans, and the plan decoder
-  refuses a scan of a remote file system (`PLAN_WIRE_UNSUPPORTED_REMOTE_FS`)
-  and an envelope with a write target; `komira_register_arrow_stream` reads only the memory of the stream it is given,
+  refuses a scan of a remote file system (`PLAN_WIRE_UNSUPPORTED_REMOTE_FS`);
+  an envelope with a write target is written to a local file
+  (`sdk_exec.run_plan_write`, which refuses a URL with `check_copy_target`); `komira_register_arrow_stream` reads only the memory of the stream it is given,
   through that stream's own callbacks; the other exports read a local file or
   the bytes given.
 - Nothing is sent anywhere. `docs/design/logging_and_telemetry.md` records
