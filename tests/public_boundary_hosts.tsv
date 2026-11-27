@@ -46,7 +46,7 @@ anaconda.org	the conda package index
 mopm.dev	the mopm package registry: the channel the mopm.lock of a package built with buildrules names
 crates.io	the Rust package index
 rust-lang.org	the Rust toolchain's distribution and documentation
-docs.rs	Rust crate documentation (DataFusion's GroupsAccumulator) cited by docs/design/udf_runtime_interface.md
+docs.rs	Rust crate documentation (DataFusion's GroupsAccumulator) cited by docs/design/udf_runtime_interface.md and docs/design/object_store_urls.md
 ziglang.org	the zig toolchain's distribution
 sqlite.org	SQLite documentation
 postgresql.org	PostgreSQL documentation
@@ -57,6 +57,7 @@ dremio.com	Dremio documentation cited by docs/design/storage_stack.md
 duckdb.org	DuckDB documentation cited by docs/design/storage_stack.md, docs/design/optimized_plan_udfs.md and docs/design/object_store_urls.md
 pydata.org	pandas documentation cited by docs/design/object_store_urls.md
 pola.rs	polars documentation cited by docs/design/object_store_urls.md
+readthedocs.io	the s3fs and gcsfs documentation cited by docs/design/object_store_urls.md
 ducklake.select	the DuckLake specification cited by docs/design/storage_stack.md
 estuary.dev	Estuary documentation cited by docs/design/storage_stack.md
 fivetran.com	Fivetran documentation cited by docs/design/storage_stack.md

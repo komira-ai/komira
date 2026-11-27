@@ -28,6 +28,15 @@ s = komira.Session()
 # argument at all, as with pandas, polars and pyarrow.
 s.sql("SELECT region, sum(amount) FROM 's3://sales/2026/*.parquet' GROUP BY region")
 df = komira.read_parquet("s3://sales/2026/east.parquet")
+
+# pandas' and polars' own spelling of an explicit credential: the SDK seals the secrets as a named
+# credential and keeps only its name and the settings in the plan.
+df = komira.read_parquet("s3://sales/2026/east.parquet",
+                         storage_options={"key": key_id, "secret": secret,
+                                          "client_kwargs": {"region_name": "eu-west-1"}})
+lf = komira.pl.scan_parquet("s3://sales/2026/*.parquet",
+                            storage_options={"aws_access_key_id": key_id,
+                                             "aws_secret_access_key": secret, "aws_region": "eu-west-1"})
 s.register_csv("returns", "s3://sales/2026/returns.csv", delimiter=";")
 
 # An explicit credential, for SQL: a scope (a location ending in "/") gives every URL under it its
@@ -43,6 +52,8 @@ s.sql("SELECT file FROM glob('s3://sales/2026/*') ORDER BY file")
 
 # The DataFrame door: a bare URL uses the chain; a komira.files source carries its own credential.
 df.to_parquet("s3://sales/out/east.parquet")
+df.to_parquet("s3://sales/out/east.parquet", storage_options={"key": key_id, "secret": secret,
+                                                              "client_kwargs": {"region_name": "eu-west-1"}})
 komira.read_parquet(komira.files("az://reports/2026/q1.parquet", credential=komira.AzureSas(...)))
 ```
 
@@ -55,12 +66,13 @@ working, and the two task pages that use it keep their output.
 Each row is an API with no counterpart in DuckDB, pandas or polars, or a place where komira would
 differ from them. The rest of the document assumes the recommendation. No part of a slice that
 depends on a row starts before the owner has answered it. Slices 1, 2 and 2b depend on none, and
-slices 3, 5a and 5b depend on Q3 only for their `register_*` part.
+slices 3, 5a and 5b depend on Q3 only for their `register_*` part. Q1 and Q2 are answered: both
+spellings.
 
 | # | question | the reference libraries | recommendation | blocks slice |
 |---|---|---|---|---|
-| Q1 | How a DataFrame reader gets an explicit credential | pandas: `read_parquet(url, storage_options={...})`, a dict of backend keys; polars: `scan_parquet(url, storage_options={...}, credential_provider=...)` | a `komira.files(...)` source in place of the path, as the credentials design's decision 3 already says: `komira.read_parquet(komira.files(url, credential=..., region=...))`. Add no `storage_options=`: its keys are each backend's own, it would be a second way to say what a source says, and that design rejected per-session storage options for the same reason | 4 |
-| Q2 | How a write terminal gets an explicit credential | pandas: `df.to_parquet(url, storage_options={...})`; polars: `write_parquet(url, storage_options=...)` | a `komira.files(...)` source as the destination: `df.to_parquet(komira.files("s3://b/k.parquet", credential=...))`. This is invented: no reference library takes a source object as a destination. The alternative is a bare URL only, so explicit credentials write through SQL `COPY` under a bound scope | 6b |
+| Q1 | How a DataFrame reader gets an explicit credential | pandas: `read_parquet(url, storage_options={...})`, a dict of keys forwarded to the fsspec backend; polars: `scan_parquet(url, storage_options={...}, credential_provider=...)`, a dict of object_store keys | both spellings. (1) `storage_options=` on every pandas-shaped and polars-shaped reader, each shape taking its own library's keys ([decision 8](#8-storage_options-a-second-spelling-of-a-source)); the SDK splits the dict into a credential, sealed under a generated name, and the source's settings, so it builds exactly the plan a `komira.files` source builds. (2) A `komira.files(...)` source in place of the path, as the credentials design's decision 3 already says, for what a dict cannot say. The credentials design's "Options considered" rejects storage options *per session, matched by prefix* (`Session(storage=[...])`); a keyword on one call is a different thing and that rejection does not reach it | 4 (the source), 4b (`storage_options=`) |
+| Q2 | How a write terminal gets an explicit credential | pandas: `df.to_parquet(url, storage_options={...})`; polars: `write_parquet(url, storage_options=...)`, `sink_parquet(url, storage_options=...)` | both spellings, as Q1. `storage_options=` on `to_parquet`, `to_csv`, `to_json` (and on `komira.pl`'s sink and write verbs once they are built) lands with the write terminals in slice 6b. A `komira.files(...)` destination is invented, since no reference library takes a source object as a destination. With `storage_options=` covering explicit credentials, it is not needed in the first slices and can wait for a later, additive pull request, if the owner still wants it | 6b (`storage_options=`); none (the source destination, later) |
 | Q3 | Whether `register_parquet`, `register_csv` and `register_json` take a URL, and a `komira.files` source | these verbs are komira's own; DuckDB's counterpart is `read_csv('s3://...', delim=';')` in SQL | yes to both. A bare URL means `komira.files(url)` with the chain. A source is the only way to give a remote CSV its parsing options (`delimiter`, `header`) and an explicit credential, since `komira.files` takes no format options. The alternative is a `format=`/`delimiter=` keyword on `komira.files`, which would be invented too | 3, 5a, 5b (their `register_*` part) |
 | Q4 | A Python listing verb | DuckDB: SQL `glob(pattern)` only. pandas and polars have none. pyarrow's `FileSystem.get_file_info(FileSelector(...))` and fsspec's `ls` and `glob` are separate libraries | none. Listing is `s.sql("SELECT file FROM glob(...)")`, whose result already converts to Arrow, pandas and polars. A `komira.glob(pattern) -> list[str]` would be invented; it can be added later without changing the SQL | none |
 | Q5 | Which protocol reads `gs://` | DuckDB reads `gs://` through Google's S3-compatible XML API with HMAC keys | a JSON-API (HTTP/1.1) conformer of the existing `GcsStorageBackend` trait, beside the gRPC one ([decision 2](#2-the-library-and-wire-protocol-for-each-store)). It is a second GCS backend in the tree; the alternatives are named there | 8a |
@@ -234,23 +246,24 @@ behaviour checks it against the pinned version.
 | task | komira (**PROPOSED** unless marked) | pandas | polars | slice |
 |---|---|---|---|---|
 | read Parquet from a URL | `komira.read_parquet("s3://b/k.parquet")`, chain | `pd.read_parquet("s3://b/k.parquet")`. pandas reads `s3` and `gs` URLs through fsspec, or through `pyarrow.fs` when both serve the scheme ([pandas: read_parquet](https://pandas.pydata.org/docs/reference/api/pandas.read_parquet.html)) | `pl.scan_parquet("s3://b/*.parquet")`; credentials are inferred from the environment when `storage_options` is omitted ([polars: scan_parquet](https://docs.pola.rs/api/python/stable/reference/api/polars.scan_parquet.html)) | 4 |
-| the same, with a credential | `komira.read_parquet(komira.files(url, credential=komira.AwsKeys(...), region=...))` (Q1) | `storage_options={"key": ..., "secret": ...}`, passed to `fsspec.open` | `storage_options={"aws_access_key_id": ..., "aws_region": ...}` | 4 |
+| the same, with a credential | `komira.read_parquet(url, storage_options={...})` with pandas' keys and `komira.pl.scan_parquet(url, storage_options={...})` with polars' keys (decision 8); or `komira.read_parquet(komira.files(url, credential=komira.AwsKeys(...), region=...))` (Q1) | `storage_options={"key": ..., "secret": ...}`, passed to `fsspec.open` | `storage_options={"aws_access_key_id": ..., "aws_region": ...}` | 4, 4b |
 | polars-shaped lazy read | `komira.pl.scan_parquet(url or source)`, `scan_csv`, `scan_ndjson` | | `pl.scan_parquet`, `pl.scan_csv`, `pl.scan_ndjson` | 4, 5a, 5b |
 | read CSV or JSON from a URL | `komira.read_csv(url or source, sep=..., header=...)`, `komira.read_json(...)` | `pd.read_csv("s3://...")` *(inferred: the read_parquet page documents the URL schemes; the read_csv page was not read)* | `pl.scan_csv("s3://...")`; polars reads Parquet, CSV, IPC and NDJSON from cloud storage ([polars: cloud storage](https://docs.pola.rs/user-guide/io/cloud-storage/)) | 5a, 5b |
 | bind a SQL name to a URL | `s.register_parquet(name, url or source)`, `register_csv(name, url or source, delimiter=..., header=...)`, `register_json(...)` (Q3); **EXISTS**: `s.add_sql_binding(name, komira.files(url, ...))` for Parquet | | | 3, 5a, 5b |
-| write a frame to a URL | `df.to_parquet("s3://b/k.parquet")`, `to_csv`, `to_json`, chain; with a credential, a `komira.files` destination (Q2) | `df.to_parquet("s3://...", storage_options={...})` ([pandas: to_parquet](https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.to_parquet.html)) | `df.write_parquet("s3://...")`; the [cloud-storage guide](https://docs.pola.rs/user-guide/io/cloud-storage/) says a frame is written by passing a cloud URL | 6b |
+| write a frame to a URL | `df.to_parquet("s3://b/k.parquet")`, `to_csv`, `to_json`, chain; with a credential, `storage_options=` (decision 8), and later perhaps a `komira.files` destination (Q2) | `df.to_parquet("s3://...", storage_options={...})` ([pandas: to_parquet](https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.to_parquet.html)) | `df.write_parquet("s3://...")`; the [cloud-storage guide](https://docs.pola.rs/user-guide/io/cloud-storage/) says a frame is written by passing a cloud URL | 6b |
 | list a prefix | `s.sql("SELECT file FROM glob('s3://b/p/*')")` (Q4) | none | none | 7 |
 
-- **Every reader takes a path, a URL or a `komira.files` source**, and nothing else new. A bare URL
-  is `komira.files(url)` with `komira.AMBIENT`. Readers never read the session's SQL bindings or
+- **Every reader takes a path, a URL or a `komira.files` source**, and `storage_options=` beside a
+  URL (decision 8). A bare URL is `komira.files(url)` with `komira.AMBIENT`. Readers never read the session's SQL bindings or
   scopes (the credentials design, decision 3): a credential is either the chain or the source's own.
 - **`_local_path` stops turning a URL into a path** (slice 1). A string with a scheme (`<letters>://`)
   goes to the library verbatim, as `_write.destination` already sends a write URL. The library then
   serves the URL or refuses it by name. `komira.files` already parses the scheme with the same
   pattern (`_URL` in `_sources.py`), so both doors share one rule.
-- **No `storage_options=`** (Q1). It is the one keyword every reference library has and komira does
-  not, and the reason is the source object: `endpoint`, `region` and `url_style` are its named
-  arguments, and a credential is a named, sealed object, never a dict of secrets in a call.
+- **Two spellings of one source** (Q1). `storage_options=` is what pandas and polars users already
+  write, so komira takes it, each shape with its own library's keys. `komira.files` stays for what a
+  dict cannot say (decision 8). Both build the same plan: a location, its settings, and a credential
+  name.
 
 ### 5. The SQL surface
 
@@ -314,7 +327,7 @@ Slice 6a serves `COPY ... TO 's3://...'`, and slice 6b the three write terminals
 - **Format and codec** follow the existing rules: from `FORMAT`, else the extension after one
   compression suffix (`copy_format_from_path` already looks only at the last segment of a URL).
 - **Credentials.** SQL takes the destination's scope, like any URL (decision 5). A write terminal
-  takes the chain for a bare URL, or the source's own credential (Q2).
+  takes the chain for a bare URL, or `storage_options=` (decision 8, Q2).
 - **Refused by name:** a `gs://`, `az://` or `https://` destination (`STORAGE_WRITE_UNSUPPORTED`,
   replacing today's `STORAGE_URL_REFUSED` for these schemes); the `COPY` options that are refused for
   local files already (`PARTITION_BY` among them, `COPY_OPTION_UNSUPPORTED`).
@@ -342,6 +355,164 @@ Slice 7 adds the table function `glob(pattern)`, DuckDB's name and shape.
   listed in slice 7, and `gs://` once slice 8b wires GCS.
 - **Not added:** the object's size or modification time. DuckDB's `glob` has neither, and adding a
   column later is additive.
+
+### 8. `storage_options=`: a second spelling of a source
+
+`storage_options=` comes with each reader and writer that takes a URL. Slice 4b adds it to
+`komira.read_parquet` and `komira.pl.scan_parquet`, slice 5a to `komira.read_csv` and
+`komira.pl.scan_csv`, slice 5b to `komira.read_json` and `komira.pl.scan_ndjson`, and slice 6b to the
+write terminals `to_parquet`, `to_csv` and `to_json`. `komira.pl`'s sink and write verbs take it when
+they are built. A scheme's rows apply once that scheme is read: the `gs://` rows of the tables below
+are refused with `STORAGE_URL_REFUSED`, as a `gs://` URL is, until slice 8b. It is taken beside a URL, never beside a local path or a `komira.files`
+source (`TypeError`). It is not added to `register_*` or `add_sql_binding`, which are komira's own
+verbs and take a source (Q3).
+
+**What the SDK builds.** The credentials design's decision 4 stands: the plan carries a location,
+the settings needed to reach it, and a credential *name*, never a value. So the SDK splits the dict
+before the library is called:
+
+- **The credential keys** become one credential of the kind they fit: `AwsKeys`, `AwsProfile`,
+  `GcpServiceAccount`, `GcpToken`, `AzureKey` or `AzureSas`. These are the access key id, the secret,
+  the session token, the profile, the Google credentials file or token, the Azure account with its key
+  or SAS. The SDK defines that credential through the C ABI's `komira_credential_add`, `_set` and
+  `_seal`, like any other, under a generated name, `storage-options-<n>`. `<n>` counts the distinct
+  credential values the session has sealed this way.
+- **The other keys** become the source's settings: `region`, `endpoint`, `url_style`, or
+  `komira.ANONYMOUS` for an unsigned read.
+- **No credential key** means `komira.AMBIENT` with those settings, as for a bare URL.
+- The result is exactly the `komira.files(url, credential=..., region=..., endpoint=...,
+  url_style=...)` source the user could have written with a credential named `storage-options-<n>`,
+  and so builds the same plan bytes. The reader then proceeds as it does with that
+  source.
+
+**The generated name.**
+
+- **Scope: the session**, `KOMIRA_BIND_SESSION`. The credentials design's decision 8 defines the call scope
+  (`KOMIRA_BIND_CALL`) only for the next `komira_sql_stream`. The readers and write terminals run
+  through `komira_plan_stream`, and decision 2 already seals a DataFrame reader's source on the
+  session. Because every distinct value gets its own name, sealing one never changes the value of
+  another name, which is the hazard the call scope exists to avoid. The value stays in the
+  session's secret store until the session closes, as any sealed credential does.
+- **Reuse.** A later call whose credential keys are byte-equal to an earlier one's reuses its name.
+  The library's byte-equal rule then keeps its generation. The SDK recognises the repeat by a SHA-256
+  digest of the credential's kind and fields, held in the Python session object only, never in a
+  plan, a render, a message or a log.
+- **Plan identity and caches** (the credentials design's decision 6). The generated name and its generation are
+  part of a read's identity like any other name. Two calls with the same dict read under one name
+  and one generation, so they share footer and metadata cache entries, correctly, since the value is
+  the same. Two calls with different dicts read under two names, so no cache answers one with what
+  the other read. `komira_plan_render` prints the generated name, so their plans render and hash
+  differently. Names are per session, and caches are never shared across sessions, so
+  `storage-options-1` in two sessions never meets.
+- **Reserved.** A user credential whose name starts with `storage-options-` is refused with
+  `ValueError` when it is built, and with `CREDENTIALS_INVALID` through the C ABI. This narrows the
+  credentials design's decision 1 grammar, which reserves only `ambient` and `anonymous`. Slice 4b
+  amends that decision in the same pull request. No release has shipped the grammar: the task pages
+  of ranks 31 and 93 note that the credential classes are newer than the PyPI release 0.1.1623.
+- **A job manager.** `storage_options=` is a local-session spelling. A job manager's admission
+  refuses every credential name with the reserved prefix by name (`CREDENTIAL_UNBOUND`), whatever its
+  secret catalog holds, so a plan can never bind a generated name to a stored secret that happens to
+  share it. A plan meant for a job manager names its credential with `komira.files` and a name the
+  secret store knows.
+- **Cost.** Each distinct value is a new name, kept with its cache entries until the session
+  closes. A program that rotates a short-lived token (`token`, `sas_token`, a bearer token) on every
+  call grows the session's secret store by one value per rotation. Such a program names one
+  credential with `komira.files` and re-adds it, which replaces the value under one name (the
+  credentials design's decision 2).
+
+**Each shape takes its own library's keys.** The pandas-shaped verbs take the keys pandas forwards
+to fsspec ([pandas: read_parquet](https://pandas.pydata.org/docs/reference/api/pandas.read_parquet.html):
+"For other URLs (e.g. starting with "s3://", and "gcs://") the key-value pairs are forwarded to
+`fsspec.open`"). Those keys are the constructor arguments of s3fs, gcsfs and adlfs. The polars-shaped
+verbs take the object_store keys that polars links from `storage_options`
+([polars: scan_parquet](https://docs.pola.rs/api/python/stable/reference/api/polars.scan_parquet.html)).
+Every key komira honours is in the tables below. **Any other key is refused by name, never ignored**:
+`UnsupportedOperation` naming the verb and the key (`storage_options['requester_pays']`), raised
+before the library is called. A value of the wrong type is a `TypeError`. A credential key on a
+scheme it does not fit is a `ValueError`, as `komira.files` raises today. polars' `credential_provider=`,
+a Python callable, is refused by name too: the library resolves credentials itself and never calls
+back into Python (the credentials design's "Options considered").
+
+pandas-shaped verbs ([s3fs](https://s3fs.readthedocs.io/en/latest/api.html),
+[gcsfs](https://gcsfs.readthedocs.io/en/latest/api.html), [adlfs](https://fsspec.github.io/adlfs/api/)):
+
+| scheme | key, as the backend documents it | komira |
+|---|---|---|
+| `s3://` (s3fs) | `key` | `AwsKeys.key_id` |
+| | `secret` | `AwsKeys.secret` |
+| | `token` | `AwsKeys.session_token` |
+| | `profile` (s3fs's examples: `S3FileSystem(profile=...)`) | `AwsProfile(profile=...)` |
+| | `anon=True` | `komira.ANONYMOUS` (slice 2b) |
+| | `endpoint_url`, or `client_kwargs={"endpoint_url": ...}` | `endpoint` |
+| | `client_kwargs={"region_name": ...}` (botocore's client argument; s3fs documents `client_kwargs` as "dict of parameters for the botocore client") | `region` |
+| | anything else, `use_ssl`, `requester_pays`, `config_kwargs`, `s3_additional_kwargs`, `version_aware` and every other key of `client_kwargs` among them | refused by name |
+| `gs://`, `gcs://` (gcsfs) | `token` as a path to a credentials file | `GcpServiceAccount(file=...)` |
+| | `token="anon"` | `komira.ANONYMOUS` |
+| | `token="google_default"`, or no `token` | `komira.AMBIENT` (Application Default Credentials) |
+| | `endpoint_url` | `endpoint` |
+| | `token` as a dict or a credentials object, `token="cache"`, `"browser"` or `"cloud"`, `project`, `access`, `requester_pays`, anything else | refused by name |
+| `az://`, `abfs://`, `abfss://` (adlfs) | `account_name` | the credential's account |
+| | `account_key` | `AzureKey.key` |
+| | `sas_token` | `AzureSas.sas` |
+| | `anon=True` | `komira.ANONYMOUS` |
+| | `account_host` | `endpoint`, as `https://<account_host>` |
+| | `account_key` together with `sas_token` (adlfs signs with the key; komira does not pick one) | refused by name |
+| | `account_name` with neither `account_key` nor `sas_token`, and not `anon=True` (Azure's chain is not served) | refused by name |
+| | `connection_string`, `credential`, `client_id`, `client_secret`, `tenant_id`, anything else | refused by name |
+
+polars-shaped verbs (object_store's [AmazonS3ConfigKey](https://docs.rs/object_store/latest/object_store/aws/enum.AmazonS3ConfigKey.html),
+[GoogleConfigKey](https://docs.rs/object_store/latest/object_store/gcp/enum.GoogleConfigKey.html) and
+[AzureConfigKey](https://docs.rs/object_store/latest/object_store/azure/enum.AzureConfigKey.html), every
+spelling each documents):
+
+| scheme | keys | komira |
+|---|---|---|
+| `s3://` | `aws_access_key_id`, `access_key_id` | `AwsKeys.key_id` |
+| | `aws_secret_access_key`, `secret_access_key` | `AwsKeys.secret` |
+| | `aws_session_token`, `aws_token`, `session_token`, `token` | `AwsKeys.session_token` |
+| | `aws_region`, `region`; else `aws_default_region`, `default_region` | `region` |
+| | `aws_endpoint`, `aws_endpoint_url`, `endpoint`, `endpoint_url` | `endpoint` |
+| | `aws_virtual_hosted_style_request`, `virtual_hosted_style_request` | `url_style`: `"true"` is `vhost`, `"false"` is `path` |
+| | `aws_skip_signature`, `skip_signature` as `"true"` | `komira.ANONYMOUS` (slice 2b) |
+| | anything else: `aws_endpoint_url_s3`, the role, web-identity, container and metadata keys, `aws_request_payer`, `aws_s3_express`, `aws_unsigned_payload`, the conditional-put, tagging, bucket, checksum and encryption keys, and the client keys | refused by name |
+| `gs://`, `gcs://` | `google_service_account`, `service_account`, `google_service_account_path`, `service_account_path`, `google_application_credentials`, `application_credentials` | `GcpServiceAccount(file=...)` |
+| | `google_bearer_token`, `bearer_token` | `GcpToken` |
+| | `google_base_url`, `base_url` | `endpoint` |
+| | `google_skip_signature`, `skip_signature` as `"true"` | `komira.ANONYMOUS` |
+| | anything else: `google_service_account_key`, `service_account_key` (a key inline; `GcpServiceAccount` takes a file), the bucket and client keys | refused by name |
+| `az://`, `abfs://`, `abfss://` | `azure_storage_account_name`, `account_name` | the credential's account |
+| | `azure_storage_account_key`, `azure_storage_access_key`, `azure_storage_master_key`, `access_key`, `account_key`, `master_key` | `AzureKey.key` |
+| | `azure_storage_sas_key`, `azure_storage_sas_token`, `sas_key`, `sas_token` | `AzureSas.sas` |
+| | `azure_storage_endpoint`, `azure_endpoint`, `endpoint` | `endpoint` |
+| | `azure_skip_signature`, `skip_signature` as `"true"` | `komira.ANONYMOUS` |
+| | an account name with neither a key nor a SAS and no `skip_signature` (Azure's chain is not served) | refused by name |
+| | anything else: the bearer-token, client, tenant, authority, managed-identity, federated-token, Azure CLI, Fabric, emulator (`use_emulator`; write the emulator's `endpoint`), container and encryption keys | refused by name |
+| every scheme | the retry keys the polars cloud-storage guide lists (`max_retries`, `retry_timeout_ms`, `retry_init_backoff_ms`, `retry_max_backoff_ms`, `retry_base_multiplier`) | refused by name |
+
+- A key this table maps to `komira.ANONYMOUS` beside a credential key is refused by name: one source
+  has one credential.
+- An anonymous Azure source reads the account from its URL; one whose URL names no account is
+  refused, as `komira.files` refuses it today.
+- An S3 dict with credential keys but no region is refused at bind with `STORAGE_REGION_UNKNOWN`, as a
+  `komira.files` source is. s3fs and object_store find a bucket's region by themselves *(inferred)*;
+  komira does not guess one (the credentials design's owner question on regions).
+- A key that names a store setting komira gains later (requester pays, a connection string, an
+  inline Google key) moves from "refused" to a mapping in its own pull request. That change is
+  additive.
+
+**What `storage_options=` cannot say, and `komira.files` still does:**
+
+- **A URL written inside SQL.** SQL text has no keyword to hang a dict on. A URL in the SQL text
+  takes its credential from a scope, a `komira.files` location ending in `/` bound with
+  `add_sql_binding` (decision 5).
+- **Two identities in one statement.** A SQL statement over two buckets read under two credentials
+  names two bound sources, one per identity.
+- **Catalogs.** `komira.iceberg(...)` carries a catalog credential and, for its table files, a
+  `data_access` credential. Neither is an object-store dict.
+- **A credential a job manager resolves.** That needs a name its secret store knows, which a
+  generated name is not.
+- **CSV options in `register_csv`**, and every binding that outlives one call: these take a source
+  (Q3).
 
 ## How each slice is tested, with no real service
 
@@ -465,19 +636,32 @@ except where the table at the end says so.
   5). Tests: the plan carries the credential's name and no key bytes (every byte of the encoded plan
   checked); the two cross-release tests; a bare URL reads with the chain while a scope bound for SQL
   changes nothing for it. Moves: it removes `probe_read_parquet_url.py`. No status change.
+- **Slice 4b: `storage_options=` on the Parquet readers** (decision 8, Q1). `komira.read_parquet` takes
+  pandas' keys and `komira.pl.scan_parquet` polars' keys. The SDK seals the credential keys under a
+  generated `storage-options-<n>` name on the session and maps the rest to settings. The prefix is
+  reserved, and the credentials design's decision 1 says so. Tests: each `s3://` and `az://` row of both key tables builds
+  the plan bytes of the equivalent `komira.files` source with a credential named
+  `storage-options-<n>`, and each `gs://` row is refused with `STORAGE_URL_REFUSED`; every refused key, one test per row, raises
+  `UnsupportedOperation` naming it, with the message asserted by exact equality; a byte-equal dict
+  reuses the name and its generation, and a different one gets a new name and no shared cache entry;
+  no secret appears in the plan, the render or a message; anonymous beside a credential key, and
+  `account_key` beside `sas_token`, are refused; an S3 dict with no region gives
+  `STORAGE_REGION_UNKNOWN`; `credential_provider=` is refused by name; a user credential named
+  `storage-options-1` raises `ValueError`. Moves: page 31's notes. No status change.
 - **Slice 5a: CSV objects on `s3://` and `az://`.** The CSV scan spec carries the file system, as
   Parquet's does. The scan reads the object's body through it with `read_at` and parses it with
   `read_csv_bytes_to_batch`, decompressing with `decompress_text_bytes_to_buffer`. The binder takes
   the format from the extension, so slice 1's refusal of `.csv` goes. `read_csv('<url>')` and
   `FROM '<url>.csv'` read through the scope. `register_csv` takes a URL or a source (Q3), and so do
-  `komira.read_csv` and `komira.pl.scan_csv`, over `WireScanBinding.access`. Tests: each CSV option
+  `komira.read_csv` and `komira.pl.scan_csv`, over `WireScanBinding.access`, with `storage_options=`
+  as in slice 4b for `komira.read_csv` and `komira.pl.scan_csv`. Tests: each CSV option
   over a stand-in equals the same file read locally; `.csv.gz` and `.csv.zst`; a missing object gives
   `STORAGE_NOT_FOUND`; the two cross-release tests for a CSV scan. Moves: it removes
   `probe_csv_object.py`. **Rank 31 may become `works`**: Parquet and CSV are read from `s3://` with
   the chain or explicit keys, through SQL and the DataFrame readers. Its page shows CSV, and page
   93's notes change.
 - **Slice 5b: JSON objects on `s3://` and `az://`.** The same as 5a for the JSONL scan: `read_json`,
-  `register_json`, `komira.read_json` and `komira.pl.scan_ndjson`. Tests mirror 5a's, with
+  `register_json`, `komira.read_json` and `komira.pl.scan_ndjson`, with `storage_options=`. Tests mirror 5a's, with
   `.jsonl.zst`. No status change.
 - **Slice 6a: `COPY ... TO 's3://...'`.** The SQL door's write through the run's file system (decision 6),
   with PUT and the multipart verbs added to `FakeS3`. Tests: one PutObject for a small file and a
@@ -488,8 +672,9 @@ except where the table at the end says so.
   with `example.py`, its stand-in, `expected_output.txt` and `page.md`, writing with `COPY`. **Rank
   32 may become `works`.**
 - **Slice 6b: The DataFrame write terminals on `s3://`.** `to_parquet`, `to_csv` and `to_json` of an
-  `s3://` URL or a `komira.files` destination (Q2) through `run_plan_write`. This adds
-  `WireWriteTarget.access` with format version 6. Tests: slice 6a's, through the plan door; the two
+  `s3://` URL, bare or with `storage_options=` (decision 8, Q2), through `run_plan_write`. This adds
+  `WireWriteTarget.access` with format version 6. A `komira.files` destination is not in this slice
+  (Q2). Tests: slice 6a's, through the plan door; slice 4b's key cases on a writer; the two
   cross-release tests. Moves: page 32 gains `to_parquet`. No status change.
 - **Slice 7: Listing: the `glob` table function** (decision 7, Q6), over local paths, `s3://` and `az://`.
   This adds List Blobs to the in-memory Azure fake. Tests: `*`, `?`, `[...]` and `**` over a
@@ -502,7 +687,8 @@ except where the table at the end says so.
 - **Slice 8b: `gs://` in libkomira.** `StoreFs` gains GCS; `so` builds the token source from ADC,
   `GcpServiceAccount`, `GcpToken` or `ANONYMOUS`; the default `gs://` scope reads with ADC; Parquet,
   CSV and JSON reads and `glob` reach it. Tests: in Mojo over the in-memory and JSON backends, with
-  ADC under `MapEnv` and `MapFiles` and the metadata probe faked. No status change.
+  ADC under `MapEnv` and `MapFiles` and the metadata probe faked; each `gs://` row of decision 8's key
+  tables builds its source. No status change.
 - **Slice 8c: The Python stand-in and the pages.** A `FakeGcs` serving the JSON API in
   `objectstore_fakes.py`, the Python tests over it, and the pages. Moves: page 93 shows `gs://`, and
   page 96 drops its `gs://` note. **Rank 93 may become `works`, and rank 96 `works`.**
@@ -519,7 +705,7 @@ Only as far as is true after the slice lands:
 | after slice | 31 | 32 | 93 | 96 |
 |---|---|---|---|---|
 | today | partial | gap | partial | gap |
-| 1 to 4 | partial | gap | partial | gap |
+| 1 to 4b | partial | gap | partial | gap |
 | 5a | **works** | gap | partial | gap |
 | 5b | works | gap | partial | gap |
 | 6a | works | **works** | partial | gap |
