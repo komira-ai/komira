@@ -33,7 +33,7 @@ install time or when it runs.
 | platform | **Linux on x86_64**. Linux on arm64 and macOS on Apple silicon have platform packages in the design, but not built yet (specified). There is no Windows package. |
 | C library | **glibc 2.35 or newer**, as for the Python wheel: for example Ubuntu 22.04 or newer, Debian 12 or newer and Fedora 36 or newer have it; RHEL 9 (glibc 2.34), Debian 11 and Alpine (musl) do not. `ldd --version` prints yours on its first line. |
 | CPU | **x86-64-v3**: AVX2, BMI2 and FMA. Intel CPUs from Haswell on and AMD CPUs from Excavator on have it, except some low-end Pentium, Celeron and Atom models. |
-| Node.js | **22.12 or newer** (the package's `engines`): 22.12 is the first Node.js 22 that loads an ES module through `require`. The tests run on Node.js 24.21.0; 22 and 26 are not tested yet. Deno, Bun and Electron are not supported. |
+| Node.js | **22.12 or newer** (the package's `engines`): 22.12 is the first Node.js 22 that loads an ES module through `require`. `//node:install_test` installs the package with npm into an empty project and runs it on Node.js 22.23.5, 24.21.0 and 26.13.1; the other tests run on 24.21.0. Deno, Bun and Electron are not supported. |
 | apache-arrow | **`^21.2.0`**, the peer dependency npm installs. The tests run 21.2.0. |
 | C++ runtime | the system `libstdc++`. Most systems have it; a minimal container image may need the `libstdc++6` package (Debian, Ubuntu) or `libstdc++` (Fedora, RHEL). |
 

@@ -18,7 +18,7 @@ npm install @komira-ai/komira
 
 npm installs `apache-arrow`, the peer dependency, and the platform package for your machine with it.
 The package needs Linux on x86_64 with glibc 2.35 or newer and an x86-64-v3 CPU, and Node.js 22.12
-or newer (the tests run 24.21.0).
+or newer (an npm install of it is tested on Node.js 22, 24 and 26).
 [Installing komira for Node.js](../docs/install_node.md) has the details and what to do when
 something goes wrong.
 
@@ -351,6 +351,22 @@ among them), or when the manifest's `repository.url` is not komira's. Each carri
 stamped: unstamped, as in a pull request, it is `0.0.0` and stays private; the release stamp gives
 `0.1.<N>`, the wheel's version, on the package and on every optional dependency. Nothing publishes
 them yet.
+
+`:install_test` installs them as a user does: the pinned npm 11.20.0
+([third_party/node](../third_party/node/README.md)) runs `npm install --offline --ignore-scripts
+--engine-strict` in an empty project whose `package.json` depends on `:package` alone and overrides
+every other name to its tarball, so npm resolves the platform package (from the main package's
+`optionalDependencies`, by `os`, `cpu` and `libc`), the peer `apache-arrow` and its dependencies
+to `:package_linux_x64` and the pinned tarballs, and reaches no registry
+([tools/build/node/README.md](../tools/build/node/README.md), `npm_install_test`). A package npm
+marks as having an install script fails it. Then the files of [`install/`](install/) run in that
+project and import the package by its name. Each pinned Node.js line, 22.23.5, 24.21.0 and
+26.13.1, is its own action (`[node_22]`, `[node_24]`, `[node_26]`).
+
+| file | what it proves |
+|---|---|
+| [`install/install.test.ts`](install/install.test.ts) | npm installed the main package, of its platform packages only `komira-linux-x64-gnu` (marked optional, with its `os`, `cpu` and `libc`), and `apache-arrow` 21.2.0 as the peer the project does not name; the package by its name is the one in `node_modules`, at its `package.json`'s version (`0.0.0` or `0.1.<N>`), as is its platform package; its public names exactly; the environment holds no Mojo or conda variable and its one library path is node's C++ runtime (`libgcc_s.so.1` and `libstdc++.so.6`, with `libatomic.so.1` on Node 26, nothing else); libkomira loads (ABI major 1), and the addon, `libkomira.so` and the three Mojo runtime libraries are mapped from the installed platform package and from nowhere else (`process.report`'s shared objects); `SELECT 1 AS n` is one INT32 row, a `Table` and `RecordBatch`es of the installed `apache-arrow` (`instanceof`); a `GROUP BY` over the Parquet, CSV and NDJSON fixtures ([`install/fixtures/`](install/fixtures/), the same eight rows) answers DuckDB's rows and BIGINT columns |
+| [`install/commonjs.test.cjs`](install/commonjs.test.cjs) | `require()` of the package by its name from a `.cjs` file gives its public names and its `package.json`'s version, and its `Session` answers `SELECT 1` |
 
 ### Tests
 

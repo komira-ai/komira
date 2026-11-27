@@ -1,8 +1,16 @@
-load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "node_addon", "node_binding_test")
+load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "node_addon", "node_binding_test", "npm_install_test")
 load("@komira//tools/build/node:modules.bzl", "tsc_build", "tsc_check")
 load("@komira//src/tests/conformance/komira_sql_conformance:tables.bzl", "CORPUS_TABLES", "corpus_tables")
 load("@komira//tools/build/package:npm.bzl", "npm_tarball")
 load("@komira//tools/build/package/libkomira:packaged.bzl", "DIST_LICENSE_EXPRESSION", "DIST_LICENSE_FILES", "DIST_NATIVE_NEEDS")
+load(":install_test.bzl", "INSTALL_DATA", "INSTALL_FILES", "INSTALL_NODES", "INSTALL_REGISTRY", "INSTALL_TESTS")
+
+# The failing cases of :install_test (tools/build/tests/negative/node), which
+# install the packages below and the test's files. That package is in the
+# `tests` cell, which only komira's own checkout has; a label naming it
+# would fail to load in a repository that uses komira as a cell, so it is
+# named only when the cell exists.
+_NEGATIVE = ["tests//negative/node:"] if read_root_config("cells", "tests") else []
 
 # The Node-API addon over libkomira, built with the pinned zig against the
 # headers of the pinned node. README.md says what it exposes and why it opens
@@ -240,6 +248,7 @@ npm_tarball(
         "NOTICE": "komira//:NOTICE",
         "dist": ":dist",
     },
+    visibility = ["komira//ci:"] + _NEGATIVE,
 )
 
 # @komira-ai/komira-linux-x64-gnu: the addon, libkomira's self-contained native
@@ -256,7 +265,36 @@ npm_tarball(
         "komira_addon.node": ":komira_addon",
         "native": "komira//src/so:libkomira[dist]",
     } | DIST_LICENSE_FILES,
+    visibility = ["komira//ci:"] + _NEGATIVE,
     **DIST_NATIVE_NEEDS["linux-x86_64"]
+)
+
+# ---- From the installed package (docs/design/typescript_package.md, section 5)
+#
+# The tarballs above as a user installs them: the pinned npm (third_party/
+# node, :npm) installs :package into an empty project, offline and with
+# --ignore-scripts, and npm resolves its platform package to
+# :package_linux_x64 and its peer, apache-arrow, to the pinned tarballs. Then
+# install/install.test.ts and install/commonjs.test.cjs import the package by
+# its name from that project: what npm installed, the public names, the load
+# of libkomira from the platform package alone, SELECT 1, a GROUP BY over the
+# Parquet, CSV and NDJSON fixtures, apache-arrow's classes, and require() from
+# CommonJS. Once per pinned Node.js line, 22, 24 and 26 (`[node_22]`,
+# `[node_24]`, `[node_26]`), each its own action; a package npm marks as
+# having an install script fails it (tools/build/node/README.md).
+[export_file(
+    name = "install/" + f,
+    src = "install/" + f,
+    visibility = _NEGATIVE,
+) for f in INSTALL_FILES]
+
+npm_install_test(
+    name = "install_test",
+    install = ":package",
+    tarballs = [":package_linux_x64"] + INSTALL_REGISTRY,
+    data = INSTALL_DATA,
+    test_files = INSTALL_TESTS,
+    nodes = INSTALL_NODES,
 )
 
 # Stand-ins for the package's tests: a library of ABI 1.1 that loads, and two

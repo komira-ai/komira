@@ -24,20 +24,21 @@ Test support: [`tartest.zig`](tartest.zig) builds tar and gzip archives in memor
 
 ## node_act
 
-`node_act` is the second program of this directory: the actions of the `node_dist`, `npm_package`, `node_test`, `node_binding_test` and `esbuild_bundle` rules
-([`tools/build/node/defs.bzl`](../node/defs.bzl)), which were busybox scripts. A Zig tool, built behind its unit tests; no shell.
+`node_act` is the second program of this directory: the actions of the `node_dist`, `npm_package`, `node_test`, `node_binding_test`, `npm_install_test` and `esbuild_bundle` rules
+([`tools/build/node/defs.bzl`](../node/defs.bzl)), which but `npm_install_test`'s were busybox scripts. A Zig tool, built behind its unit tests; no shell.
 
 ```
 node_act dist --archive <tgz> --out <dir> --top <dir> --version <v> --libs <dir>
 node_act npm-package --tarball <tgz> --out <dir> --name <n> --version <v> --integrity <sha512-b64> --exe <path|-> --node <dir> --libs <dir> --js <program>
 node_act node-test --node <dir> --libs <dir> --out <file> --dir <dir> --script <path> --expect <pass|fail> --error <text> -- <args>...
 node_act binding-test --node <dir> --libs <dir> --out <file> --dir <dir> [--cover <path>]... -- <test file>...
+node_act install-test --node <dir> --libs <dir> --npm <dir> --out <file> --dir <dir> --install <tgz> [--tarball <tgz>]... -- <test file>...
 node_act esbuild-bundle --esbuild <exe> --dir <dir> --entry <path> --out <file> --format <cjs|esm>
 ```
 
 | file | what it holds | its tests |
 |---|---|---|
-| [`node_act.zig`](node_act.zig) | the five subcommands, their messages and exit statuses (those of the scripts), the environments node is run in | [`node_act_test.zig`](node_act_test.zig) and `tests//functional/node_act:driver` (a stand-in for node, for an npm package's executable and for esbuild) |
+| [`node_act.zig`](node_act.zig) | the six subcommands, their messages and exit statuses (those of the scripts), the environments node is run in | [`node_act_test.zig`](node_act_test.zig) and `tests//functional/node_act:driver` (a stand-in for node, for an npm package's executable and for esbuild) |
 | [`act_util/extract.zig`](../act_util/extract.zig) | `tar -xzf` of the entries below one top directory, kept by a predicate: the archive's modes (executable or 0644), links kept (shared with the python rule) | [`extract_test.zig`](../act_util/extract_test.zig): another top, `..`, links, modes |
 
 `binding-test` with `--cover` (`node_binding_test`'s `covered_srcs`) also has node write an lcov
@@ -45,5 +46,12 @@ report of exactly those files, and fails, printing each file's lines and branche
 every one has a record (`<path> is to be covered, and no test loaded it`) and their lines and their
 branches together are each at least 99% covered (`the line coverage of the covered sources is <p>% (<h>
 of <f> lines), under 99%`, and the same for branches).
+
+`install-test` reads each tarball's package name from its top `package.json` (any top directory, as npm
+drops it), writes the project's `package.json` (the `--install` package a `file:` dependency, every other
+an override), runs npm, refuses a package its `package-lock.json` marks `hasInstallScript` (`install_test:
+npm reports an install script in <path>, and npm install is the only step: a package runs nothing at
+install`), and then runs the tests as `binding-test` does, from the project. Its unit tests hold each of
+those parts; npm itself runs in `//node:install_test` and the `install_*` cases of `tests//negative/node`.
 
 The `c_shared_lib` rule needs no tool of its own: it runs the pinned zig through `zig_launch`.

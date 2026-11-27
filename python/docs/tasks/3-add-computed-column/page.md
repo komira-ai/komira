@@ -74,5 +74,5 @@ int64 float64 float64
 
 - [How do I select columns and filter rows?](../2-select-columns-filter-rows/page.md) (rank 2, works)
 - How do I add a column with if/else (case when) logic? (rank 30, works; no page yet)
-- How do I change a column's data type? (rank 12, works; no page yet)
-- How do I apply a function to every value in a column? (rank 17, partial; no page yet)
+- [How do I change a column's data type?](../12-change-column-data-type/page.md) (rank 12, works)
+- [How do I apply a function to every value in a column?](../17-apply-function-value-column/page.md) (rank 17, partial)

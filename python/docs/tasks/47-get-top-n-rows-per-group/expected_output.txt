@@ -1,0 +1,2 @@
+[{'region': 'east', 'rep': 'Cy', 'amount': 200}, {'region': 'east', 'rep': 'Di', 'amount': 150}, {'region': 'north', 'rep': 'Hal', 'amount': 50}, {'region': 'west', 'rep': 'Gus', 'amount': 300}, {'region': 'west', 'rep': 'Ed', 'amount': 90}]
+[{'region': 'east', 'rep': 'Cy', 'amount': 200}, {'region': 'east', 'rep': 'Di', 'amount': 150}, {'region': 'north', 'rep': 'Hal', 'amount': 50}, {'region': 'west', 'rep': 'Gus', 'amount': 300}, {'region': 'west', 'rep': 'Ed', 'amount': 90}]
