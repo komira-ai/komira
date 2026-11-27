@@ -692,6 +692,8 @@ def test_every_name_in_the_frame_table_raises_its_message_on_a_frame():
                   "then call .to_pandas() on the Result", "frame")
     check_refused(df, "join", "DataFrame.join joins on the index, which komira frames do not have; "
                   "use merge(other, on=...)", "frame")
+    check_refused(df, "shift", 'DataFrame.shift() of every column is not supported yet: take one column, '
+                  'as df["column"].shift()', "frame")
 
 
 def test_every_name_in_the_series_table_raises_its_message_on_a_series():
@@ -703,6 +705,9 @@ def test_every_name_in_the_series_table_raises_its_message_on_a_series():
     check_refused(s, "values", ".values needs the rows: run the frame with materialize(), "
                   "then convert the Result with to_pandas()", "series")
     assert "join" not in _refusals.SERIES
+    for name in ("shift", "diff", "pct_change"):
+        assert name not in _refusals.SERIES and callable(getattr(s, name)), name
+    check_refused(s, "ffill", ".ffill() is not supported yet", "series")
 
 
 def test_every_name_in_the_module_table_raises_its_message_on_the_module():

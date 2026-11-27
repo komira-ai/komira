@@ -20,7 +20,8 @@ nothing. It is used inside its own frame's verbs: `df[s]` filters by it and
   string methods of a string Series and `s.dt` the date and time methods of a
   timestamp or date32 Series (komira/_accessors.py); on a Series of another
   type each raises `AttributeError`, so `hasattr(s, "str")` is False.
-- The window verbs (`cumsum`, `cummin`, `cummax`, `rank`, `rolling`) give a
+- The window verbs (`cumsum`, `cummin`, `cummax`, `rank`, `rolling`, `shift`,
+  `diff`, `pct_change`) give a
   Series that reads windows (komira/_windows.py); operators combine it with
   others as any Series, carrying the windows along.
 - Numeric operands of an operator or a comparison are widened to one type
@@ -351,6 +352,78 @@ class Series:
             if value != default:
                 raise UnsupportedOperation(f"rolling({name}={value!r}) is not supported: leave {name} at its default")
         return _windows.Rolling._of(self, column, window, min_periods)
+
+    def shift(
+        self,
+        periods: int = 1,
+        freq: object = None,
+        axis: object = 0,
+        fill_value: object = None,
+        suffix: object = None,
+    ) -> Series:
+        """The value `periods` rows before each row in the frame's sort order,
+        or `-periods` rows after it when `periods` is negative; missing where
+        there is no such row (the first `periods` rows, or the last
+        `-periods`). pandas documents `Series.shift` as shifting the data by
+        `periods` with a missing value where no data is shifted in
+        (https://pandas.pydata.org/docs/reference/api/pandas.Series.shift.html).
+        The frame must be sorted (`sort_values`). The Series keeps the
+        column's type, an int64, float64 or string column; `freq`,
+        `fill_value` and `suffix` are refused."""
+        _check_axis(axis, "shift")
+        column = self._column("shift()")
+        if freq is not None:
+            raise UnsupportedOperation(
+                f"shift(freq={freq!r}) moves a time index, which komira frames do not have: leave freq=None"
+            )
+        if fill_value is not None:
+            raise UnsupportedOperation(
+                f"shift(fill_value={fill_value!r}) is not supported: a row with no row to read is missing, "
+                "leave fill_value at its default"
+            )
+        if suffix is not None:
+            raise UnsupportedOperation(
+                f"shift(suffix={suffix!r}) names the columns of a frame shifted by several periods; "
+                "a Series shifts once: leave suffix=None"
+            )
+        built = _windows.shift(self._frame, column, periods)
+        return self._windowed(built.node, built.windows)
+
+    def diff(self, periods: int = 1) -> Series:
+        """Each value less the value `periods` rows before it in the frame's
+        sort order (after it when negative): `s - s.shift(periods)`, as pandas
+        documents `Series.diff`
+        (https://pandas.pydata.org/docs/reference/api/pandas.Series.diff.html);
+        missing where there is no such row. The answer is float64, as pandas
+        gives it for an int64 column. The frame must be sorted."""
+        column = self._column("diff()")
+        built = _windows.diff(self._frame, column, periods)
+        return self._windowed(built.node, built.windows)
+
+    def pct_change(self, periods: int = 1, fill_method: object = None, freq: object = None, **kwargs: object) -> Series:
+        """The fractional change from the value `periods` rows before:
+        `s / s.shift(periods) - 1`, as pandas documents `Series.pct_change`
+        (https://pandas.pydata.org/docs/reference/api/pandas.Series.pct_change.html),
+        as float64; missing where there is no such row or either value is
+        missing. Over a previous value of 0 it is inf, -inf or NaN, as pandas
+        divides. Missing values are not filled first (`fill_method=None`,
+        pandas' default); `freq` and other arguments are refused. The frame
+        must be sorted."""
+        column = self._column("pct_change()")
+        if fill_method is not None:
+            raise UnsupportedOperation(
+                f"pct_change(fill_method={fill_method!r}) fills missing values from a neighbouring row first, "
+                "which this release does not build: leave fill_method=None"
+            )
+        if freq is not None:
+            raise UnsupportedOperation(
+                f"pct_change(freq={freq!r}) moves a time index, which komira frames do not have: leave freq=None"
+            )
+        if kwargs:
+            name = sorted(kwargs)[0]
+            raise UnsupportedOperation(f"pct_change({name}=...) is not supported: pct_change takes periods alone")
+        built = _windows.pct_change(self._frame, column, periods)
+        return self._windowed(built.node, built.windows)
 
     def __repr__(self) -> str:
         if self._generation != self._frame._generation:

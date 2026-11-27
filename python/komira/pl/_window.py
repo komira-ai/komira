@@ -1,4 +1,5 @@
-"""Windows of komira.pl: `over`, `rank`, `cum_*` and `rolling_*`, and the plan
+"""Windows of komira.pl: `over`, `rank`, `cum_*`, `rolling_*`, `shift` and
+`diff`, and the plan
 a row-wise verb builds for the windows its expressions gather.
 
 A window is a `WindowExpr` item of a `Project`, which the plan encoder writes
@@ -32,12 +33,18 @@ How each polars answer is built (rules sections 7 and 8):
   rows in the other order;
 - `rolling_*` is the window over the `window_size` rows up to the current
   one, null where fewer than `min_samples` of them (`window_size` when not
-  given) are not null.
+  given) are not null;
+- `shift(n)` is LAG by `n` rows in that order, or LEAD by `-n` when `n` is
+  negative, null where there is no such row; `diff(n)` is the value less
+  its `shift(n)` (`null_behavior="ignore"`, polars' default). LAG and LEAD
+  read int64, float64 and string columns, so an int8 to int32 or a float32
+  column is shifted through int64 or float64 and cast back.
 
 The types are polars' (komira/pl/_types.py): a rank is an Int64 (polars:
 UInt32), an `"average"` rank a Float64, a cumulative or rolling sum is typed as
 `sum`, a rolling mean is a Float64 (Float32 over a Float32), and a minimum or
-maximum keeps the column's type.
+maximum keeps the column's type, and so do `shift` and `diff`. polars' diff
+of an unsigned column is signed, and is refused here.
 """
 
 from __future__ import annotations
@@ -47,7 +54,7 @@ from komira._ops import Arith, Cast, ColRef, Compare, Frame, Lit, Project, SortK
 
 from ._scope import WINDOW_ARGS
 
-__all__ = ["carried", "cumulative", "over", "rank", "rolling", "windowed"]
+__all__ = ["carried", "cumulative", "diff", "over", "rank", "rolling", "shift", "windowed"]
 
 _RUNNING = Frame("rows", "unbounded_preceding", "current_row")
 
@@ -274,6 +281,86 @@ def rolling(inner, func: str, window_size, weights, min_samples, center):
         values = scope.window("count", arg, what, order=order, frame=frame)
         out = E._case(((Compare("lt", values, Lit(least)), Lit(None)),), value, scope, verb)
         return out if scope.arrow_type(out) == final else Cast(out, final)
+
+    return E.Expr(lower, inner._name, False)
+
+
+# The type LAG and LEAD read a column of each type through, None for the
+# column's own: polars' shift keeps the type, and so does its diff.
+_SHIFTS = {
+    "int8": "int64",
+    "int16": "int64",
+    "int32": "int64",
+    "int64": None,
+    "float32": "float64",
+    "float64": None,
+    "string": None,
+}
+_DIFFS = frozenset({"int8", "int16", "int32", "int64", "float32", "float64"})
+
+
+def _rows_arg(verb: str, value) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{verb}: n must be an int, the number of rows, not {type(value).__name__}")
+    return value
+
+
+def _previous(scope, arg, n: int, verb: str, what: str, types):
+    """`arg` `n` rows before each row in the scope's order (after it when
+    `n` is negative), null where there is no such row, read through the
+    wider type of `_SHIFTS`; and that read type of `arg` itself."""
+    order = scope.order(what)
+    found = scope.arrow_type(arg)
+    if found not in types:
+        to = "int64, float64 or string" if "string" in types else "int64 or float64"
+        raise UnsupportedOperation(f"{verb} of a column of type {found} is not supported yet; cast it to {to}")
+    read = _SHIFTS[found]
+    wide = arg if read is None else Cast(arg, read)
+    if n == 0:
+        return wide, wide
+    func = "lag" if n > 0 else "lead"
+    return scope.window(func, wide, what, order=order, offset=abs(n)), wide
+
+
+def _narrowed(scope, node, found: str):
+    return node if scope.arrow_type(node) == found else Cast(node, found)
+
+
+def shift(inner, n, fill_value):
+    """`inner.shift(n, fill_value=...)`."""
+    E = _expr()
+    rows = _rows_arg("shift", n)
+    if fill_value is not None:
+        raise UnsupportedOperation("shift: fill_value= is not supported; a row with no row to read is null")
+    inner._no_agg("shift")
+    what = f"shift({rows})"
+
+    def lower(scope):
+        arg = inner._lower(scope)
+        before, _ = _previous(scope, arg, rows, "shift", what, _SHIFTS)
+        return _narrowed(scope, before, scope.arrow_type(arg))
+
+    return E.Expr(lower, inner._name, False)
+
+
+def diff(inner, n, null_behavior):
+    """`inner.diff(n, null_behavior)`."""
+    E = _expr()
+    rows = _rows_arg("diff", n)
+    if null_behavior == "drop":
+        raise UnsupportedOperation(
+            "diff: null_behavior='drop' leaves out the first rows, which changes the number of rows; "
+            "only null_behavior='ignore' is supported"
+        )
+    if null_behavior != "ignore":
+        raise ValueError(f"diff: null_behavior must be 'ignore' or 'drop', not {null_behavior!r}")
+    inner._no_agg("diff")
+    what = f"diff({rows})"
+
+    def lower(scope):
+        arg = inner._lower(scope)
+        before, wide = _previous(scope, arg, rows, "diff", what, _DIFFS)
+        return _narrowed(scope, Arith("sub", wide, before), scope.arrow_type(arg))
 
     return E.Expr(lower, inner._name, False)
 

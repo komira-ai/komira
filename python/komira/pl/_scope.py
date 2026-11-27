@@ -276,14 +276,15 @@ class Scope:
                 self.column(key.column)
         return Scope(self._fields, self._verb, windows=windows, over=(keys, order))
 
-    def window(self, func: str, arg: Node | None, what: str, *, order=(), frame=None) -> ColRef:
+    def window(self, func: str, arg: Node | None, what: str, *, order=(), frame=None, offset: int = 0) -> ColRef:
         """A reference to the window `func` of `arg` (a node, or None for a
         ranking) over the partition of the enclosing `over()`, ordered by
-        `order` and reading `frame`."""
+        `order` and reading `frame`; `offset` is the row distance of a lag or
+        lead."""
         windows = self._need_windows(what)
         column = None if arg is None else windows.column(arg)
         partition = self._over[0] if self._over is not None else ()
-        return windows.window(WindowExpr(func, column, 0, partition, tuple(order), frame))
+        return windows.window(WindowExpr(func, column, offset, partition, tuple(order), frame))
 
     def sort_key(self, node: Node, what: str, descending: bool) -> SortKey:
         """`node` as a window's order key, its nulls last: a column of its

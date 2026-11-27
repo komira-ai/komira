@@ -88,7 +88,7 @@ Output:
 - The timestamps must be a timestamp column, as Parquet and Arrow give. A CSV file with `YYYY-MM-DD HH:MM:SS` text reads that column as text, which `date_diff` refuses by name.
 - The first event of each user has no previous event (`lag` is NULL), so it starts session 1.
 - Sessions are numbered per user from 1. Sort the result with `ORDER BY`: rows come back in no promised order otherwise.
-- The pandas-shaped frame has no `shift` or `diff` yet, so there is no frame form of this task today.
+- The pandas-shaped frame's `shift` and `diff` read integer, float and text columns and not timestamps, as `lag` does, so there is no frame form of this task today.
 
 ## Related
 

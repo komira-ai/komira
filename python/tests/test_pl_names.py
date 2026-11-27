@@ -146,7 +146,7 @@ def test_expr_refusal_table_and_python_message():
     for name, message in EXPR_TABLE.items():
         assert not hasattr(e, name), name
         refused(lambda: getattr(e, name), AttributeError, message)
-    refused(lambda: e.shift, AttributeError, "'Expr' object has no attribute 'shift'")
+    refused(lambda: e.pct_change, AttributeError, "'Expr' object has no attribute 'pct_change'")
     refused(lambda: e.str.split, AttributeError, "'ExprStringNameSpace' object has no attribute 'split'")
     refused(lambda: kpl.when(e > 1).else_, AttributeError, "'When' object has no attribute 'else_'")
     refused(lambda: kpl.when(e > 1).then(1).else_, AttributeError, "'Then' object has no attribute 'else_'")

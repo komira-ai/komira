@@ -20,6 +20,12 @@ filter by, alone or in an expression:
   **`rolling(n, min_periods=None)`** with `sum()`, `mean()`, `min()` and
   `max()` (float64; missing when fewer than `min_periods`, by default `n`, of
   the window's rows hold a value).
+- On a sorted frame, **`shift(periods=1)`** of a column: the value `periods`
+  rows before, or `-periods` rows after when negative, missing where there is
+  no such row; the column keeps its type (int64, float64 or string). **`diff(periods=1)`**
+  is `s - s.shift(periods)` and **`pct_change(periods=1)`** is
+  `s / s.shift(periods) - 1`, both float64 as pandas gives them; a previous
+  value of 0 makes `pct_change` inf, -inf or NaN, as pandas divides.
 - **`rank(method="min")` or `rank(method="dense")`** of a column or of a
   group's column, as float64, a missing value's rank missing
   (`na_option="keep"`), last (`"bottom"`) or first (`"top"`).
@@ -30,8 +36,11 @@ stale, so take `df.groupby(k)["c"]` again for each window you set, and set a
 window of a sorted frame on that sorted frame, not on the frame it was sorted
 from.
 
-**Refused by name** with `UnsupportedOperation`: a running or rolling window
-of a frame that is not sorted; pandas' default `rank(method="average")`, and
+**Refused by name** with `UnsupportedOperation`: a running, rolling or
+shifted window of a frame that is not sorted; `shift` of a column of another
+type than int64, float64 or string, and its `fill_value`, `freq` and
+`suffix`; `pct_change(fill_method=...)` and `freq`; `df.shift()` and the
+others over every column of a frame; pandas' default `rank(method="average")`, and
 `"max"` and `"first"`; `rank(pct=True)`; a centred or time-based `rolling`; a
 Python function in `transform`.
 

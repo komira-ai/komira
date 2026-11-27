@@ -1038,7 +1038,8 @@ _FAMILY_FILES = {d: glob([d + "/test_*.py"]) for d in _FAMILIES}
 # DuckDB (test_frame_join_window_duckdb.py): the duckdb/ family's inputs, and
 # duckdb/test_frame_duckdb.py staged beside it, whose comparator, left file and
 # Case type it uses; each program equals DuckDB's answer to the SQL that means
-# the same over two Parquet files written in the test.
+# the same over two Parquet files written in the test. shift, diff and
+# pct_change are also held to pandas' own answer, so pandas is a dependency.
 python_binding_test(
     name = "frame_join_window_duckdb_test",
     src = "test_frame_join_window_duckdb.py",
@@ -1047,6 +1048,7 @@ python_binding_test(
     deps = [
         "//python:komira_with_plan_modules",
         "komira//third_party/python:duckdb",
+        "komira//third_party/python:pandas",
         "komira//third_party/python:protobuf",
         "komira//third_party/python:pyarrow",
     ],

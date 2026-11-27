@@ -40,7 +40,7 @@ again. The install test runs this program on the installed wheel.
   [what the engine runs today](aggregates_engine.md) and
   [drop_duplicates](drop_duplicates.md).
 - [merge, and isin with another frame](merge.md) (newer than 0.1.1623): joins.
-- [Windows](windows.md): `transform`, `cumsum`, `cummin`, `cummax`, `rolling`, `rank` (newer than 0.1.1623).
+- [Windows](windows.md): `transform`, `cumsum`, `cummin`, `cummax`, `rolling`, `rank`, `shift`, `diff`, `pct_change` (newer than 0.1.1623).
 - [In a notebook](display.md).
 
 The polars-shaped surface, `komira.pl`, is in [../pl/](../pl/frames.md).
