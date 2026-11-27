@@ -2,7 +2,7 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of so that holds
 # pointers.
 # =============================================================================
-# Twenty-six `@export abi("C")` functions are the library's whole surface today. Their C
+# Twenty-seven `@export abi("C")` functions are the library's whole surface today. Their C
 # prototypes are komira.h, which `//src/so:komira_abi` makes from the golden `abi/komira.tsv`
 # (one row per export, with its types and the version that added it) and builds only while this
 # file's exports are exactly the golden's rows; `src/so/README.md` lists them in prose.
@@ -70,6 +70,7 @@ from so.sources import (
     is_cancelled_error,
     json_binding_bytes,
     parquet_schema_bytes,
+    parquet_source_bytes,
     plan_render_text,
     plan_result,
     register_arrow,
@@ -331,6 +332,26 @@ def _copy_in(plan: _Bytes, plan_len: UInt64) -> List[UInt8]:
     return bytes^
 
 
+def _nulls(ctx: Handle, first: Int, second: Int, refusal: String) -> Int32:
+    """A call's first refusals: `KOMIRA_ERR_NULL_CTX` for a NULL `ctx`; else the last
+    error is cleared, and a NULL `first` or `second` (required pointers' addresses) is
+    `KOMIRA_ERR_NULL_ARG` with `refusal` as the last error; `KOMIRA_OK` otherwise."""
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if first == 0 or second == 0:
+        session[].set_error(refusal)
+        return KOMIRA_ERR_NULL_ARG
+    return KOMIRA_OK
+
+
+def _bind_refusal(session: UnsafePointer[Session, MutUntrackedOrigin], e: Error) -> Int32:
+    """`KOMIRA_ERR_ENGINE`, with `e` stored as the last error at step bind."""
+    session[].set_error(String(e), KOMIRA_STEP_BIND)
+    return KOMIRA_ERR_ENGINE
+
+
 def _emit(
     session: UnsafePointer[Session, MutUntrackedOrigin],
     data: Span[UInt8, _],
@@ -371,19 +392,15 @@ def komira_register_parquet(
     Returns `KOMIRA_ERR_NULL_CTX` for a NULL `ctx` and `KOMIRA_ERR_NULL_ARG`
     for a NULL `name` or `path`.
     """
-    if Int(ctx) == 0:
-        return KOMIRA_ERR_NULL_CTX
+    var refused = _nulls(ctx, Int(name), Int(path), "komira_register_parquet: name or path is NULL")
+    if refused != KOMIRA_OK:
+        return refused
     var session = _session(ctx)
-    session[].clear_error()
-    if Int(name) == 0 or Int(path) == 0:
-        session[].set_error(String("komira_register_parquet: name or path is NULL"))
-        return KOMIRA_ERR_NULL_ARG
     try:
         register_parquet(session[], _c_string(name), _c_string(path))
         return KOMIRA_OK
     except e:
-        session[].set_error(String(e), KOMIRA_STEP_BIND)
-        return KOMIRA_ERR_ENGINE
+        return _bind_refusal(session, e)
 
 
 @export
@@ -403,19 +420,38 @@ def komira_parquet_schema(
     and `KOMIRA_ERR_BUFFER_TOO_SMALL` with `*out_len` set when `out_cap` is
     below the length.
     """
-    if Int(ctx) == 0:
-        return KOMIRA_ERR_NULL_CTX
+    var refused = _nulls(ctx, Int(path), Int(out_len), "komira_parquet_schema: path or out_len is NULL")
+    if refused != KOMIRA_OK:
+        return refused
     var session = _session(ctx)
-    session[].clear_error()
-    if Int(path) == 0 or Int(out_len) == 0:
-        session[].set_error(String("komira_parquet_schema: path or out_len is NULL"))
-        return KOMIRA_ERR_NULL_ARG
     try:
         var bytes = parquet_schema_bytes(_c_string(path))
         return _emit(session, Span(bytes), out_buf, out_cap, out_len)
     except e:
-        session[].set_error(String(e), KOMIRA_STEP_BIND)
-        return KOMIRA_ERR_ENGINE
+        return _bind_refusal(session, e)
+
+
+@export
+def komira_parquet_source(
+    ctx: Handle,
+    path: CStr,
+    hive_partitioning: Int32,
+    out_buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    out_cap: UInt64,
+    out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
+) abi("C") -> Int32:
+    """Write the `WireParquetSource` of the Parquet files at `path` (a file, a glob or a
+    directory) with the Hive partition columns `hive_partitioning` (`KOMIRA_HIVE_*`)
+    asks for (two-call protocol). Errors are those of `komira_parquet_schema`."""
+    var refused = _nulls(ctx, Int(path), Int(out_len), "komira_parquet_source: path or out_len is NULL")
+    if refused != KOMIRA_OK:
+        return refused
+    var session = _session(ctx)
+    try:
+        var bytes = parquet_source_bytes(session[], _c_string(path), hive_partitioning)
+        return _emit(session, Span(bytes), out_buf, out_cap, out_len)
+    except e:
+        return _bind_refusal(session, e)
 
 
 @export
@@ -437,21 +473,17 @@ def komira_csv_binding(
     `int32_t` and any non-zero value is true. Errors are those of
     `komira_parquet_schema`.
     """
-    if Int(ctx) == 0:
-        return KOMIRA_ERR_NULL_CTX
+    var refused = _nulls(ctx, Int(path), Int(out_len), "komira_csv_binding: path or out_len is NULL")
+    if refused != KOMIRA_OK:
+        return refused
     var session = _session(ctx)
-    session[].clear_error()
-    if Int(path) == 0 or Int(out_len) == 0:
-        session[].set_error(String("komira_csv_binding: path or out_len is NULL"))
-        return KOMIRA_ERR_NULL_ARG
     try:
         var bytes = csv_binding_bytes(
             _c_string(path), delimiter, Int(has_header) != 0, Int(all_varchar) != 0
         )
         return _emit(session, Span(bytes), out_buf, out_cap, out_len)
     except e:
-        session[].set_error(String(e), KOMIRA_STEP_BIND)
-        return KOMIRA_ERR_ENGINE
+        return _bind_refusal(session, e)
 
 
 @export
@@ -465,19 +497,15 @@ def komira_json_binding(
     """Write the `WireScanBinding` of the newline-delimited JSON file at
     `path` (two-call protocol). Errors are those of `komira_parquet_schema`.
     """
-    if Int(ctx) == 0:
-        return KOMIRA_ERR_NULL_CTX
+    var refused = _nulls(ctx, Int(path), Int(out_len), "komira_json_binding: path or out_len is NULL")
+    if refused != KOMIRA_OK:
+        return refused
     var session = _session(ctx)
-    session[].clear_error()
-    if Int(path) == 0 or Int(out_len) == 0:
-        session[].set_error(String("komira_json_binding: path or out_len is NULL"))
-        return KOMIRA_ERR_NULL_ARG
     try:
         var bytes = json_binding_bytes(_c_string(path))
         return _emit(session, Span(bytes), out_buf, out_cap, out_len)
     except e:
-        session[].set_error(String(e), KOMIRA_STEP_BIND)
-        return KOMIRA_ERR_ENGINE
+        return _bind_refusal(session, e)
 
 
 @export
@@ -499,13 +527,10 @@ def komira_plan_render(
     `KOMIRA_ERR_TOO_LARGE` for a `plan_len` above `KOMIRA_MAX_INPUT_BYTES`
     (64 MiB), checked before the plan is read.
     """
-    if Int(ctx) == 0:
-        return KOMIRA_ERR_NULL_CTX
+    var refused = _nulls(ctx, Int(plan), Int(out_len), "komira_plan_render: plan or out_len is NULL")
+    if refused != KOMIRA_OK:
+        return refused
     var session = _session(ctx)
-    session[].clear_error()
-    if Int(plan) == 0 or Int(out_len) == 0:
-        session[].set_error(String("komira_plan_render: plan or out_len is NULL"))
-        return KOMIRA_ERR_NULL_ARG
     if input_length_status(plan_len) != KOMIRA_OK:
         session[].set_error(
             String("komira_plan_render: plan_len is above ")
@@ -538,13 +563,10 @@ def komira_credential_add(
     grammar, or `ambient` or `anonymous`. `*out_id` is written only on
     `KOMIRA_OK`.
     """
-    if Int(ctx) == 0:
-        return KOMIRA_ERR_NULL_CTX
+    var refused = _nulls(ctx, Int(name), Int(out_id), "komira_credential_add: name or out_id is NULL")
+    if refused != KOMIRA_OK:
+        return refused
     var session = _session(ctx)
-    session[].clear_error()
-    if Int(name) == 0 or Int(out_id) == 0:
-        session[].set_error(String("komira_credential_add: name or out_id is NULL"))
-        return KOMIRA_ERR_NULL_ARG
     var text: String
     try:
         text = _c_string(name)
@@ -561,8 +583,7 @@ def komira_credential_add(
         out_id[0] = id
         return KOMIRA_OK
     except e:
-        session[].set_error(String(e), KOMIRA_STEP_BIND)
-        return KOMIRA_ERR_ENGINE
+        return _bind_refusal(session, e)
 
 
 @export
@@ -615,8 +636,7 @@ def komira_credential_set(
             )
         return KOMIRA_OK
     except e:
-        session[].set_error(String(e), KOMIRA_STEP_BIND)
-        return KOMIRA_ERR_ENGINE
+        return _bind_refusal(session, e)
 
 
 @export
@@ -637,8 +657,7 @@ def komira_credential_seal(ctx: Handle, id: Int32, scope: Int32) abi("C") -> Int
         session[].credentials.seal(id, scope)
         return KOMIRA_OK
     except e:
-        session[].set_error(String(e), KOMIRA_STEP_BIND)
-        return KOMIRA_ERR_ENGINE
+        return _bind_refusal(session, e)
 
 
 def _sql_stream(
@@ -707,13 +726,10 @@ def komira_sql_stream(ctx: Handle, sql: CStr, out_stream: ArrowStream) abi("C") 
     Nothing can cancel the run: `komira_sql_stream_run` is the call that takes
     a run handle.
     """
-    if Int(ctx) == 0:
-        return KOMIRA_ERR_NULL_CTX
+    var refused = _nulls(ctx, Int(sql), Int(out_stream), "komira_sql_stream: sql or out is NULL")
+    if refused != KOMIRA_OK:
+        return refused
     var session = _session(ctx)
-    session[].clear_error()
-    if Int(sql) == 0 or Int(out_stream) == 0:
-        session[].set_error(String("komira_sql_stream: sql or out is NULL"))
-        return KOMIRA_ERR_NULL_ARG
     return _sql_stream(
         session, String("komira_sql_stream"), sql, RunControl(), out_stream
     )
@@ -852,13 +868,10 @@ def komira_register_csv(
     name (`TABLE_NAME_EMPTY`) and a name the session already holds
     (`TABLE_ALREADY_REGISTERED`); nothing is registered then.
     """
-    if Int(ctx) == 0:
-        return KOMIRA_ERR_NULL_CTX
+    var refused = _nulls(ctx, Int(name), Int(path), "komira_register_csv: name or path is NULL")
+    if refused != KOMIRA_OK:
+        return refused
     var session = _session(ctx)
-    session[].clear_error()
-    if Int(name) == 0 or Int(path) == 0:
-        session[].set_error(String("komira_register_csv: name or path is NULL"))
-        return KOMIRA_ERR_NULL_ARG
     try:
         register_csv(
             session[],
@@ -870,8 +883,7 @@ def komira_register_csv(
         )
         return KOMIRA_OK
     except e:
-        session[].set_error(String(e), KOMIRA_STEP_BIND)
-        return KOMIRA_ERR_ENGINE
+        return _bind_refusal(session, e)
 
 
 @export
@@ -883,19 +895,15 @@ def komira_register_json(ctx: Handle, name: CStr, path: CStr) abi("C") -> Int32:
     inferred here from the leading records. Errors are those of
     `komira_register_csv`.
     """
-    if Int(ctx) == 0:
-        return KOMIRA_ERR_NULL_CTX
+    var refused = _nulls(ctx, Int(name), Int(path), "komira_register_json: name or path is NULL")
+    if refused != KOMIRA_OK:
+        return refused
     var session = _session(ctx)
-    session[].clear_error()
-    if Int(name) == 0 or Int(path) == 0:
-        session[].set_error(String("komira_register_json: name or path is NULL"))
-        return KOMIRA_ERR_NULL_ARG
     try:
         register_json(session[], _c_string(name), _c_string(path))
         return KOMIRA_OK
     except e:
-        session[].set_error(String(e), KOMIRA_STEP_BIND)
-        return KOMIRA_ERR_ENGINE
+        return _bind_refusal(session, e)
 
 
 @export
@@ -907,13 +915,10 @@ def komira_plan_stream(
     `ctx`, -2 NULL `plan` or `out_stream`, -5 `plan_len` above the bound (not
     read), -3 a refusal `<step>: <reason>` (`decode`, `bind`, `optimize`,
     `lower`, `execute`)."""
-    if Int(ctx) == 0:
-        return KOMIRA_ERR_NULL_CTX
+    var refused = _nulls(ctx, Int(plan), Int(out_stream), "komira_plan_stream: plan or out is NULL")
+    if refused != KOMIRA_OK:
+        return refused
     var session = _session(ctx)
-    session[].clear_error()
-    if Int(plan) == 0 or Int(out_stream) == 0:
-        session[].set_error(String("komira_plan_stream: plan or out is NULL"))
-        return KOMIRA_ERR_NULL_ARG
     if input_length_status(plan_len) != KOMIRA_OK:
         session[].set_error(
             String("komira_plan_stream: plan_len is above ")
@@ -961,8 +966,7 @@ def komira_register_arrow_stream(
     except e:
         # Live only if refused before the drain, which releases it on every path.
         consumer_release_c_stream(stream)
-        session[].set_error(String(e), KOMIRA_STEP_BIND)
-        return KOMIRA_ERR_ENGINE
+        return _bind_refusal(session, e)
 
 
 @export
@@ -976,13 +980,10 @@ def komira_add_sql_binding(
     `KOMIRA_BIND_SESSION`, an empty or non-UTF-8 name, a source that is not a
     `WireBoundSource` or names no kind, or a source the reader refuses; nothing
     is bound or replaced then (src/so/README.md lists each)."""
-    if Int(ctx) == 0:
-        return KOMIRA_ERR_NULL_CTX
+    var refused = _nulls(ctx, Int(name), Int(source), "komira_add_sql_binding: name or source is NULL")
+    if refused != KOMIRA_OK:
+        return refused
     var session = _session(ctx)
-    session[].clear_error()
-    if Int(name) == 0 or Int(source) == 0:
-        session[].set_error(String("komira_add_sql_binding: name or source is NULL"))
-        return KOMIRA_ERR_NULL_ARG
     if input_length_status(source_len) != KOMIRA_OK:
         session[].set_error(
             String("komira_add_sql_binding: source_len is above ")
@@ -994,5 +995,4 @@ def komira_add_sql_binding(
         add_sql_binding(session[], _c_string(name), _copy_in(source, source_len), scope)
         return KOMIRA_OK
     except e:
-        session[].set_error(String(e), KOMIRA_STEP_BIND)
-        return KOMIRA_ERR_ENGINE
+        return _bind_refusal(session, e)

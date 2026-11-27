@@ -38,7 +38,7 @@
   `register_json`, `register_arrow`
   (a table already in memory, replacing one of its name) and its name check
   `check_table_name`,
-  `parquet_schema_bytes`, `csv_binding_bytes`,
+  `parquet_schema_bytes`, `parquet_source_bytes`, `csv_binding_bytes`,
   `json_binding_bytes`, `plan_render_text`, `sql_result`, the answer of
   one SQL statement as batches ready for the Arrow C stream (`sql_result_with`
   over a caller's connectors), and
@@ -84,6 +84,7 @@ from .session import (
     try_new_session,
 )
 from .sources import (
+    HIVE_PARTITIONING_UNKNOWN,
     QUERY_CANCELLED,
     TABLE_TYPE_UNSUPPORTED,
     check_table_name,
@@ -92,6 +93,7 @@ from .sources import (
     is_cancelled_error,
     json_binding_bytes,
     parquet_schema_bytes,
+    parquet_source_bytes,
     plan_render_text,
     plan_result,
     register_arrow,
@@ -141,6 +143,9 @@ from .status import (
     KOMIRA_FIELD_SESSION_TOKEN,
     KOMIRA_FIELD_TOKEN,
     KOMIRA_FIELD_TOKEN_URL,
+    KOMIRA_HIVE_AUTO,
+    KOMIRA_HIVE_OFF,
+    KOMIRA_HIVE_ON,
     KOMIRA_MAX_INPUT_BYTES,
     KOMIRA_OK,
     KOMIRA_STEP_BIND,

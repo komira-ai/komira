@@ -933,11 +933,14 @@ FRAME_MODULES = (
     "_frame.py", "_groupby.py", "_series.py", "_refusals.py", "_verbs.py", "_missing.py", "_cast.py", "_accessors.py",
     "_display.py", "_merge.py", "_windows.py", "_write.py",
 )
-PRIVATE_SESSION = {"_plan_stream", "_plan_render", "_plan_write", "_parquet_schema", "_csv_binding", "_json_binding"}
+PRIVATE_SESSION = {
+    "_plan_stream", "_plan_render", "_plan_write", "_parquet_schema", "_parquet_source", "_csv_binding", "_json_binding"
+}
 ALLOWED_IMPORTS = {
     "__future__:annotations", "collections.abc:Callable", "types:ModuleType", "typing:TYPE_CHECKING",
     ".:_ops", ".:_refusals", ".:_plan", "._errors:UnsupportedOperation", "._series:Series", "._series:operand",
     "._session:Result", "._session:Session", "._session:_local_path", "._session:default_session",
+    "._session:_HIVE_AUTO", "._session:_names_many_files",
     "._plan:_wire", ".plan.v1:plan_pb2", "._frame:DataFrame", "os", ".:_groupby", "._groupby:GroupBy",
     ".:_merge", ".:_windows", "._series:_Membership", "._windows:Windows", "._windows:merged",
     "._plan._window:window_field", "hashlib",

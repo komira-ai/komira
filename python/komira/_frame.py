@@ -8,8 +8,9 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
 `komira_plan_stream`. No SQL text is written or read anywhere on this path.
 
 - Readers (`read_parquet`, `read_csv`, `read_json`) read the file's schema now,
-  through libkomira, and build a scan that names the file itself; no table name
-  is registered. They take the session as a keyword and use the process's
+  through libkomira (for `read_parquet` of a glob or a directory, the files it
+  names, resolved by the engine), and build a scan that names the files
+  itself; no table name is registered. They take the session as a keyword and use the process's
   default session without one.
 - The verbs are `df["x"]` (a `Series`), `df[["a", "b"]]` (a projection),
   `df[cond]` (a filter), `assign` and `df["x"] = ...` (computed columns),
@@ -65,7 +66,7 @@ from ._errors import UnsupportedOperation
 from ._groupby import GroupBy
 from ._missing import present
 from ._series import Series, _Membership, operand
-from ._session import Result, Session, _local_path, default_session
+from ._session import _HIVE_AUTO, Result, Session, _local_path, _names_many_files, default_session
 from ._windows import Windows, merged
 
 if TYPE_CHECKING:
@@ -984,13 +985,23 @@ def _scan_frame(session: Session, path: str, fmt: str, schema: object, source: o
 
 
 def read_parquet(path: str | os.PathLike[str], *, session: Session | None = None) -> DataFrame:
-    """A frame of the local Parquet file at `path`. Its schema is read from
-    the footer now, so a missing or unreadable file raises here; the rows are
-    read when the frame runs. `session` is the session the frame runs on, the
-    process's default session when None. A relative `path` is resolved
-    against the working directory now and `~` is expanded."""
+    """A frame of the local Parquet files at `path`: one file, a glob (`*`,
+    `?`, `[...]`, `{a,b}`, `**`), whose matches are read as one frame in
+    byte-wise sorted order, or a directory, whose `.parquet` files below it
+    are (names starting with `.` skipped). The Hive `key=value` folders of a
+    glob's or a directory's files are columns after the files' own when every
+    file has the same keys, as `Session.register_parquet` reads them. The
+    schema is read from the footers now, so a missing or unreadable file, a
+    glob that matches nothing (`PARQUET_GLOB_NO_MATCH`, naming it) and files
+    whose schemas differ raise here; the rows are read when the frame runs.
+    `session` is the session the frame runs on, the process's default session
+    when None. A relative `path` is resolved against the working directory
+    now and `~` is expanded."""
     session = _session_of(session)
     path = _local_path(path)
+    if _names_many_files(path):
+        source = _encoder().parquet_files_source(session._parquet_source(path, _HIVE_AUTO))
+        return _scan_frame(session, path, "parquet", _encoder().scan_schema(source), source)
     schema_bytes = session._parquet_schema(path)
     schema = _wire().pb.WireSchema.FromString(schema_bytes)
     return _scan_frame(session, path, "parquet", schema, _encoder().parquet_source(path, schema_bytes))

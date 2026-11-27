@@ -18,6 +18,10 @@ error. Nothing here holds a pointer.
   drains the stream.
 - `parquet_schema_bytes`: a Parquet file's schema as `komira.plan.v1`
   `WireSchema` bytes.
+- `parquet_source_bytes`: the Parquet files a path names (one file, a glob or
+  a directory), resolved as `register_parquet` resolves them, as
+  `WireParquetSource` bytes: the sorted files, their schema and the Hive
+  partition columns a `KOMIRA_HIVE_*` mode asks for.
 - `csv_binding_bytes`, `json_binding_bytes`: the whole `WireScanBinding` of a
   CSV or newline-delimited JSON file, schema inferred from a bounded prefix.
 - `plan_render_text`: a serialized plan decoded and printed, not run.
@@ -51,6 +55,7 @@ from plan_ir.logical_plan import LogicalPlan
 from plan_wire import (
     PLAN_WIRE_UDFS_DROPPED,
     binding_to_bytes,
+    parquet_source_to_bytes,
     plan_envelope_from_bytes,
     plan_from_bytes,
     schema_to_bytes,
@@ -64,11 +69,17 @@ from sdk_exec.engine_plan import SqlOutcome, run_plan, run_plan_write
 from sdk_exec.engine_context import RegisteredTable
 from sdk_exec.engine_sql import STEP_BIND, STEP_EXECUTE, run_sql_with
 from sdk_exec.run_control import RunControl
-from sql.sql_ast import HIVE_PARTITIONING_AUTO, TvfOptions
+from sql.sql_ast import (
+    HIVE_PARTITIONING_AUTO,
+    HIVE_PARTITIONING_OFF,
+    HIVE_PARTITIONING_ON,
+    TvfOptions,
+)
 from sql.sql_tvf_bind import csv_tvf_schema, json_tvf_schema
 
 from .bindings import forget_table, store_opener
 from .session import Session, step_number
+from .status import KOMIRA_HIVE_AUTO, KOMIRA_HIVE_OFF, KOMIRA_HIVE_ON
 from .store_fs import StoreConnectors, StoreScanFs, kernel_store_connectors
 
 comptime TABLE_TYPE_UNSUPPORTED = "TABLE_TYPE_UNSUPPORTED"
@@ -79,6 +90,10 @@ as only flat Parquet files are (`register_parquet`)."""
 comptime QUERY_CANCELLED = "QUERY_CANCELLED"
 """The named error of a run its `RunControl` cancelled: `sql_result` raises
 `QUERY_CANCELLED: execute: <the engine's cancelled error>`."""
+
+comptime HIVE_PARTITIONING_UNKNOWN = "HIVE_PARTITIONING_UNKNOWN"
+"""Refusal of `parquet_source_bytes`: a Hive mode that is none of
+`KOMIRA_HIVE_AUTO`, `KOMIRA_HIVE_ON` and `KOMIRA_HIVE_OFF`."""
 
 comptime STEP_DECODE = "decode"
 """The step of `plan_result` that turns the plan's bytes into a plan; the
@@ -273,6 +288,49 @@ def parquet_schema_bytes(path: String) raises -> List[UInt8]:
     var footer = read_parquet_footer(path)
     var schema = footer.take_schema()
     return schema_to_bytes(schema)
+
+
+def parquet_source_bytes(
+    session: Session, path: String, hive_partitioning: Int32
+) raises -> List[UInt8]:
+    """The Parquet files at `path` as `WireParquetSource` bytes.
+
+    `path` is what `register_parquet` takes: one file, a glob (every file it
+    matches, sorted byte-wise) or a directory (every `.parquet` file under
+    it). The files and their footers are read now, through the session's
+    footer reader, and every file must have the first file's schema. The
+    source's schema is the files' columns; the Hive partition columns, which
+    a scan reads after them, are those `hive_partitioning` asks for:
+    `KOMIRA_HIVE_AUTO` when every file has the same keys,
+    `KOMIRA_HIVE_ON` refusing files whose keys differ, `KOMIRA_HIVE_OFF`
+    none.
+
+    Raises:
+        `HIVE_PARTITIONING_UNKNOWN` for any other mode, before anything is
+        read; the errors of `resolve_parquet_source` (among them
+        `PARQUET_GLOB_NO_MATCH`, naming the pattern, and
+        `PARQUET_FILES_SCHEMA_MISMATCH`); an error naming a file whose footer
+        does not read; `compression: cannot load <soname>: <loader error>`
+        when a codec library cannot be loaded, before anything is read.
+    """
+    var mode: UInt8
+    if hive_partitioning == KOMIRA_HIVE_AUTO:
+        mode = HIVE_PARTITIONING_AUTO
+    elif hive_partitioning == KOMIRA_HIVE_ON:
+        mode = HIVE_PARTITIONING_ON
+    elif hive_partitioning == KOMIRA_HIVE_OFF:
+        mode = HIVE_PARTITIONING_OFF
+    else:
+        raise Error(
+            HIVE_PARTITIONING_UNKNOWN
+            + ": hive_partitioning "
+            + String(hive_partitioning)
+            + " is none of KOMIRA_HIVE_AUTO (0), KOMIRA_HIVE_ON (1) and"
+            + " KOMIRA_HIVE_OFF (2)"
+        )
+    probe_codec_libraries()
+    var source = resolve_parquet_source(session.engine.footers, path, mode, True)
+    return parquet_source_to_bytes(source)
 
 
 def csv_binding_bytes(

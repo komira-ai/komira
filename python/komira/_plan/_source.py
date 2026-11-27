@@ -7,6 +7,11 @@ own readers:
     parquet_source   the `WireSchema` bytes of `komira_parquet_schema`, put
                      in a `WireParquetSource` of one local path, as the SQL
                      catalog binds a registered file (no name, mtime 0)
+    parquet_files_source
+                     the `WireParquetSource` bytes of `komira_parquet_source`,
+                     whole: the files a glob or a directory names, sorted,
+                     their schema and their Hive partition columns, which the
+                     scan reads after the files' columns (`scan_schema`)
     binding_source   the `WireScanBinding` bytes of `komira_csv_binding` or
                      `komira_json_binding`, whole: its fingerprint and
                      snapshot token are the file's identity
@@ -25,7 +30,7 @@ from komira._ops._rel import Scan
 
 from ._wire import arrow_name, member, pb, vocab
 
-__all__ = ["binding_source", "encode_scan", "parquet_source"]
+__all__ = ["binding_source", "encode_scan", "parquet_files_source", "parquet_source", "scan_schema"]
 
 # The binding variants a scan of each non-Parquet format reads
 # (`SourceVariantTag`, src/plan_proto/plan_vocabulary.proto).
@@ -61,6 +66,27 @@ def parquet_source(path: str, schema: bytes) -> pb.WireScanSource:
     return out
 
 
+def parquet_files_source(source: bytes) -> pb.WireScanSource:
+    """The source of a scan of the Parquet files `komira_parquet_source`
+    resolved, its `WireParquetSource` bytes `source` taken whole."""
+    out = pb.WireScanSource()
+    out.parquet.ParseFromString(_need_bytes(source, "source"))
+    return out
+
+
+def scan_schema(source: pb.WireScanSource) -> pb.WireSchema:
+    """The columns a scan of `source` reads: a Parquet source's file columns
+    followed by its Hive partition columns, a binding's schema."""
+    if source.WhichOneof("payload") != "parquet":
+        return source.binding.schema
+    if not source.parquet.partition_cols:
+        return source.parquet.schema
+    out = pb.WireSchema()
+    out.CopyFrom(source.parquet.schema)
+    out.fields.extend(source.parquet.partition_cols)
+    return out
+
+
 def binding_source(binding: bytes) -> pb.WireScanSource:
     """The source of a scan the `WireScanBinding` bytes `binding` describe."""
     out = pb.WireScanSource()
@@ -89,7 +115,7 @@ def _schema_and_layout(node: Scan, source: pb.WireScanSource) -> tuple[pb.WireSc
     if arm == "parquet":
         if node.format != "parquet":
             raise ValueError(f"the scan of '{node.path}' is {node.format}, and its source is Parquet")
-        return source.parquet.schema, vocab.SOURCE_KIND_COLUMNAR
+        return scan_schema(source), vocab.SOURCE_KIND_COLUMNAR
     if arm == "binding":
         binding = source.binding
         variants = _FORMAT_VARIANTS.get(node.format, ())

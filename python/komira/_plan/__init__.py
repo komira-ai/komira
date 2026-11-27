@@ -4,7 +4,9 @@ wire the engine reads (src/plan_proto/plan.proto, src/plan_wire).
 `encode_plan` gives the `WirePlanEnvelope` of a whole plan, the bytes the plan
 door takes (`komira_plan_stream`), each node with the output schema the engine
 derives for it. Its scans read sources libkomira describes: `parquet_source`
-over the schema bytes of `komira_parquet_schema`, `binding_source` over the
+over the schema bytes of `komira_parquet_schema`, `parquet_files_source` over
+the source bytes of `komira_parquet_source` (`scan_schema` is the columns a
+scan of a source reads), `binding_source` over the
 binding bytes of `komira_csv_binding` and `komira_json_binding`, keyed by the
 scan's path.
 
@@ -30,6 +32,14 @@ from __future__ import annotations
 from ._expr import encode_expr
 from ._field import expr_field
 from ._rel import encode_plan
-from ._source import binding_source, parquet_source
+from ._source import binding_source, parquet_files_source, parquet_source, scan_schema
 
-__all__ = ["binding_source", "encode_expr", "encode_plan", "expr_field", "parquet_source"]
+__all__ = [
+    "binding_source",
+    "encode_expr",
+    "encode_plan",
+    "expr_field",
+    "parquet_files_source",
+    "parquet_source",
+    "scan_schema",
+]

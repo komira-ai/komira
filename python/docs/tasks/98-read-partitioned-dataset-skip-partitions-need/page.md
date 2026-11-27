@@ -57,7 +57,7 @@ Output:
 ## Notes
 
 - The partition columns (`yr`, `region`) come after the data columns, typed from their values: whole numbers as integers, dates as dates, timestamps as timestamps, other text as strings.
-- `register_parquet` also takes one directory (every Parquet file under it) or a glob such as `sales/yr=2029/*/*.parquet`; `hive_partitioning = false` in `read_parquet` leaves the key columns out.
+- `register_parquet` also takes one directory (every Parquet file under it) or a glob such as `sales/yr=2029/*/*.parquet`; `hive_partitioning = false` in `read_parquet` leaves the key columns out. The frame readers take the folder too: `komira.read_parquet(root)` and `komira.pl.scan_parquet(root)` read it with the keys as columns ([rank 19](../19-read-many-files-matching-pattern-table/page.md)).
 - A glob that matches no file, and files whose schemas differ, are refused by name.
 - Rows come back in no promised order unless the query sorts them: add `ORDER BY`.
 

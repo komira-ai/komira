@@ -96,6 +96,11 @@ from .plan_wire_udf_check import (
     PLAN_WIRE_UDF_CHECK_UNMODELLED_TAG,
 )
 
+# ★ THE MANY-FILE TWIN OF `schema_to_bytes`: a Parquet source the engine
+# resolved from a glob or a directory (its files, schema and Hive partition
+# columns), for a frontend in another language to splice into its scan.
+from .plan_wire_parquet_source import parquet_source_to_bytes
+
 # WHAT OPTIMIZED ADMITS THAT RAW DOES NOT, AND THE REVERSE, for the fields an
 # optimizer fills in (build side, estimated groups, scan statistics).
 from .plan_wire_optimized import (

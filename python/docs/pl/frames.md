@@ -21,7 +21,10 @@ A frame is a plan: no verb runs a query, and `collect()` encodes the plan and
 runs it through `komira_plan_stream`. Nothing writes SQL text and nothing
 imports polars.
 
-- **Readers.** `scan_parquet`, `scan_ndjson` and `scan_csv`.
+- **Readers.** `scan_parquet`, `scan_ndjson` and `scan_csv`. `scan_parquet`
+  also takes a glob or a folder and polars' `hive_partitioning` (None: the
+  `key=value` folders are columns for a folder, not for a glob; True: for a
+  glob too; False: never).
 - **`LazyFrame`.** `select`, `with_columns`, `filter`, `sort`, `head`,
   `limit`, `slice`, `tail`, `top_k`, `bottom_k`, `drop`, `rename`,
   `drop_nulls`, `columns`, `schema`, `explain` and `collect`;

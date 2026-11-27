@@ -51,6 +51,12 @@ NATIVE_OWNERS = [
 # plan rendered, sql_result, komira_sql_stream's answer on values (rows,
 # no rows with the schema, a result that outlives its session, and refusals as
 # `<step>: <reason>` with the step and the code recorded on the session);
+# test_parquet_source holds parquet_source_bytes: a glob's files sorted, one
+# file as its own path, a directory's Hive keys as partition columns for
+# KOMIRA_HIVE_AUTO and KOMIRA_HIVE_ON and none for KOMIRA_HIVE_OFF, keys that
+# differ between files (none for AUTO, HIVE_PARTITION_LAYOUT_MISMATCH for ON),
+# and the named refusals of a glob matching nothing, files of two schemas and
+# an unknown mode;
 # test_register_text holds register_csv and
 # register_json: a CSV or JSON file registered by name and queried through
 # the session's engine, each CSV dialect argument equal to read_csv's (a
@@ -190,6 +196,7 @@ mojo_library(
         "tests/test_add_sql_binding.mojo",
         "tests/test_credentials.mojo",
         "tests/test_credentials_reveal.mojo",
+        "tests/test_parquet_source.mojo",
         "tests/test_plan_result.mojo",
         "tests/test_register_arrow.mojo",
         "tests/test_register_text.mojo",
@@ -212,7 +219,7 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): twenty-six exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): twenty-seven exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). Every context it creates owns
 # an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
 # komira_sql_stream runs SQL on that engine and answers an Arrow C stream; the
@@ -230,7 +237,7 @@ mojo_library(
 # through the object store.
 # It is published only if every gate driver passes, each of which dlopens it
 # with RTLD_NOW and calls it as a foreign host would:
-#   gate_version       the version is 1010 (1.10);
+#   gate_version       the version is 1011 (1.11);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op, and a context (with its
 #                      engine's workers) is created and freed again;
@@ -259,6 +266,13 @@ mojo_library(
 #                      nothing written and no read of the plan; exactly 64 MiB
 #                      is read (garbage, so -3). gate_parquet_schema also: a
 #                      path that is not UTF-8 is -3 with a last error.
+#   gate_parquet_source  a glob gives its files sorted and a directory of
+#                      key=value folders its partition column, through the
+#                      two-call protocol; NULL ctx -1, NULL path or out_len -2,
+#                      a glob matching nothing (PARQUET_GLOB_NO_MATCH, naming
+#                      it) and an unknown mode (HIVE_PARTITIONING_UNKNOWN) -3
+#                      with the named last error; a good call afterwards
+#                      leaves no error.
 #   gate_register_csv, gate_register_json  a file is registered by name (CSV:
 #                      for each dialect argument); a name already taken, in
 #                      any case and by either call, is -3 with
@@ -301,6 +315,7 @@ _LIBKOMIRA = dict(
         "komira_last_error_step",
         "komira_register_parquet",
         "komira_parquet_schema",
+        "komira_parquet_source",
         "komira_csv_binding",
         "komira_json_binding",
         "komira_plan_render",
@@ -332,6 +347,7 @@ _LIBKOMIRA = dict(
         "tests/gate/gate_error_code_step.mojo",
         "tests/gate/gate_json_binding.mojo",
         "tests/gate/gate_parquet_schema.mojo",
+        "tests/gate/gate_parquet_source.mojo",
         "tests/gate/gate_plan_render.mojo",
         "tests/gate/gate_register_arrow_stream.mojo",
         "tests/gate/gate_register_csv.mojo",

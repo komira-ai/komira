@@ -8,7 +8,8 @@ the frame's session through the plan entry, `komira_plan_stream`, which
 answers a `Result`. No SQL text is made anywhere on this path.
 
 A reader reads its file's schema when it is called, through libkomira (the
-schema of a Parquet file, the binding of a CSV or NDJSON file), so every verb
+schema of a Parquet file or the source of the Parquet files a glob or a
+directory names, the binding of a CSV or NDJSON file), so every verb
 knows its frame's columns and their types, and a column the frame lacks is
 refused at the verb that names it.
 
@@ -49,7 +50,16 @@ from komira._ops import (
     sort,
     with_columns,
 )
-from komira._session import Result, Session, _local_path, default_session
+from komira._session import (
+    _HIVE_AUTO,
+    _HIVE_OFF,
+    _HIVE_ON,
+    Result,
+    Session,
+    _local_path,
+    _names_many_files,
+    default_session,
+)
 
 from . import _join, _names, _window
 from ._expr import Expr, col, lit
@@ -635,16 +645,46 @@ def _scan_frame(session: Session, path: str, fmt: str, source, schema) -> LazyFr
     return LazyFrame(session, scan(path, fmt, fields), {path: source}, None)
 
 
-def scan_parquet(source: str | os.PathLike[str], *, session: Session | None = None) -> LazyFrame:
-    """A frame of the local Parquet file `source`, whose schema is read now
-    (a missing or unreadable file raises here). It runs on `session`, the
-    process's default session when None."""
+def _hive_mode(hive_partitioning: object, directory: bool) -> int:
+    """The `KOMIRA_HIVE_*` mode of polars' `hive_partitioning`: None is on
+    for a directory and off otherwise, True is on (files whose keys differ
+    are refused), False is off."""
+    if hive_partitioning is None:
+        return _HIVE_AUTO if directory else _HIVE_OFF
+    if not isinstance(hive_partitioning, bool):
+        raise TypeError(f"hive_partitioning must be a bool or None, not {type(hive_partitioning).__name__}")
+    return _HIVE_ON if hive_partitioning else _HIVE_OFF
+
+
+def scan_parquet(
+    source: str | os.PathLike[str],
+    *,
+    hive_partitioning: bool | None = None,
+    session: Session | None = None,
+) -> LazyFrame:
+    """A frame of the local Parquet files `source`: one file, a glob (`*`,
+    `?`, `[...]`, `{a,b}`, `**`), whose matches are read as one frame in
+    byte-wise sorted order, or a directory, whose `.parquet` files below it
+    are (names starting with `.` skipped). The schema is read now: a missing
+    or unreadable file, a glob that matches nothing (`PARQUET_GLOB_NO_MATCH`,
+    naming it) and files whose schemas differ raise here.
+
+    `hive_partitioning`, as in polars: the `key=value` folders of the files'
+    paths are columns after the files' own. None, the default, reads them
+    for a directory when every file has the same keys, and not for a glob or
+    a file; True reads them (files whose keys differ are refused,
+    `HIVE_PARTITION_LAYOUT_MISMATCH`); False does not. The frame runs on
+    `session`, the process's default session when None."""
     s = _session_of(session)
     path = _path_of("scan_parquet", source)
+    directory = os.path.isdir(path)
+    mode = _hive_mode(hive_partitioning, directory)
     plan = _encoder()
-    data = s._parquet_schema(path)
-    src = plan.parquet_source(path, data)
-    return _scan_frame(s, path, "parquet", src, src.parquet.schema)
+    if mode == _HIVE_OFF and not _names_many_files(path):
+        src = plan.parquet_source(path, s._parquet_schema(path))
+    else:
+        src = plan.parquet_files_source(s._parquet_source(path, mode))
+    return _scan_frame(s, path, "parquet", src, plan.scan_schema(src))
 
 
 def scan_ndjson(source: str | os.PathLike[str], *, session: Session | None = None) -> LazyFrame:
@@ -711,7 +751,11 @@ def concat(items, *, how: str = "vertical", rechunk: bool = False, parallel: boo
                     f"{t} in frame 0; cast it to one type first"
                 )
         for path, src in f._sources.items():
-            sources.setdefault(path, src)
+            if sources.setdefault(path, src) != src:
+                raise UnsupportedOperation(
+                    f"concat: two frames read {path!r} in two ways (another hive_partitioning, or "
+                    "files that changed between the reads): read it once, and take both frames from that one"
+                )
     from komira._ops import concat as union
 
     return LazyFrame(first._session, union([f._plan for f in frames]), sources, None)

@@ -11,7 +11,9 @@ same; `plan_round_trip` does both directions in one call.
 and `plan_wire_supported_versions` is the set this build reads.
 `schema_to_bytes` and `binding_to_bytes` let a frontend in another language
 write the schema of a Parquet scan or a whole scan binding without computing
-the engine's codes itself.
+the engine's codes itself; `parquet_source_to_bytes` gives it the whole
+`WireParquetSource` of a source the engine resolved from a glob or a
+directory (its sorted files, schema and Hive partition columns).
 
 Decoding treats the bytes as untrusted. Before parsing, `plan_wire_admit`
 refuses a message over `PLAN_WIRE_MAX_BYTES` (16 MiB), a version this build
