@@ -117,7 +117,9 @@ node_dist(
 ) for p in NPM + NPM_INSTALL_ONLY]
 
 # `:npm`, the npm CLI (pins.bzl, NPM_CLI): its tarball's package/ directory,
-# whose bin/npm-cli.js the pinned node runs. Only the install test runs it.
+# whose bin/npm-cli.js the pinned node runs. Only the install test depends on
+# it; .github/workflows/npm.yml also builds it (and :node) by name, as the tools
+# its publish and smoke jobs run (README.md, Never shipped).
 pinned_file(
     name = NPM_CLI["file"],
     url = NPM_CLI["url"],

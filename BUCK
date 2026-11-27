@@ -119,12 +119,16 @@ zig_test(
 # mopm-prod-staged-<sha>) is kept 7 to 14 days for a rerun on a later day
 # (.github/workflows/release_workflow_test.zig and release_publish_group.zig say what each
 # catches), and no wheel stage (no wheel job, no setup-python, no wheel target, no smoke driver:
-# pypi.yml tests the wheel). A build action.
+# pypi.yml tests the wheel), and the jobs that run the README e2e on what beta and prod serve after
+# each commit (.github/workflows/release_served_readmes.zig). A build action.
 zig_test(
     name = "release_workflow_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/workflows/release_workflow_test.zig",
-    imports = [".github/workflows/release_publish_group.zig"],
+    imports = [
+        ".github/workflows/release_publish_group.zig",
+        ".github/workflows/release_served_readmes.zig",
+    ],
     data = {
         "workflows/release.yml": ".github/workflows/release.yml",
         "packages.bzl": "//release/readme_e2e:packages.bzl",
@@ -200,6 +204,22 @@ zig_test(
         "workflows/pypi.yml": ".github/workflows/pypi.yml",
         "workflows/release.yml": ".github/workflows/release.yml",
     },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# The cases of npm.yml, the publish of the npm packages (.github/workflows/npm_workflow_test.zig says what
+# each catches): a push to main of code alone, top-level permissions {}, the four jobs build, test, publish
+# and smoke on the hosted runner, each job's exact condition, needs, environment and permissions (the
+# environment npm and its id-token for the publish alone, the farm's for build and test, nothing for the
+# smoke), the publish and the smoke gated on the build job's output of release/npm_publish.txt, the publish
+# command in the publish job alone, no checkout or farm in the publish or the smoke, and no token or
+# secret. A build action.
+zig_test(
+    name = "npm_workflow_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/npm_workflow_test.zig",
+    data = {"workflows/npm.yml": ".github/workflows/npm.yml"},
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
 )

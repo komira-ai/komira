@@ -25,24 +25,24 @@ changes its row in the same change. Do not edit it by hand: copy the lines the c
 | with a `mojo_adopted_library` gate | 66 |
 | with a `mojo_library` gate | 197 |
 | with no gate | 2 |
-| with at least one example | 235 |
+| with at least one example | 249 |
 | refused by the README examples tool | 0 |
 | run by the release e2e | 66 |
-| run by a build gate | 235 |
-| run by nobody | 30 |
+| run by a build gate | 249 |
+| run by nobody | 16 |
 
 ## Left out
 
-Run by a build gate and not by the release e2e: 169 READMEs. Their packages have no `mopm.toml`, so the release does not publish them; [UNPUBLISHED.md](UNPUBLISHED.md) says why for each library.
+Run by a build gate and not by the release e2e: 183 READMEs. Their packages have no `mopm.toml`, so the release does not publish them; [UNPUBLISHED.md](UNPUBLISHED.md) says why for each library.
 
-Run by nobody (30): [`agg`](../src/agg/README.md), [`agg_api`](../src/agg_api/README.md), [`batch_eval`](../src/batch_eval/README.md), [`bench_q6_phases`](../src/bench_q6_phases/README.md), [`bench_runner`](../src/bench_runner/README.md), [`broker_compaction`](../src/broker_compaction/README.md), [`chunk`](../src/chunk/README.md), [`comms_index`](../src/comms_index/README.md), [`decimal_literal`](../src/decimal_literal/README.md), [`dispatch_agg_exec`](../src/dispatch_agg_exec/README.md), [`dispatch_agg_folds`](../src/dispatch_agg_folds/README.md), [`dispatch_join_kernels`](../src/dispatch_join_kernels/README.md), [`dispatch_project`](../src/dispatch_project/README.md), [`dispatch_scan`](../src/dispatch_scan/README.md), [`dispatch_sources`](../src/dispatch_sources/README.md), [`engine_runtime`](../src/engine_runtime/README.md), [`eval`](../src/eval/README.md), [`exec_types`](../src/exec_types/README.md), [`expr`](../src/expr/README.md), [`group_ratchet`](../src/group_ratchet/README.md), [`iceberg`](../src/iceberg/README.md), [`json_index`](../src/json_index/README.md), [`log_index`](../src/log_index/README.md), [`lowering`](../src/lowering/README.md), [`mail_tls`](../src/mail_tls/README.md), [`op_agg_distinct`](../src/op_agg_distinct/README.md), [`op_agg_hash`](../src/op_agg_hash/README.md), [`op_agg_slab`](../src/op_agg_slab/README.md), [`udf_abi`](../src/udf_abi/README.md), [`udf_python`](../src/udf_python/README.md).
+Run by nobody (16): [`dispatch_sources`](../src/dispatch_sources/README.md), [`engine_runtime`](../src/engine_runtime/README.md), [`eval`](../src/eval/README.md), [`exec_types`](../src/exec_types/README.md), [`expr`](../src/expr/README.md), [`group_ratchet`](../src/group_ratchet/README.md), [`iceberg`](../src/iceberg/README.md), [`json_index`](../src/json_index/README.md), [`log_index`](../src/log_index/README.md), [`lowering`](../src/lowering/README.md), [`mail_tls`](../src/mail_tls/README.md), [`op_agg_distinct`](../src/op_agg_distinct/README.md), [`op_agg_hash`](../src/op_agg_hash/README.md), [`op_agg_slab`](../src/op_agg_slab/README.md), [`udf_abi`](../src/udf_abi/README.md), [`udf_python`](../src/udf_python/README.md).
 
 ## The READMEs
 
 | Package | `mopm.toml` | e2e | gate | example | run by |
 |---|---|---|---|---|---|
-| [`agg`](../src/agg/README.md) | no | no | mojo_library | no | nobody |
-| [`agg_api`](../src/agg_api/README.md) | no | no | mojo_library | no | nobody |
+| [`agg`](../src/agg/README.md) | no | no | mojo_library | yes | build gate |
+| [`agg_api`](../src/agg_api/README.md) | no | no | mojo_library | yes | build gate |
 | [`anomaly`](../src/anomaly/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`arrow`](../src/arrow/README.md) | no | no | mojo_library | yes | build gate |
 | [`arrow_ipc`](../src/arrow_ipc/README.md) | no | no | mojo_library | yes | build gate |
@@ -75,16 +75,16 @@ Run by nobody (30): [`agg`](../src/agg/README.md), [`agg_api`](../src/agg_api/RE
 | [`awslc`](../src/awslc/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`azure_blob`](../src/azure_blob/README.md) | no | no | mojo_library | yes | build gate |
 | [`azure_core`](../src/azure_core/README.md) | no | no | mojo_library | yes | build gate |
-| [`batch_eval`](../src/batch_eval/README.md) | no | no | mojo_library | no | nobody |
+| [`batch_eval`](../src/batch_eval/README.md) | no | no | mojo_library | yes | build gate |
 | [`bench`](../src/bench/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`bench_corpus`](../src/bench_corpus/README.md) | no | no | mojo_library | yes | build gate |
 | [`bench_data`](../src/bench_data/README.md) | no | no | mojo_library | yes | build gate |
 | [`bench_duckdb`](../src/bench_duckdb/README.md) | no | no | mojo_library | yes | build gate |
-| [`bench_q6_phases`](../src/bench_q6_phases/README.md) | no | no | mojo_library | no | nobody |
+| [`bench_q6_phases`](../src/bench_q6_phases/README.md) | no | no | mojo_library | yes | build gate |
 | [`bench_report`](../src/bench_report/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
-| [`bench_runner`](../src/bench_runner/README.md) | no | no | mojo_library | no | nobody |
+| [`bench_runner`](../src/bench_runner/README.md) | no | no | mojo_library | yes | build gate |
 | [`broker`](../src/broker/README.md) | no | no | mojo_library | yes | build gate |
-| [`broker_compaction`](../src/broker_compaction/README.md) | no | no | mojo_library | no | nobody |
+| [`broker_compaction`](../src/broker_compaction/README.md) | no | no | mojo_library | yes | build gate |
 | [`broker_coordinator`](../src/broker_coordinator/README.md) | no | no | mojo_library | yes | build gate |
 | [`broker_proto`](../src/broker_proto/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`bump_arena`](../src/bump_arena/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
@@ -96,12 +96,12 @@ Run by nobody (30): [`agg`](../src/agg/README.md), [`agg_api`](../src/agg_api/RE
 | [`cdc_ingest`](../src/cdc_ingest/README.md) | no | no | mojo_library | yes | build gate |
 | [`chat_proto`](../src/chat_proto/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`chat_store`](../src/chat_store/README.md) | no | no | mojo_library | yes | build gate |
-| [`chunk`](../src/chunk/README.md) | no | no | mojo_library | no | nobody |
+| [`chunk`](../src/chunk/README.md) | no | no | mojo_library | yes | build gate |
 | [`clock`](../src/clock/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`codeworks_api`](../src/codeworks_api/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`column_format`](../src/column_format/README.md) | no | no | mojo_library | yes | build gate |
 | [`column_kernels`](../src/column_kernels/README.md) | no | no | mojo_library | yes | build gate |
-| [`comms_index`](../src/comms_index/README.md) | no | no | mojo_library | no | nobody |
+| [`comms_index`](../src/comms_index/README.md) | no | no | mojo_library | yes | build gate |
 | [`compression`](../src/compression/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`connect`](../src/connect/README.md) | no | no | mojo_library | yes | build gate |
 | [`contacts`](../src/contacts/README.md) | no | no | mojo_library | yes | build gate |
@@ -117,12 +117,12 @@ Run by nobody (30): [`agg`](../src/agg/README.md), [`agg_api`](../src/agg_api/RE
 | [`db`](../src/db/README.md) | no | no | mojo_library | yes | build gate |
 | [`db_postgres`](../src/db_postgres/README.md) | no | no | mojo_library | yes | build gate |
 | [`db_sqlite`](../src/db_sqlite/README.md) | no | no | mojo_library | yes | build gate |
-| [`decimal_literal`](../src/decimal_literal/README.md) | no | no | mojo_library | no | nobody |
-| [`dispatch_agg_exec`](../src/dispatch_agg_exec/README.md) | no | no | mojo_library | no | nobody |
-| [`dispatch_agg_folds`](../src/dispatch_agg_folds/README.md) | no | no | mojo_library | no | nobody |
-| [`dispatch_join_kernels`](../src/dispatch_join_kernels/README.md) | no | no | mojo_library | no | nobody |
-| [`dispatch_project`](../src/dispatch_project/README.md) | no | no | mojo_library | no | nobody |
-| [`dispatch_scan`](../src/dispatch_scan/README.md) | no | no | mojo_library | no | nobody |
+| [`decimal_literal`](../src/decimal_literal/README.md) | no | no | mojo_library | yes | build gate |
+| [`dispatch_agg_exec`](../src/dispatch_agg_exec/README.md) | no | no | mojo_library | yes | build gate |
+| [`dispatch_agg_folds`](../src/dispatch_agg_folds/README.md) | no | no | mojo_library | yes | build gate |
+| [`dispatch_join_kernels`](../src/dispatch_join_kernels/README.md) | no | no | mojo_library | yes | build gate |
+| [`dispatch_project`](../src/dispatch_project/README.md) | no | no | mojo_library | yes | build gate |
+| [`dispatch_scan`](../src/dispatch_scan/README.md) | no | no | mojo_library | yes | build gate |
 | [`dispatch_sources`](../src/dispatch_sources/README.md) | no | no | mojo_library | no | nobody |
 | [`dynamic_filter`](../src/dynamic_filter/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |
 | [`encoding`](../src/encoding/README.md) | yes | yes | mojo_adopted_library | yes | release e2e, build gate |

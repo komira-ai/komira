@@ -19,6 +19,55 @@ The evaluator only evaluates. It rewrites no plan and registers no expression:
 the plan an executor host lowers arrives optimized, and this package is called
 with the expressions that plan carries.
 
+## Evaluating over a batch
+
+`evaluate_column` computes one value per row and keeps an operand's NULL;
+`evaluate_predicate` gives one bit per row, with UNKNOWN as data 0 and validity
+0. The batch here is one nullable INT64 column `v` holding 10, NULL and 30.
+
+```mojo
+from arrow.arrow_types import ArrowType
+from arrow.column_builder import ColumnBuilder
+from arrow.record_batch import RecordBatchBuilder
+from arrow.schema import Field, SchemaBuilder
+from batch_eval.evaluate import evaluate_column, evaluate_predicate
+from plan_expr.expr import BIN_GT, BIN_SUB, Expr
+from plan_expr.scalar_value import ScalarValue
+from std.testing import assert_equal, assert_false, assert_true
+
+var vb = ColumnBuilder[DType.int64].with_capacity(3)
+vb.append(Int64(10))
+vb.append_null()
+vb.append(Int64(30))
+var sb = SchemaBuilder()
+sb.add_field(Field("v", ArrowType.INT64, True))
+var rbb = RecordBatchBuilder()
+rbb.add_column(vb^.materialize())
+var batch = rbb.build(sb.build())
+
+# 100 - v is [90, NULL, 70].
+var diff = Expr.binary(
+    BIN_SUB, Expr.literal(ScalarValue.from_int(100)), Expr.col_ref("v")
+)
+var out = evaluate_column(diff, batch)
+assert_true(out.arrow_type == ArrowType.INT64)
+assert_equal(out.length(), 3)
+assert_true(out.is_null_at(1))
+assert_equal(out.as_primitive[DType.int64]().get(0), Int64(90))
+assert_equal(out.as_primitive[DType.int64]().get(2), Int64(70))
+
+# v > 15 is [FALSE, UNKNOWN, TRUE].
+var gt = Expr.binary(
+    BIN_GT, Expr.col_ref("v"), Expr.literal(ScalarValue.from_int(15))
+)
+var mask = evaluate_predicate(gt, batch)
+assert_equal(len(mask), 3)
+assert_false(mask.data.test(0))
+assert_true(mask.data.test(2))
+assert_true(Bool(mask.validity))
+assert_false(mask.validity.value().test(1))
+```
+
 ## Dependency direction
 
 ```

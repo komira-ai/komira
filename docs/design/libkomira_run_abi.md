@@ -412,7 +412,7 @@ otherwise fail fast. The port keeps that answer and makes it explicit:
      aborts in the middle of a query (for example at the first compressed Parquet
      page).
    - **EXISTS:** every call that can reach a codec (the Parquet, CSV and JSON
-     register calls, the three describe calls, `komira_sql_stream`,
+     register calls, `komira_add_sql_binding`, the three describe calls, `komira_sql_stream`,
      `komira_sql_stream_run` and `komira_plan_stream`; not
      `komira_register_arrow_stream`, which reads no file) first opens libzstd, libz and liblz4 through a
      raising probe (`probe_codec_libraries` in `compression.codec_libraries`),

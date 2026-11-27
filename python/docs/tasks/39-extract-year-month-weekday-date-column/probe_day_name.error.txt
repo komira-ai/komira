@@ -1,0 +1,1 @@
+AttributeError: .dt.day_name() is not supported yet: the engine does not format a timestamp as text

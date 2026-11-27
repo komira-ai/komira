@@ -1,7 +1,9 @@
 # The release files: what a release of komira builds (artifacts.textproto), the
 # set that builds it (release_set, below). .github/workflows/release.yml builds the set on every
 # push to main. release_set below holds the set to artifacts.textproto (a build
-# action).
+# action). The npm packages are a set of their own (npm_packages, below), which
+# .github/workflows/npm.yml builds, tests and, once release/npm_publish.txt says
+# so, publishes on every push to main.
 # release/ci (a package of its own) holds the programs of the workflows
 # (main_red, check_release_ref, release_json), built behind their cases.
 # Changes need the release approver's review (.github/CODEOWNERS).
@@ -13,6 +15,7 @@ load("@komira//tools/build/selftest:defs.bzl", "graph_check")
 load(":darwin_libs.bzl", "DARWIN_PACKAGES", "mopm_darwin_libs")
 load(":exec_tools.bzl", "exec_tool_cases")
 load(":mopm_artifacts.bzl", "merge_tree_cases", "mopm_artifacts", "mopm_release_artifacts", "native_ids_json", "release_packages_json")
+load(":npm_packages.bzl", "npm_packages")
 load(":plan_expectation.bzl", "mopm_plan_expectation", "plan_expectation_cases")
 load(":release_set.bzl", "release_set")
 load(":unpublished.bzl", "src_library_paths")
@@ -379,5 +382,53 @@ mopm_release_artifacts(
     linux = ":mopm_artifacts",
     mac = ":mopm_darwin_libs",
     target_compatible_with = select({":mac_tree": [], "DEFAULT": [":mac_tree_off"]}),  # komira-limit:release-mac-tree
+    visibility = ["PUBLIC"],
+)
+
+# ---- The npm packages (docs/design/typescript_package.md, section 4) --------------------------------
+
+# The npm release set (npm_packages.bzl): the tarballs of //node:package and //node:package_linux_x64
+# and npm_set.json, the record of each package's name, version, file, SHA-256 and sha512 integrity, in the
+# order .github/workflows/npm.yml publishes them (the platform package, then the main package, which names
+# it). npm.yml's build job builds it stamped (0.1.<N>, the wheel's version); the pull request builds it
+# unstamped (0.0.0), which checks everything but the stamp. Not a member of :release_set, whose members
+# are conda packages only.
+npm_packages(
+    name = "npm_packages",
+    main = "@komira-ai/komira",
+    packages = {
+        "@komira-ai/komira": "//node:package",
+        "@komira-ai/komira-linux-x64-gnu": "//node:package_linux_x64",
+    },
+    visibility = ["PUBLIC"],
+)
+
+# release/npm_names.txt is the set's names, so a package added to or dropped from :npm_packages changes
+# the list in the same change, and the owner knows which names to create on npm with their trusted
+# publisher (npm_names_test.zig says what each case catches).
+zig_test(
+    name = "npm_names_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "npm_names_test.zig",
+    data = {
+        "npm_names.txt": "npm_names.txt",
+        "npm_set.json": ":npm_packages[npm_set.json]",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# release/npm_publish.txt, the publish gate npm.yml's build job reads (`npm_smoke gate`), is one
+# `publish: off` or `publish: on` line among comments: a gate a typo or a merge left unreadable fails the
+# pull request, not main (npm_publish_gate_test.zig). Off until the owner's go (the design's D4).
+zig_test(
+    name = "npm_publish_gate_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "npm_publish_gate_test.zig",
+    data = {"npm_publish.txt": "npm_publish.txt"},
+    deps = ["//release/ci:npm_smoke_lib"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
