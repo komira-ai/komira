@@ -71,7 +71,8 @@ coverage_ci_cases(
 # The cases of the farm-connect action (.github/actions/farm-connect/action_test.zig
 # says what each catches): its input checks and the buckconfig it writes, run
 # from action.yml's own scripts with the busybox sh in a HOME of each case's
-# own; and every workflow step that uses the action, which must pass `tls`
+# own; its wait for the farm, run on a clock of each case's own
+# (probe_test.zig); and every workflow step that uses the action, which must pass `tls`
 # from the FARM_TLS variable. A build action, so a failing case fails
 # `./buck2 build //...`.
 WORKFLOWS = glob([".github/workflows/*.yml"])
@@ -80,6 +81,8 @@ zig_test(
     name = "farm_connect_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/actions/farm-connect/action_test.zig",
+    # The cases of the step that waits for the farm, imported by action_test.zig.
+    imports = [".github/actions/farm-connect/probe_test.zig"],
     data = dict(
         {"action.yml": ".github/actions/farm-connect/action.yml"},
         **{w.removeprefix(".github/"): w for w in WORKFLOWS}
@@ -109,17 +112,19 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
-# The cases of the mopm jobs of release.yml: the continuous prod publish (each prod job's
-# gate, needs, environment and permissions, the commands), no beta job, no schedule, the
-# release-main concurrency group, no secret, the version of every run, and that the staged set
-# (mopm-staged-<sha>, mopm-prod-staged-<sha>) is kept 7 to 14 days for a rerun on a later day
-# (.github/workflows/release_workflow_test.zig says what each catches), and no wheel stage (no
-# wheel job, no setup-python, no wheel target, no smoke driver: pypi.yml tests the wheel). A build
-# action.
+# The cases of the mopm jobs of release.yml: the continuous publish to beta and then prod (each
+# beta and prod job's gate, needs, environment and permissions, the commands, each job's registry,
+# and prod-stage needing beta-commit), no schedule, the release-main concurrency group, no secret,
+# the version of every run, and that the staged set (mopm-staged-<sha>, mopm-beta-staged-<sha>,
+# mopm-prod-staged-<sha>) is kept 7 to 14 days for a rerun on a later day
+# (.github/workflows/release_workflow_test.zig and release_publish_group.zig say what each
+# catches), and no wheel stage (no wheel job, no setup-python, no wheel target, no smoke driver:
+# pypi.yml tests the wheel). A build action.
 zig_test(
     name = "release_workflow_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/workflows/release_workflow_test.zig",
+    imports = [".github/workflows/release_publish_group.zig"],
     data = {
         "workflows/release.yml": ".github/workflows/release.yml",
         "packages.bzl": "//release/readme_e2e:packages.bzl",
@@ -132,8 +137,8 @@ zig_test(
 # The whole-set check of release.yml (.github/workflows/release_plan_expect_test.zig says what each case
 # catches): `mopm-stage` builds //release:mopm_plan_expectation on the farm and, as the step right after
 # `mopm stage`, runs `release_staged_verify expect` on the staged plan with it, with no condition and no
-# ignored failure, and `prod-stage` needs `mopm-stage`, so a set that is not every package on every
-# platform stops before the registry is asked for a group. A build action.
+# ignored failure, and `beta-stage` and `prod-stage` need `mopm-stage`, so a set that is not every
+# package on every platform stops before either registry is asked for a group. A build action.
 zig_test(
     name = "release_plan_expect_cases",
     exec_compatible_with = LINUX_X86_64,
@@ -221,7 +226,7 @@ zig_test(
             "packages.bzl": "//release/readme_e2e:packages.bzl",
             "darwin_libs.bzl": "//release:darwin_libs.bzl",
             "release.BUCK": "//release:release_buck",
-            "ci_targets": "//ci:target_shards",
+            "ci_roots": "//ci:root_files",
         },
         **{"workflows/" + w.removeprefix(".github/workflows/"): w for w in WORKFLOWS}
     ),
@@ -232,7 +237,8 @@ zig_test(
 # The cases of the buck2-farm action (.github/actions/buck2-farm/action_test.zig
 # says what each catches): action.yml's shape, and its two run lines run
 # end to end over recorded buck2 output with the real //tools/build/ci:assert_remote,
-# a cut connection to the farm run once more and every other failure not.
+# a cut connection to the farm run again once a farm on a loopback port of the case's
+# own answers (at most three runs) and every other failure not.
 zig_test(
     name = "buck2_farm_cases",
     exec_compatible_with = LINUX_X86_64,

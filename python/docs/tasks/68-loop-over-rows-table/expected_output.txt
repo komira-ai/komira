@@ -1,0 +1,9 @@
+1 Ana 120
+2 Bo 80
+3 Cy 200
+{'customer': 'Ana', 'amount': 120}
+{'customer': 'Bo', 'amount': 80}
+{'customer': 'Cy', 'amount': 200}
+Ana
+Bo
+Cy

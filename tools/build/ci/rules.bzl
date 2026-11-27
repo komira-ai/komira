@@ -15,7 +15,7 @@ configuration).
           request that does not touch what a row owns leaves them out (below).
   UNIVERSE the target patterns of the check set: the graph the selector
           answers over, and the targets the aggregate `//ci:pr` holds
-          (ci/targets.bzl). The tests cell is its `functional` tree only:
+          (one file per root, ci/roots/: roots.bzl). The tests cell is its `functional` tree only:
           the rest of that cell fails by design.
 
 A pattern is a path, `dir/**` (everything under dir), `text*` (a path
@@ -75,7 +75,7 @@ DEFAULT = "komira//ci:pr_default"
 #   own     the paths whose change keeps it: a change with a file matching one of these
 #           (patterns as in WIDEN) builds it and everything above it; a change with none
 #           leaves out the target and every check that depends on it, WIDENED or not.
-#   roots   the roots of the check set (ci/targets.bzl) that reach the target: DEFAULT is
+#   roots   the roots of the check set (ci/roots/, roots.bzl) that reach the target: DEFAULT is
 #           the check set without them, and `default_guard.bxl:check` fails when DEFAULT
 #           still reaches the target or a root here reaches nothing heavy.
 #   reason  why it is left off.
@@ -98,7 +98,8 @@ EXCLUDED = [
     ("komira//python:komira_wheel_macos_arm64", "the macOS arm64 wheel: it is built for the darwin-arm64 platform on the farm's macOS workers by pypi.yml (job build-macos-arm64), and never by a pull request (the Linux wheel and the wheel rule's own cases are the aggregate's)"),
     ("komira//python:tpch_via_wheel_test", "TPC-H q1 to q22 at scale factor 1 through the installed wheel against DuckDB: 22 engine queries over staged sf1 data, a validation run and not a build-and-unit-test check (B9); it is built on request (`./buck2 build komira//python:tpch_via_wheel_test`), and the answer check it uses is held in the pull request by `//python/tests:tpch_compare_test`"),
     ("komira//python:wheel_install_test_macos_arm64", "the macOS arm64 wheel's install test: it runs on the farm's macOS workers in pypi.yml (job build-macos-arm64), and never in a pull request (the Linux install tests are the aggregate's)"),
-    ("komira//python/docs/tasks:examples_macos_arm64", "the common-task examples on the macOS arm64 wheel: built for darwin-arm64 on the farm's macOS workers by release-macos.yml (step `build the macOS Python harness tests`), never by a pull request (each example's Linux run, `komira//python/docs/tasks:<rank>-<slug>`, is the aggregate's)"),
+    ("komira//python/docs/tasks:examples_macos_arm64", "the common-task examples on the macOS arm64 wheel: built for darwin-arm64 on the farm's macOS workers by release-macos.yml (step `build the macOS Python harness tests`), never by a pull request (each example's Linux run, `komira//python/docs/tasks:<rank>-<slug>`, is the aggregate's, through `komira//python/docs/tasks:examples`)"),
+    ("komira//python/docs/task_tree_fixture/...", "the two task trees of tools/build/ci/tasks_cases.bzl, configured by cases.bxl to hold that a task directory added changes no generated target list; their wheel and driver are placeholders, so they are analysed and never built (a change to them alone selects only these, so the selector answers with the whole aggregate)"),
     ("komira//python/tests:pyarrow-25.0.1-cp313-cp313-macosx_12_0_arm64.whl", "the pinned macOS arm64 pyarrow wheel, which only the macOS wheel's install test reads (komira//python:wheel_install_test_macos_arm64, above): it is compatible with darwin-arm64 alone, so a change to python/tests/BUCK that selects it by name would fail the Linux build as incompatible"),
     ("komira//python/tests:protobuf-7.36.2-cp310-abi3-macosx_10_9_universal2.whl", "the pinned macOS protobuf wheel, which only the macOS wheel's install test reads (komira//python:wheel_install_test_macos_arm64, above): it is compatible with darwin-arm64 alone, so a change to python/tests/BUCK that selects it by name would fail the Linux build as incompatible"),
     ("komira//python:wheel_libs_macos_arm64", "the macOS arm64 wheel read back, its libraries loaded from it alone: built for darwin-arm64 by pypi.yml (job build-macos-arm64) only, never by a pull request (the Linux wheel's check and the tool's unit tests are the aggregate's)"),

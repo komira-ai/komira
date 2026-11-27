@@ -1,6 +1,9 @@
 # Connects a GitHub-hosted job to the build farm: joins the tailnet as
-# `tag:ci`, refuses to go on unless the farm answers, and writes the farm's
-# machine buckconfig for buck2 (docs/ci.md, "The runner").
+# `tag:ci`, waits (at most `farm-wait-minutes`) for the farm to answer and
+# refuses to go on unless it does, and writes the farm's machine buckconfig for
+# buck2 (docs/ci.md, "The runner"). The buckconfig also carries that wait, as
+# `farm_wait_seconds` under `[komira_ci]`, for the buck2-farm action's wait
+# before it runs a cut command again.
 #
 # Nothing here names the farm. Its address, instance name and worker property
 # sets arrive as inputs, which a workflow takes from repository variables, so no
@@ -20,7 +23,7 @@
 # and a pull request from a fork gets neither the token nor the variables, so
 # the caller skips a fork's job (a composite action cannot see the event).
 name: farm-connect
-description: Join the tailnet, refuse unless the farm answers, write the farm's machine buckconfig.
+description: Join the tailnet, wait (bounded) for the farm to answer and refuse unless it does, write the farm's machine buckconfig.
 
 inputs:
   ts-client-id:
@@ -62,6 +65,10 @@ inputs:
     description: The priority class the farm queues this job's actions in, `ci` or `batch` (a `batch` action starts after every queued `ci` action, so the pull-request checks go first when the farm is full). Written as the request header `x-kbf-qos` (buck2's `http_headers`); it is no platform property, so it does not change an action's digest or its cache entry. Left out, no header is sent and the farm queues the actions as `ci`. It takes effect only on a farm whose front end reads the header; one that does not ignores it.
     required: false
     default: ""
+  farm-wait-minutes:
+    description: How long, in whole minutes from 1 to 120, to wait for the farm's port to answer before refusing to build (here, after joining the tailnet), and before the buck2-farm action runs a command cut by a lost connection again (it reads the value from the machine buckconfig). Every wait is reported in the job summary.
+    required: false
+    default: "20"
   tls:
     description: Whether the remote-execution service is reached over TLS, `true` or `false`.
     required: false
@@ -92,6 +99,7 @@ runs:
         TLS: ${{ inputs.tls }}
         TLS_CA_CERTS: ${{ inputs.tls-ca-certs }}
         FARM_QOS: ${{ inputs.farm-qos }}
+        FARM_WAIT_MINUTES: ${{ inputs.farm-wait-minutes }}
       run: |
         set -eu
         refuse() {
@@ -121,6 +129,12 @@ runs:
             *"$nl"* | *"$cr"*) refuse "an input holds a line break; each value must be one line of the buckconfig" ;;
           esac
         done
+        # A bound, in whole minutes: never 0 (no wait at all) and never past
+        # two hours (a job's own limit is not much more).
+        case "$FARM_WAIT_MINUTES" in
+          '' | *[!0-9]* | 0*) refuse "farm-wait-minutes is '$FARM_WAIT_MINUTES', not a whole number of minutes from 1 to 120" ;;
+        esac
+        [ "$FARM_WAIT_MINUTES" -le 120 ] || refuse "farm-wait-minutes is '$FARM_WAIT_MINUTES', not a whole number of minutes from 1 to 120"
         # The one header the action writes: its value is a level name and nothing else.
         case "$FARM_QOS" in
           ''|ci|batch) ;;
@@ -192,12 +206,17 @@ runs:
         # The log of a public repository is public: no tailnet status, no addresses.
         log-mode: quiet
 
-    # A TCP connection to the farm's port, retried for a minute because a new
-    # node can take a few seconds to get its routes.
+    # A TCP connection to the farm's port, given 5 s, with 5 s between two,
+    # until it answers or farm-wait-minutes have passed: a new node can take a
+    # few seconds to get its routes, and the connection between the runner and
+    # the farm can be lost for minutes at a time. A line each minute in the job
+    # log, and the whole wait in the job summary, so an outage is seen, never
+    # hidden. The clock is `date +%s`, so the cases of the step can set it.
     - name: refuse unless the farm answers
       shell: bash
       env:
         FARM_ADDRESS: ${{ inputs.farm-address }}
+        FARM_WAIT_MINUTES: ${{ inputs.farm-wait-minutes }}
       run: |
         set -u
         hostport="${FARM_ADDRESS#*://}"
@@ -208,15 +227,38 @@ runs:
           ''|*[!0-9]*) echo "::error title=farm-connect::FARM_ADDRESS has no numeric port"; exit 1 ;;
         esac
         [ -n "$host" ] && [ "$host" != "$hostport" ] || { echo "::error title=farm-connect::FARM_ADDRESS is not host:port"; exit 1; }
-        for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+        bound=$((FARM_WAIT_MINUTES * 60))
+        took() { echo "$(($1 / 60)) min $(($1 % 60)) s"; }
+        start=$(date +%s)
+        next_note=60
+        attempt=0
+        while :; do
+          attempt=$((attempt + 1))
           if timeout 5 bash -c 'exec 3<>"/dev/tcp/$0/$1"' "$host" "$port" 2>/dev/null; then
-            echo "the farm answers on its port (attempt $attempt)"
+            if [ "$attempt" -eq 1 ]; then
+              echo "the farm answers on its port"
+              exit 0
+            fi
+            waited=$(($(date +%s) - start))
+            line="farm-connect: farm unreachable for $(took "$waited"); went on when it answered (probe $attempt)"
+            echo "$line"
+            echo "$line" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          sleep 5
+          waited=$(($(date +%s) - start))
+          if [ "$waited" -ge "$bound" ]; then
+            echo "farm-connect: farm unreachable for $(took "$waited"), the longest wait; not building" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=farm-connect::the farm does not answer from this job after joining the tailnet: unreachable for $(took "$waited"), the longest wait (farm-wait-minutes $FARM_WAIT_MINUTES). Not building: with no farm buck2 would build on this runner. Look at the tailnet policy (tag:ci to tag:farm, the farm's port only), whether the farm's nodes are up, and the trust credential's subject."
+            exit 1
+          fi
+          if [ "$waited" -ge "$next_note" ]; then
+            echo "farm-connect: the farm has not answered for $(took "$waited"); waiting up to $(took "$bound")"
+            next_note=$(((waited / 60 + 1) * 60))
+          fi
+          rest=$((bound - waited))
+          [ "$rest" -lt 5 ] || rest=5
+          sleep "$rest"
         done
-        echo "::error title=farm-connect::the farm does not answer from this job after joining the tailnet. Not building: with no farm buck2 would build on this runner. Look at the tailnet policy (tag:ci to tag:farm, the farm's port only), whether the farm's nodes are up, and the trust credential's subject."
-        exit 1
 
     - name: write the farm's machine buckconfig
       shell: bash
@@ -232,6 +274,7 @@ runs:
         TLS: ${{ inputs.tls }}
         TLS_CA_CERTS: ${{ inputs.tls-ca-certs }}
         FARM_QOS: ${{ inputs.farm-qos }}
+        FARM_WAIT_MINUTES: ${{ inputs.farm-wait-minutes }}
       run: |
         set -eu
         case "$CONCURRENCY" in
@@ -247,6 +290,10 @@ runs:
         dir="$HOME/.buckconfig.d"
         mkdir -p "$dir"
         {
+          # The CI's own key, which buck2 does not read: the buck2-farm action's
+          # longest wait for the farm before it runs a cut command again.
+          echo "[komira_ci]"
+          echo "  farm_wait_seconds = $((FARM_WAIT_MINUTES * 60))"
           echo "[buck2_re_client]"
           echo "  engine_address = $FARM_ADDRESS"
           echo "  action_cache_address = $FARM_ADDRESS"

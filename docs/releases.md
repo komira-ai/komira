@@ -8,9 +8,11 @@ What komira publishes today, and how another repository pins a version of it.
 set (`.github/workflows/release.yml`: the packages, `release.json` and its set
 hash, kept as a workflow artifact, [docs/ci.md](ci.md#releaseyml-the-release))
 and publishes the libraries that moved to mopm to the mopm
-registry `prod`, as one group at the version `0.1.<run number>`, through the jobs
-`mopm-stage` and `prod-*` of the same workflow, each package built for linux-64 and osx-arm64
-([docs/ci.md](ci.md#the-mopm-jobs)). The Python package `komira` is published by `pypi.yml` (the
+registry `beta` and then, when beta committed them, to the registry `prod`, each as one group at the
+same version `0.1.<run number>` (the same bytes on both), through the jobs `mopm-stage`, `beta-*` and
+`prod-*` of the same workflow, each package built for linux-64 and osx-arm64
+([docs/ci.md](ci.md#the-mopm-jobs)). Until the beta registry trusts this workflow as a publisher, a
+push fails at `beta-stage` and publishes to neither ([docs/ci.md](ci.md#before-the-first-release)). The Python package `komira` is published by `pypi.yml` (the
 Linux x86_64 wheel) and `pypi-macos-arm64.yml` (the macOS arm64 wheel): to TestPyPI on a push to
 `main` that changes more than documentation, and to PyPI by their daily promotion
 ([docs/ci.md](ci.md#pypiyml-publishing-the-python-package), [install.md](install.md)). Nothing is

@@ -1,0 +1,6 @@
+{'key_id': 1, 'kind': 'removed', 'old_qty': 10, 'new_qty': None}
+{'key_id': 3, 'kind': 'changed', 'old_qty': 7, 'new_qty': 9}
+{'key_id': 4, 'kind': 'added', 'old_qty': None, 'new_qty': 3}
+[{'id': 1, 'qty': 10}]
+[{'id': 4, 'qty': 3}]
+[{'id': 3, 'qty_old': 7, 'qty_new': 9}]
