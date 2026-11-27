@@ -64,7 +64,7 @@ every query after it keeps its text, the port the Iceberg design gives for a cat
 
 The write side, komira-ai/komira#2335, is designed in `database_table_write.md` (komira-ai/komira#2451, not yet
 merged). The two documents use the same source objects, credential, error class and codes, and ask
-the owner the same `ATTACH` question.
+the owner the same `ATTACH` question (`TYPE sqlite` only).
 
 ## What is it for, and what is out of scope?
 
@@ -99,15 +99,19 @@ Out of scope, each refused by name where a user can reach it:
 - `ATTACH` of a server database (`TYPE postgres`, `TYPE mysql`), an `ATTACH` with a connection string or a
   `SECRET`, and `USE`, `CREATE SECRET` and the `SET pg_*`, `SET mysql_*` and `SET sqlite_*` settings.
   They stay refused, as [credentials_and_writes.md decision 10](credentials_and_writes.md#10-writes)
-  rules. `ATTACH` and `DETACH` of a local database file are served (owner question 1,
+  rules. `ATTACH` and `DETACH` of a local SQLite file are served (owner question 1,
   [SQL surface](#sql-surface)).
-- Reading a DuckDB file (`ATTACH 'x.duckdb'`, `komira.duckdb(path)`). The write design brings
-  libduckdb for writing one (its question on that library); reading through it is a later slice of that
-  library, not of this design.
 - `postgres_scan`, `postgres_scan_pushdown`, `postgres_attach` and `sqlite_attach`: DuckDB's older
   table functions, which take a connection string or attach a database from SQL.
-- Other engines: SQL Server, Oracle, DuckDB files, Snowflake, BigQuery, ODBC, ADBC drivers.
+- Other engines: SQL Server, Oracle, Snowflake, BigQuery, ODBC, ADBC drivers.
 - A SQLite file at a remote URL (`s3://.../x.db`). Refused with `STORAGE_URL_REFUSED`.
+- **A DuckDB database file is not read or written.** DuckDB is the engine komira is compared against,
+  the SQL oracle of [query_semantics_rulings.md](query_semantics_rulings.md), and komira does not embed
+  it: no libduckdb, no `komira.duckdb`, no `ATTACH ... (TYPE duckdb)`, which is refused by name
+  (`DATABASE_KIND_UNSUPPORTED`). komira would need DuckDB's own library to write or read one *(inferred: no other writer of the format is known)*. Rank 92 (export a
+  table to a SQLite or DuckDB file) is the write design's: its page will show the SQLite export and,
+  for DuckDB, `COPY (<query>) TO 'x.parquet'`, which DuckDB reads with `read_parquet`, and its status
+  becomes `partial` (one of its two forms) when that design's SQLite export lands.
 - Change data capture, logical replication and streaming reads of a database (`cdc_ingest` is a
   separate package with its own scope).
 - Nested and exotic column types in the first slices: arrays, composite types, ranges, enums,
@@ -192,8 +196,9 @@ build.
 
 What changes in `db_sqlite` (**PROPOSED**; rule M9 keeps the FFI there):
 
-- A read-only open: `SQLITE_OPEN_READONLY` with `SQLITE_OPEN_URI`, never `CREATE`; both constants are new
-  in `ffi.mojo`. A missing file is `STORAGE_NOT_FOUND`, not a new empty database.
+- A read-only open: `SQLITE_OPEN_READONLY`, never `SQLITE_OPEN_URI` and never `CREATE`, so SQLite never
+  parses the path as a URI; a `path` that starts with `file:` is refused with `DATABASE_LOCATION_REFUSED`.
+  `SQLITE_OPEN_READONLY` is new in `ffi.mojo`. A missing file is `STORAGE_NOT_FOUND`, not a new empty database.
 - A WAL database opened read-only still needs its `-shm` file, readable or creatable: SQLite reads a WAL
   database read-only only when the `-shm` and `-wal` files exist or the directory is writable
   ([wal.html](https://www.sqlite.org/wal.html)). When neither holds, the open fails, and komira raises
@@ -296,7 +301,9 @@ in its fields.
   the TLS mode and `access.credential = "crm-reader"`. The user name travels with the password inside
   the credential, so the plan names no database role *(a decision: a role name is not a secret, but
   keeping it with the password makes one secret-store row the whole login)*.
-- **A connection URI in Python is a second spelling of the source object** (owner question 2). The
+- **A connection URI in Python is a second spelling of the source object** (ruled by the owner, on the
+  condition that the parsing is done in the Python SDK and the plan supports no such string; see
+  [What must always hold](#what-must-always-hold)). The
   pandas and polars readers (and `to_sql`) also accept the URI string those libraries document:
   pandas' `con` takes "a str" that SQLAlchemy reads as a database URL (`pandas.read_sql`), of the form
   `postgresql://<user>:<password>@<host>:<port>/<database>`; polars' `read_database_uri` takes
@@ -304,7 +311,7 @@ in its fields.
   and `sqlite://path` (its API reference page) *(to confirm against pandas 3.0.6 and polars 1.44.2)*.
   - The SDK parses the URI in Python. It builds exactly the source object the constructor builds:
     `komira.sqlite(path)` for `sqlite:///<path>` (and polars' `sqlite://<path>`), `komira.postgres(host,
-    database, port=...)` for `postgresql://` and `postgres://` (SQLAlchemy's `+driver` suffix is
+    database, port=..., credential=komira.Password(<generated name>, ...))` for `postgresql://` and `postgres://` (SQLAlchemy's `+driver` suffix is
     ignored: komira uses its own driver), and `komira.mysql(...)` for `mysql://`.
   - The user and password become a `komira.Password` under a generated name, `uri.` and the first 16
     hex digits of the SHA-256 of `<scheme>://<user>@<host>:<port>/<database>`, so the name says nothing
@@ -370,7 +377,7 @@ one meaning on both sides.
 | DuckDB | komira | why |
 |---|---|---|
 | `sqlite_scan('f.db', 't')` | served, the same signature | a local path, no credential: the same as `read_parquet('x.parquet')` |
-| `ATTACH 'f.db' [AS f] (TYPE sqlite [, READ_ONLY] [, BUSY_TIMEOUT n])` then `f.t`; `DETACH f` | served, the same statement (owner question 1). It binds what `s.add_sql_binding("f", komira.sqlite("f.db", read_only=..., busy_timeout=...))` binds. Other options are refused with `DATABASE_ATTACH_OPTION_UNSUPPORTED`; with no `TYPE`, or `TYPE duckdb`, `DATABASE_KIND_UNSUPPORTED` until the DuckDB file slice | a file path carries no secret, and `COPY ... TO '<path>'` already takes a path in SQL |
+| `ATTACH 'f.db' [AS f] (TYPE sqlite [, READ_ONLY] [, BUSY_TIMEOUT n])` then `f.t`; `DETACH f` | served, the same statement (owner question 1). It binds what `s.add_sql_binding("f", komira.sqlite("f.db", read_only=..., busy_timeout=...))` binds. Other options are refused with `DATABASE_ATTACH_OPTION_UNSUPPORTED`; with no `TYPE`, or `TYPE duckdb`, `DATABASE_KIND_UNSUPPORTED`: komira reads no DuckDB file | a file path carries no secret, and `COPY ... TO '<path>'` already takes a path in SQL |
 | `ATTACH '<libpq string>' AS p (TYPE postgres [, READ_ONLY])`, `TYPE mysql`, `SECRET` | refused with `DATABASE_KIND_UNSUPPORTED`, which says to bind the database from the SDK: `s.add_sql_binding("p", komira.postgres(...))`, then the same `p.schema.t` | [decision 10](credentials_and_writes.md#10-writes): credentials are never bound in SQL, and a connection string can hold a password |
 | `postgres_query('p', 'SELECT ...')` | served, the same signature: the first argument is the bound name | the first argument names an attached database in DuckDB too |
 | `mysql_query('m', 'SELECT ...')` | served, the same signature | as `postgres_query` |
@@ -511,7 +518,7 @@ kpl.read_database_uri(query, uri, *, partition_on=None, partition_range=None, pa
 - **They return a `LazyFrame`.** The skin's rule refuses polars' eager `read_*` names in favour of the
   lazy `scan_*` spelling, but polars has no lazy database reader, so there is no `scan_*` name to point
   at. Inventing `scan_database` would be a name polars does not have. So these two names are served,
-  lazily, as the one exception to the rule (owner question 5).
+  lazily, as the one exception to the rule (owner question 4).
 - `connection` takes the same values as pandas' `con` above, and so as `to_sql(con=...)`. `uri` takes
   the URIs polars documents for these engines (`postgresql://`, `mysql://`, `sqlite://`), split by the
   SDK as for `con`.
@@ -770,8 +777,8 @@ Codes this design shares with the write design:
 | `DATABASE_TABLE_NOT_FOUND` | the table or schema does not exist; the message lists none of the database's other names | `bind` | `DatabaseError` |
 | `DATABASE_BUSY` | a SQLite file stayed locked past the busy timeout | `bind` or `execute` | `DatabaseError` |
 | `DATABASE_FILE_NOT_A_DATABASE` | the path is a file of another format | `bind` | `DatabaseError` |
-| `DATABASE_KIND_UNSUPPORTED`, `DATABASE_ATTACH_OPTION_UNSUPPORTED` | `ATTACH` of a server, a connection string or a kind not built; an `ATTACH` option other than `TYPE`, `READ_ONLY` and `BUSY_TIMEOUT` | `bind` | `UnsupportedOperation` |
-| `DATABASE_LOCATION_REFUSED` | a `host` or `database` argument shaped like a connection string; a URI with a scheme komira does not read, or a query parameter other than `sslmode` | `bind` | `UnsupportedOperation` |
+| `DATABASE_KIND_UNSUPPORTED`, `DATABASE_ATTACH_OPTION_UNSUPPORTED` | `ATTACH` of a server, of a connection string, with no `TYPE`, or of a kind komira does not read (`TYPE duckdb`); an `ATTACH` option other than `TYPE`, `READ_ONLY` and `BUSY_TIMEOUT` | `bind` | `UnsupportedOperation` |
+| `DATABASE_LOCATION_REFUSED` | a `host` or `database` argument shaped like a connection string; a SQLite path that starts with `file:`; a URI with a scheme komira does not read, or a query parameter other than `sslmode` | `bind` | `UnsupportedOperation` |
 | `DATABASE_AUTH_FAILED`, `DATABASE_AUTH_METHOD_UNSUPPORTED` | the server refused the login (Postgres SQLSTATE `28P01` or `28000`, MySQL error 1045), or offers only a method komira does not speak (`md5`, cleartext, `mysql_native_password`) | `bind` or `execute` | `CredentialsError` |
 | `DATABASE_TLS_REQUIRED`, `DATABASE_TLS_VERIFY_FAILED` | the server refused TLS (Postgres `N` to `SSLRequest`, MySQL without `CLIENT_SSL`), or its certificate failed `verify-full` | `bind` or `execute` | `StorageError` |
 | `DATABASE_TRANSPORT` | connect failure, reset, timeout, end of stream mid-`COPY` | `bind` or `execute` | `StorageError` |
@@ -797,10 +804,35 @@ slice lands):
 - Existing codes keep their meaning: `STORAGE_NOT_FOUND` (a missing SQLite file on a read, which never
   creates one), `STORAGE_ACCESS_DENIED` (a file komira may not open, such as a WAL database's missing
   `-shm` in a read-only directory), `STORAGE_MALFORMED` (bytes komira cannot frame),
-  `STORAGE_URL_REFUSED` (a SQLite file at a URL), `CREDENTIAL_KIND_MISMATCH`, `CREDENTIAL_UNBOUND`.
+  `STORAGE_URL_REFUSED` (a SQLite file at a URL), `CREDENTIAL_KIND_MISMATCH`, `CREDENTIAL_UNBOUND`, and
+  `SQL_STATEMENT_UNSUPPORTED` (`CREATE SECRET` and the `SET pg_*`, `SET mysql_*` and `SET sqlite_*`
+  settings).
 - A server's error text is not copied into the message, because Postgres and MySQL quote values and
   key fields in it (for example a duplicate key's value) *(inferred from their documented message
   forms)*. The SQLSTATE or error number is enough to look the error up.
+
+## What must always hold
+
+- **The plan holds no connection string.** The owner's condition for accepting connection URIs: "the
+  parsing has to be done in the Python SDK. The logical plan shouldn't support this kind of arbirary
+  strings." So:
+  - the SDK parses a URI and builds the source object; the plan carries only the parsed, typed fields
+    (the kind, `host`, `port`, `database`, the TLS mode, and the credential's name);
+  - no plan field, no binding call (`komira_add_sql_binding` and its `WireBoundSource` arm) and no C ABI
+    row takes a connection string, or a `key=value` string for the engine to parse;
+  - a `host` or `database` argument shaped like a connection string, or a SQLite path that starts with
+    `file:` (which SQLite would read as a URI), stays refused (`DATABASE_LOCATION_REFUSED`);
+  - a URI inside SQL text stays refused (`DATABASE_KIND_UNSUPPORTED` in `ATTACH`, `SQL_NOT_SUPPORTED` for
+    `postgres_scan`).
+  - **The tests that hold it.** `test_uri_plan_equals_constructor_plan`: for each engine, the plan built
+    from a URI is byte-identical to the plan built from the constructor with the same fields and a
+    `komira.Password` under the generated name. `test_wire_has_no_connection_string_field`: the database
+    arm of `WireBoundSource` and the scan kinds' param descriptors hold only the typed fields above, so a
+    new free-form string field fails the test; and the decoder refuses a `host` or `database` value
+    holding `@`, `/`, `?`, `#`, `=`, a space or a scheme, and a SQLite `path` starting with `file:`, with
+    the full message asserted.
+- **No credential value reaches a plan, a message or a log** ([Redaction](#redaction)).
+- **A scan never mixes two snapshots** ([One snapshot per scan](#one-snapshot-per-scan)).
 
 ## How is it tested?
 
@@ -947,7 +979,7 @@ Each is a case the issue does not settle, decided here with its reason.
 17. **Server error text is not copied into messages**: it can quote row values.
 18. **Integration servers are the write design's held interop run**, extended with the read suites.
 19. **A connection URI in Python builds the source object, its password under a generated name**:
-    owner question 2, shared with the write design.
+    the owner's ruling, with the parsing in the Python SDK only.
 20. **Pushed values and `params` are literals on Postgres and MySQL**, bound only on SQLite: `COPY` and
     `COM_QUERY` take no parameters, and a fixed session setting makes one escaping rule complete.
 21. **A read-only WAL database with no usable `-shm` is refused**, never read with `immutable`: that flag
@@ -981,49 +1013,19 @@ Ranks 87 and 90 move to `works` only with komira-ai/komira#2335's write half.
 
 ## Questions for the owner
 
-Each has a recommendation; the rest of the document is written to it. Questions 1 and 2 are shared with
-the write design (`database_table_write.md`, komira-ai/komira#2451), in the same words with the same
-recommendation, so the owner rules once for both sides.
+Each has a recommendation; the rest of the document is written to it. Question 1, `ATTACH` of a local SQLite
+file, is the one shared question not yet ruled; the write design (`database_table_write.md`,
+komira-ai/komira#2451) asks it in the same words with the same recommendation, so the owner rules once
+for both sides. Connection strings in Python, the other shared question, are ruled: they are accepted,
+parsed in the Python SDK only ([What must always hold](#what-must-always-hold)).
 
-1. **`ATTACH` of a local database file.** Recommendation: "ATTACH 'f.db' (TYPE sqlite), and later
-   (TYPE duckdb), of a local file is served as a spelling of add_sql_binding: it builds the same binding,
+1. **`ATTACH` of a local SQLite file.** Recommendation: "ATTACH 'f.db' (TYPE sqlite) of a local file is
+   served as a spelling of add_sql_binding: it builds the same binding,
    a path carries no secret, and DuckDB SQL that people copy keeps working. ATTACH of a server (TYPE
    postgres, TYPE mysql), a connection string in SQL, and CREATE SECRET stay refused by name, because SQL
    text is logged and the plan never carries a secret (docs/design/credentials_and_writes.md decision 4
    and its Options considered)."
-2. **Connection strings in Python.** pandas and polars take a connection URI string, with the password
-   in it. Recommendation: the pandas and polars readers and `to_sql` also accept the connection URI
-   string those libraries document (`read_sql(con='postgresql://...')`, `read_database_uri(query, uri)`,
-   `sqlite:///path`), as a spelling that builds exactly the plan the source object builds: the SDK
-   parses the URI in Python, sends the password through the C ABI credential calls
-   (`komira_credential_add`, `komira_credential_set`, `komira_credential_seal`) under a generated name,
-   and the plan carries the location and that name only. A URI inside SQL text stays refused. A DB-API,
-   SQLAlchemy or ADBC connection object cannot be honoured, because komira has its own drivers, and is
-   refused by name. This is the same reasoning as accepting `storage_options` for files: the SDK splits
-   the secret out before the plan is built ([Credentials](#how-are-credentials-passed)).
-
-The names komira invents, as opposed to mirroring pandas, polars or DuckDB, need the owner's yes. This
-table is the same in both database designs:
-
-| invented name | what it is | read design | write design |
-|---|---|---|---|
-| `komira.sqlite(path, *, read_only=False, busy_timeout=None)` | a SQLite file as a source and a destination | yes | yes |
-| `komira.duckdb(path, *, read_only=False)` | a DuckDB file | later | yes |
-| `komira.postgres(host, database, *, port=5432, credential, tls="verify-full")` | a Postgres server database | yes | yes |
-| `komira.mysql(host, database, *, port=3306, credential, tls="verify-full")` | a MySQL server database | yes | yes |
-| `komira.Password(name, *, user, password)` | the credential for both servers | yes | yes |
-| `tls=` with `"verify-full"` and `"require"` | the TLS mode of a server source; the values are libpq's `sslmode` names | yes | yes |
-| `komira.DatabaseError` | the exception class of database errors, a `KomiraError` and a `ValueError` | yes | yes |
-| the `DATABASE_*` error codes | the named codes of [Errors](#errors) | yes | yes |
-| `uri.<16 hex digits>` | the credential name the SDK generates for a password taken from a URI | yes | yes |
-| a komira source object as `con` / `connection` | pandas' and polars' argument names, taking komira's object beside their URI strings | yes | yes |
-| `kpl.read_database`, `kpl.read_database_uri` returning a `LazyFrame` | polars' names with komira's lazy result (question 5) | yes | no |
-
-Every SQL name in both designs is DuckDB's (`ATTACH`, `DETACH`, `sqlite_scan`, `postgres_query`,
-`mysql_query`, `INSERT`, `ON CONFLICT`), and every reader and writer name is pandas' or polars'. The
-scan kind names (`komira.sqlite.table` and the rest) and plan params are wire names under rule B8, not
-user API.
-3. **The pin of a database scan in an `OptimizedPlan`.** An `OptimizedPlan` must pin every scan
+2. **The pin of a database scan in an `OptimizedPlan`.** An `OptimizedPlan` must pin every scan
    ([optimized_plan_sources.md](optimized_plan_sources.md) §15.3.3), and "a stored `OptimizedPlan` reads
    the same data forever, or is refused by name once that data is gone". A database table has no
    snapshot that outlives a transaction. Recommendation: a new `ScanPin.resolved` arm,
@@ -1032,16 +1034,39 @@ user API.
    (Postgres `pg_current_snapshot()`, a SQLite file's data version, MySQL's GTID set). This is a named
    departure from "the same data forever", limited to database kinds; the alternative is that no
    database scan ever runs on a job manager. The first slices run in one process and do not need it.
-4. **The query text as a plan parameter.** Rule B21 says the job manager accepts no SQL text. The
+3. **The query text as a plan parameter.** Rule B21 says the job manager accepts no SQL text. The
    `query` param is the database's SQL, which komira never parses or optimizes; its one change is
    wrapping it as a subquery for `partition_on`. Recommendation: allow it, as an opaque parameter of
    the source like a file path, and keep refusing komira SQL text.
-5. **`kpl.read_database` returning a LazyFrame.** Recommendation: serve polars' two names lazily, as
+4. **`kpl.read_database` returning a LazyFrame.** Recommendation: serve polars' two names lazily, as
    decision 12 says. The alternative is a komira-own `kpl.scan_database`, a name polars does not have.
-6. **Cleartext password authentication over verified TLS on Postgres**, which token logins to managed
+5. **Cleartext password authentication over verified TLS on Postgres**, which token logins to managed
    databases use. Recommendation: refuse it in the first slices, and add it as a later credential kind
    with its own token source.
-7. **`sqlite_all_varchar` as a source keyword**, `komira.sqlite(path, all_varchar=True)`, DuckDB's
+6. **`sqlite_all_varchar` as a source keyword**, `komira.sqlite(path, all_varchar=True)`, DuckDB's
    setting name as a keyword. Recommendation: wait for a user who asks; a query can cast.
-8. **Where the integration targets and the oracle's pinned extensions run**: on the farm on every merge
+7. **Where the integration targets and the oracle's pinned extensions run**: on the farm on every merge
    to main, or on a schedule. Recommendation: on every merge to main, outside the pull request's check.
+
+### Invented names
+
+The names komira invents, as opposed to mirroring pandas, polars or DuckDB, need the owner's yes. This
+table is the same in both database designs:
+
+| invented name | what it is | read design | write design |
+|---|---|---|---|
+| `komira.sqlite(path, *, read_only=False, busy_timeout=None)` | a SQLite file as a source and a destination | yes | yes |
+| `komira.postgres(host, database, *, port=5432, credential, tls="verify-full")` | a Postgres server database | yes | yes |
+| `komira.mysql(host, database, *, port=3306, credential, tls="verify-full")` | a MySQL server database | yes | yes |
+| `komira.Password(name, *, user, password)` | the credential for both servers | yes | yes |
+| `tls=` with `"verify-full"` and `"require"` | the TLS mode of a server source; the values are libpq's `sslmode` names | yes | yes |
+| `komira.DatabaseError` | the exception class of database errors, a `KomiraError` and a `ValueError` | yes | yes |
+| the `DATABASE_*` error codes | the named codes of [Errors](#errors) | yes | yes |
+| `uri.<16 hex digits>` | the credential name the SDK generates for a password taken from a URI | yes | yes |
+| a komira source object as `con` / `connection` | pandas' and polars' argument names, taking komira's object beside their URI strings | yes | yes |
+| `kpl.read_database`, `kpl.read_database_uri` returning a `LazyFrame` | polars' names with komira's lazy result (question 4) | yes | no |
+
+Every SQL name in both designs is DuckDB's (`ATTACH`, `DETACH`, `sqlite_scan`, `postgres_query`,
+`mysql_query`, `INSERT`, `ON CONFLICT`), and every reader and writer name is pandas' or polars'. The
+scan kind names (`komira.sqlite.table` and the rest) and plan params are wire names under rule B8, not
+user API.
