@@ -5,7 +5,7 @@ load("@komira//python:pythons.bzl", "CLASSIFIERS", "HOSTED", "PYTHONS", "REQUIRE
 load("@komira//third_party/modular:pins.bzl", "OTHER_MOJO", "TOOLCHAIN_MOJO", "is_newer", "modular_wheel")
 load("@komira//tools/build/package/libkomira:packaged.bzl", "DIST_LICENSE_EXPRESSION", "DIST_LICENSE_FILES", "DIST_MODULAR_LICENSE_FILES", "DIST_NATIVE_NEEDS", "DIST_THIRD_PARTY_LICENSE_FILES")
 load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_file_at_stamp", "wheel_libs_check", "wheel_same_check", "wheel_version")
-load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 load("@komira//tools/build/python:defs.bzl", "python_proto", "python_source_package")
 
 # The import package `komira` (README.md): its files at their paths, as the site
@@ -135,7 +135,9 @@ changelog_file(
 # `--target-platforms komira//tools/build/platforms:darwin-arm64`. On macOS the
 # wheel rule refuses a Mach-O member that needs a newer macOS than the tag's,
 # and one whose code signature is missing or does not match it; "The macOS
-# wheel, read back" below holds the finished file.
+# wheel, read back" below holds the finished file. `:komira_wheel`, the wheels
+# derived from it, and the tests that install or read them are linux-x86_64
+# only (limit manylinux-wheel-linux-x86-64): a darwin-arm64 build skips them.
 
 _PLATFORM = "linux-x86_64"
 
@@ -195,6 +197,8 @@ picked_files(
     name = "dist_files",
     dir = _DIST,
     paths = ["libkomira.so"] + ["lib/" + n for n in _OWNERS + _RUNTIME],
+    # The Linux [dist]'s ELF file names: the macOS [dist] holds .dylib files.
+    target_compatible_with = LINUX_X86_64,  # komira-limit:libkomira-elf-linux-x86-64
 )
 
 # komira's licence, the licence texts of the third-party code compiled into
@@ -239,7 +243,14 @@ _SHARED_METADATA = {
 # and its native needs.
 _METADATA = {p: _SHARED_METADATA | {"platform": p} | needs for p, needs in _NATIVE_NEEDS.items()}
 
-_WHEEL = _METADATA[_PLATFORM]
+# The manylinux wheel holds ELF libraries and the wheel rule refuses a Mach-O
+# member in one, so every wheel built from `_WHEEL` is linux x86_64 only: a
+# darwin-arm64 build skips it, and the tests that install or read it (the rule
+# and the macros below mark those too). The macOS wheel is
+# `:komira_wheel_macos_arm64`.
+_WHEEL = _METADATA[_PLATFORM] | {
+    "target_compatible_with": LINUX_X86_64,  # komira-limit:manylinux-wheel-linux-x86-64
+}
 
 wheel_file(
     name = "komira_wheel",

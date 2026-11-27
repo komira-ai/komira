@@ -206,7 +206,7 @@ def stand_in(args):
     assert native.abi_version == 1007, native.abi_version
     assert _native._FUNCTIONS["komira_plan_stream"][0] == 8
     want = "komira_plan_stream needs libkomira ABI version 1.8; the library at {} is 1.7".format(
-        os.path.join(directory, "libkomira.so")
+        os.path.join(directory, _native._LIB_NAME)
     )
 
     def check(call):

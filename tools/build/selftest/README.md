@@ -38,7 +38,7 @@ given `--nested`, which the guard refuses.
 
 | scenario | what it checks | a planted defect it catches |
 |---|---|---|
-| [`exec_platforms`](exec_platforms.zig) | Mojo, toolchain, third_party_srcs and C/C++ targets resolve to `linux-x86_64`; the host platform's own `[komira_re]` key decides remote execution; under the inner key `hello` keeps the pinned configuration hash | a second platform registered first; any key selecting remote |
+| [`exec_platforms`](exec_platforms.zig) | Mojo, toolchain, third_party_srcs and C/C++ targets resolve to `linux-x86_64`; the host platform's own `[komira_re]` key decides remote execution; under the inner key `hello` keeps the pinned configuration hash; under a darwin-arm64 target platform third_party_srcs' `:gen` is configured for `linux-x86_64` | a second platform registered first; any key selecting remote; the generator taken as a plain dependency |
 | [`uquery_select_branches`](uquery_select_branches.zig) | `uquery deps(cshim:cadd_user)` reaches `toolchains//:cxx_no_default_deps` | the alias deleted |
 | [`analysis_refusals_platform_table`](analysis_refusals_platform_table.zig) | the table's load-time cases hold; the platforms declared; `host`; the reserved row's key refused | a pending pin accepted in a registered row |
 | [`analysis_refusals_mojo`](analysis_refusals_mojo.zig) | the gate bypass, empty `exports`, test_data, env, test_deps, assert level, defines and memory cap refusals, a dep of the wrong kind, an optimization level `mojo build` does not accept, a package named in `closure_excludes` reached through `deps` (the four the host profile refuses, and the three more `lowering` refuses) | each `fail()` deleted, `[ungated]` returning MojoInfo, `closure_excludes` compared by prefix |

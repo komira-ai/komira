@@ -3,7 +3,7 @@
 # (./run_id), the facts of the machine it ran on, and per runtime:
 #   - cold start: dlopen of the runtime library, init and describe (open);
 #     load (for the native runtime: reading the library, its sha256, the copy
-#     into a memory file, dlopen, the library's init, describe and load);
+#     to a private file (a memory file on Linux), dlopen, the library's init, describe and load);
 #     open_context and open_instance; and the first call_batch;
 #   - per-batch cost: call_batch of `identity` on 0 and 1 rows, timed around
 #     the call alone, after a warmup: min, median, p90 and max over the

@@ -38,7 +38,7 @@ def main(args):
 
     with komira.Session() as s:
         if version % 1000 == 0:
-            path = os.path.join(directory, "libkomira.so")
+            path = os.path.join(directory, _native._LIB_NAME)
             want = "komira_register_parquet needs libkomira ABI version 1.1; the library at {} is 1.0".format(path)
             try:
                 s.register_parquet("ok", "f.parquet")
@@ -91,7 +91,7 @@ def main(args):
         # option raises, naming the call and both versions, with no status;
         # naming none calls komira_ctx_new and works.
         want = "komira_ctx_new_with_options needs libkomira ABI version 1.4; the library at {} is {}.{}".format(
-            os.path.join(directory, "libkomira.so"), *divmod(version, 1000)
+            os.path.join(directory, _native._LIB_NAME), *divmod(version, 1000)
         )
         for options in ({"memory_limit": 1 << 20}, {"threads": 2}):
             try:
@@ -103,7 +103,7 @@ def main(args):
         komira.Session(threads=None, memory_limit=None).close()
         # Neither stand-in has the registration calls of 1.5: each raises
         # when it is used, naming the call and both versions, with no status.
-        path = os.path.join(directory, "libkomira.so")
+        path = os.path.join(directory, _native._LIB_NAME)
         have = "{}.{}".format(*divmod(version, 1000))
         for op, call in (
             ("komira_register_csv", lambda: s.register_csv("c", "c.csv")),

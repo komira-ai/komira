@@ -28,10 +28,22 @@
  * code object `<code_root>/<hex sha256>` whole, hash the bytes read, and
  * refuse with ERR_CODE_DIGEST unless they match, before anything is mapped
  * (a missing or mismatched object is refused each time, never remembered).
- * The verified bytes are copied into an anonymous memory file and dlopened
- * from it (RTLD_NOW | RTLD_LOCAL), so the bytes loaded are the bytes hashed,
- * whatever happens to the file after it was read. The library is never
- * dlclosed, and its memory file is never closed (open_bytes says why). It
+ * The verified bytes are copied into a file of the runtime's own and
+ * dlopened from it (RTLD_NOW | RTLD_LOCAL), so the bytes loaded are the bytes
+ * hashed, whatever happens to the code object after it was read: the copy is
+ * written from the buffer that was hashed, never read again from the code
+ * root. On Linux the copy is an anonymous memory file (memfd_create),
+ * dlopened as /proc/self/fd/<n>. macOS has no memory file and dlopen takes a
+ * path only, so there the copy is a new file, named by the sha256, in a
+ * private directory the runtime makes once (mkdtemp, mode 0700, owned by the
+ * effective uid, under TMPDIR or else the user's temporary directory),
+ * created with O_EXCL | O_NOFOLLOW and mode 0500. On both systems only the
+ * process's own uid (or root) can replace what is mapped: /proc/self/fd/<n>
+ * and that directory are reachable by the same principals and no others. The
+ * library is never dlclosed, and its copy's descriptor is never closed
+ * (open_bytes says why); a copy that failed to load is removed. A library
+ * that fails to load leaves no copy and no descriptor. The macOS copies stay
+ * in the private directory, which lives in the scratch directory. It
  * must export komira_udf_native_init_v1 and must not export
  * komira_udf_runtime_init_v1, so a runtime and a user library are never
  * confused. Its init gets this runtime's host struct, and the error it fills
@@ -58,7 +70,9 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -73,6 +87,9 @@
 #define NATIVE_ID "komira/native"
 #define LIB_SYMBOL "komira_udf_native_init_v1"
 #define RUNTIME_SYMBOL "komira_udf_runtime_init_v1"
+/* macOS: the private directory's name is this prefix and six random
+ * characters (mkdtemp); native/probe.c reads the copies by the same name. */
+#define PRIVATE_DIR_PREFIX "komira-udf-"
 
 #if defined(__linux__)
 #define OS_NAME "linux"
@@ -172,6 +189,9 @@ struct komira_udf_rt {
   const komira_udf_host* host;
   pthread_mutex_t mu;
   struct lib* libs;
+#if defined(__APPLE__)
+  char private_dir[PATH_MAX]; /* made at the first library's copy (mu held); empty before */
+#endif
 };
 
 struct komira_udf_udf {
@@ -268,31 +288,103 @@ static uint8_t* read_all(const char* path, size_t* n) {
   return buf;
 }
 
-/* dlopen `bytes` through an anonymous memory file: what is mapped is what
- * was hashed. NULL on failure. The file stays open for the life of the
- * process, as the library stays loaded: the dynamic loader knows a loaded
- * object by the name it was opened with, `/proc/self/fd/<n>`, so a closed
- * descriptor's number, reused for the next library, would name the library
- * already loaded and dlopen would return that one instead. */
-static void* open_bytes(const uint8_t* bytes, size_t n) {
-#if defined(__linux__)
-  int fd = memfd_create("komira-udf-native-library", MFD_CLOEXEC);
-  if (fd < 0) return NULL;
+/* Write all of `bytes` to `fd`; 1, or 0 on a failed write. */
+static int write_all(int fd, const uint8_t* bytes, size_t n) {
   size_t at = 0;
   while (at < n) {
     ssize_t put = write(fd, bytes + at, n - at);
-    if (put <= 0) {
-      close(fd);
-      return NULL;
-    }
+    if (put <= 0) return 0;
     at += (size_t)put;
+  }
+  return 1;
+}
+
+#if defined(__APPLE__)
+/* The directory the private directory is made in: TMPDIR when set and not
+ * empty (the scratch directory the process was given), else the user's
+ * temporary directory. 0, or -1 when there is none or it does not fit. */
+static int private_base(char* out, size_t cap) {
+  const char* dir = getenv("TMPDIR");
+  if (dir != NULL && dir[0] != 0) {
+    size_t n = strlen(dir);
+    if (n >= cap) return -1;
+    memcpy(out, dir, n + 1);
+    return 0;
+  }
+  size_t n = confstr(_CS_DARWIN_USER_TEMP_DIR, out, cap);
+  return n == 0 || n > cap ? -1 : 0;
+}
+
+/* The runtime's private directory, made at the first call (rt->mu held):
+ * mode 0700, owned by the effective uid, a name no other process chose.
+ * 0, or -1 with errno. The room left in the path is for "/" and the 64 hex
+ * digits of a library's name. */
+static int private_dir(komira_udf_rt* rt) {
+  if (rt->private_dir[0] != 0) return 0;
+  char base[PATH_MAX];
+  if (private_base(base, sizeof(base)) != 0) {
+    errno = ENOENT;
+    return -1;
+  }
+  char made[PATH_MAX];
+  int len = snprintf(made, sizeof(made), "%s/" PRIVATE_DIR_PREFIX "XXXXXX", base);
+  if (len < 0 || (size_t)len + 2 + 64 >= sizeof(made)) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  if (mkdtemp(made) == NULL) return -1;
+  memcpy(rt->private_dir, made, (size_t)len + 1);
+  return 0;
+}
+#endif
+
+/* dlopen `bytes` (whose sha256 is `sha`) through a copy that is the
+ * runtime's own: what is mapped is what was hashed. NULL on failure (rt->mu
+ * held). The copy stays open for the life of the process, as the library
+ * stays loaded. Linux: an anonymous memory file, `/proc/self/fd/<n>`; the
+ * dynamic loader knows a loaded object by the name it was opened with, so a
+ * closed descriptor's number, reused for the next library, would name the
+ * library already loaded and dlopen would return that one instead. macOS:
+ * a file named by the sha256 in the private directory, made new each time
+ * (O_EXCL, so a path is never reused, and O_NOFOLLOW), with its descriptor
+ * kept open; a copy that failed to load is unlinked and closed, as the
+ * memory file is. Descriptor 0 is a valid result of open and memfd_create. */
+static void* open_bytes(komira_udf_rt* rt, const uint8_t sha[32], const uint8_t* bytes, size_t n) {
+#if defined(__linux__)
+  (void)rt;
+  (void)sha;
+  int fd = memfd_create("komira-udf-native-library", MFD_CLOEXEC);
+  if (fd < 0) return NULL;
+  if (!write_all(fd, bytes, n)) {
+    close(fd);
+    return NULL;
   }
   char path[64];
   snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
   void* h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
   if (h == NULL) close(fd);
   return h;
+#elif defined(__APPLE__)
+  if (private_dir(rt) != 0) return NULL;
+  char path[PATH_MAX];
+  int at = snprintf(path, sizeof(path), "%s/", rt->private_dir);
+  for (int i = 0; i < 32; i++) at += snprintf(path + at, sizeof(path) - (size_t)at, "%02x", sha[i]);
+  int fd = open(path, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0500);
+  if (fd < 0) return NULL;
+  if (!write_all(fd, bytes, n)) {
+    unlink(path);
+    close(fd);
+    return NULL;
+  }
+  void* h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+  if (h == NULL) {
+    unlink(path);
+    close(fd);
+  }
+  return h;
 #else
+  (void)rt;
+  (void)sha;
   (void)bytes;
   (void)n;
   return NULL;
@@ -329,7 +421,7 @@ static int32_t open_library(komira_udf_rt* rt, const char* root, const uint8_t s
       *out = l;
       return KOMIRA_UDF_OK;
     }
-  char path[4096];
+  char path[PATH_MAX];
   int at = snprintf(path, sizeof(path), "%s/", root);
   for (int i = 0; i < 32 && at > 0 && (size_t)at + 2 < sizeof(path); i++)
     at += snprintf(path + at, sizeof(path) - (size_t)at, "%02x", sha[i]);
@@ -356,7 +448,7 @@ static int32_t open_library(komira_udf_rt* rt, const char* root, const uint8_t s
   l->next = rt->libs;
   rt->libs = l;
   *out = l;
-  void* h = open_bytes(bytes, n);
+  void* h = open_bytes(rt, sha, bytes, n);
   free(bytes);
   if (h == NULL) {
     refuse(l, KOMIRA_UDF_ERR_LOAD, "dlopen of the verified library failed");

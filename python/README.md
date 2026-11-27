@@ -475,7 +475,10 @@ Adding a minor is a line in `pythons.bzl` and its interpreter's pin in
 minor. On macOS, `actions/setup-python` has no build of the newer patch
 releases of 3.11 and 3.12 (they are released as source alone), so the macOS
 jobs install 3.11.9 and 3.12.10. The farm's macOS tests run CPython 3.13
-alone.
+alone: the interpreters of the other minors are linux x86_64 builds, so the
+tests and wheels that name one (`_py311`, `_py312`, `_py314`) are configured for
+linux x86_64 only (limit `python-linux-interpreters`, set by the macros of
+`tools/build/python`) and a macOS build skips them.
 
 How the loader behaves:
 
@@ -562,7 +565,10 @@ The tests run on Linux x86_64 as build actions, so building a test's target
 runs it. `./buck2 build //python/tests:all` builds and runs every test of the
 package, and each test is `//python/tests:<name>` (`load_test`, `sql_test`,
 `frame_test`, ...) with `<name>_py311`, `<name>_py312` and `<name>_py314` for
-the other Pythons (Supported Pythons, below). What a test covers is in its
+the other Pythons (Supported Pythons, below). The farm's macOS workers run
+them too, on CPython 3.13 only (the other pinned interpreters are Linux
+builds), with Mach-O stand-in libraries (`libkomira.dylib`); `runtime_test`
+and the tests of the Linux wheel are Linux only. What a test covers is in its
 file's docstring, which also says what the test is given.
 
 A test is declared in one of two ways (`tests/BUCK`):

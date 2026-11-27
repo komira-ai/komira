@@ -604,7 +604,10 @@ tests, which no pull request builds. The rest of this section is about `release-
   `tools/build/ci/rules.bzl`, so the pull-request selector never picks it, and each has
   `target_compatible_with = DARWIN_ARM64` (limit `pypi-wheel-macos-arm64` in
   `tools/build/platforms/limits.tsv`), so it builds only with `--target-platforms
-  komira//tools/build/platforms:darwin-arm64`, which only the macOS jobs of `pypi.yml` pass.
+  komira//tools/build/platforms:darwin-arm64`, which only the macOS jobs of `pypi.yml` pass. The Linux
+  wheel (`//python:komira_wheel`), the wheels derived from it and every test that installs or reads one
+  are the other half: compatible with linux-x86_64 only (limit `manylinux-wheel-linux-x86-64`), so a
+  darwin-arm64 build skips them.
 - **Analysed in every pull request.** What fails before anything is built
   (a target of the set's closure incompatible with darwin-arm64, a toolchain with no
   execution platform, a rule that fails at analysis) is found in the pull request that
@@ -693,14 +696,15 @@ tests, which no pull request builds. The rest of this section is about `release-
 Not built yet. `//release:mopm_darwin_libs` covers the mopm packages only. Most of `//src` is
 not a mopm package, so a change that breaks one of those libraries on macOS is seen by nobody.
 Measured: a `uquery` of `kind(...)` for the library rules (`mojo_library`, gated, shared,
-system, native and `cxx_library`) over the `src` directory lists 425 targets. One `build --target-platforms komira//tools/build/platforms:darwin-arm64
---keep-going --skip-incompatible-targets` of that list on the farm, on main after the `http_core`
-macOS test fixes and the Mach-O native shared library (`Commands: 18849 (cached: 16445, remote:
-2404, local: 0)`), built 405, skipped 4 as incompatible (the connect, git pack, git protocol and
-HTTP conformance suites) and stopped on 16. With the fixes below the same build builds 415, skips
-7 and stops on 3. A target is counted under the first failing action its build report names:
+system, native and `cxx_library`) over the `src` directory lists 427 targets. One `build --target-platforms komira//tools/build/platforms:darwin-arm64
+--keep-going --skip-incompatible-targets` of that list on the farm builds 416, skips 7 as
+incompatible and stops on 4 on main (`Commands: 5685 (cached: 4366, remote: 1319, local: 0)`), and
+builds 420, skips 7 and stops on none with the last two rows below fixed (`Commands: 19147 (cached:
+19128, remote: 19, local: 0)`). The sweep before this one counted 425 targets: 405 built, 4 skipped
+and 16 stopped before its fixes, 415, 7 and 3 after them. A target is counted under the first
+failing action its build report names:
 
-| Cause | Targets on main | After the fixes | Issue |
+| Cause | Targets stopped before the fix | After the fix | Issue |
 | --- | --- | --- | --- |
 | the mail servers' serve-loop tests moved the clock before the peer's bytes had reached the server, and stepped a fixed number of times; macOS loopback can deliver after the send returns. Fixed: they wait, with `poll`, for the bytes to arrive | 3 (`smtp_server`, `imap_server`, `smtp_client`) | 0 | |
 | `db_postgres`'s TLS handshake test alternated 256 busy rounds over TCP loopback. Fixed: a side blocked on read waits in `poll` | 2 (`db_postgres`, `komira_db_conformance`) | 0 | |
@@ -709,8 +713,28 @@ HTTP conformance suites) and stopped on 16. With the fixes below the same build 
 | the per-CPU-level links of `libkomira` failed analysis instead of being skipped. Fixed: they are linux-x86_64 only (`komira-limit:isa-variants-linux-x86-64`) | 2 | 0 (skipped) | |
 | `phase_timers` counted a usage sample that macOS cannot take (no per-thread `getrusage`) as a dropped record | 1 (`bench_q6_phases`) | 0 | |
 | `komira_test_s3_adapter`'s runner starts MinIO through setpriv and `PR_SET_PDEATHSIG` and refuses every start elsewhere. It is Linux only, with its two end-to-end binaries (`komira-limit:s3-adapter-runner-linux`) | 1 | 0 (skipped) | |
-| `cbrt` answers one ulp from the expected ones, which come from the Linux DuckDB (`decimal_compare` conformance) | 1 | 1 | komira-ai/komira#2233 |
-| the UDF spike helpers' welded tests: the native runtime has no macOS rule for loading a verified library, and the node worker's tests need a darwin-arm64 `node` | 2 (`komira_udf_spike_native`, `komira_udf_spike_node_worker`) | 2 | komira-ai/komira#2199 |
+| a transcendental function's answer (`cbrt` first) is one ulp from the expected one, which comes from the Linux DuckDB on glibc's libm. Fixed: the conformance suites hold such an answer bit for bit on Linux and within 4 ulp elsewhere (`komira_plan_harness.libm_rule`, which names every function it covers) | 2 (`komira_decimal_compare_conformance`, `komira_sql_conformance`) | 0 | komira-ai/komira#2233 |
+| the UDF spike helpers' welded tests: the native runtime had no macOS rule for loading a verified library, and the node worker's tests needed a darwin-arm64 `node`. Fixed: the library is loaded from a private copy, and `//third_party/node` stages darwin-arm64's `node` | 2 (`komira_udf_spike_native`, `komira_udf_spike_node_worker`) | 0 | komira-ai/komira#2199 |
+
+The same build of every other target of the repository (a `uquery` of the repository less the `src`
+directory: `//tools`, with the examples and `//tools/build/package`, `//python`, `//node`,
+`//packaging`, `//release`, `//third_party`, `//ci` and the root package) lists 1836 targets on
+main and 1842 with the fixes, which add darwin-arm64's `node` and the macOS protobuf edge wheels.
+On main it builds 1331, skips 34 and stops on 471 (`Commands: 786 (cached: 533, remote: 253,
+local: 0)`). Most of the 471 are Linux-only by design but were not marked: the Linux interpreters
+and their wheels, the manylinux wheel and its read-backs, the README e2e, the release set, OCI
+images, the Rust toolchain, kcov and the ELF checks of `libkomira`. Each is now marked with its
+limit (`tools/build/platforms/limits.tsv`), and what should build on macOS (the C shim and shared
+library examples, `node`'s tests) is fixed. With the fixes it builds 1385, skips 445 and stops on 12
+(`Commands: 1897 (cached: 1776, remote: 121, local: 0)`). `//tools/build/examples:hello` builds a
+Mach-O `hello`. The 12, each a port with its issue, are both fixed on main since that measurement
+(by komira-ai/komira#2299 and komira-ai/komira#2298; inferred from those pull requests, not re-measured
+by this sweep):
+
+| Cause | Targets | Issue |
+| --- | --- | --- |
+| the Python UDF runtime library (`//src/udf_python:komira_udf_python`) was ELF whatever the target, and signalled its workers through pidfds and a `memfd_create` cancel word, which macOS does not have. Fixed: it builds as Mach-O on macOS (`c_shared_lib`'s `target_os`) and signals its workers without either | 11 (`//python/tests:udf_*_test`) | komira-ai/komira#2288 |
+| `mojo_shared_lib` refused `native_owners` for darwin-arm64 at analysis, by name: it neither linked nor staged an owner's Mach-O library. Fixed: it links each owner by its install name and stages it in `lib/` | 1 (`//tools/build/examples/shared_lib_native:spike_native`) | komira-ai/komira#2289 |
 
 Fixed by the sweeps before this one: tests that assumed Linux's `PATH_MAX`, a `SIGPIPE` that macOS
 raises for the whole process, BSD `yes`, the epoll backend, the `libc.so.6` name, a temporary-file
