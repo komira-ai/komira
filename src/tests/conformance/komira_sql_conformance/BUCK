@@ -1,6 +1,7 @@
 load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+load(":tables.bzl", "CORPUS_TABLES", "check_corpora", "corpus_tables")
 
 # The SQL conformance corpus (README.md): cases, each one SELECT over the
 # tables its corpus builds, with the answer the pinned DuckDB gives committed
@@ -92,6 +93,37 @@ sql_oracle(
     ],
     outputs = ["compare_check.tsv"],
 )
+
+# The runners of the corpus through an SDK (README.md, "Runners"): today
+# node's :sql_conformance_test. They read the cases as one directory
+# (`:cases_tree`, cases/ at its root), each corpus's tables as Parquet
+# (`:<corpus>_tables[<table>.parquet]`, written by the pinned DuckDB from its
+# tables.sql: tables.bzl), and the two lists of the cases komira does not
+# answer as DuckDB does, refusals.tsv and differences.tsv.
+_RUNNERS = ["//node/..."]
+
+check_corpora(_CORPORA)
+
+[corpus_tables(
+    name = corpus + "_tables",
+    tables_sql = "cases/" + corpus + "/tables.sql",
+    tables = CORPUS_TABLES[corpus],
+    visibility = _RUNNERS,
+) for corpus in _CORPORA]
+
+filegroup(
+    name = "cases_tree",
+    srcs = {p[len("cases/"):]: p for p in glob(["cases/**"])},
+    visibility = _RUNNERS,
+)
+
+[export_file(
+    name = f,
+    visibility = _RUNNERS,
+) for f in [
+    "differences.tsv",
+    "refusals.tsv",
+]]
 
 # The comparison and the case runner, for the planted cases in
 # tests//negative/sql_oracle (the self-test scenario sql_oracle builds them

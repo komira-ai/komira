@@ -22,11 +22,17 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 #                     second-level heading is no version is refused naming the line, before a fragment is read;
 #   description_unit  the wheel's description: the README, a blank line, the changelog with every heading one
 #                     level down, a fenced block and a line that only looks like a heading left alone, a level
-#                     6 heading refused naming the line;
+#                     6 heading refused naming the line; with a stamp, every link to a file or directory of
+#                     the repository's `main` pinned to the commit (in a fenced block too) and every other link
+#                     (another branch, another repository, the repository itself, its issues) left alone; a
+#                     stamp with no commit, a commit with no stamp, and a commit that is not 40 lower-case
+#                     hexadecimal digits each refused;
 #   cli_unit          the command: `assemble` and `description` over a scratch root write the file and exit 0
-#                     (stamped, unstamped, no changelog.d); a malformed fragment, a directory in changelog.d,
-#                     an Unreleased heading, a bad stamp and an unreadable root, CHANGELOG.md, README or output
-#                     exit 1 with the reason on stderr and write nothing; each usage error exits 2.
+#                     (stamped with `--commit`, unstamped, no changelog.d); a malformed fragment, a directory in
+#                     changelog.d, an Unreleased heading, a bad stamp, a stamp and a commit that do not go
+#                     together, and an unreadable root, CHANGELOG.md, README or output exit 1 with the reason
+#                     on stderr and write nothing; each usage error (`--commit` to `assemble` or given twice
+#                     among them) exits 2.
 _ZIG = "komira//tools/build/toolchains:zig_next"
 _BUSYBOX = "komira//tools/build/toolchains:busybox"
 

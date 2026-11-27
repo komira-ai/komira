@@ -1,6 +1,7 @@
 //! The cases of the command line (cli.zig): `assemble` and `description` over a root directory write the file
 //! and exit 0; an input that is refused or cannot be read exits 1 with the reason on stderr and writes nothing;
-//! a usage error exits 2 and reads and writes nothing.
+//! a usage error exits 2 and reads and writes nothing. A stamped description pins its links to `main` to the
+//! commit given with `--commit`, and a stamp without a commit, or a commit without a stamp, exits 1.
 const std = @import("std");
 const lib = @import("changelog_lib");
 const t = std.testing;
@@ -8,6 +9,7 @@ const Alloc = std.mem.Allocator;
 
 const CHANGELOG = "# Changelog\n\nWhat each release added.\n\n## 0.1.1512\n\n- **Platforms.** Linux.\n";
 const README = "# komira\n\nSQL over local files.\n";
+const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 
 const Run = struct { code: u8, err: []const u8 };
 
@@ -42,6 +44,15 @@ const TWO = [_][2][]const u8{
 
 fn assembleArgs(a: Alloc, tmp: *t.TmpDir, stamp: []const u8) ![]const []const u8 {
     return a.dupe([]const u8, &.{ "assemble", "--root", try path(a, tmp, "root"), "--prefix", "python/", "--stamp", stamp, "--out", try path(a, tmp, "out.md") });
+}
+
+/// `description` over the scratch root, with `--commit commit` when it is given.
+fn descriptionArgs(a: Alloc, tmp: *t.TmpDir, stamp: []const u8, commit: ?[]const u8) ![]const []const u8 {
+    var args = std.ArrayList([]const u8).empty;
+    try args.appendSlice(a, &.{ "description", "--root", try path(a, tmp, "root"), "--prefix", "python/", "--stamp", stamp });
+    if (commit) |c| try args.appendSlice(a, &.{ "--commit", c });
+    try args.appendSlice(a, &.{ "--readme", try path(a, tmp, "README.md"), "--out", try path(a, tmp, "out.md") });
+    return args.toOwnedSlice(a);
 }
 
 fn written(a: Alloc, tmp: *t.TmpDir) ![]u8 {
@@ -96,7 +107,7 @@ test "description writes the README and then the assembled changelog one level d
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     try setup(&tmp, &TWO);
-    const r = try exec(a, &.{ "description", "--root", try path(a, &tmp, "root"), "--prefix", "python/", "--stamp", "1600", "--readme", try path(a, &tmp, "README.md"), "--out", try path(a, &tmp, "out.md") });
+    const r = try exec(a, try descriptionArgs(a, &tmp, "1600", COMMIT));
     try t.expectEqual(@as(u8, 0), r.code);
     try t.expectEqualStrings("", r.err);
     try t.expectEqualStrings(README ++ "\n## Changelog\n\nWhat each release added.\n\n### 0.1.1600\n\n- **First.** one\n  continued\n- **Second.** two\n\n### 0.1.1512\n\n- **Platforms.** Linux.\n", try written(a, &tmp));
@@ -115,6 +126,45 @@ test "a malformed fragment exits 1 naming its path, and nothing is written" {
     try notWritten(&tmp);
 }
 
+test "a stamped description links to the files of its commit, and an unstamped one to main" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try setup(&tmp, &.{.{ "a.md", "- **A.** [the page](https://github.com/komira-ai/komira/blob/main/docs/install.md)\n" }});
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = "# komira\n\n[docs](https://github.com/komira-ai/komira/tree/main/python/docs/)\n" });
+    var r = try exec(a, try descriptionArgs(a, &tmp, "1600", COMMIT));
+    try t.expectEqual(@as(u8, 0), r.code);
+    try t.expectEqualStrings("", r.err);
+    try t.expectEqualStrings("# komira\n\n[docs](https://github.com/komira-ai/komira/tree/" ++ COMMIT ++ "/python/docs/)\n\n## Changelog\n\nWhat each release added.\n\n### 0.1.1600\n\n- **A.** [the page](https://github.com/komira-ai/komira/blob/" ++ COMMIT ++ "/docs/install.md)\n\n### 0.1.1512\n\n- **Platforms.** Linux.\n", try written(a, &tmp));
+
+    r = try exec(a, try descriptionArgs(a, &tmp, "0", null));
+    try t.expectEqual(@as(u8, 0), r.code);
+    try t.expectEqualStrings("# komira\n\n[docs](https://github.com/komira-ai/komira/tree/main/python/docs/)\n\n## Changelog\n\nWhat each release added.\n\n### Unreleased\n\n- **A.** [the page](https://github.com/komira-ai/komira/blob/main/docs/install.md)\n\n### 0.1.1512\n\n- **Platforms.** Linux.\n", try written(a, &tmp));
+}
+
+test "a description whose stamp and commit do not go together exits 1, and nothing is written" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try setup(&tmp, &TWO);
+    const cases = [_]struct { stamp: []const u8, commit: ?[]const u8, err: []const u8 }{
+        .{ .stamp = "1600", .commit = null, .err = "changelog: FAILED: the stamp `1600` is given with no commit: a stamped description pins its links to the commit the wheel is built from\n" },
+        .{ .stamp = "0", .commit = COMMIT, .err = "changelog: FAILED: the commit `" ++ COMMIT ++ "` is given for an unstamped build, whose description links to `main`: a commit needs a stamp\n" },
+        .{ .stamp = "1600", .commit = "", .err = "changelog: FAILED: the commit `` is not 40 lower-case hexadecimal digits\n" },
+        .{ .stamp = "1600", .commit = "0123456789ABCDEF0123456789abcdef01234567", .err = "changelog: FAILED: the commit `0123456789ABCDEF0123456789abcdef01234567` is not 40 lower-case hexadecimal digits\n" },
+    };
+    for (cases) |c| {
+        const r = try exec(a, try descriptionArgs(a, &tmp, c.stamp, c.commit));
+        try t.expectEqual(@as(u8, 1), r.code);
+        try t.expectEqualStrings(c.err, r.err);
+        try notWritten(&tmp);
+    }
+}
+
 test "a fragment that is not named as a slug exits 1 in the description too" {
     var ar = std.heap.ArenaAllocator.init(t.allocator);
     defer ar.deinit();
@@ -122,7 +172,7 @@ test "a fragment that is not named as a slug exits 1 in the description too" {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     try setup(&tmp, &.{.{ "Bad_Name.md", "- **A.** a\n" }});
-    const r = try exec(a, &.{ "description", "--root", try path(a, &tmp, "root"), "--prefix", "python/", "--stamp", "1600", "--readme", try path(a, &tmp, "README.md"), "--out", try path(a, &tmp, "out.md") });
+    const r = try exec(a, try descriptionArgs(a, &tmp, "1600", COMMIT));
     try t.expectEqual(@as(u8, 1), r.code);
     try t.expectEqualStrings("changelog: FAILED: python/changelog.d/Bad_Name.md: the name is not `<slug>.md` with a slug of lower-case letters, digits and hyphens that does not start with a hyphen\n", r.err);
     try notWritten(&tmp);
@@ -187,7 +237,7 @@ test "a root, a CHANGELOG.md, a README or an output that cannot be used is refus
 
     try setup(&tmp, &TWO);
     const no_readme = try path(a, &tmp, "no-readme.md");
-    r = try exec(a, &.{ "description", "--root", try path(a, &tmp, "root"), "--prefix", "python/", "--stamp", "1", "--readme", no_readme, "--out", try path(a, &tmp, "out.md") });
+    r = try exec(a, &.{ "description", "--root", try path(a, &tmp, "root"), "--prefix", "python/", "--stamp", "1", "--commit", COMMIT, "--readme", no_readme, "--out", try path(a, &tmp, "out.md") });
     try t.expectEqual(@as(u8, 1), r.code);
     try t.expectEqualStrings(try std.fmt.allocPrint(a, "changelog: FAILED: {s}: cannot read it: FileNotFound\n", .{no_readme}), r.err);
 
@@ -212,6 +262,8 @@ test "a usage error exits 2 and writes nothing" {
         .{ .args = &.{ "assemble", "--root", root, "--prefix", "p/", "--stamp", "1" }, .line = "usage: changelog assemble" },
         .{ .args = &.{ "description", "--root", root, "--prefix", "p/", "--stamp", "1", "--out", out }, .line = "usage: changelog assemble" },
         .{ .args = &.{ "assemble", "--root", root, "--prefix", "p/", "--stamp", "1", "--out", out, "--readme", "R" }, .line = "changelog: unknown argument --readme\n" },
+        .{ .args = &.{ "assemble", "--root", root, "--prefix", "p/", "--stamp", "1", "--out", out, "--commit", COMMIT }, .line = "changelog: unknown argument --commit\n" },
+        .{ .args = &.{ "description", "--root", root, "--prefix", "p/", "--stamp", "1", "--commit", COMMIT, "--commit", COMMIT, "--readme", "R", "--out", out }, .line = "changelog: --commit needs one value, given once\n" },
         .{ .args = &.{ "assemble", "--root", root, "--prefix", "p/", "--stamp", "1", "--out", out, "--extra", "x" }, .line = "changelog: unknown argument --extra\n" },
         .{ .args = &.{ "assemble", "--root", root, "--prefix", "p/", "--stamp", "1", "--out" }, .line = "changelog: --out needs one value, given once\n" },
         .{ .args = &.{ "assemble", "--root", root, "--root", root, "--prefix", "p/", "--stamp", "1", "--out", out }, .line = "changelog: --root needs one value, given once\n" },

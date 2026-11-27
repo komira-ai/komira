@@ -1,0 +1,7 @@
+[{'region': 'east', 'rep': 'Ana', 'amount': 120, 'pct': 60.0}, {'region': 'east', 'rep': 'Bo', 'amount': 80, 'pct': 40.0}, {'region': 'north', 'rep': 'Flo', 'amount': 200, 'pct': 100.0}, {'region': 'west', 'rep': 'Cy', 'amount': 50, 'pct': 16.7}, {'region': 'west', 'rep': 'Di', 'amount': 150, 'pct': 50.0}, {'region': 'west', 'rep': 'Ed', 'amount': 100, 'pct': 33.3}]
+Ana 60.0
+Bo 40.0
+Cy 16.7
+Di 50.0
+Ed 33.3
+Flo 100.0

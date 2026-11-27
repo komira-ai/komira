@@ -149,6 +149,7 @@ def _project_string_fn_n(expr: Expr, batch: RecordBatch) raises -> Column[HeapRe
                     Int(pd_cnt.get(i)),
                     pd_pad.get(i),
                     sfnn_op == STRFNN_LPAD,
+                    STRING_FN_N_REPEAT_MAX_BYTES,
                 )
             )
         var pd_arr = StringArray.from_byte_lists(pd_out)

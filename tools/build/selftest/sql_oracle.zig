@@ -51,7 +51,10 @@
 //! discipline (discipline_unplaced and discipline_unordered build green).
 //! And: komira_sql_conformance's case runner no longer comparing its answer
 //! with the committed one (corpus_answer_differs builds green), or running
-//! a case whose first line names no row order (corpus_unordered).
+//! a case whose first line names no row order (corpus_unordered); and its
+//! export of a corpus's tables as Parquet no longer holding the tables
+//! tables.sql created to the ones it was given, either way
+//! (corpus_tables_unlisted, corpus_tables_not_created).
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -276,6 +279,8 @@ const REDS = [_]Red{
     .{ .name = "discipline_unordered", .text = "Invalid Input Error: oracle discipline: case.sql its outermost query has no ORDER BY" },
     .{ .name = "corpus_answer_differs", .text = "Invalid Input Error: corpus case: answer.tsv differs from the committed expected.tsv, line 2: got \"1\", want \"2\"" },
     .{ .name = "corpus_unordered", .text = "Invalid Input Error: corpus case: case.sql must start with \"-- order: query\" or \"-- order: rows\" on a line of its own" },
+    .{ .name = "corpus_tables_unlisted", .text = "Invalid Input Error: corpus tables: tables.sql creates V, X, and tables.bzl lists V" },
+    .{ .name = "corpus_tables_not_created", .text = "Invalid Input Error: corpus tables: tables.sql creates V, X, and tables.bzl lists V, X, Y" },
 };
 
 /// The pieces of the sql_oracle action's argv, as `buck2 aquery` prints it

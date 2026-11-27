@@ -283,7 +283,7 @@ whether the frame is **ordered**.
 
 - **A sort makes a frame ordered:** `sort_values`, `sort`, `nlargest`, `top_k` and the others.
 - **These verbs keep it ordered:**
-  - filters;
+  - filters, the semi and anti joins of `isin` with another frame's column (ruling 16) among them;
   - a projection, rename or `with_columns`/`assign` that keeps every sort key;
   - `head`, `limit` and `slice`.
 
@@ -452,8 +452,8 @@ its number).
       input column. That is the rule `select_aggregates.name_unaliased` and `agg_output_naming` apply on
       the Mojo side.
     - Two outputs with one name are refused at the verb.
-13. **Float aggregates are not bit-reproducible** (carried) across runs and worker counts (§2.10), except an ungrouped
-    float sum or mean, which the engine folds in source position order. Tests compare float sums and means with a
+13. **Float aggregates are not bit-reproducible** (carried) across runs and worker counts (§2.10), except a float
+    sum or mean, ungrouped or per group, which the engine folds in source position order. Tests compare float sums and means with a
     stated tolerance. Neither library promises more for parallel input.
 14. **Types.** New with the verbs that take a dtype (D17).
     - A dtype argument (`astype`, `cast`, `return_dtype`) is a `pyarrow.DataType`, or a name from the

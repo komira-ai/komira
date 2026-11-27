@@ -7,16 +7,17 @@
 //!   komira_wheel check <flags> --wheel <wheel> --require-stamped true|false
 //!       [--twin <wheel>] --out <marker>
 //!   komira_wheel libs --wheel <wheel> --entry <member path>
-//!       --runtime-lib <name>=<file>... [--runtime-license <name>]...
+//!       [--opened <member path>]... --runtime-lib <name>=<file>... [--runtime-license <name>]...
 //!       [--runtime-dist <distribution>]...
 //!       [--expect-refusal <text>] --out <marker>
 //!   komira_wheel same --wheel <wheel> --like <wheel>
 //!       [--only-in-wheel <member path>]... [--only-in-like <member path>]...
 //!       --out <marker>
 //! cli.zig lists the flags of `write` and `check`. `write` refuses to write a
-//! wheel policy.zig refuses; `check` writes `ok` to --out only if check.zig
-//! refuses nothing. `libs` reads the wheel
-//! alone (libs.zig): --out gets the libraries the entry loads, in load order,
+//! wheel that native_policy's policy.zig refuses; `check` writes `ok` to
+//! --out only if check.zig refuses nothing. `libs` reads the wheel
+//! alone (libs.zig): --out gets the libraries the entry and each --opened
+//! library load, in load order,
 //! one member path a line, only if libs.zig refuses nothing (with
 //! --expect-refusal, `refused: <text>` only if it refuses the wheel with
 //! exactly that text); each `--runtime-lib` file is the toolchain's copy of
@@ -27,11 +28,12 @@
 //! A static executable: no shell, no PATH, no network, no clock. Exit status 2
 //! on any refusal, with its reason. This file only forwards; the sections are
 //! cli.zig (flags and files), stamp.zig (version), tag.zig, wheel.zig (the
-//! wheel), policy.zig, elf.zig, macho.zig and codesign.zig (what its libraries
-//! need), zip.zig, check.zig, libs.zig and compare.zig.
+//! wheel), zip.zig, check.zig, libs.zig and compare.zig; what its libraries
+//! need is the module native_policy (../native_policy/: policy.zig, elf.zig,
+//! macho.zig and codesign.zig), and a refusal travels as its diag.zig says.
 
 const std = @import("std");
-const diag = @import("diag.zig");
+const diag = @import("native_policy").diag;
 const cli = @import("cli.zig");
 const check = @import("check.zig");
 const compare = @import("compare.zig");

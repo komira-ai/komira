@@ -2,8 +2,9 @@
 
 `//ci:pr` (ci/BUCK) is a `ci_aggregate` whose `deps` are the roots of the
 check set and whose `tests` are the standalone tests among them; both lists
-are GENERATED (ci/targets.bzl, written by `targets.bxl:generate`) and held
-complete by `guard.bxl:check`: a target can depend on listed labels only,
+are read from committed files, one empty file per root named by its label
+(roots.bzl: ci/roots/ and ci/test_roots/, written by `targets.bxl:generate`), and
+held complete by `guard.bxl:check`: a target can depend on listed labels only,
 and no rule can query the graph.
 
 Building it builds every dependency's outputs (so a library's welded tests,

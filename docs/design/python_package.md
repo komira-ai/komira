@@ -95,7 +95,8 @@ python/
     _session.py     Session, Result, the default session
     _errors.py      KomiraError and its subclasses
     _arrow.py       the Arrow C stream import
-    _lib/           not in the repository: the wheel rule copies libkomira's directory here (decision 6)
+    _lib/           not in the repository: the wheel rule copies libkomira's directory here (decision 6),
+                    and, in the Linux wheel, the UDF runtime libkomira_udf_python.so beside libkomira
   tests/
     BUCK            python_binding_test targets
     test_*.py
@@ -286,6 +287,9 @@ or read it are compatible with linux-x86_64 only, so a darwin-arm64 build skips 
   because Linux build workers have none. On macOS arm64 `[dist]` is `libkomira.dylib` and, in `lib/`, the three
   runtime `.dylib` files, with no owners (the C archives are linked into the dylib) and no C++ runtime; its
   run path is `@loader_path/lib`, and `[runnable]` is the same directory as `[dist]`.
+- The Linux wheel also carries the komira/python UDF runtime at `komira/_lib/libkomira_udf_python.so`.
+  libkomira does not load it, so the wheel's libs check names it `opened`; the macOS wheel does not carry it
+  yet (komira-ai/komira#2333).
 - The library's run path (`$ORIGIN/lib:$ORIGIN`,
   [tools/build/mojo/README.md](../../tools/build/mojo/README.md)) resolves the owners and the runtime in
   `_lib/lib/`, so the loader sets no search path and preloads nothing. It opens `<dir>/libkomira.so` with
@@ -392,7 +396,7 @@ polars = ["polars"]
 [project.urls]
 Source = "https://github.com/komira-ai/komira"
 Issues = "https://github.com/komira-ai/komira/issues"
-Documentation = "https://github.com/komira-ai/komira/blob/main/docs/install.md"
+Documentation = "https://github.com/komira-ai/komira/blob/main/docs/install.md"   # a stamped build: blob/<its commit>/
 Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
 ```
 
@@ -404,9 +408,12 @@ Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
   (`python/changelog`, Zig, with its own cases; the rule is `changelog_file`, target `//python:changelog`)
   puts `## 0.1.<N>` before the first release heading of `CHANGELOG.md`, holding the bullets of every file in
   file-name order, so a release lists every change merged since the newest section `CHANGELOG.md` keeps
-  (a section is kept by moving its files' bullets under their own heading in one change). The wheel's
+  (a section is kept by moving its files' bullets under their own heading in one change; every version on
+  PyPI gets one, the files `changelog.d/` held at the commit it was built from). The wheel's
   description, `METADATA`'s body, is `README.md` followed by that changelog with each heading one level
-  down, so the page of version 0.1.`<N>` on PyPI shows its own section; both wheels read the one target,
+  down, so the page of version 0.1.`<N>` on PyPI shows its own section, and with every link to the
+  repository's `main` pinned to the commit the build is stamped with (`-c komira.package_commit`), so the
+  pages it links to describe that version and not a later `main`; both wheels read the one target,
   so their `METADATA` is the same. The tool refuses, naming the file and the line, a file that is not a
   slug and `.md`, an empty file, a line that is neither a bullet nor an indented continuation, a heading,
   a `## Unreleased` heading in `CHANGELOG.md` and a `CHANGELOG.md` with no release heading; the wheel
@@ -564,6 +571,10 @@ and `_py311`, `_py312` and `_py314` on the other supported minors), alone: the e
   `python/`; the loader added them.
 - Free-threaded CPython (3.14t): the package is not claimed for it in the first release. ctypes works
   there, but no test runs the package on it.
+- An abort inside libkomira ends the interpreter. A raise is a status and becomes a Python exception,
+  but an `abort()`, a fault, stack exhaustion or an out-of-memory kill cannot be caught in the process
+  ([libkomira_run_abi.md](libkomira_run_abi.md) §8 lists the inputs refused before they reach one, and
+  the ones that still do). The package README says so, under "What does not work yet".
 - `Result.to_polars` and `to_pandas` convert through Arrow, with pyarrow's `Table.to_pandas()` and
   `polars.from_arrow` and no options of their own; `python/tests/test_result_frames.py` holds the dtype
   each Arrow type the engine answers becomes.

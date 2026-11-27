@@ -65,9 +65,9 @@ archive_files(
     strip_prefix = "aws-lc-1.39.0",
     one_tree = True,
     tree_dirs = ["include"],
-    # The Python wheel carries the archive's LICENSE (`[LICENSE]`) as
-    # AWS_LC_LICENSE (python/BUCK).
-    visibility = ["//python:"],
+    # The Python wheel and the npm platform packages carry the archive's
+    # LICENSE (`[LICENSE]`) as AWS_LC_LICENSE (python/BUCK, node/BUCK).
+    visibility = ["//node:", "//python:"],
 )
 
 # What the CMake build adds to every compile of these sources: its Release

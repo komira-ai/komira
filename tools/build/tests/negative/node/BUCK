@@ -1,6 +1,7 @@
 load("@komira//third_party/node:pins.bzl", "NODE", "NODE_DARWIN_ARM64", "NPM")
-load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "esbuild_bundle", "node_addon", "node_binding_test", "node_dist", "node_test", "npm_package")
-load(":stand_in.bzl", "stand_in_archive", "stand_in_npm")
+load("@komira//node:install_test.bzl", "INSTALL_DATA", "INSTALL_REGISTRY", "INSTALL_TESTS")
+load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "esbuild_bundle", "node_addon", "node_binding_test", "node_dist", "node_test", "npm_install_test", "npm_package")
+load(":stand_in.bzl", "npm_repack", "stand_in_archive", "stand_in_npm")
 
 # Planted defects for the hermetic Node.js rules (test 54,
 # tools/build/node/README.md): every target here must fail, and
@@ -624,4 +625,137 @@ node_binding_test(
 node_binding_test(
     name = "binding_no_srcs",
     srcs = [],
+)
+
+# ---- npm_install_test: analysis ---------------------------------------------
+#
+# Refused before any action: the tarball is never read.
+
+# RED "test_files is empty": an install test that runs no file.
+npm_install_test(
+    name = "install_no_tests",
+    install = "pass.js",
+    data = {"pass.test.mjs": "pass.js"},
+    test_files = [],
+    nodes = [_PKG + "node"],
+)
+
+# RED "nodes is empty": an install test on no Node.js.
+npm_install_test(
+    name = "install_no_nodes",
+    install = "pass.js",
+    data = {"pass.test.mjs": "pass.js"},
+    test_files = ["pass.test.mjs"],
+    nodes = [],
+)
+
+# RED "test absent.test.mjs is not a destination of data": a test file that is
+# not staged in the project.
+npm_install_test(
+    name = "install_test_not_staged",
+    install = "pass.js",
+    data = {"pass.test.mjs": "pass.js"},
+    test_files = ["absent.test.mjs"],
+    nodes = [_PKG + "node"],
+)
+
+# RED "data destination node_modules/tslib/index.js is the project's own": a
+# file staged where npm installs.
+npm_install_test(
+    name = "install_reserved_destination",
+    install = "pass.js",
+    data = {
+        "node_modules/tslib/index.js": "pass.js",
+        "pass.test.mjs": "pass.js",
+    },
+    test_files = ["pass.test.mjs"],
+    nodes = [_PKG + "node"],
+)
+
+# RED "data destination .npmrc is the project's own": an npm configuration
+# file in the project, which npm would read.
+npm_install_test(
+    name = "install_npmrc",
+    install = "pass.js",
+    data = {
+        ".npmrc": "pass.js",
+        "pass.test.mjs": "pass.js",
+    },
+    test_files = ["pass.test.mjs"],
+    nodes = [_PKG + "node"],
+)
+
+# RED "nodes names two Node.js 24 releases": the pinned node and another
+# release of its line (version_differs_node, which states 24.20.0).
+npm_install_test(
+    name = "install_two_of_a_line",
+    install = "pass.js",
+    data = {"pass.test.mjs": "pass.js"},
+    test_files = ["pass.test.mjs"],
+    nodes = [_PKG + "node", ":version_differs_node"],
+)
+
+# ---- npm_install_test: what the installed package must not need ------------
+#
+# //node:install_test over the built packages written again with one defect
+# each (npm_repack, stand_in.bzl), which npm_tarball itself refuses to write,
+# on the default Node.js.
+
+_MAIN = "komira//node:package"
+
+_PLATFORM = "komira//node:package_linux_x64"
+
+_NODE = ["komira//third_party/node:node"]
+
+npm_repack(
+    name = "platform_without_msupport",
+    tarball = _PLATFORM,
+    drop = ["native/lib/libMSupportGlobals.so"],
+)
+
+# RED "libMSupportGlobals.so: cannot open shared object file": the platform
+# package without one of the Mojo runtime libraries installs, and the
+# package's first call cannot load libkomira from it.
+npm_install_test(
+    name = "install_missing_runtime",
+    install = _MAIN,
+    tarballs = [":platform_without_msupport"] + INSTALL_REGISTRY,
+    data = INSTALL_DATA,
+    test_files = INSTALL_TESTS,
+    nodes = _NODE,
+)
+
+npm_repack(
+    name = "package_with_postinstall",
+    tarball = _MAIN,
+    scripts = {"postinstall": "node -e process.exit(0)"},
+)
+
+# RED "npm reports an install script in node_modules/@komira-ai/komira, and
+# npm install is the only step": the main package with a postinstall script.
+npm_install_test(
+    name = "install_postinstall",
+    install = ":package_with_postinstall",
+    tarballs = [_PLATFORM] + INSTALL_REGISTRY,
+    data = INSTALL_DATA,
+    test_files = INSTALL_TESTS,
+    nodes = _NODE,
+)
+
+npm_repack(
+    name = "platform_with_binding_gyp",
+    tarball = _PLATFORM,
+    add = {"binding.gyp": "binding.gyp"},
+)
+
+# RED "npm reports an install script in
+# node_modules/@komira-ai/komira-linux-x64-gnu, and": the platform package
+# with a binding.gyp, which npm builds at install with node-gyp, as a script.
+npm_install_test(
+    name = "install_binding_gyp",
+    install = _MAIN,
+    tarballs = [":platform_with_binding_gyp"] + INSTALL_REGISTRY,
+    data = INSTALL_DATA,
+    test_files = INSTALL_TESTS,
+    nodes = _NODE,
 )

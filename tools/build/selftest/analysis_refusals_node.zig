@@ -4,7 +4,10 @@
 //! destination that is a source or a package, conflicting pins, a package in
 //! its own deps, a node_dist with both or neither of native_libs and
 //! foreign, and a c_shared_lib's target_os with a zig_triple or with an
-//! `out` that is not a `.so` name. Catches the staged-twice check deleted.
+//! `out` that is not a `.so` name; an npm_install_test of no test or no
+//! Node.js, of a test that is not staged, of a file staged where npm writes
+//! or reads its configuration, or of two releases of one Node.js line.
+//! Catches the staged-twice check deleted.
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -63,6 +66,36 @@ const ROWS = [_]lib.Row{
         .name = "node_binding_no_srcs",
         .target = "tests//negative/node:binding_no_srcs",
         .text = "tests//negative/node:binding_no_srcs: srcs is empty: name the test files node --test runs",
+    },
+    .{
+        .name = "node_install_no_tests",
+        .target = "tests//negative/node:install_no_tests",
+        .text = "tests//negative/node:install_no_tests: test_files is empty: name the test files node --test runs",
+    },
+    .{
+        .name = "node_install_no_nodes",
+        .target = "tests//negative/node:install_no_nodes",
+        .text = "tests//negative/node:install_no_nodes: nodes is empty: name the Node.js lines the package is installed on",
+    },
+    .{
+        .name = "node_install_test_not_staged",
+        .target = "tests//negative/node:install_test_not_staged",
+        .text = "tests//negative/node:install_test_not_staged: test absent.test.mjs is not a destination of data",
+    },
+    .{
+        .name = "node_install_reserved_destination",
+        .target = "tests//negative/node:install_reserved_destination",
+        .text = "tests//negative/node:install_reserved_destination: data destination node_modules/tslib/index.js is the project's own",
+    },
+    .{
+        .name = "node_install_npmrc",
+        .target = "tests//negative/node:install_npmrc",
+        .text = "tests//negative/node:install_npmrc: data destination .npmrc is the project's own",
+    },
+    .{
+        .name = "node_install_two_of_a_line",
+        .target = "tests//negative/node:install_two_of_a_line",
+        .text = "tests//negative/node:install_two_of_a_line: nodes names two Node.js 24 releases",
     },
     .{
         .name = "node_target_os_with_triple",

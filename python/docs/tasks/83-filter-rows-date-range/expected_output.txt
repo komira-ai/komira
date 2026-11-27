@@ -1,0 +1,6 @@
+{'id': 2, 'item': 'ink', 'order_date': datetime.date(2026, 9, 3)}
+{'id': 3, 'item': 'pad', 'order_date': datetime.date(2026, 9, 5)}
+{'id': 4, 'item': 'pen', 'order_date': datetime.date(2026, 9, 7)}
+[3, 4, 5]
+date32
+[{'id': 2, 'item': 'ink'}, {'id': 3, 'item': 'pad'}, {'id': 4, 'item': 'pen'}]

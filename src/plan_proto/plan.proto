@@ -1318,6 +1318,13 @@ message WireJoinNode {
   JoinAlgo algo_hint = 6;
   bool has_residual = 7;
   WireExpr residual = 8;
+  // The side the host builds its hash table on. Required in the OPTIMIZED
+  // context (inside `OptimizedPlanBody` or `OptimizedSegment`), where an
+  // unspecified value is refused; refused in the RAW context
+  // (`WirePlanEnvelope`) when set, because a raw plan carries no optimizer
+  // decision. Child order still fixes the output schema: `build_side` chooses
+  // only which input is materialized.
+  JoinBuildSide build_side = 9;
 }
 
 message WireSortNode {

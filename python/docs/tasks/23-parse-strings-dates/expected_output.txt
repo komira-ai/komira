@@ -1,0 +1,4 @@
+date32[day]
+[{'id': 2, 'shipped': datetime.date(2026, 10, 1), 'month': 10, 'days': 30}, {'id': 3, 'shipped': datetime.date(2026, 12, 31), 'month': 12, 'days': 121}]
+date32[day]
+[{'id': 1, 'shipped': datetime.date(2026, 9, 15), 'year': 2026}, {'id': 2, 'shipped': datetime.date(2026, 10, 20), 'year': 2026}]
