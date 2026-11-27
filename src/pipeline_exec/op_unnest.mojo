@@ -138,8 +138,6 @@ struct UnnestOp(MorselOperatorImpl):
             held.schema, self._column, self._keep_empty
         )
         ref col = held.column_at(self._at)
-        if col.arrow_type != ArrowType.LIST or col.num_children() != 1:
-            raise Error("unnest: column '" + self._column + "' is not a list")
         var sb = SchemaBuilder()
         sb.add_field(
             Field(
@@ -172,7 +170,7 @@ struct UnnestOp(MorselOperatorImpl):
         ref list_col = self._pending.value().column_at(self._at)
         ref offsets = list_col._offsets.value()
         var view = offsets.view_ro()
-        while stop < n and (len(outer) == 0 or len(outer) < UNNEST_CHUNK_ROWS):
+        while stop < n and len(outer) < UNNEST_CHUNK_ROWS:
             var s = 0
             var e = 0
             if not list_col.is_null_at(stop):

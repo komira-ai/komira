@@ -5,7 +5,8 @@
 # `LogicalPlan.unnest(child, column, keep_empty)` replaces the LIST column
 # `column` of the child, in place and under the same name, by its element
 # type; it is nullable when the element is or when `keep_empty` is set. A
-# column that is not there, or is not a list, is refused by name. The render
+# column that is not there, is not a list, or holds an element type with
+# parameters or children, is refused by name. The render
 # is the structural hash, so the two `keep_empty` values must differ in it.
 # =============================================================================
 
@@ -115,6 +116,20 @@ def test_a_list_without_one_element_type_is_refused() raises:
     )
 
 
+def test_an_element_type_with_parameters_is_refused() raises:
+    var decimals = _scan_of(
+        Field.list_of("tags", ArrowType.DECIMAL128, True)
+    )
+    assert_equal(
+        _refusal(decimals^, "tags"),
+        "unnest: column 'tags' holds " + String(ArrowType.DECIMAL128)
+        + " elements, which unnest does not serve: only an element type with"
+        " no parameters and no children is",
+    )
+    var nested = _scan_of(Field.list_of("tags", ArrowType.LIST, True))
+    assert_true("does not serve" in _refusal(nested^, "tags"))
+
+
 def test_tag_accessors_and_name() raises:
     var p = LogicalPlan.unnest(_string_lists(), "tags", True)
     assert_equal(Int(PLAN_UNNEST), 21)
@@ -186,7 +201,7 @@ def test_the_tree_walks_descend_through_the_node() raises:
     assert_equal(_plan_depth(p), 2)
     assert_equal(
         explain_plan(p),
-        "Unnest [column=tags]\n  Scan path=t.parquet\n",
+        "Unnest [column=tags, keep_empty=false]\n  Scan path=t.parquet\n",
     )
 
 

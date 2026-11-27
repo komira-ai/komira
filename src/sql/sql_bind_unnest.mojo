@@ -24,9 +24,9 @@ from arrow.arrow_types import ArrowType
 from arrow.schema import Schema
 from plan_expr.expr import Expr
 from plan_ir.logical_plan import ExprArray, LogicalPlan
-from sql.sql_ast import SX_CALL, SelectStmt, SqlExpr
+from sql.sql_ast import SX_CALL, SX_COLUMN, SelectStmt, SqlExpr
 from sql.sql_bind_expr import _bind_scalar
-from sql.sql_bind_names import _duckdb_expr_text
+from sql.sql_bind_names import _duckdb_expr_text, _group_has
 from sql.sql_bind_scope import CteScope, _schema_has_col, BindScope
 from sql.sql_catalog import SqlCatalog
 
@@ -76,9 +76,15 @@ def _bind_unnest_projection(
     catalog: SqlCatalog,
     cte_scope: CteScope,
     prebound: List[Expr],
+    order_names: List[String],
+    mut order_carry: List[String],
 ) raises -> LogicalPlan:
     """Bind a SELECT one of whose items is `unnest(x)` (see the module header).
-    The caller refuses unnest beside an aggregate, GROUP BY or a window."""
+    The caller refuses unnest beside an aggregate, GROUP BY or a window.
+
+    An ORDER BY column key the items do not produce is carried at the end of
+    the final Project (as `_bind_projection` carries it) and named in
+    `order_carry`, so the SELECT binder prunes it above the sort."""
     var at = -1
     for i in range(len(stmt.select_items)):
         ref item = stmt.select_items[i]
@@ -120,6 +126,7 @@ def _bind_unnest_projection(
         )
     var plan = LogicalPlan.unnest(listed^, String(UNNEST_COLUMN), False)
     var proj = ExprArray()
+    var out_names = List[String]()
     for i in range(len(stmt.select_items)):
         ref item = stmt.select_items[i]
         if i == at:
@@ -129,9 +136,25 @@ def _bind_unnest_projection(
             else:
                 name = _duckdb_expr_text(item.expr)
             proj.append(Expr.alias(Expr.col_ref(String(UNNEST_COLUMN)), name))
+            out_names.append(name^)
             continue
         var e = _bind_scalar(item.expr, schema, scope, catalog, cte_scope, prebound)
         if item.out_alias:
             e = Expr.alias(e^, item.out_alias.value())
+            out_names.append(String(item.out_alias.value()))
+        elif item.expr.tag == SX_COLUMN:
+            out_names.append(String(item.expr.text))
+        else:
+            out_names.append(_duckdb_expr_text(item.expr))
         proj.append(e^)
+    for n in range(len(order_names)):
+        ref onm = order_names[n]
+        if _group_has(out_names, onm) or _group_has(order_carry, onm):
+            continue
+        if not _schema_has_col(schema, onm):
+            # Not an input column either: `_bind_order` names the problem.
+            continue
+        proj.append(Expr.col_ref(onm))
+        out_names.append(String(onm))
+        order_carry.append(String(onm))
     return LogicalPlan.project(proj^, plan^)

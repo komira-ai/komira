@@ -65,9 +65,10 @@ def unnest_output_schema(
     element nullable or keep_empty)`; every other field is copied unchanged.
 
     RAISES, naming the column, when `child_schema` has no field `column`
-    ("unnest: no column '<c>' in its input") or when that field is not a LIST
+    ("unnest: no column '<c>' in its input"), when that field is not a LIST
     with exactly one element type ("unnest: column '<c>' is <TYPE>, not a
-    list").
+    list"), or when the element type has parameters or children, which a
+    schema's element entry cannot hold (`Field.list_item_type_is_lossless`).
     """
     var at = -1
     for i in range(child_schema.num_columns()):
@@ -87,6 +88,17 @@ def unnest_output_schema(
             + "' is "
             + String(list_field.arrow_type)
             + ", not a list"
+        )
+    if not Field.list_item_type_is_lossless(list_field.child_arrow_type(0)):
+        # A schema records an element as a type id alone, so an element type
+        # with parameters or children of its own could not be declared.
+        raise Error(
+            "unnest: column '"
+            + column
+            + "' holds "
+            + String(list_field.child_arrow_type(0))
+            + " elements, which unnest does not serve: only an element type"
+            " with no parameters and no children is"
         )
     var builder = SchemaBuilder()
     for i in range(child_schema.num_columns()):

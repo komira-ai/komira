@@ -1709,7 +1709,11 @@ def _explain_node(plan: LogicalPlan, indent: Int, mut out: String):
         _explain_node(plan._topn.value()[].child[], indent + 1, out)
 
     elif plan.tag == PLAN_UNNEST:
-        out += prefix + plan_tag_name(plan.tag) + " [column=" + plan._unnest.value()[].column + "]\n"
+        out += (
+            prefix + plan_tag_name(plan.tag) + " [column="
+            + plan._unnest.value()[].column + ", keep_empty="
+            + ("true" if plan._unnest.value()[].keep_empty else "false") + "]\n"
+        )
         _explain_node(plan._unnest.value()[].child[], indent + 1, out)
 
     else:

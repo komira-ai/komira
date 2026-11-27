@@ -460,7 +460,8 @@ def _bind_select(
         if len(order_expr_idx) > 0:
             raise Error(UNNEST_ORDER_EXPRESSION)
         plan = _bind_unnest_projection(
-            stmt, schema, scope, plan^, catalog, cte_scope, prebound
+            stmt, schema, scope, plan^, catalog, cte_scope, prebound,
+            order_names, order_carry,
         )
     elif has_window:
         # Window functions build PARTITION BY node(s) then a Project. They are

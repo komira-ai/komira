@@ -17,7 +17,8 @@
 #       `unnest(string_split(s, ','))`: the split is computed below the Unnest.
 #   test_where_and_order_by_bind_around_the_unnest
 #       WHERE filters the input below the unnest; ORDER BY an alias, a selected
-#       column and an ordinal sort the output above it.
+#       column and an ordinal sort the output above it; an ORDER BY column the
+#       items do not produce is carried to the sort and pruned above it.
 #   test_unnest_in_an_expression_or_outside_the_select_list_is_refused
 #       `unnest(tags) || 'x'` and `WHERE unnest(tags) = 'a'` are refused with
 #       the not-a-SELECT-item sentence.
@@ -146,6 +147,15 @@ def test_where_and_order_by_bind_around_the_unnest() raises:
     )
     assert_equal(String(lines[2]), "    Unnest(column=__unnest, keep_empty=false)")
     assert_true(String(lines[4]).startswith("      Filter("), got)
+    # A column the items do not produce is carried to the sort and pruned.
+    assert_equal(
+        _schema_text("SELECT unnest(tags) AS tag FROM t ORDER BY id, tag"),
+        "tag:" + String(Int(ArrowType.STRING.type_id)),
+    )
+    var carried = _plan("SELECT unnest(tags) AS tag FROM t ORDER BY id, tag")
+    assert_true(
+        "Alias(ColRef(__unnest), \"tag\"), ColRef(id)])" in carried, carried
+    )
     var by_ordinal = _plan("SELECT id, unnest(tags) AS tag FROM t ORDER BY 2 DESC, 1")
     assert_true(by_ordinal.startswith("Sort("), by_ordinal)
 
