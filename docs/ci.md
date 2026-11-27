@@ -769,7 +769,7 @@ What is left, none of it a `//src` library that fails to build for darwin-arm64:
   which run `bssl` as a TLS peer, name it.
 - `//src/http_client`'s `test_rss_gate` checks its flat-RSS bound on macOS only, and returns before
   streaming on Linux, which has no resident-set probe in it (komira-ai/komira#2446).
-- The darwin busybox shim is still a shell script with two rows in `no_shell_list.tsv`
+- The darwin busybox shim is still a shell script with its rows in `no_shell_list.tsv`
   (komira-ai/komira#2023). The darwin actions that use it build.
 
 The proposal keeps this set built, in the same way as the mopm set:
