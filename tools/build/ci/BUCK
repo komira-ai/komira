@@ -10,8 +10,9 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # every action ran on the farm (assert_remote.zig says what buck2 prints and
 # what is accepted). The CI action `buck2-farm` runs it over the run's log.
 # `assert_remote run` is the action's first line: it runs the buck2 command,
-# and when its only failure is a cut connection to the farm
-# (assert_remote/farm_retry.zig says what counts as one) waits for the farm's
+# and when its only failures are the farm's, a cut connection to the farm or a
+# job the farm failed to start because an input was unavailable on its host
+# (assert_remote/farm_retry.zig says what counts as one), waits for the farm's
 # port to answer, for a bounded time (assert_remote/farm_wait.zig), and runs it
 # again, at most three runs in all.
 # Its cases are recorded buck2 output (assert_remote/fixtures); welded: the
@@ -37,8 +38,8 @@ zig_test(
 )
 
 # Which failed runs `assert_remote run` runs again (assert_remote/farm_retry_test.zig
-# says what each case holds): recorded failed runs on the farm, a cut and real
-# failures, and logs made from them with a line added or changed; and the wait
+# says what each case holds): recorded failed runs on the farm, a cut, a job
+# the farm failed to start and real failures, and logs made from them with a line added or changed; and the wait
 # for the farm before a run again, on a clock of the case's own.
 zig_test(
     name = "farm_retry_unit",
@@ -51,6 +52,7 @@ zig_test(
         "assert_remote/fixtures/build_cut_after_file_changes.log",
         "assert_remote/fixtures/build_cut_and_compile_error.log",
         "assert_remote/fixtures/build_failed_unknown_target.log",
+        "assert_remote/fixtures/build_input_unavailable.log",
         "assert_remote/fixtures/build_remote.log",
         "assert_remote/fixtures/test_cut.log",
         "assert_remote/fixtures/test_failed.log",
