@@ -3,8 +3,8 @@
 Status: accepted; the six decisions at the end were taken on 2026-11-27, each as recommended.
 Built where a line says "exists": the task pages, and the first tier's tooling for package READMEs
 (the include marker, `fill`, the freshness check, one welded test per example file, `migrate` and
-`migrate --verify`), proven on fixtures, and one package README migrated (`src/anomaly`). How every code block
-in our documentation is run or accounted for. Counts are from main of this repository; *(not checked
+`migrate --verify`), proven on fixtures; one package README, `src/anomaly`, is on it. How every
+code block in our documentation is run or accounted for. Counts are from main of this repository; *(not checked
 here)* marks one from our other repositories, and *[est]* marks an estimate.
 
 ## The answer
@@ -261,7 +261,7 @@ word can be added later, additively, if a named page needs one; none does now.
 
 ## A README under source-first: `src/anomaly`
 
-Files in the package directory, one per fence of today's README (lines 23, 42, 70 and 90). Example
+Files in the package directory, one per fence of the inline README (lines 23, 42, 70 and 90). Example
 files are named for what they show, lower-case with underscores; the README shows them in the order
 it chooses:
 
@@ -274,7 +274,7 @@ src/anomaly/examples/store_sweep.mojo
 src/anomaly/BUCK
 ```
 
-`src/anomaly/examples/validate_series.mojo`, the first example of today's README with its hidden
+`src/anomaly/examples/validate_series.mojo`, the first example of the inline README with its hidden
 import made visible:
 
 ```mojo
