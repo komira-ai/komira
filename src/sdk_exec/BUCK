@@ -71,7 +71,19 @@ _COPY_FILES = [
     "times_json.json",
 ]
 
-_COPY_CASES = [f.split(".")[0] for f in _COPY_FILES]
+# The cases that write a Hive-partitioned directory (PARTITION_BY), named like
+# a file: komira's tree is a directory input of the oracle, and DuckDB's an
+# output directory of it.
+_COPY_DIRS = [
+    "hive_years.parquet",
+    "hive_types.parquet",
+    "hive_nulls.parquet",
+    "hive_escaped.parquet",
+    "hive_csv.csv",
+    "hive_empty.parquet",
+]
+
+_COPY_CASES = [f.split(".")[0] for f in _COPY_FILES + _COPY_DIRS]
 
 # The timestamp and integer cases read a Parquet file the pinned DuckDB
 # writes (tests/copy/times.sql says what it holds).
@@ -98,24 +110,34 @@ copy_cases(
     name = "copy_komira",
     cases = "tests/copy/cases.sql",
     inputs = _COPY_INPUTS,
-    outputs = _COPY_FILES + ["counts.tsv"],
+    outputs = _COPY_FILES + _COPY_DIRS + ["counts.tsv"],
     runner = ":copy_runner",
 )
 
 _COPY_READBACK_INPUTS = dict(_COPY_INPUTS)
 
-_COPY_READBACK_INPUTS.update({"komira/" + f: ":copy_komira[" + f + "]" for f in _COPY_FILES})
+_COPY_READBACK_INPUTS.update({"komira/" + f: ":copy_komira[" + f + "]" for f in _COPY_FILES + _COPY_DIRS})
 
 sql_oracle(
     name = "copy_readback_oracle",
     srcs = ["tests/copy/cases.sql", "tests/copy/readback.sql"],
     inputs = _COPY_READBACK_INPUTS,
+    input_dirs = ["komira/" + d for d in _COPY_DIRS],
     outputs = _COPY_FILES + [c + ".check.tsv" for c in _COPY_CASES],
+    output_dirs = _COPY_DIRS,
 )
 
 _COPY_TEST_DATA = {"cases.sql": "tests/copy/cases.sql", "counts.tsv": ":copy_komira[counts.tsv]"}
 
 _COPY_TEST_DATA.update({c + ".check.tsv": ":copy_readback_oracle[" + c + ".check.tsv]" for c in _COPY_CASES})
+
+# The trees of two partitioned cases komira reads back itself, DuckDB's and
+# its own (test_copy_readback_duckdb).
+_READ_BACK_TREES = ["hive_years.parquet", "hive_types.parquet"]
+
+_COPY_TEST_DATA.update({"duckdb/" + d: ":copy_readback_oracle[" + d + "]" for d in _READ_BACK_TREES})
+
+_COPY_TEST_DATA.update({"komira/" + d: ":copy_komira[" + d + "]" for d in _READ_BACK_TREES})
 
 # DuckDB's answers for test_run_sql_cte: each line of tests/cte/cases.sql runs
 # one WITH query over the committed tests/cte/sales.csv and writes its answer.
@@ -849,6 +871,11 @@ mojo_library(
     # The package's README is sdk_exec's: its examples run as sdk_exec's.
     readme = False,
     test_srcs = ["tests/test_copy_readback_duckdb.mojo"],
+    # run_sql reads the trees back (test_komira_reads_both_trees_alike).
+    test_deps = [
+        ":sdk_exec",
+        "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
+    ],
     test_data = {"tests/test_copy_readback_duckdb.mojo": _COPY_TEST_DATA},
     visibility = ["PUBLIC"],
 )

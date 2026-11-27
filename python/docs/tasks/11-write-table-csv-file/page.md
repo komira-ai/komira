@@ -49,14 +49,14 @@ id,region,amount
 - The destination is a local path. A path ending in `.csv` needs no `FORMAT`; a name with no known extension is refused by name. A `.gz` or `.zst` name, or `COMPRESSION gzip` or `zstd`, writes a compressed file.
 - `df.to_csv(path)` on the pandas-shaped frame runs it once, writes the bytes `COPY ... TO` writes for the same rows, and returns `None`. A `.gz` or `.zst` name writes a compressed file (`compression="infer"`); `index` is accepted and changes nothing.
 - The polars-shaped frame has no writer of its own yet: `lf.sink_csv(...)` is not there (komira-ai/komira#2372). `probe_lazyframe_sink_csv.py` beside this page tries it and must fail with the line in its `.error.txt` file. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
-- The CSV options of `COPY` are only `FORMAT`, `COMPRESSION`, `COMPRESSION_LEVEL` and `HEADER`: a delimiter, quote character or NULL text option is refused by name (komira-ai/komira#2374). `HEADER` written bare, without `true`, is a syntax error today: komira-ai/komira#2322.
+- The CSV options of `COPY` are only `FORMAT`, `COMPRESSION`, `COMPRESSION_LEVEL`, `HEADER` and `PARTITION_BY`: a delimiter, quote character or NULL text option is refused by name (komira-ai/komira#2374). `HEADER` written bare, without `true`, is a syntax error today: komira-ai/komira#2322.
 - pyarrow's `write_csv` quotes the header and every string cell, as the second file shows; `COPY` quotes a string only when it needs it.
 - `HEADER false` is refused, since the writer always writes the header row.
-- A partitioned write (`PARTITION_BY`) is komira-ai/komira#2346; writing to `s3://`, `gs://` or `az://` is komira-ai/komira#2337.
+- `PARTITION_BY (<columns>)` writes a directory of CSV files partitioned by those columns ([rank 97](../97-write-dataset-partitioned-column/page.md)); writing to `s3://`, `gs://` or `az://` is komira-ai/komira#2337.
 
 ## Related
 
 - [How do I read a CSV file?](../1-read-csv-file/page.md) (rank 1, works)
 - [How do I write a table to Parquet?](../27-write-table-parquet/page.md) (rank 27, partial)
 - [How do I turn a query result into pandas, polars or Arrow?](../33-turn-query-result-pandas-polars-arrow/page.md) (rank 33, works)
-- How do I write a dataset partitioned by a column? (rank 97, gap; no page yet)
+- [How do I write a dataset partitioned by a column?](../97-write-dataset-partitioned-column/page.md) (rank 97, works)

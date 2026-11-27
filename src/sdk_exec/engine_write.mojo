@@ -146,45 +146,21 @@ def _parquet_codec(codec: UInt8) -> CompressionCodec:
     return CompressionCodec.SNAPPY
 
 
-def write_parquet_result(
-    var batch: RecordBatch, dest: String, codec: UInt8
-) raises -> Int:
-    """Write `batch` to the local file `dest` as Parquet with the WCOMP_*
-    page codec `codec`, all or nothing, and return the rows written.
-
-    Raises:
-        `COPY_TYPE_UNSUPPORTED` naming the first column the writer cannot
-        write, before any file is touched; `STORAGE_NOT_FOUND` or `STORAGE_IO`
-        from `write_file_atomic`, with `dest` unchanged; the writer's own error
-        for a result it refuses.
-    """
-    for c in range(batch.num_columns()):
-        var at = batch.schema.field_arrow_type(c)
-        if not _writable(at):
-            raise Error(
-                String(COPY_TYPE_UNSUPPORTED) + ": COPY ... TO '" + dest
-                + "': column '" + batch.schema.field_name(c) + "' has type "
-                + String(at) + ", which is not written to Parquet yet"
-            )
-    var rows = materialize_selection_if_present(batch^)
-    var bytes = write_record_batch_to_parquet_bytes(rows, _parquet_codec(codec))
-    write_file_atomic(dest, Span(bytes))
-    return rows.num_rows()
-
-
-def write_text_result(
-    var batch: RecordBatch, dest: String, fmt: UInt8, codec: UInt8
-) raises -> Int:
-    """Write `batch` to the local file `dest` as CSV (`fmt` WFMT_CSV) or
-    newline-delimited JSON (any other `fmt`), compressed by the WCOMP_*
-    `codec` (`compress_text`), all or nothing, and return the rows written.
-
-    Raises:
-        `COPY_TYPE_UNSUPPORTED` naming the first column of a type that is not
-        written, or `COPY_DUPLICATE_COLUMN` naming a name two columns have,
-        before any file is touched; `STORAGE_NOT_FOUND` or `STORAGE_IO` from
-        `write_file_atomic`, with `dest` unchanged.
-    """
+def check_copy_columns(batch: RecordBatch, dest: String, fmt: UInt8) raises:
+    """Refuse a result whose columns a COPY to `dest` in the WFMT_* format
+    `fmt` cannot write: for Parquet a column with no annotated Parquet type,
+    for CSV and JSON a column of a type that is not written, or two columns
+    of one name (`COPY_TYPE_UNSUPPORTED`, `COPY_DUPLICATE_COLUMN`)."""
+    if fmt == WFMT_PARQUET:
+        for c in range(batch.num_columns()):
+            var at = batch.schema.field_arrow_type(c)
+            if not _writable(at):
+                raise Error(
+                    String(COPY_TYPE_UNSUPPORTED) + ": COPY ... TO '" + dest
+                    + "': column '" + batch.schema.field_name(c) + "' has type "
+                    + String(at) + ", which is not written to Parquet yet"
+                )
+        return
     var name = String("CSV") if fmt == WFMT_CSV else String("JSON")
     for c in range(batch.num_columns()):
         var at = batch.schema.field_arrow_type(c)
@@ -202,6 +178,42 @@ def write_text_result(
                     + batch.schema.field_name(c) + "'; give each column of a "
                     + name + " file its own name (AS)"
                 )
+
+
+def write_parquet_result(
+    var batch: RecordBatch, dest: String, codec: UInt8
+) raises -> Int:
+    """Write `batch` to the local file `dest` as Parquet with the WCOMP_*
+    page codec `codec`, all or nothing, and return the rows written.
+
+    Raises:
+        `COPY_TYPE_UNSUPPORTED` naming the first column the writer cannot
+        write, before any file is touched (`check_copy_columns`);
+        `STORAGE_NOT_FOUND` or `STORAGE_IO` from `write_file_atomic`, with
+        `dest` unchanged; the writer's own error for a result it refuses.
+    """
+    check_copy_columns(batch, dest, WFMT_PARQUET)
+    var rows = materialize_selection_if_present(batch^)
+    var bytes = write_record_batch_to_parquet_bytes(rows, _parquet_codec(codec))
+    write_file_atomic(dest, Span(bytes))
+    return rows.num_rows()
+
+
+def write_text_result(
+    var batch: RecordBatch, dest: String, fmt: UInt8, codec: UInt8
+) raises -> Int:
+    """Write `batch` to the local file `dest` as CSV (`fmt` WFMT_CSV) or
+    newline-delimited JSON (any other `fmt`), compressed by the WCOMP_*
+    `codec` (`compress_text`), all or nothing, and return the rows written.
+
+    Raises:
+        `COPY_TYPE_UNSUPPORTED` naming the first column of a type that is not
+        written, or `COPY_DUPLICATE_COLUMN` naming a name two columns have,
+        before any file is touched (`check_copy_columns`);
+        `STORAGE_NOT_FOUND` or `STORAGE_IO` from `write_file_atomic`, with
+        `dest` unchanged.
+    """
+    check_copy_columns(batch, dest, fmt)
     var rows = materialize_selection_if_present(batch^)
     var bytes: List[UInt8]
     if fmt == WFMT_CSV:

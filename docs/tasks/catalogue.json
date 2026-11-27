@@ -851,10 +851,7 @@
     "slug": "write-dataset-partitioned-column",
     "category": "Cloud storage",
     "question": "How do I write a dataset partitioned by a column?",
-    "status": "gap",
-    "issues": [
-      "komira-ai/komira#2346"
-    ]
+    "status": "works"
   },
   {
     "rank": 98,

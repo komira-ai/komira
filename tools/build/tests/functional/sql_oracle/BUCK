@@ -43,6 +43,30 @@ sql_oracle(
     outputs = ["schema.tsv"],
 )
 
+# A tree: `write_tree` writes a partitioned COPY into the output directory
+# `tree` and lists its files; `check_tree` takes that directory as an input
+# directory, holds its files to the list and reads its rows back with Hive
+# partitioning. Either fails its action when DuckDB may not make, read or
+# glob the files under the named directory.
+sql_oracle(
+    name = "write_tree",
+    srcs = "write_tree.sql",
+    inputs = ["data.csv"],
+    outputs = ["files.tsv"],
+    output_dirs = ["tree"],
+)
+
+sql_oracle(
+    name = "check_tree",
+    srcs = "check_tree.sql",
+    inputs = {
+        "files.tsv": ":write_tree[files.tsv]",
+        "t": ":write_tree[tree]",
+    },
+    input_dirs = ["t"],
+    outputs = ["tree_rows.tsv"],
+)
+
 # A duckdb_dist whose version holds both ends of the digit range, 0 and 9:
 # //tools/build/selftest:sql_oracle builds it, so a version pattern whose
 # range is narrowed by one at either end (`[1-9.]`, `[0-8.]`) fails here.

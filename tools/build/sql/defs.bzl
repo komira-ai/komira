@@ -40,6 +40,15 @@ read of a file that is not an input are DuckDB errors, `-bail` stops at the
 first error with exit status 1, and an output the SQL did not write fails
 the last check (and buck2's own check of the action's outputs).
 
+`output_dirs` are directories the SQL writes a tree into (a
+`COPY ... TO '<dir>' (PARTITION_BY ...)`), and `input_dirs` the paths of
+`inputs` that are directories (a build output that is a tree). An oracle that
+names either adds `SET allowed_directories = [<input_dirs>, <output_dirs>]`
+after `allowed_paths` (and each output directory to `allowed_paths`), so the
+SQL may make, read and glob the files under exactly those directories; every
+other oracle's invocation is the one above. Each output directory is a
+sub-target `[<dir>]`; buck2 fails an action that leaves one unmade.
+
 `extensions` (DuckDB extension files, each named `<name>.duckdb_extension`)
 are staged in `ext/` beside `work/`, not inside it, so the SQL cannot read
 them, and each is loaded by a `LOAD` before `.safe_mode`, in the order
@@ -173,11 +182,23 @@ def _sql_oracle_impl(ctx):
         if o in staged or o in dirs:
             fail("{}: output {} is also an input path".format(_where(ctx), repr(o)))
         seen[o] = True
+    for d in ctx.attrs.output_dirs:
+        if not regex_match(_NAME, d) or d in (".", ".."):
+            fail("{}: output_dirs entry {} is not a plain name ({}): output directories land in the working directory itself".format(_where(ctx), repr(d), _NAME))
+        if d in seen:
+            fail("{}: output_dirs entry {} is also an output or named twice".format(_where(ctx), repr(d)))
+        if d in staged or d in dirs:
+            fail("{}: output_dirs entry {} is also an input path".format(_where(ctx), repr(d)))
+        seen[d] = True
+    for d in ctx.attrs.input_dirs:
+        if d not in staged:
+            fail("{}: input_dirs entry {} is not a path of inputs".format(_where(ctx), repr(d)))
 
     # Every file of the action under one prefix of this target: the outputs
     # and the copied inputs in work/, the SQL in sql/ beside it. A path that
     # is not content-based keeps work/ and sql/ siblings.
     outs = {o: ctx.actions.declare_output("work/" + o, has_content_based_path = False) for o in ctx.attrs.outputs}
+    dir_outs = {d: ctx.actions.declare_output("work/" + d, dir = True, has_content_based_path = False) for d in ctx.attrs.output_dirs}
     hidden = []
     for p in sorted(staged.keys()):
         dest = ctx.actions.declare_output("work/" + p, has_content_based_path = False)
@@ -193,8 +214,8 @@ def _sql_oracle_impl(ctx):
         hidden.append(ctx.actions.copy_file(dest.as_output(), e))
 
     first = outs[ctx.attrs.outputs[0]]
-    allowed = sorted(staged.keys()) + sorted(ctx.attrs.outputs)
-    settings = "; ".join([
+    allowed = sorted(staged.keys()) + sorted(ctx.attrs.outputs) + sorted(ctx.attrs.output_dirs)
+    settings_list = [
         "SET threads = 1",
         "SET TimeZone = 'UTC'",
         "SET autoinstall_known_extensions = false",
@@ -202,7 +223,14 @@ def _sql_oracle_impl(ctx):
         "SET temp_directory = ''",
         "SET enable_progress_bar = false",
         "SET allowed_paths = " + _sql_list(allowed),
-    ])
+    ]
+
+    # The files under a directory input or output: only an oracle that names
+    # one sets allowed_directories, so every other invocation is unchanged.
+    tree_dirs = sorted(ctx.attrs.input_dirs) + sorted(ctx.attrs.output_dirs)
+    if tree_dirs:
+        settings_list.append("SET allowed_directories = " + _sql_list(tree_dirs))
+    settings = "; ".join(settings_list)
     version = "SELECT CASE WHEN version() <> 'v{v}' THEN error('sql_oracle: this duckdb is ' || version() || ', the pin says v{v}') END".format(v = dist.version)
 
     # The action's environment, read back before `.safe_mode` turns getenv()
@@ -252,7 +280,7 @@ def _sql_oracle_impl(ctx):
     for f in sql:
         cmd.add("-f", f)
     cmd.add("-cmd", ".mode trash", "-cmd", exists, ":memory:")
-    cmd.add(cmd_args(hidden = hidden + [o.as_output() for o in outs.values()]))
+    cmd.add(cmd_args(hidden = hidden + [o.as_output() for o in outs.values()] + [d.as_output() for d in dir_outs.values()]))
     ctx.actions.run(
         cmd,
         env = {
@@ -262,18 +290,25 @@ def _sql_oracle_impl(ctx):
         },
         category = "sql_oracle",
     )
+    sub_targets = {o: [DefaultInfo(default_output = outs[o])] for o in ctx.attrs.outputs}
+    sub_targets.update({d: [DefaultInfo(default_output = dir_outs[d])] for d in ctx.attrs.output_dirs})
     return [DefaultInfo(
-        default_outputs = [outs[o] for o in ctx.attrs.outputs],
-        sub_targets = {o: [DefaultInfo(default_output = outs[o])] for o in ctx.attrs.outputs},
+        default_outputs = [outs[o] for o in ctx.attrs.outputs] + [dir_outs[d] for d in ctx.attrs.output_dirs],
+        sub_targets = sub_targets,
     )]
 
 _sql_oracle = rule(
     impl = _sql_oracle_impl,
-    doc = "Runs `srcs` (one .sql file or a list, in order) with the pinned DuckDB CLI as one build action, in-memory, threads=1, TimeZone 'UTC', from a working directory holding `inputs` (a list of sources, each at its path in the package, or {path: source}); the SQL writes every name in `outputs` there (`COPY ... TO '<name>'`), each a sub-target `[<name>]`. A file the SQL reads or writes that is neither an input nor an output, a missing output, a SQL error or a changed setting fails the action.",
+    doc = "Runs `srcs` (one .sql file or a list, in order) with the pinned DuckDB CLI as one build action, in-memory, threads=1, TimeZone 'UTC', from a working directory holding `inputs` (a list of sources, each at its path in the package, or {path: source}); the SQL writes every name in `outputs` there (`COPY ... TO '<name>'`), each a sub-target `[<name>]`, and every directory in `output_dirs` (a partitioned `COPY ... TO '<name>' (PARTITION_BY ...)`), each a sub-target too. `input_dirs` names the inputs that are directories, whose files the SQL may read. A file the SQL reads or writes that is neither an input nor an output nor under a named directory, a missing output, a SQL error or a changed setting fails the action.",
     attrs = {
         # DuckDB extension files, loaded in this order before `.safe_mode`.
         "extensions": attrs.list(attrs.source(), default = []),
+        # Paths of `inputs` that are directories (a build output that is a
+        # tree): the SQL may read and glob the files under them.
+        "input_dirs": attrs.list(attrs.string(), default = []),
         "inputs": attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source()), default = []),
+        # Directories the SQL writes a tree into, as outputs.
+        "output_dirs": attrs.list(attrs.string(), default = []),
         "outputs": attrs.list(attrs.string()),
         "srcs": attrs.one_of(attrs.source(), attrs.list(attrs.source())),
         "_duckdb": attrs.exec_dep(providers = [DuckdbInfo], default = "komira//third_party/duckdb:duckdb"),

@@ -58,6 +58,14 @@ Any other extension is refused with `COPY_FORMAT_NOT_INFERRED` instead of
 being written as Parquet. With no `COMPRESSION`, Parquet is snappy and CSV and
 JSON take gzip from `.gz`, zstd from `.zst`, and none otherwise.
 
+`PARTITION_BY (<columns>)` (or one bare name) in a COPY's options is read
+into `SqlStatement.partition_by` (`sql.sql_copy_partition`); the binder
+resolves each name against the query's result columns without regard to case
+and keeps the result's spelling in `BoundStatement.partition_by`. A name the
+result does not have, or a list naming every column, is a bind error; an
+empty list, a name listed twice, the option given twice and the option with
+JSON are refused at parse.
+
 The parser recurses once per nested construct on the caller's thread, so it
 refuses a statement nested deeper than `MAX_SQL_NESTING` (100) levels with
 `SQL syntax error: the statement nests deeper than 100 levels`

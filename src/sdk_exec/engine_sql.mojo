@@ -8,9 +8,11 @@
 # lower with inputs from the same footers; run. A
 # `COPY ... TO` runs its query the same way and then writes the result as a
 # local Parquet, CSV or newline-delimited JSON file (`engine_write`, still
-# step `execute`), answering one row with the BIGINT column `Count`; its
-# destination and compression are checked at step `bind`, so a refused COPY
-# touches no file. A step that refuses
+# step `execute`), or, with PARTITION_BY, as a Hive-partitioned directory of
+# such files (`engine_write_partitioned`), answering one row with the BIGINT
+# column `Count`; its destination and compression (and a partitioned COPY's
+# target directory) are checked at step `bind`, so a refused COPY touches no
+# file. A step that refuses
 # ends the call, and the outcome says which step and the step's own message
 # unchanged; the door retries nothing and keeps no second route. Nothing here
 # raises: a failure of any step is a value.
@@ -71,6 +73,10 @@ from .engine_plan import (
 )
 from .run_control import RunControl
 from .engine_write import check_copy_target, count_result, write_copy_result
+from .engine_write_partitioned import (
+    check_partitioned_target,
+    write_partitioned_result,
+)
 
 comptime STEP_PARSE = "parse"
 comptime STEP_BIND = _STEP_BIND
@@ -138,6 +144,8 @@ def run_sql_with[
         pt_record[PH_BIND](t_bind)
         if bound.kind == STMT_COPY:
             check_copy_target(bound.dest_path, bound.fmt, bound.codec)
+            if len(bound.partition_by) > 0:
+                check_partitioned_target(bound.dest_path, bound.partition_by)
         elif bound.kind != STMT_QUERY:
             raise Error(
                 String(STATEMENT_NOT_A_QUERY)
@@ -148,7 +156,13 @@ def run_sql_with[
         var plan = bound.take_plan()
         var batch = run_plan_batch(ctx, plan^, opener^, step, control)
         var outcome = SqlOutcome()
-        if bound.kind == STMT_COPY:
+        if bound.kind == STMT_COPY and len(bound.partition_by) > 0:
+            var rows = write_partitioned_result(
+                batch^, bound.dest_path, bound.fmt, bound.codec,
+                bound.partition_by,
+            )
+            outcome.batches.append(count_result(rows))
+        elif bound.kind == STMT_COPY:
             var rows = write_copy_result(
                 batch^, bound.dest_path, bound.fmt, bound.codec
             )

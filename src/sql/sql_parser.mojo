@@ -76,6 +76,7 @@ from arrow.write_target import (
     WCOMP_SNAPPY, WCOMP_UNCOMPRESSED, WCOMP_ZSTD, WCOMP_GZIP, WCOMP_LZ4,
     write_format_name, write_codec_name, write_target_supported,
 )
+from .sql_copy_partition import parse_partition_by
 
 
 comptime INNER_ON_BEFORE_OUTER_REFUSAL = (
@@ -370,11 +371,18 @@ struct _Parser(Movable):
             raise Error("SQL syntax error: COPY ... TO expects a string path")
         var dest = String(self.tokens[self.pos].text)
         self._advance()
-        var opts = self._parse_copy_options(dest)
-        return SqlStatement(STMT_COPY, source^, dest, String(""), opts[0], opts[1], False)
+        var partition_by = List[String]()
+        var opts = self._parse_copy_options(dest, partition_by)
+        return SqlStatement(
+            STMT_COPY, source^, dest, String(""), opts[0], opts[1], False,
+            partition_by^,
+        )
 
-    def _parse_copy_options(mut self, dest: String) raises -> Tuple[UInt8, UInt8]:
-        """Parse the parenthesized COPY option list, if any -> (fmt, codec).
+    def _parse_copy_options(
+        mut self, dest: String, mut partition_by: List[String]
+    ) raises -> Tuple[UInt8, UInt8]:
+        """Parse the parenthesized COPY option list, if any -> (fmt, codec),
+        with the names of a PARTITION_BY option into `partition_by`.
         With no FORMAT the format comes from `dest`'s extension, and with no
         COMPRESSION the codec from the format and `dest`
         (`sql_copy_format`).
@@ -386,6 +394,8 @@ struct _Parser(Movable):
             COMPRESSION_LEVEL <int>
             HEADER <true|false>             csv only
             ARRAY <true|false>              json only
+            PARTITION_BY <name> | (<name>, ...)   parquet and csv only
+                                            (sql_copy_partition)
 
         TWO PASSES, deliberately. Every option is COLLECTED first and validated
         only once the list is closed, because the meaning of HEADER / ARRAY /
@@ -416,11 +426,12 @@ struct _Parser(Movable):
         var saw_header = False
         var array_opt = False
         var saw_array = False
+        var saw_partition = False
         while True:
             if self._kind() != TK_IDENT:
                 raise Error(
                     "SQL syntax error: expected a COPY option (FORMAT / COMPRESSION /"
-                    " COMPRESSION_LEVEL / HEADER / ARRAY)"
+                    " COMPRESSION_LEVEL / HEADER / ARRAY / PARTITION_BY)"
                 )
             var opt = String(self.tokens[self.pos].text)
             self._advance()
@@ -439,10 +450,24 @@ struct _Parser(Movable):
             elif opt == "array":
                 array_opt = self._copy_option_bool(String("ARRAY"))
                 saw_array = True
+            elif opt == "partition_by":
+                if saw_partition:
+                    raise Error(
+                        "SQL syntax error: the COPY option PARTITION_BY is given twice"
+                    )
+                var p = self.pos
+                try:
+                    parse_partition_by(self.tokens, p, partition_by)
+                except e:
+                    self.pos = p
+                    raise e^
+                self.pos = p
+                saw_partition = True
             else:
                 raise Error(
                     "SQL not supported: COPY option '" + opt + "' (FORMAT /"
-                    " COMPRESSION / COMPRESSION_LEVEL / HEADER / ARRAY)"
+                    " COMPRESSION / COMPRESSION_LEVEL / HEADER / ARRAY /"
+                    " PARTITION_BY)"
                 )
             if self._kind() == TK_COMMA:
                 self._advance()
@@ -485,6 +510,11 @@ struct _Parser(Movable):
                     " writes newline-delimited objects (DuckDB's ARRAY false); it"
                     " cannot emit a single JSON array"
                 )
+        if saw_partition and fmt == WFMT_JSONL:
+            raise Error(
+                "SQL not supported: COPY option PARTITION_BY applies to FORMAT"
+                " 'parquet' or 'csv', not 'json' (DuckDB refuses it for JSON too)"
+            )
         if saw_level:
             var want = _codec_fixed_level(codec)
             if want < 0:

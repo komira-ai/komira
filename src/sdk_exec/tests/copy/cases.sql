@@ -14,6 +14,12 @@
 -- (its type detection overflows on them), and test_copy_text_encoding holds
 -- their text. read_parquet file names are replaced by their paths
 -- as read_csv ones are.
+-- The hive_* cases write a Hive-partitioned directory (PARTITION_BY), named
+-- like a file so a case's name is the part before the first `.`: two
+-- partition levels of BIGINT, the BOOLEAN, DATE and DECIMAL directory texts,
+-- NULL partitions, values DuckDB URL-escapes (a comma, quotes, a line break,
+-- spaces, a multi-byte character), gzip CSV files, and an empty result,
+-- which leaves an empty directory.
 COPY (SELECT id, qty, price, day, name, qty > 10 AS big FROM read_csv('typed.csv')) TO 'typed_default.parquet';
 COPY (SELECT * FROM read_csv('typed.csv')) TO 'typed_zstd.parquet' (FORMAT parquet, COMPRESSION zstd);
 COPY (SELECT * FROM read_csv('nulls.csv')) TO 'nulls_gzip.parquet' (COMPRESSION gzip);
@@ -36,3 +42,9 @@ COPY (SELECT * FROM read_csv('typed.csv') ORDER BY id) TO 'typed_zstd_json.json.
 COPY (SELECT * FROM read_parquet('times.parquet') ORDER BY id) TO 'times_default.parquet';
 COPY (SELECT * FROM read_parquet('times.parquet') WHERE id NOT IN (11, 12, 15) ORDER BY id) TO 'times_csv.csv';
 COPY (SELECT * FROM read_parquet('times.parquet') WHERE id NOT IN (11, 12, 15) ORDER BY id) TO 'times_json.json';
+COPY (SELECT id, qty, price, name, year(day) AS year, month(day) AS month FROM read_csv('typed.csv') ORDER BY id) TO 'hive_years.parquet' (FORMAT parquet, PARTITION_BY (year, month));
+COPY (SELECT id, qty > 10 AS big, day, CAST(price AS DECIMAL(6, 3)) AS cost, name FROM read_csv('typed.csv') ORDER BY id) TO 'hive_types.parquet' (FORMAT parquet, PARTITION_BY (big, day, cost));
+COPY (SELECT id, qty, name FROM read_csv('nulls.csv') ORDER BY id) TO 'hive_nulls.parquet' (FORMAT parquet, PARTITION_BY name);
+COPY (SELECT id, amount, note FROM read_csv('quoted.csv') ORDER BY id) TO 'hive_escaped.parquet' (FORMAT parquet, PARTITION_BY (note));
+COPY (SELECT name, qty, id FROM read_csv('typed.csv') ORDER BY id) TO 'hive_csv.csv' (FORMAT csv, COMPRESSION gzip, PARTITION_BY (name));
+COPY (SELECT id, name FROM read_csv('typed.csv') WHERE qty < 0) TO 'hive_empty.parquet' (FORMAT parquet, PARTITION_BY (name));

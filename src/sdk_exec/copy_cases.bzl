@@ -6,7 +6,8 @@ a directory holding `inputs` (each at its name), and the output directory:
 
     copy_runner --cases <cases.sql> --input-dir <inputs> --out-dir <out>
 
-Every name in `outputs` (each case's destination file, and `counts.tsv`,
+Every name in `outputs` (each case's destination file, or the directory a
+partitioned case writes, and `counts.tsv`,
 the `Count` each case answered) is a sub-target `[<name>]`, which a
 `sql_oracle` takes as an input in its dict form. A refused case fails the
 action. Nothing here reads an environment variable; the program takes its

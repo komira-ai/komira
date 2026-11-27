@@ -1653,6 +1653,10 @@ struct SqlStatement(Movable):
                         pair is validated at parse time against
                         `write_target_supported`.
         replace       — STMT_CREATE_TABLE_AS: True for `CREATE OR REPLACE TABLE`.
+        partition_by  — STMT_COPY: the column names of a `PARTITION_BY` option,
+                        as written (empty for a COPY to one file and for
+                        every other kind; sql_copy_partition says what is
+                        accepted).
 
     Move-only (holds a move-only `SelectStmt`)."""
 
@@ -1663,6 +1667,7 @@ struct SqlStatement(Movable):
     var fmt: UInt8
     var codec: UInt8
     var replace: Bool
+    var partition_by: List[String]
 
     def __init__(
         out self,
@@ -1673,6 +1678,7 @@ struct SqlStatement(Movable):
         fmt: UInt8 = WFMT_PARQUET,
         codec: UInt8 = WCOMP_SNAPPY,
         replace: Bool = False,
+        var partition_by: List[String] = List[String](),
     ):
         self.kind = kind
         self.query = query^
@@ -1681,3 +1687,4 @@ struct SqlStatement(Movable):
         self.fmt = fmt
         self.codec = codec
         self.replace = replace
+        self.partition_by = partition_by^
