@@ -736,7 +736,7 @@ for darwin-arm64; and `//release:mopm_release_artifacts` merges the two into one
 configures the macOS half for darwin-arm64 through a transition, so one build of it, for Linux,
 builds both). That is the layout mopm reads, which requires the namespace directory: `mopm stage`
 packs one `.conda` per subdir that holds a member's library, and refuses a member that declares a
-native with no archive for one of them. Eleven jobs of `release.yml` carry the
+native with no archive for one of them. Thirteen jobs of `release.yml` carry the
 steps (a documentation-only push does not start the workflow, so it publishes nothing):
 
 | job | when | what it does |
@@ -746,12 +746,14 @@ steps (a documentation-only push does not start the workflow, so it publishes no
 | `beta-test` | after `beta-stage`, on a push to `main` | as `prod-test` below, on the directory `beta-stage` kept: environment `build`, **no registry identity and no secret**, `release_staged_verify verify` of every file against `plan.json`, then the README e2e on the farm on the files that matched. |
 | `beta-commit` | after `beta-test`, on a push to `main` | in the environment `beta`: `mopm publish --staged S --registry beta --oidc` on the directory with its `state.json`, after a fresh OIDC exchange: the beta group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-beta-committed-<sha>`. |
 | `beta-abort` | after `beta-stage`, `beta-test` and `beta-commit`, when one of them failed or the run was cancelled, on a push to `main` and with a `beta-stage` that was not skipped | in the environment `beta`: `mopm publish --staged S --registry beta --oidc --abort` ends the open beta group. |
+| `beta-served-readmes` | after `beta-commit`, on a push to `main` | as `prod-served-readmes` below, on what the beta registry serves (`--stage beta`). `prod-stage` does not wait for it. |
 | `prod-stage` | after `release`, `mopm-stage` and `beta-commit`, **only on a push to `main`** (a manual run skips all six prod jobs before they start; there is no other switch) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, kept 7 days, even when the step failed. |
 | `prod-test` | after `prod-stage`, on a push to `main` | in the environment `build` (the farm's; `id-token: write` for the tailnet join only), with **no registry identity and no secret**. It downloads the directory `prod-stage` kept, checks every file against `plan.json` (`release_staged_verify verify`: sha256 and size), writes `release/staged_set` from the files that matched and from nothing else, and runs `-c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm. |
 | `prod-commit` | after `prod-test`, on a push to `main` | in the environment `prod`, with `contents: read` and `id-token: write`. The same command without `--no-commit`, on the same directory with its `state.json`, after a fresh OIDC exchange: the same group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-prod-committed-<sha>`. |
 | `prod-abort` | after `prod-stage`, `prod-test` and `prod-commit`, when one of them failed or the run was cancelled, on a push to `main` and with a `prod-stage` that was not skipped | in the environment `prod`, same permissions: `mopm publish --staged S --registry prod --oidc --abort` ends the open group and gives its place back. |
 | `prod-smoke` | after `prod-commit`, on a push to `main` | no environment, no identity, no secret, no farm: `release_staged_verify smoke` downloads the published files from the prod channel and compares each with the plan. On a difference it prints the `mopm yank --group <id> ...` command for a human and fails; it yanks nothing. |
 | `prod-add` | after `prod-commit` and `prod-smoke`, on a push to `main` | no environment, no identity, no secret, no farm (a farm action has no network): `release_staged_verify add` makes a fresh project with the mopm `mopm-stage` built, sets its Mojo to the one this release was built for, runs `mopm add komira-ai/<name> --registry prod` for `json`, `uuid` and every package that ships a native archive (`async_api`, `awslc`, `compression`, `crypto`, `libc`, `log`, `metrics`) and then `mopm sync`, and checks the lock and the installed files against the plan. It yanks nothing. |
+| `prod-served-readmes` | after `prod-commit`, on a push to `main` | in the environment `build` (the farm's; `id-token: write` for the tailnet join only), with **no registry identity and no secret**. `release_staged_verify served --stage prod` downloads, on the runner, every file of the plan from the prod channel and every member's README from the prod API at this run's version, checks them against the plan of the set `mopm-stage` kept (sha256 and size; each README byte for byte), writes `release/staged_set` from what matched, and runs `-c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on that set on the farm ([below](#the-readme-e2e-on-what-the-registry-serves)). |
 
 **The staged set is the whole set.** `mopm stage` packs one `.conda` per subdir a member has a library in,
 and the checks after it (`verify`, `smoke`, `add`) read the plan, so a plan that lost a platform or a package
@@ -898,6 +900,9 @@ would be handed two files for one name.
    user would get, and a person decides what to do. Its cases (`//tools/build/ci:release_staged_verify_unit`)
    run a registry and a mopm in memory.
 
+7. **`prod-served-readmes`** runs once the group is visible, beside the smoke and the add. See
+   [the README e2e on what the registry serves](#the-readme-e2e-on-what-the-registry-serves).
+
 **The identity.** No job holds a registry token and neither the environment `prod` nor `beta` holds a
 secret. The three prod jobs that talk to the registry run in the environment `prod` and exchange the job's
 GitHub OIDC token; the registry trusts this repository's `release.yml`, run on `main` from a push, in the
@@ -911,7 +916,8 @@ yet](#before-the-first-release)). `beta-test` and `prod-test` are in the environ
 committed, are the files of S: the registry pinned each sha256 when it opened the group, and `prod-test`
 hashed the same directory against the same plan. The README examples of every package ran on exactly those
 bytes before anything was committed, and after the commit the channel serves bytes whose sha256 and size
-are the plan's. A user's `mopm add komira-ai/<name> --registry prod` and `mopm sync` on a clean runner lock
+are the plan's, the API serves each package's README as the plan staged it, and the README examples ran
+again on those served files and READMEs. A user's `mopm add komira-ai/<name> --registry prod` and `mopm sync` on a clean runner lock
 the full names under the namespace's channel at this run's version and install exactly those bytes.
 
 **What it does not prove.**
@@ -932,6 +938,45 @@ the full names under the namespace's channel at this run's version and install e
 `MOPM` in [`packages.bzl`](../release/readme_e2e/packages.bzl) (`toolchains//:mopm_0_0_138` in the
 `mopm-stage` job). The first mopm release with both flags is 0.0.66, so the pin has them; a later move of
 the pin must keep them, in the same change as the toolchain entry the job builds.
+
+#### The README e2e on what the registry serves
+
+`prod-test` and `beta-test` run the README e2e on the files the registry holds in quarantine, before the
+commit; after the commit, a user gets what the registry serves: the files from its channel and each README
+from its API. `beta-served-readmes` (after `beta-commit`) and `prod-served-readmes` (after `prod-commit`)
+run the README e2e of every package on exactly that. Each is a job of the environment `build` with no
+registry identity and no secret, and runs, in order:
+
+1. `release_staged_verify served --stage <beta|prod> --staged <the set mopm-stage kept> --out release/staged_set --attempts 5 --delay 30`
+   ([source](../tools/build/ci/release_beta_fetch/served.zig)), on the runner, which has the network the
+   farm lacks. It reads `plan.json` and each member's README from the set `mopm-stage` kept (its `.conda`
+   files are not read). It reads the registry's index (`https://api.beta.mopm.dev/index/config.json` or
+   `https://api.mopm.dev/index/config.json`) and refuses one whose `stage` is not the registry's, whose
+   `channel_url` is not its pinned channel (`https://conda.beta.mopm.dev/`, `https://conda.mopm.dev/`) or
+   whose `api_v2_url` is not its pinned API root (`https://api.beta.mopm.dev/api/v2`,
+   `https://api.mopm.dev/api/v2`). Then, with https GETs that follow no redirect, it downloads every file
+   of the plan from `<channel><namespace>/<subdir>/<filename>` and compares its sha256 and size with the
+   plan, and reads `<api_v2_url>/packages/<namespace>/<name>/<version>` (mopm's `getVersion`) for every
+   member at this run's version: the answer must name the member and the version, in the state
+   `published`, with a `readme` equal byte for byte to the plan's README. Every difference (a file or a
+   version not served, another size or hash, no readme, a readme of another length or with another byte,
+   with the first differing byte) is reported at once; a pass that found one is repeated up to five times
+   30 seconds apart, as the smoke's is, because a cache can lag the commit. Only when everything matched
+   does it write `release/staged_set` (beside its checked-in `BUCK`): `plan.json`, each README as served
+   and each file as downloaded. Its cases (`//tools/build/ci:served_unit`) run a registry in memory.
+2. `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all`
+   on the farm: the README e2e of every package installs from that set and compiles and runs the
+   examples of the README the registry served. A package the set lacks fails at the e2e's phase
+   `staged`, and `expect` of `mopm-stage` already holds the plan to every package of the release.
+
+The job fails when a file or a README the registry serves is not the plan's, when a package's version is
+not served, or when any README example fails. It yanks nothing: a failure after the commit says what a
+user gets, and a person decides what to do ([Yanking a bad release](#yanking-a-bad-release)). `prod-stage` does not need
+`beta-served-readmes`, so a beta failure here does not stop the prod publish of the same run; it makes the
+run red. `//:release_workflow_cases` holds both jobs
+([`release_served_readmes.zig`](../.github/workflows/release_served_readmes.zig)): the needs, the gate, the
+environment and permissions, the one artifact (`mopm-staged-<sha>`), the `served` command of its own
+registry, the order of the steps, the e2e asserted remote, and no write to a registry.
 
 #### The beta publish
 
@@ -968,9 +1013,9 @@ jobs" fails at `mopm-stage`'s upload of `mopm-staged-<sha>`, which already exist
 `prod-stage` does rerun cleanly with "Re-run failed jobs": it starts again from S, which holds no `state.json`,
 and the registry opens an ended group again as its next attempt. Otherwise, push again.
 
-**What it does not do yet.** No job downloads what the beta channel serves or adds from beta (there is no
-beta smoke and no beta add), so the beta publish proves that the beta registry accepted, held and committed
-the set, and that the README e2e passed on the bytes it held before the commit.
+**After the commit.** `beta-served-readmes` downloads what the beta registry serves (every file from its
+channel, every README from its API) and runs the README e2e on it, as `prod-served-readmes` does for prod
+([above](#the-readme-e2e-on-what-the-registry-serves)). No job adds from beta (there is no beta add).
 
 #### Before the first release
 

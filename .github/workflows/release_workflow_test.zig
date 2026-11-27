@@ -40,6 +40,8 @@
 //!    directory), the order of the test's steps, that the test, the smoke and the add
 //!    never name a registry-writing verb or the OIDC exchange, and that the smoke and the
 //!    add never join the farm (the test joins it for the README e2e).
+//!  - after each commit, `beta-served-readmes` and `prod-served-readmes` run the README e2e on what that
+//!    registry serves (release_served_readmes.zig says what its cases catch).
 //!  - the staged set outlives a rerun: every upload of `mopm-staged-<sha>` (the set `mopm-stage`
 //!    hands to the beta and prod jobs), of `mopm-beta-staged-<sha>` (the directory `beta-stage` hands to
 //!    `beta-test`, `beta-commit` and `beta-abort`) and of `mopm-prod-staged-<sha>` (the
@@ -60,6 +62,7 @@
 const std = @import("std");
 const t = std.testing;
 const group = @import("release_publish_group.zig");
+const served = @import("release_served_readmes.zig");
 
 const WHEEL_JOBS = [_][]const u8{ "wheel", "wheel-user-test" };
 const WHEEL_WORDS = [_][]const u8{ "setup-python", "//python:komira_wheel", "pypi_smoke" };
@@ -222,6 +225,7 @@ pub fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (try checkProd(ar, text, prod_stage)) |why| return why;
     if (try group.checkBeta(ar, text)) |why| return why;
     if (try checkStagedRetention(ar, text)) |why| return why;
+    if (try served.checkServed(ar, text)) |why| return why;
 
     // top-level permissions and the triggers
     var tp: usize = 0;
@@ -934,4 +938,6 @@ test "a mopm label that differs from the pin, or none, is refused" {
 test {
     // the beta jobs' cases, and checkGroup, which the prod jobs share
     _ = @import("release_publish_group.zig");
+    // the cases of the jobs that run the README e2e on what each registry serves after its commit
+    _ = @import("release_served_readmes.zig");
 }

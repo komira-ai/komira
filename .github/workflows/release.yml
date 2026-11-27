@@ -35,8 +35,8 @@
 #                   sends nothing and holds no token. S is planned against prod;
 #                   every member is a new version (0.1.<run number>), so the same
 #                   plan is the plan for beta too.
-#   `beta-stage`, `beta-test`, `beta-commit`, `beta-abort`
-#                   the beta publish, in four jobs, ONLY on a push to main (never
+#   `beta-stage`, `beta-test`, `beta-commit`, `beta-abort`, `beta-served-readmes`
+#                   the beta publish, in four jobs and the served check, ONLY on a push to main (never
 #                   on a manual run), the shape of the first four prod jobs below
 #                   with the registry `beta` and the environment `beta`:
 #     beta-stage    (needs release and mopm-stage; environment `beta`, `id-token:
@@ -50,8 +50,12 @@
 #                   without `--no-commit`: the beta group is committed.
 #     beta-abort    (needs the three above; only when one failed or the run was
 #                   cancelled) `--abort` ends the open beta group.
-#   `prod-stage`, `prod-test`, `prod-commit`, `prod-abort`, `prod-smoke`, `prod-add`
-#                   the prod publish, in six jobs, ONLY on a push to main (never on a
+#     beta-served-readmes
+#                   (needs beta-commit; environment `build`; no registry identity)
+#                   as `prod-served-readmes` below, on what beta serves.
+#   `prod-stage`, `prod-test`, `prod-commit`, `prod-abort`, `prod-smoke`, `prod-add`,
+#   `prod-served-readmes`
+#                   the prod publish, in six jobs and the served check, ONLY on a push to main (never on a
 #                   manual run). It stages the set the e2e of `mopm-stage`
 #                   passed on and beta committed, tests the files the registry now
 #                   holds in quarantine, and only then commits:
@@ -85,6 +89,14 @@
 #                   lock must record full names
 #                   under https://conda.mopm.dev/komira-ai/ at this run's version,
 #                   and the installed files must be the plan's (sha256 and size).
+#     prod-served-readmes
+#                   (needs prod-commit; environment `build`, the farm's; no registry
+#                   identity and no secret) `release_staged_verify served --stage prod`
+#                   downloads every file of the plan from the prod channel and every
+#                   member's README from the prod API at this run's version, checks
+#                   them against the plan (sha256 and size; the README byte for
+#                   byte), writes them to release/staged_set, and runs the README e2e
+#                   of every package on that set on the farm.
 #                   These jobs need a mopm that has `--no-commit` and `--abort`
 #                   (0.0.66 and later), and each registry, beta and prod, must
 #                   trust this workflow's identity in its environment as a CI
@@ -571,6 +583,57 @@ jobs:
         if: hashFiles('mopm-beta/staged/state.json') == ''
         run: 'echo "no state.json: the beta stage failed before it asked the registry for a group; nothing to end"'
 
+  # SERVED IN BETA. As `prod-served-readmes`, for the registry `beta`, after `beta-commit`: the
+  # files and READMEs the beta registry now serves at this run's version, checked against the
+  # plan and tried by the README e2e on the farm. `prod-stage` does not wait for it.
+  beta-served-readmes:
+    needs: beta-commit
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/beta-served
+      - name: the verify tool is executable
+        run: chmod +x "$RUNNER_TEMP/beta-served/release_staged_verify"
+      - name: download what beta serves and check it against the plan
+        run: '"$RUNNER_TEMP/beta-served/release_staged_verify" served --stage beta --staged "$RUNNER_TEMP/beta-served/staged" --out release/staged_set --attempts 5 --delay 30'
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      - name: the README e2e against what beta serves
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
   # THE PROD PUBLISH, in six jobs (see the header). Every one runs only on a
   # push to main (a manual run never reaches the environment `prod`), and
   # `prod-stage` needs the set `mopm-stage` tried and passed the README e2e on, and
@@ -812,3 +875,62 @@ jobs:
         run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm" "$RUNNER_TEMP/mopm-publish/release_staged_verify"
       - name: mopm add from prod installs the published files
         run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" add --staged "$RUNNER_TEMP/prod-add/committed" --mopm "$RUNNER_TEMP/mopm-publish/mopm" --work "$RUNNER_TEMP/prod-add/work"'
+
+  # SERVED. The group is visible, and what a user gets is what the registry serves: the files
+  # from its channel and each README from its API (`getVersion` at this run's version), which
+  # the tests before the commit could not see. `release_staged_verify served` downloads them
+  # for every member of the plan of the set `mopm-stage` kept (its `.conda` files are not
+  # read), refuses an index that names another registry, checks every file against the plan
+  # (sha256 and size) and every README against the plan's byte for byte, reporting every
+  # difference, trying again for a few minutes if the registry's cache lags, and writes
+  # `release/staged_set` from what matched and from nothing else. The README e2e of every
+  # package then runs on that set on the farm (the farm has no network, so the runner fetches
+  # and the build uploads). It holds no registry identity and no secret: the environment is
+  # `build`, `id-token: write` is for farm-connect only, and it sends nothing but GETs.
+  prod-served-readmes:
+    needs: prod-commit
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/prod-served
+      - name: the verify tool is executable
+        run: chmod +x "$RUNNER_TEMP/prod-served/release_staged_verify"
+      - name: download what prod serves and check it against the plan
+        run: '"$RUNNER_TEMP/prod-served/release_staged_verify" served --stage prod --staged "$RUNNER_TEMP/prod-served/staged" --out release/staged_set --attempts 5 --delay 30'
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      - name: the README e2e against what prod serves
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true

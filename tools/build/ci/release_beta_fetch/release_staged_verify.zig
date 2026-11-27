@@ -1,9 +1,10 @@
-//! release_staged_verify: the four checks of the mopm publish of release.yml that make no write to a registry.
+//! release_staged_verify: the five checks of the mopm publish of release.yml that make no write to a registry.
 //!
 //!   release_staged_verify verify --staged <dir> --out <dir>
 //!   release_staged_verify smoke  --staged <dir> --config-url <https url> [--attempts <n>] [--delay <seconds>]
 //!   release_staged_verify add    --staged <dir> --mopm <file> --work <dir>
 //!   release_staged_verify expect --staged <dir> --expect <file>
+//!   release_staged_verify served --stage <beta|prod> --staged <dir> --out <dir> [--attempts <n>] [--delay <seconds>]
 //!
 //! It shares the plan reader and the client of release_beta_fetch.zig (the file beside this one) and
 //! holds no credential.
@@ -40,11 +41,17 @@
 //! `add` is what `prod-add` runs after `prod-smoke`: a user's `mopm add komira-ai/<name>` and `mopm sync` against
 //! prod, in a directory it makes, with the pinned mopm; it checks the lock they write and the files they install
 //! against the plan. prod_add.zig (beside this file) says what it runs and refuses.
+//!
+//! `served` is what `beta-served-readmes` and `prod-served-readmes` run after `beta-commit` and `prod-commit`: every
+//! file of the plan from that registry's channel and every member's README from its API, at the plan's version,
+//! checked against the plan (sha256 and size; the README byte for byte) and written to `--out` for the README e2e.
+//! served.zig (beside this file) says what it reads and refuses.
 const std = @import("std");
 const builtin = @import("builtin");
 const rbf = @import("release_beta_fetch.zig");
 const prod_add = @import("prod_add.zig");
 const plan_expect = @import("plan_expect.zig");
+const served = @import("served.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -172,6 +179,7 @@ const usage =
     \\       release_staged_verify smoke --staged <dir> --config-url <https url> [--attempts <n>] [--delay <seconds>]
     \\       release_staged_verify add --staged <dir> --mopm <file> --work <dir>
     \\       release_staged_verify expect --staged <dir> --expect <file>
+    \\       release_staged_verify served --stage <beta|prod> --staged <dir> --out <dir> [--attempts <n>] [--delay <seconds>]
     \\
 ;
 
@@ -247,6 +255,12 @@ pub fn main() !u8 {
         const rest = try a.alloc([]const u8, args.len - 2);
         for (rest, args[2..]) |*r, arg| r.* = arg;
         return plan_expect.cliExpect(a, rest, &out.interface, &err.interface);
+    }
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "served")) {
+        const rest = try a.alloc([]const u8, args.len - 2);
+        for (rest, args[2..]) |*r, arg| r.* = arg;
+        var http = rbf.Http{};
+        return served.cliServed(a, gpa.allocator(), rest, http.fetcher(), &out.interface, &err.interface);
     }
     if (args.len < 2 or !(std.mem.eql(u8, args[1], "verify") or std.mem.eql(u8, args[1], "smoke"))) {
         try err.interface.writeAll(usage);
