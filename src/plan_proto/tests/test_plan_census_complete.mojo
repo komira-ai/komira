@@ -52,6 +52,7 @@ from std.testing import assert_equal, assert_true
 from proto_codec import FieldKey, ProtoEnum, Serializable, WireDecoder
 from plan_proto.optimized_plan import (
     DeclaredNeeds,
+    DigestTrailer,
     ExchangeEdge,
     OptimizedPlan,
     OptimizedPlanBody,
@@ -154,6 +155,7 @@ from plan_proto.plan_vocabulary import (
     FrameBound,
     FrameUnits,
     JoinAlgo,
+    JoinBuildSide,
     JoinType,
     MathFn1,
     MathFn2,
@@ -534,6 +536,8 @@ def _fields_of(message: String) raises -> _Shape:
         return _vocabulary[PlanAdvice]()
     elif message == "ProducerStamp":
         return _vocabulary[ProducerStamp]()
+    elif message == "DigestTrailer":
+        return _vocabulary[DigestTrailer]()
     elif message == "RuntimeNeed":
         return _vocabulary[RuntimeNeed]()
     elif message == "ScanPin":
@@ -564,6 +568,8 @@ def _values_of(enum: String) raises -> String:
         return JoinType.known_json_names()
     elif enum == "JoinAlgo":
         return JoinAlgo.known_json_names()
+    elif enum == "JoinBuildSide":
+        return JoinBuildSide.known_json_names()
     elif enum == "AsofDirection":
         return AsofDirection.known_json_names()
     elif enum == "AsofToleranceKind":

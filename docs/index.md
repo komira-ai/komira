@@ -9,6 +9,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | Installing the Python package from PyPI: the platforms and what it needs, the first program and what it prints, what does not work yet, troubleshooting | [install.md](install.md) |
 | What each release of the Python package added or changed: the sections it keeps, and the entries (one file each) no section holds yet | [python/CHANGELOG.md](../python/CHANGELOG.md), [python/changelog.d/](../python/changelog.d/) |
 | What the Python package's DataFrames can do, one page per feature, with examples | [python/docs/](../python/docs/dataframe/overview.md) |
+| What komira can do for each of the 100 most common data-analysis tasks, ranked, with the issues that block the rest, and a runnable example with its output per task that has one | [tasks/README.md](tasks/README.md) |
 | Developer setup: buck2, the build farm, running the tests | [DEVELOPMENT.md](../DEVELOPMENT.md) |
 | The engineering rules every change is written to and reviewed against, each with an id (the shared core, the language rules, komira's own) | [AGENTS.md](../AGENTS.md) |
 | The build tooling, and using komira from another repository | [tools/build/README.md](../tools/build/README.md) |

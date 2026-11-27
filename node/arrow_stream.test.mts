@@ -11,7 +11,7 @@ import test from 'node:test';
 import v8 from 'node:v8';
 import vm from 'node:vm';
 
-import type { ArrowAddon } from './src/arrow_import.mts';
+import type { ArrowAddon } from './src/arrow_import.ts';
 import { NULLABLE, bitmap, bytes, bytesOf, fixed, streamOf, varlen, type StreamSpec } from './tests/arrow_specs.mts';
 
 const here = import.meta.dirname;
@@ -276,7 +276,7 @@ test('a closed result refuses its calls, and closing again does nothing', async 
   const closed = { code: 'KOMIRA_ARROW_CLOSED', message: 'the Arrow result was closed' };
   assert.throws(() => addon.arrowSchema(result), closed);
   assert.throws(() => addon.arrowNextBatch(result), closed);
-  const notResult = { name: 'TypeError', code: 'KOMIRA_ARG', message: 'the result must be a value importArrowStream resolved to' };
+  const notResult = { name: 'TypeError', code: 'KOMIRA_ARG', message: 'the result must be a value importArrowStream or sql resolved to' };
   for (const v of [{}, foreign.make(), stand.stream(twoBatches())]) {
     assert.throws(() => addon.arrowSchema(v), notResult);
     assert.throws(() => addon.arrowNextBatch(v), notResult);

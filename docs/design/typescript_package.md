@@ -10,7 +10,8 @@ are the recommended ones, not settled ones.
 
 People should be able to `npm install` komira and run SQL over their local files from Node, with
 Arrow data back. komira has a Node addon over `libkomira` ([node/README.md](../../node/README.md)),
-but it is test-only. It runs no query, returns no Arrow, and nothing of it is published.
+and a private package over it that runs SQL (`Session.sql`) and answers Arrow (`Result`), but both
+are test-only and nothing of them is published.
 
 The Python package ([python_package.md](python_package.md)) is the sibling. Both bind the same
 library through the same C calls ([libkomira_run_abi.md](libkomira_run_abi.md)). This document
@@ -47,20 +48,20 @@ Fixed before this design, and not reopened here:
 
 ### The addon
 
-- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (998 lines) is a Node-API addon in C, with
+- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (1059 lines) is a Node-API addon in C, with
   its Arrow import in [node/arrow_import.c](../../node/arrow_import.c).
   - It defines `NAPI_VERSION 8` and uses `NAPI_MODULE_INIT`, so it is context-aware. Its function
     table is process-wide, and a worker thread shares it (the comment at the table). `:thread_test`
     loads it in worker threads.
-  - It exports twelve functions: `load`, `abiVersion`, `newSession`, `freeSession`,
-    `registerParquet`, `parquetSchema`, `planRender`, `sessionStats`, and the Arrow import's
+  - It exports thirteen functions: `load`, `abiVersion`, `newSession`, `freeSession`,
+    `registerParquet`, `parquetSchema`, `planRender`, `sql`, `sessionStats`, and the Arrow import's
     `importArrowStream`, `arrowSchema`, `arrowNextBatch` and `arrowClose` (below).
 - **How it binds libkomira.** `load(path)` opens the library with `dlopen(RTLD_NOW | RTLD_LOCAL)`
   and requires `komira_abi_version()` major 1. It then resolves seven symbols by name, and a
   missing one is named in a `KOMIRA_MISSING_SYMBOL` error. It also resolves
-  `komira_ctx_new_with_options` (1.4), `komira_last_error_code` and `komira_last_error_step`
+  `komira_sql_stream` (1.3), `komira_ctx_new_with_options` (1.4), `komira_last_error_code` and `komira_last_error_step`
   (1.7): each is required when the library's minor includes it and may be missing from an older
-  library, where options are refused naming both versions and a refusal has no code or step.
+  library, where `sql` and options are refused naming both versions and a refusal has no code or step.
   - The library is never `dlclose`d, because the Mojo runtime cannot be unloaded.
   - There is one library per process: loading the same path again does nothing, and loading
     another path is refused.
@@ -85,27 +86,33 @@ Fixed before this design, and not reopened here:
   table gives the code. Misuse of the addon
   throws an error with a `code` and no `status`: `KOMIRA_ARG`, `KOMIRA_NOT_LOADED`,
   `KOMIRA_SESSION_FREED`, `KOMIRA_LOAD_FAILED`, `KOMIRA_ABI_MISMATCH`, `KOMIRA_MISSING_SYMBOL`,
-  `KOMIRA_LOADED`, and from `newSession` `KOMIRA_ABI_TOO_OLD` and `KOMIRA_CTX_REFUSED`.
+  `KOMIRA_LOADED`, and from `newSession` `KOMIRA_ABI_TOO_OLD` and `KOMIRA_CTX_REFUSED`, and from `sql`
+  `KOMIRA_ABI_TOO_OLD`.
+- **`sql`.** `sql(session, text)` runs `komira_sql_stream` on the session thread into a zeroed
+  stream and drains it there (step 1 of [Arrow: from the C stream to
+  JavaScript](#arrow-from-the-c-stream-to-javascript)). Its Promise resolves with the drained result
+  the Arrow import's calls read, which needs no context, so it reads after `freeSession`.
 - **Calls it does not bind.** `komira_csv_binding` and `komira_json_binding` have no function in
-  the addon. Nothing in it runs a query.
+  the addon, nor do `komira_sql_stream_run`'s run handle and `komira_plan_stream`.
 - **EXISTS** The Arrow import of [Arrow: from the C stream to
-  JavaScript](#arrow-from-the-c-stream-to-javascript), steps 1 to 3, over a stream handed to
+  JavaScript](#arrow-from-the-c-stream-to-javascript), steps 1 to 3, over the stream
+  `komira_sql_stream` fills (drained on the session thread) and over a stream handed to
   `importArrowStream` as a capsule (an N-API external tagged as an Arrow C stream,
-  [node/arrow_c.h](../../node/arrow_c.h)) rather than one `komira_sql_stream` fills. It drains on
-  the JavaScript thread. The private module is
-  [node/src/arrow_import.mts](../../node/src/arrow_import.mts) (`readArrowStream`), with
+  [node/arrow_c.h](../../node/arrow_c.h)), which it drains on the JavaScript thread. The private
+  module is [node/src/arrow_import.ts](../../node/src/arrow_import.ts) (`tableOf`, `openBatches`,
+  and `readArrowStream` for the tests), with
   `KomiraError` and `UnsupportedOperation` in [node/src/errors.ts](../../node/src/errors.ts), the package's one errors module.
   [node/package.json](../../node/package.json) is private and declares the `apache-arrow` peer
   dependency at `^21.2.0` (part 3 completes it).
 
 ### Tests and CI
 
-- **EXISTS** [node/BUCK](../../node/BUCK) has four `node_binding_test` targets.
+- **EXISTS** [node/BUCK](../../node/BUCK) has five `node_binding_test` targets.
   - `:load_test` runs [load.test.mjs](../../node/load.test.mjs) and
     [capacity.test.mjs](../../node/capacity.test.mjs). They cover the load refusals, using
     stand-ins built from [tests/fake_libkomira.c](../../node/tests/fake_libkomira.c): ABI 2.0,
-    ABI 0.999, a missing `komira_plan_render`, and a library that records the capacity it was
-    given.
+    ABI 0.999, a missing `komira_plan_render`, ABI 1.3 without `komira_sql_stream`, ABI 1.7
+    without `komira_last_error_code`, and a library that records the capacity it was given.
   - `:session_test` runs [session.test.mjs](../../node/session.test.mjs). It covers errors with
     their last error, the frozen schema bytes of `two_columns.parquet`, plan text, wrong-kind
     arguments, a foreign external, double free, and finalizers counted with `gc()` with no clock.
@@ -118,14 +125,21 @@ Fixed before this design, and not reopened here:
     [arrow_import.test.mts](../../node/arrow_import.test.mts) over streams of a stand-in producer
     ([tests/arrow_stand_in.c](../../node/tests/arrow_stand_in.c)) that counts each release: the
     round trip of every type of the exporter's set, with nulls, offsets and a dictionary, an empty
-    stream, failing callbacks, a misaligned buffer, malformed arrays and unmapped formats.
-- **EXISTS** The four tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
+    stream, failing callbacks, a misaligned buffer, malformed arrays and unmapped formats. It
+    measures `node/src/arrow_import.ts`: at least 99% of its lines and branches covered.
+  - `:package_test` runs the package's tests, `sql` and `Result` among them, over the real
+    library (a Parquet file of three rows the engine writes, a syntax error and an unknown table
+    with their codes and steps) and over a stand-in of ABI 1.9
+    ([tests/fake_sql.c](../../node/tests/fake_sql.c)) whose `komira_sql_stream` answers fixed
+    queries.
+- **EXISTS** The tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
   - `node_binding_test` runs `node --test` as a build action, under `env -i`, with no network.
   - It passes only if TAP reports tests, all passed, and none skipped
     ([tools/build/node/README.md](../../tools/build/node/README.md)).
-- **EXISTS** The TypeScript sources of `node/src/` are measured by their own test target:
-  `//node:package_test` names them as `covered_srcs`, and `node_binding_test` fails unless every one
-  is loaded and their lines and branches are each at least 99% covered (rule T1). The addon's C is
+- **EXISTS** The TypeScript sources of `node/src/` are measured by their own test targets:
+  `//node:package_test` names them, the Arrow import aside, as `covered_srcs`, and `:arrow_test`
+  names the Arrow import; `node_binding_test` fails unless every one is loaded and their lines and
+  branches are each at least 99% covered (rule T1). The addon's C is
   not measured. `.github/workflows/coverage.yml` and the covcheck README never name `node/`
   *(inferred from a search of both)*; covcheck does read lcov tracefiles
   ([tools/build/coverage/README.md](../../tools/build/coverage/README.md)).
@@ -158,11 +172,12 @@ Fixed before this design, and not reopened here:
 
 ### Release state
 
-- **Nothing is released.** **EXISTS** The package of part 3 (below, "Where the work lands"):
+- **Nothing is released.** **EXISTS** The package of parts 3 and 4 (below, "Where the work lands"):
   `node/package.json` (`"private": true`, named by D1's option A as a placeholder), the TypeScript
-  sources in `node/src/`, and the `.js` and `.d.ts` files `//node:dist` compiles from them. The
-  private Arrow import of part 2 (`node/src/arrow_import.mts`) is beside them, outside `dist/` until
-  `Result` uses it. No platform package is built and nothing is published. No workflow mentions npm
+  sources in `node/src/`, `Session.sql` and `Result` among them, and the `.js` and `.d.ts` files
+  `//node:dist` compiles from them. The private Arrow import of part 2
+  (`node/src/arrow_import.ts`) is one of those sources, read by `Result`. No platform package is
+  built and nothing is published. No workflow mentions npm
   publishing. The only use of npm in a workflow is the pin check in `kpin-update.yml`.
 
 ### The library under it
@@ -524,20 +539,25 @@ top-level `pypi.yml` and the macOS arm64 wheel by `pypi-macos-arm64.yml`, each t
 
 ### The build
 
-- **A package rule.** `npm_tarball`, in `tools/build/package/`, is a Starlark rule with a Zig tool,
-  the sibling of `wheel_file` (rule B7; no shell and no Python, rules B4 and B5).
+- **A package rule.** **EXISTS**: `npm_tarball`, in `tools/build/package/` (`npm.bzl`, the tool
+  `npm/`; [its README section](../../tools/build/package/README.md#the-npm-packages)), is a Starlark
+  rule with a Zig tool, the sibling of `wheel_file` (rule B7; no shell and no Python, rules B4 and
+  B5).
   - It writes the tarball `npm pack` would write: gzip over a tar of `package/...`, members sorted,
     one fixed mtime, modes 0644 and 0755. A `[twin]` action writes it again from inputs staged
     elsewhere, and the check refuses it unless the bytes are equal.
-  - It stamps `version` from `komira.package_stamp` and writes `package.json` from the rule's
-    attributes. **EXISTS** since part 3: `node/package.json`, the manifest the package's tests read
-    (`"private": true`, version `0.0.0`). The rule's change decides whether the rule stamps that file
-    or writes its own, and in the second case adds the check that the two agree.
+  - It stamps `version` from `komira.package_stamp`. **EXISTS** since part 3: `node/package.json`,
+    the manifest the package's tests read (`"private": true`, version `0.0.0`). The rule stamps that
+    file rather than writing its own, so the two cannot disagree: the version and every optional
+    dependency become the stamp's version, a stamped package drops `private`, and every other key is
+    kept. A platform package's manifest is `node/platforms/<npm platform>/package.json`, stamped the
+    same way. Every member must be one npm packs for the manifest's `files`, so the manifest names
+    `NOTICE`.
   - Its native input is the self-contained directory of the libkomira target, the one the wheel
     copies. The rule takes the directory as one input and copies it
     whole; it never assembles the library, owners and runtime from separate targets.
   - It reads the tarball back. The ELF policy of `wheel_file` for that directory
-    (`_NATIVE_NEEDS` in [python/BUCK](../../python/BUCK)) applies to the platform packages: the glibc floor; every run path at
+    (`DIST_NATIVE_NEEDS` in [packaged.bzl](../../tools/build/package/libkomira/packaged.bzl), which python/BUCK and node/BUCK load) applies to the platform packages: the glibc floor; every run path at
     `$ORIGIN` or under it; every NEEDED a member or a system library, so the three runtime
     libraries are members; no other file of Modular's distribution; a size cap.
   - The rule refuses a package whose `repository.url` is not `https://github.com/komira-ai/komira`,
@@ -548,7 +568,8 @@ top-level `pypi.yml` and the macOS arm64 wheel by `pypi-macos-arm64.yml`, each t
   - Its sub-targets are `[check]`, `[release]` and `[release_check]`, as for the wheel. The
     `[release]` target refuses an unstamped package.
 - **The targets.** `//node:package` (the main package) and
-  `//node:package_<platform>` for each platform row of `table.bzl`.
+  `//node:package_<platform>` for each platform row of `table.bzl`. **EXISTS**: `//node:package` and
+  `//node:package_linux_x64`, unstamped in a pull request.
 - **A release set of their own.** `//release:npm_packages` is one directory holding the tarballs
   and `npm_set.json`, which records each package's name, version, file, SHA-256 and the sha512
   `integrity` npm reports.
@@ -650,8 +671,8 @@ linux-x86_64.
   - A staged directory with one of the three runtime libraries removed rejects with
     `LibraryLoadError` and no other class, with a message that names the missing library's file.
     The loader's text varies by platform, so this test checks the class and the file name. The
-    other refusals assert the full message by equality (rule T13). This test needs the directory,
-    so it lands with the package rule (item 6 of the plan) or after it.
+    other refusals assert the full message by equality (rule T13). **EXISTS** with the package rule:
+    `node/tests/missing_runtime.test.ts`, on the directory without `libMSupportGlobals.so`.
   - `SELECT 1 AS n` and a `GROUP BY` over the checked-in Parquet fixture answer as DuckDB does.
   - An unknown table, a syntax error and an unsupported construct reject from `sql` with their
     class, `step` and `code`.
@@ -698,11 +719,12 @@ the one build action that runs npm.
 
 The SQL cases are data already: `src/tests/conformance/komira_sql_conformance/cases/<corpus>/`
 holds `tables.sql`, `<case>.sql` and the committed DuckDB answer `<case>.tsv`
-([README](../../src/tests/conformance/komira_sql_conformance/README.md)). Nothing runs komira on
-them yet. A Python end-to-end runner over them is planned but not built. The Mojo package
+([README](../../src/tests/conformance/komira_sql_conformance/README.md)). The Node runner,
+`//node:sql_conformance_test` ([node/tests/conformance](../../node/tests/conformance/README.md)), runs
+every case through `Session.sql`. A Python end-to-end runner over them is planned but not built. The Mojo package
 `src/tests/e2e/sql_e2e` holds komira's SQL to DuckDB through `so.sql_result` over a corpus of its
-own, on `komira_test_oracle`'s datasets and its own regression tables; no matrix cell names one
-of its targets yet. The Node runner reads **the same files through Buck2 targets**,
+own, on `komira_test_oracle`'s datasets and its own regression tables; its `test_sql_<capability>`
+targets fill the `sql` cells of the matrix. The Node runner reads **the same files through Buck2 targets**,
 and copies none of them.
 - **Tables.** Both runners register the same Parquet export of each corpus's `tables.sql`, built
   once by DuckDB as a target beside the corpus. Neither runner executes `CREATE TABLE`.
@@ -710,11 +732,15 @@ and copies none of them.
   empty cell, `""`, shortest round-trip floats, `nan`/`inf`, decimals at their scale), sort when
   the case says `order: rows`, and compare text with the header.
 - **Refusals.** The cases komira refuses by name sit in one list both runners read, with the
-  refusal each expects, so the two languages cannot disagree on what is supported.
+  refusal each expects, so the two languages cannot disagree on what is supported. The cases komira
+  answers otherwise than DuckDB sit in a second list beside it, `differences.tsv`, each with how its
+  answer differs, so every case is held to exactly one outcome and a fix shows as a removed line.
 - **Negatives.** A fixture corpus with one wrong committed answer must fail the Node runner, the
   negative case of rule T15.
-- **The matrix.** The `sql` cells of `tests/surface_capability_matrix.bzl` are to be filled by the
-  Python runner's targets. The Node runner checks the binding, not a new surface: SQL is one surface,
+- **The matrix.** The `sql` cells of `tests/surface_capability_matrix.bzl` are filled by the
+  per-capability tests of `src/tests/e2e/sql_e2e`, which run each case through `so.sql_result`, the
+  call libkomira's `komira_sql_stream` wraps. The Python runner's targets can fill a cell once the
+  matrix lint counts a Python test as a test. The Node runner checks the binding, not a new surface: SQL is one surface,
   however it is reached. The `ts_polars` and `excel` cells are filled by those SDKs.
 
 ## 6. The Excel SDK
@@ -845,8 +871,9 @@ that runs no query would be a release with nothing in it.
 
 ## What are the limits and open questions?
 
-- The npm platform packages wait for `npm_tarball` and the npm release set. The self-contained
-  directory they copy, and the licence files and notice the wheel carries with it, are on `main`.
+- The npm packages wait for the npm release set. `npm_tarball` and the linux-x64 platform package
+  exist; the self-contained directory they copy, and the licence files and notice the wheel carries
+  with it, are on `main`.
 - Tests in `.ts` run with type stripping on the pinned 24, and on a Node 22 pin only from 22.18,
   so the Node 22 pin is 22.18 or later.
 - linux-arm64 waits for its build platform. macos-arm64 waits for the macOS build of the addon;
@@ -884,5 +911,5 @@ The Excel SDK and the `ts_polars` builder follow, on a shared plan encoder.
 
 Today: [node/](../../node/README.md), [tools/build/node](../../tools/build/node/README.md),
 [third_party/node](../../third_party/node/README.md), [src/so](../../src/so/README.md), and `node/src/`
-for the TypeScript. Later: `tools/build/package/` for `npm_tarball`, `release/` for the npm set, and
-`.github/workflows/npm.yml`.
+for the TypeScript, and `tools/build/package/` for `npm_tarball`. Later: `release/` for the npm set,
+and `.github/workflows/npm.yml`.

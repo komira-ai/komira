@@ -1,5 +1,7 @@
 # The `.str` accessor
 
+> **Newer than 0.1.1623.** komira 0.1.1623 and older releases do not have what this page describes. [The changelog](../../CHANGELOG.md) lists what each release added.
+
 `s.str`, on a string column: `lower`, `upper`, `len`, `startswith`,
 `endswith`, `contains` (a regular expression unless `regex=False`, and
 `case=False`), `match`, `fullmatch`, `replace` (every occurrence, literal

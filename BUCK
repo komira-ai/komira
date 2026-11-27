@@ -71,7 +71,8 @@ coverage_ci_cases(
 # The cases of the farm-connect action (.github/actions/farm-connect/action_test.zig
 # says what each catches): its input checks and the buckconfig it writes, run
 # from action.yml's own scripts with the busybox sh in a HOME of each case's
-# own; and every workflow step that uses the action, which must pass `tls`
+# own; its wait for the farm, run on a clock of each case's own
+# (probe_test.zig); and every workflow step that uses the action, which must pass `tls`
 # from the FARM_TLS variable. A build action, so a failing case fails
 # `./buck2 build //...`.
 WORKFLOWS = glob([".github/workflows/*.yml"])
@@ -80,6 +81,8 @@ zig_test(
     name = "farm_connect_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/actions/farm-connect/action_test.zig",
+    # The cases of the step that waits for the farm, imported by action_test.zig.
+    imports = [".github/actions/farm-connect/probe_test.zig"],
     data = dict(
         {"action.yml": ".github/actions/farm-connect/action.yml"},
         **{w.removeprefix(".github/"): w for w in WORKFLOWS}
@@ -206,12 +209,16 @@ zig_test(
 # builds hold up nothing, no workflow that runs on a pull request names a macOS platform outside
 # pr.yml's macOS part (which holds its contract: the macOS keys in a file only its build step names,
 # that step bounded and through the buck2-farm action), the check set holds no macOS build or macOS
-# wheel target, and the set's definition is one list. A build action.
+# wheel target, and the set's definition is one list; release-macos-result's script, run for each
+# result of the build job, passes only a build that succeeded. A build action.
 zig_test(
     name = "release_macos_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/workflows/release_macos_test.zig",
-    imports = [".github/workflows/release_macos_harness_test.zig"],
+    imports = [
+        ".github/workflows/release_macos_harness_test.zig",
+        ".github/workflows/release_macos_result_test.zig",
+    ],
     data = dict(
         {
             "packages.bzl": "//release/readme_e2e:packages.bzl",
@@ -228,7 +235,8 @@ zig_test(
 # The cases of the buck2-farm action (.github/actions/buck2-farm/action_test.zig
 # says what each catches): action.yml's shape, and its two run lines run
 # end to end over recorded buck2 output with the real //tools/build/ci:assert_remote,
-# a cut connection to the farm run once more and every other failure not.
+# a cut connection to the farm run again once a farm on a loopback port of the case's
+# own answers (at most three runs) and every other failure not.
 zig_test(
     name = "buck2_farm_cases",
     exec_compatible_with = LINUX_X86_64,
@@ -447,7 +455,7 @@ _TESTS_LINTS = [
 [surface_capability_matrix(
     name = "surface_capability_matrix",
     capabilities = CAPABILITIES,
-    floor = 0,
+    floor = 31,
     grounding = {
         "src/arrow/write_target.mojo": ["WFMT_"],
         "src/plan_expr/expr.mojo": ["EXPR_"],
