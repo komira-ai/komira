@@ -1,13 +1,13 @@
 # udf_host
 
-The engine's host of UDF runtimes ([docs/design/udf_runtime_interface.md](../../docs/design/udf_runtime_interface.md)
+The engine's host of UDF runtimes (`docs/design/udf_runtime_interface.md`
 section 4). A UDF runtime is a shared library that implements the C ABI of
-[`src/udf_abi/komira_udf_runtime.h`](../udf_abi/komira_udf_runtime.h); komira's
+`src/udf_abi/komira_udf_runtime.h`; komira's
 Python runtime is `libkomira_udf_python.so` (`src/udf_python`). This package
 opens one, admits the UDFs of a plan on it, and makes the calls of the
 column-kind UDFs (`SCALAR` and `MAP_BATCHES_COLUMN`) that `OP_UDF_APPLY`
 (`pipeline_exec`) runs. `so` reaches it through `komira_udf_runtime_set` and
-the plan door ([src/so](../so/README.md)).
+the plan door (`src/so`).
 
 - `_abi.mojo`: the one file that holds pointers (`FFI-BOUNDARY`). It mirrors
   the header's structs field for field, opens the library with `dlopen`

@@ -425,7 +425,7 @@ the plan needs no table registered on the session.
   the session's UDF runtime, see `komira_udf_runtime_set`:
   `OPTIMIZED_ENV_RUNTIME_MISSING` when the session has none,
   `OPTIMIZED_ENV_CODE_MISSING` for a code object the code root lacks, and the
-  other admission refusals of [`udf_host`](../udf_host/README.md); a write's destination refused before
+  other admission refusals of `udf_host`; a write's destination refused before
   the plan runs: a path with `://`, `STORAGE_URL_REFUSED`; CSV or JSON with
   `lz4`, `COPY_COMPRESSION_UNSUPPORTED`), then `optimize`, `lower` or
   `execute` (a destination directory that does not exist,
@@ -723,7 +723,7 @@ until it ends.
 UDF on the runtime at step `bind`, before any row is read, and calls them in
 workers the runtime forks, a batch at a time. A UDF failure in a batch is a -3
 at step `execute` whose reason starts with its code (`UDF_RAISED`, ...; the
-table is in [`udf_host`](../udf_host/README.md)).
+table is in `udf_host`).
 
 Refusals are -1 for a NULL `ctx`, -2 for a NULL `library` or `code_root`, or
 NULL `options` with a non-zero `options_len` (the last error
