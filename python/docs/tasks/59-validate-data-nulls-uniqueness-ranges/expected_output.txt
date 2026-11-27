@@ -1,0 +1,8 @@
+FAIL name is null: 1
+FAIL age is null: 1
+FAIL age outside 0..120: 2
+FAIL id repeated: 1
+{'id': 2, 'name': 'Bo', 'age': None}
+{'id': 3, 'name': 'Di', 'age': 150}
+{'id': 5, 'name': None, 'age': 41}
+{'id': 6, 'name': 'Ed', 'age': -2}
