@@ -11,6 +11,7 @@
 use	python/smoke/src/index.zig	Thread.sleep	1	production: the pause between verify attempts while the index catches up with an upload (tests pass a delay of 0)
 use	python/smoke/src/install.zig	Thread.sleep	1	production: the pause between attempts of the komira install while the index catches up with an upload (tests pass a delay of 0)
 use	release/ci/main_red/gh.zig	Thread.sleep	1	production: the backoff between a gh command's attempts
+use	release/ci/npm_smoke/cli.zig	Thread.sleep	1	production: the pause between install attempts of npm.yml's smoke while the registry catches up with a publish (tests pass a pause that only counts)
 use	tools/build/bisect/main.zig	milliTimestamp	1	production: the bisect tool's default rerun nonce
 use	tools/build/bisect/probe.zig	milliTimestamp	6	production: the bisect tool's probe has a time limit of its own, and measures its seconds
 use	tools/build/bisect/probe.zig	Thread.sleep	1	production: the poll of the probe's time limit

@@ -12,7 +12,7 @@ Nothing is compiled on the runner.
 
 | event | runs |
 |---|---|
-| push to `main` | [`release.yml`](#releaseyml-the-release): builds the release set and publishes the mopm packages to the prod registry, on every push (no schedule, no switch); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert). And, when the push changes more than documentation, the TestPyPI half of [`pypi.yml`](#pypiyml-publishing-the-python-package): builds the `komira` wheel on the farm, installs the wheel file on a fresh runner per supported Python, uploads it to TestPyPI, installs it from there per supported Python and runs the quickstart, and records the version when all of that passed. And, on the same pushes, [the macOS arm64 wheel in `pypi.yml`](#the-macos-arm64-wheel-in-pypiyml): the same for the macOS arm64 wheel of the same version, in jobs of the same run |
+| push to `main` | [`release.yml`](#releaseyml-the-release): builds the release set and publishes the mopm packages to the prod registry, on every push (no schedule, no switch); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert). And, when the push changes more than documentation, the TestPyPI half of [`pypi.yml`](#pypiyml-publishing-the-python-package): builds the `komira` wheel on the farm, installs the wheel file on a fresh runner per supported Python, uploads it to TestPyPI, installs it from there per supported Python and runs the quickstart, and records the version when all of that passed. And, on the same pushes, [the macOS arm64 wheel in `pypi.yml`](#the-macos-arm64-wheel-in-pypiyml): the same for the macOS arm64 wheel of the same version, in jobs of the same run. And, on the same pushes, [`npm.yml`](#npmyml-publishing-the-npm-packages): builds the npm packages on the farm and runs their install test on each pinned Node.js; it publishes them only once `release/npm_publish.txt` says `publish: on`, which it does not yet |
 | pull request from a branch of this repository | `pr / check`, whose [macOS part](#the-macos-part-of-the-check) builds the libraries of the macOS set the change reaches on the farm's Macs; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | merge group of the [merge queue](#the-merge-queue) (`merge_group`) | `pr / check` on the group's head commit, which is what `main` becomes; `coverage` does not run |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
@@ -160,7 +160,7 @@ buckconfig written whole. It also reads every workflow and holds each step
 that uses the action to `tls: ${{ vars.FARM_TLS || 'false' }}` under its
 `with:`: a caller that dropped `tls` would connect in plain text whatever
 `FARM_TLS` says.
-It holds `farm-qos` to `batch` on every step of `release.yml`, `release-macos.yml` and `pypi.yml`
+It holds `farm-qos` to `batch` on every step of `release.yml`, `release-macos.yml`, `pypi.yml` and `npm.yml`
 and to absent on every step of any other workflow.
 
 A job that calls it needs `permissions: id-token: write` (to ask GitHub for the
@@ -195,7 +195,7 @@ the network.
 **Priority.** A farm that queues by priority class runs a `ci` action before a
 `batch` one. The action takes an optional `farm-qos` (`ci` or `batch`) and, when
 it is set, writes the request header `x-kbf-qos` as buck2's `http_headers`.
-Every job of `release.yml` passes `batch`, and so do the job `build` of `pypi.yml`, the job `build-macos-arm64` of `pypi.yml` and the job `release-macos` of `release-macos.yml`, so the release work that a push to
+Every job of `release.yml` passes `batch`, and so do the job `build` of `pypi.yml`, the job `build-macos-arm64` of `pypi.yml`, the jobs `build` and `test` of `npm.yml` and the job `release-macos` of `release-macos.yml`, so the release work that a push to
 `main` starts waits behind the pull-request checks when the farm is full; no
 other workflow passes it, so they stay at `ci`. The class is not a platform
 property: it is not part of an action's digest, so a release build and a pull
@@ -666,7 +666,8 @@ or a change outside `src` that breaks a library no pull request touched.
 conda packages that `release/artifacts.textproto` declares, as one release set,
 with Buck2 targets on the farm. It is written by hand. It holds no job of the Python wheel: `pypi.yml`
 builds and installs that on every push that changes code
-([below](#pypiyml-publishing-the-python-package)).
+([below](#pypiyml-publishing-the-python-package)). Nor of the npm packages: `npm.yml` builds and tests
+them ([below](#npmyml-publishing-the-npm-packages)).
 **The release set itself publishes to no channel**: the job `release` builds the
 set, so a push to `main` still proves the release builds, keeps what it built as
 a workflow artifact, and holds no publishing credential and no channel. The
@@ -1618,6 +1619,88 @@ the newest version that has their file. Once macOS builds pass routinely, a hold
 and removes the lock-file failure, and is worth deciding then. The promotion rule is unchanged by the move
 of the macOS wheel's jobs into `pypi.yml`.
 
+## npm.yml: publishing the npm packages
+
+[`.github/workflows/npm.yml`](../.github/workflows/npm.yml) builds, tests and publishes the npm packages of
+[`node/`](../node/README.md) ([the design, section 4](design/typescript_package.md#4-release)): the main
+package `@komira-ai/komira` and its platform package `@komira-ai/komira-linux-x64-gnu`. It is written by
+hand. **It publishes nothing yet**: the publish waits for the owner's go (the design's D4), and the go is a
+change of one committed file ([the gate](#the-publish-gate)). Until then every run builds the packages and
+runs their install test, and the publish and the smoke are skipped.
+
+It runs on a push to `main` that changes more than documentation (`paths-ignore`: `docs/**`, `**.md`, the
+list of `release.yml` and `pypi.yml`), and on nothing else: no pull request, no schedule, no manual run. The
+version is `0.1.<N>`, the wheel's (`<N>` the build number of `release_json stamp`), so the npm packages and
+the wheel of one commit carry one version. Every run is in the concurrency group `npm-main` with
+`cancel-in-progress: false`: a running run is never cancelled, and of the waiting runs only the newest is
+kept, so two runs never publish at once.
+
+| job | environment | permissions | what it does |
+|---|---|---|---|
+| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp, builds `//release/ci:npm_smoke` and the pinned `//third_party/node:node` and `//third_party/node:npm` (npm 11.20.0), reads the gate (`npm_smoke gate`, its output `publish`), builds `//release:npm_packages` with the three stamp flags and holds the directory to its record (`npm_smoke verify`, its output `version`). Keeps `npm-set-<sha>` (the tarballs and `npm_set.json`) and `npm-tools-<sha>` (`npm_smoke`, Node.js, npm) for 14 days. No publish step. |
+| `test` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm: downloads the two artifacts, builds `//release:npm_packages[npm_set.json]` again with the build job's stamp, and runs `npm_smoke verify --built`: the kept directory is its record, and the record is the one this stamp builds, so the tarballs the install test installs (built from the same stamp, reproducible) are the kept ones. Then builds `//node:install_test` with the same stamp: npm installs the tarballs into an empty project and the package's tests import it by its name, on Node.js 22, 24 and 26. No npm identity. |
+| `publish` | `npm` | `contents: read`, `id-token: write` (trusted publishing) | only when `build`'s output `publish` is `true`, after `test`; no checkout, no farm, no build, no token. Downloads the two artifacts and runs `npm_smoke publish`: holds the directory to `npm_set.json` again, then, for each platform package and last the main package (which names them in its `optionalDependencies`), asks the registry for that version and runs `npm publish <file> --access public` when it is absent. |
+| `smoke` | none | none | only when `publish` ran and succeeded; no checkout, no identity. Runs `npm_smoke smoke`: installs `@komira-ai/komira` at exactly the set's version from the registry into an empty project (`npm install --ignore-scripts --engine-strict`, tried up to five times, 30 seconds apart, while the registry catches up), holds the `integrity` npm recorded in `package-lock.json` for each package to `npm_set.json`, and, with no step between, runs `SELECT 1 AS n` through the installed package, which must print the set's version, `n` and `1`. The one job whose test reaches the network, and it reaches only the npm registry. |
+
+**The set and its record.** `//release:npm_packages` ([release/npm_packages.bzl](../release/npm_packages.bzl))
+is one directory: each package's tarball, under the name `npm pack` gives it, and `npm_set.json`, which
+`npm_smoke set` writes from the tarballs as a build action: the main package's name, the version, and each
+package's name, version, file, SHA-256 and the sha512 `integrity` npm reports, the platform packages first
+and the main package last, the order they are published in. Stamped, it takes each package's `[release]`
+tarball and refuses an unstamped one; a pull request builds it unstamped (`0.0.0`), which checks all but
+the stamp. It is not a member of the conda `//release:release_set` and not an entry of
+`release/artifacts.textproto`. [`release/npm_names.txt`](../release/npm_names.txt) lists the set's names, and
+`//release:npm_names_cases` holds the list equal to the set.
+
+**The tool.** [`//release/ci:npm_smoke`](../release/ci/npm_smoke/cli.zig) is one Zig program for every
+step (`set`, `gate`, `verify`, `publish`, `smoke`), built behind its cases
+(`//release/ci/tests:test_npm_smoke`, with npm and node in memory), so each step of the workflow is one
+command. It runs the pinned npm as `<node> <npm>/bin/npm-cli.js` with the public registry, the config files
+of its own work directory, written empty, and a cache of its own, so no npmrc of a runner is read. Trusted
+publishing needs npm 11.5.1 or later under Node.js 22.14 or later; the pins are npm 11.20.0 and Node.js
+24.21.0.
+
+### The publish gate
+
+[`release/npm_publish.txt`](../release/npm_publish.txt) holds one line, `publish: off` or `publish: on`.
+`build` reads it (`npm_smoke gate`, the step `gate`) and hands it on as its output `publish`; `publish` and
+`smoke` run only when it is `true`. The file says `publish: off`. The owner's go is a pull request that
+changes it to `publish: on`, after the owner steps below; it is under `release/`, so it needs the release
+approver's review. `//release:npm_publish_gate_cases` refuses any other text, so a typo or a merge cannot
+leave a gate the build job would fail on, or read as on. To stop publishing again, the same change back.
+
+### Trusted publishing
+
+npm's trusted publishing binds a package's publisher to the workflow file name and an environment, so
+publishing has a file of its own, as PyPI's has, and only the job `publish` runs in the environment `npm`.
+npm exchanges that job's OIDC token for the publish and generates the provenance itself: no `NPM_TOKEN`
+exists, and no secret is read. `build` and `test` hold `id-token: write` for the farm connection alone, in
+the environment `build`, which npm does not trust. `smoke` holds no permission. `//:npm_workflow_cases`
+([npm_workflow_test.zig](../.github/workflows/npm_workflow_test.zig) says what it holds) pins the trigger,
+the top-level `permissions: {}`, the four jobs and each one's condition, runner, `needs`, environment and
+permissions, the gate, that only `publish` runs the publish command and that neither `publish` nor `smoke`
+has a checkout, the farm or buck2, and that no line names a token or a secret; each defect written into the
+real file is refused.
+
+### A failed run
+
+npm creates a (name, version) once. `npm_smoke publish` asks the registry for each version first: one it
+holds with the set's integrity is not published again (a re-run of a run whose publish stopped part way),
+and one it holds with other bytes stops the job before anything else is published. A run that fails before
+the main package is published leaves only platform packages that nothing names, and the next code commit
+publishes `0.1.<N+1>`. A failed smoke turns the run red ([main_red.yml](#main_redyml-the-main-red-alert)
+watches `npm`); whether to `npm deprecate` that version is the owner's call. No one publishes by hand.
+
+### Owner steps before the first publish
+
+- Confirm that the `komira-ai` scope on npm is the company's.
+- Create each package of `release/npm_names.txt` on npm with its trusted publisher: the repository
+  `komira-ai/komira`, the workflow `npm.yml`, the environment `npm`. Whether npm lets a trusted publisher be
+  configured before the package exists, and so how the first version of each is created, is the owner's to
+  settle.
+- Create the environment `npm` on GitHub, deployable from `main` only.
+- Then change `release/npm_publish.txt` to `publish: on`.
+
 ## pr.yml: the pull request's check
 
 [`.github/workflows/pr.yml`](../.github/workflows/pr.yml) is workflow `pr` with
@@ -1790,7 +1873,7 @@ pull request, within an hour of the alert, before anything else merges on
 top of it.
 
 [`.github/workflows/main_red.yml`](../.github/workflows/main_red.yml) is the
-alert. It runs when a run of `release.yml` or `pypi.yml` on `main` completes (`workflow_run`),
+alert. It runs when a run of `release.yml`, `pypi.yml` or `npm.yml` on `main` completes (`workflow_run`),
 builds the Zig program [`//release/ci:main_red`](../release/ci/main_red.zig)
 on the farm (`./buck2 build`, then runs the binary that build produced) with
 `issues: write`, `actions: read`, `contents: read` and the `id-token: write`
@@ -1798,8 +1881,10 @@ the farm connection exchanges, checking out `main` and running no code of any
 pull request. The workflows it reads are `--workflow <name>` flags of that
 step (and the trigger's `workflows:` list): the program names none itself, so
 a replacement push workflow is added to both in its own pull request. It names
-two: `release`, and `pypi`, whose push run builds the Python wheels (Linux and macOS) and installs them from their files
-and from TestPyPI (its scheduled and manual runs are not push runs and are never read). The macOS
+three: `release`; `pypi`, whose push run builds the Python wheels (Linux and macOS) and installs them from their files
+and from TestPyPI (its scheduled and manual runs are not push runs and are never read); and `npm`, whose
+push run builds the npm packages and runs their install test (and, once its gate is on, publishes and smokes
+them). The macOS
 workflow `release-macos` is not named: a Mac build is reported, not blocking
 ([The macOS build of the release](#the-macos-build-of-the-release)), so its red run opens no issue. The macOS
 wheel's jobs are in `pypi.yml`, so a red macOS chain makes the `pypi` run red and is reported; the

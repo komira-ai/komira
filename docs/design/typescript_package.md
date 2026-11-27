@@ -178,9 +178,10 @@ Fixed before this design, and not reopened here:
   `node/package.json` (`"private": true`, named by D1's option A as a placeholder), the TypeScript
   sources in `node/src/`, `Session.sql` and `Result` among them, and the `.js` and `.d.ts` files
   `//node:dist` compiles from them. The private Arrow import of part 2
-  (`node/src/arrow_import.ts`) is one of those sources, read by `Result`. No platform package is
-  built and nothing is published. No workflow mentions npm
-  publishing. The only use of npm in a workflow is the pin check in `kpin-update.yml`.
+  (`node/src/arrow_import.ts`) is one of those sources, read by `Result`. Nothing is published:
+  `.github/workflows/npm.yml` (§4) builds the release set and runs the install test on every push to
+  `main`, and its publish job stays off until the owner's go (D4), which is the change of
+  `release/npm_publish.txt` to `publish: on`.
 
 ### The library under it
 
@@ -578,6 +579,9 @@ top-level `pypi.yml` and the macOS arm64 wheel by `pypi-macos-arm64.yml`, each t
     hold only `_conda` targets, and `release_json names` checks that.
   - The package names are listed in `release/npm_names.txt`, and a Zig case holds the set equal to
     the list, as `prod_claimed_names.txt` does for mopm.
+  - **EXISTS**: `//release:npm_packages` (`release/npm_packages.bzl`), whose `npm_set.json`
+    `//release/ci:npm_smoke set` writes, the platform packages first and the main package last, and
+    `//release:npm_names_cases`.
 - **The platforms.** linux-x86_64 is built on the farm's Linux workers. macos-arm64 is built by the
   macOS leg (`release-macos.yml`'s farm macOS workers), never in a pull request (rule B9).
   linux-arm64 waits for that platform to be registered.
@@ -587,16 +591,20 @@ top-level `pypi.yml` and the macOS arm64 wheel by `pypi-macos-arm64.yml`, each t
 
 ### The workflow
 
-A top-level `.github/workflows/npm.yml`. Trusted publishing names a workflow file, so publishing
-has a file of its own, as PyPI does. It runs on push to `main` and has `permissions: {}` at the
-top. Its jobs:
+A top-level `.github/workflows/npm.yml` (**EXISTS**, [docs/ci.md](../ci.md#npmyml-publishing-the-npm-packages);
+its publish job is gated off until D4's go, by `release/npm_publish.txt`). Trusted publishing names a
+workflow file, so publishing has a file of its own, as PyPI does. It runs on push to `main` and has
+`permissions: {}` at the top. Its jobs:
 
 1. **build** (environment `build`, farm): `//release:npm_packages`, stamped with the run's `N`.
 2. **test** (environment `build`, no npm identity): the install test of §5, on each pinned Node.
    - The job's only identity is the farm join, the one `prod-test` already uses
      ([docs/ci.md](../ci.md)).
    - It tests the tarballs that the build job uploaded as a workflow artifact, after checking each
-     against `npm_set.json`.
+     against `npm_set.json`. As built, the job holds the downloaded tarballs to `npm_set.json` and
+     that record to the one it builds again from the build job's stamp (`npm_smoke verify --built`);
+     the install test it then builds from the same stamp installs tarballs the farm builds, which are
+     those bytes because the tarballs are reproducible.
 3. **publish** (environment `npm`, `contents: read` and `id-token: write`, no token). Each
    platform tarball first, then the main package, with `npm publish <file> --access public`.
    - Trusted publishing exchanges the job's OIDC token, so no `NPM_TOKEN` exists anywhere.
@@ -607,8 +615,8 @@ top. Its jobs:
      by the pinned Node, and visible only to the install test's target. **EXISTS**:
      `//third_party/node:npm`, npm 11.20.0 (the npm Node 26.13.1 bundles), which
      `//node:install_test` runs.
-4. **smoke** (no identity): one named Zig tool, `//release/ci:npm_smoke`, run as one step (rule
-   B4).
+4. **smoke** (no identity): one named Zig tool, `//release/ci:npm_smoke` (**EXISTS**), run as one
+   step (rule B4).
    - It installs the exact version from the registry into an empty directory, compares each
      package's `integrity` with `npm_set.json`, and runs `SELECT 1`. There is no step between the
      install and the query.
@@ -620,7 +628,8 @@ How it holds the rules:
 - No `pull_request` trigger and no pull-request job (rule B9).
 - It runs automatically from `main`, with no tag (rule B12).
 - A Zig case file like `release_workflow_test.zig` holds the jobs' permissions and environments,
-  with a negative case for each (rule T15).
+  with a negative case for each (rule T15). **EXISTS**: `//:npm_workflow_cases`
+  (`.github/workflows/npm_workflow_test.zig`).
 
 **Failure.** npm creates a (name, version) once, like the mopm registry.
 - A run that fails before the main package is published leaves only platform packages that
@@ -633,7 +642,9 @@ How it holds the rules:
 
 **Owner steps outside the repository**, before the first publish:
 - confirm that the `komira-ai` scope on npm is the company's;
-- create the four packages and their trusted publishers (workflow `npm.yml`, environment `npm`);
+- create each package of `release/npm_names.txt` (today the main package and the linux-x64 one; the
+  darwin-arm64 and linux-arm64 packages join the list when they are built) and its trusted publisher
+  (workflow `npm.yml`, environment `npm`);
 - create the `npm` environment on GitHub, deployable from `main` only.
 
 The npm documentation does not say whether a trusted publisher can be configured before its
@@ -871,6 +882,10 @@ The owner gave the go for PyPI releases from the workflow. npm has no go yet.
 Recommendation: **A**. With the scope held there is no name to protect early, and an npm package
 that runs no query would be a release with nothing in it.
 
+Whichever option is ruled, the go itself is one reviewed change: `release/npm_publish.txt` from
+`publish: off` to `publish: on`. `npm.yml` publishes only while it says on
+([docs/ci.md](../ci.md#the-publish-gate)).
+
 ## What must always hold?
 
 - The packages carry the self-contained native directory (`libkomira`, its native owners and the
@@ -925,5 +940,6 @@ The Excel SDK and the `ts_polars` builder follow, on a shared plan encoder.
 
 Today: [node/](../../node/README.md), [tools/build/node](../../tools/build/node/README.md),
 [third_party/node](../../third_party/node/README.md), [src/so](../../src/so/README.md), and `node/src/`
-for the TypeScript, and `tools/build/package/` for `npm_tarball`. Later: `release/` for the npm set,
-and `.github/workflows/npm.yml`.
+for the TypeScript, `tools/build/package/` for `npm_tarball`, `release/` for the npm set
+(`npm_packages.bzl`, `npm_names.txt`, `npm_publish.txt`) and its tool (`release/ci/npm_smoke`), and
+`.github/workflows/npm.yml`.

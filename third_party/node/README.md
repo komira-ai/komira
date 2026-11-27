@@ -103,6 +103,12 @@ package:
   planted defects, `tests//negative/node`, which must fail and is in the
   `tests` cell that only komira's own checkout has: it sees `:node`, the
   packages and their downloads there.
+- **The npm release's tools.** `.github/workflows/npm.yml` builds `:node` and `:npm` by name, as
+  tools and not into anything (no target depends on them for it), and its `publish` and `smoke` jobs
+  run them on a hosted runner to publish the npm packages and to install them back from the registry
+  ([docs/ci.md](../../docs/ci.md#npmyml-publishing-the-npm-packages)). They are in no package: the
+  npm packages hold the addon, libkomira's directory and the compiled JavaScript, never a Node.js
+  runtime or npm.
 - **What a test hands on.** A `node_test`'s only output is its pass marker:
   it provides no runtime, package or library to a target depending on it.
 - **What a package holds.** A `conda_package` holds only a `.mojoc` and a
