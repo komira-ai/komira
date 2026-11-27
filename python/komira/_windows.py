@@ -60,7 +60,6 @@ belongs to no group, and its value is missing.
 
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 from typing import TYPE_CHECKING
 
@@ -123,6 +122,11 @@ def merged(*groups: Windows) -> Windows:
 # ---- the plans of the verbs that take a Series -------------------------------
 
 
+def _counting(win: _ops.WindowExpr, column: str) -> _ops.WindowExpr:
+    """`win`, a count of every row, as a count of the column `column`."""
+    return _ops.WindowExpr(win.func, column, win.offset, win.partition_by, win.order_by, win.frame)
+
+
 def _computed(plan: _ops.Plan, windows: Windows) -> tuple[_ops.Plan, dict[str, _ops.Node]]:
     """The projection of `plan`'s columns and one column per window, and the
     reference that replaces each placeholder. A count of every row (its
@@ -140,7 +144,7 @@ def _computed(plan: _ops.Plan, windows: Windows) -> tuple[_ops.Plan, dict[str, _
         one = free("_one")
         plan = _ops.Project(plan, tuple((c, _ops.ColRef(c)) for c in plan.columns) + ((one, _ops.Lit(1)),))
         windows = tuple(
-            (placeholder, dataclasses.replace(win, arg=one) if win.arg == _EVERY_ROW else win)
+            (placeholder, _counting(win, one) if win.arg == _EVERY_ROW else win)
             for placeholder, win in windows
         )
     subs: dict[str, _ops.Node] = {}
