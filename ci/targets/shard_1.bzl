@@ -45,6 +45,7 @@ TARGETS = [
     "komira//src/plan_proto:coverage",
     "komira//src/plan_proto:komira_plan_proto_generated_conda",
     "komira//src/plan_proto:optimized_golden_declared_needs_canonical",
+    "komira//src/plan_proto:optimized_golden_digest_trailer_canonical",
     "komira//src/plan_proto:optimized_golden_exchange_edge_canonical",
     "komira//src/plan_proto:optimized_golden_optimized_plan_body_canonical",
     "komira//src/plan_proto:optimized_golden_optimized_plan_canonical",

@@ -1,3 +1,4 @@
+load("@komira//src/tests/conformance/komira_sql_conformance:tables.bzl", "corpus_tables")
 load("@komira//tools/build/sql:defs.bzl", "duckdb_dist", "sql_oracle")
 
 # Planted defects for sql_oracle (tools/build/sql). Every target here must
@@ -113,6 +114,24 @@ sql_oracle(
     },
     outputs = ["answer.tsv"],
 ) for case in ["answer_differs", "unordered"]]
+
+# RED: komira_sql_conformance's export of a corpus's tables as Parquet
+# (tables.bzl) fails, naming both lists, when the tables its tables.sql
+# creates (V and X, corpus_tables.sql) are not the ones it is given: X left
+# out (`corpus tables: tables.sql creates V, X, and tables.bzl lists V`), and
+# Y named though no table Y is created (`... lists V, X, Y`). An export that
+# stopped comparing, or compared in one direction only, builds one green.
+corpus_tables(
+    name = "corpus_tables_unlisted",
+    tables_sql = "corpus_tables.sql",
+    tables = ["V"],
+)
+
+corpus_tables(
+    name = "corpus_tables_not_created",
+    tables_sql = "corpus_tables.sql",
+    tables = ["V", "X", "Y"],
+)
 
 # RED: each other dot command the README names as refused in safe mode
 # (`.system`, `.read`, `.output`, `.cd`, `.open`, `.import`), with the
