@@ -188,6 +188,71 @@ until it moves to the Zig module.
   fails unless one of them references the library's C, so the installed
   README run calls the shared library it ships.
 
+#### Source-first READMEs
+
+A library whose README shows each example from a file lists the files
+([docs/design/documentation_tests.md](../../../docs/design/documentation_tests.md)):
+
+```python
+mojo_library(
+    name = "anomaly",
+    srcs = glob(["anomaly/**/*.mojo"]),
+    readme_examples = glob(["examples/*.mojo"]),
+)
+```
+
+The README shows each file through an include marker on the line before
+its fence, and the fence body is the file less its final line feed:
+
+````markdown
+<!-- include examples/validate_series.mojo -->
+```mojo
+from anomaly import Series
+
+
+def main() raises:
+    var s = Series("latency/p50")
+```
+````
+
+`mojo_adopted_library` takes `readme_examples` the same way. Then:
+
+- **One welded test per file**, `[tests][readme][<name>]`: the file compiled
+  against the library (the ungated package) and run through the gate,
+  labelled `<target>:examples/<name>.mojo`, on every platform the library
+  builds for. The file is staged at its path from the cell root, so a
+  failure names `<package>/examples/<name>.mojo:<line>`, a file the author
+  can open. `<name>` is lower-case letters, digits and underscores, and not
+  `file`, `fill`, `generated`, `migrated` or `objects`. The list is the glob,
+  so analysis has it: no dynamic action.
+- **The freshness check** (the tool's `check`, welded beside them): every
+  listed file is shown by exactly one include, every ```` ```mojo ```` fence
+  (`mojo module` too) is an include, each included fence is its file byte for
+  byte (a file with a carriage return, a byte order mark or a line ending in
+  a space or a tab is refused), a ```` ```text ```` fence right after an
+  included one carries `<!-- not-tested: <reason> -->`, and the inline
+  model's `mojo-hidden` comments and misspelt markers are refused. Each
+  refusal names `README.md:<line>`. With no file listed and no example shown
+  the marker reads `NO EXAMPLE`; `release-check` still refuses such a README
+  when it is released.
+- **`[tests][readme][fill]`** is the patch that makes the README fresh (each
+  included fence rewritten from its file, nothing else): build it and apply
+  it with `git apply`. The stale refusal says so.
+- `generate` still runs, reading an included fence as a whole program, for
+  `[generated]` and the coverage build; the installed README's run
+  (`release/readme_e2e`) reads it the same way.
+
+A library still on the inline model refuses an include marker in its
+README, naming its line: nothing would hold that fence to a file. Its
+`[tests][readme][migrated]`, built only when asked for, is the README made
+source-first by the tool's `migrate` (the README and `examples/example_<n>.mojo`,
+to copy over the package), proven in the same build by `migrate --verify`:
+each file is the program the gate runs today for its fence, and the README
+differs only inside its examples. A README example that must fail is
+`mojo_readme_example_failure` (`readme.bzl`): it builds only when the run
+fails with a given text, which is how the tool's fixtures show a broken
+example going red, naming its file and line.
+
 Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples); its
 `run_tests.sh` case is stale until komira-ai/komira#1281 replaces it) builds
 a README that uses every form and two whose examples declare the same names,

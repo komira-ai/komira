@@ -1,7 +1,10 @@
 # Testing the code in our documents
 
-Status: design, not built, except where a line says "exists". How every code block in our
-documentation is run or accounted for. Counts are from main of this repository; *(not checked
+Status: accepted; the six decisions at the end were taken on 2026-11-27, each as recommended.
+Built where a line says "exists": the task pages, and the first tier's tooling for package READMEs
+(the include marker, `fill`, the freshness check, one welded test per example file, `migrate` and
+`migrate --verify`), proven on fixtures, with no package README migrated yet. How every code block
+in our documentation is run or accounted for. Counts are from main of this repository; *(not checked
 here)* marks one from our other repositories, and *[est]* marks an estimate.
 
 ## The answer
@@ -62,6 +65,14 @@ Three mechanisms exist in this repository.
 - **The Python quickstart pair**: `python/smoke/src/readme.zig` holds the quickstart blocks of
   [python/README.md](../../python/README.md) and [docs/install.md](../install.md) equal to
   `python/examples/quickstart.{py,expected}`.
+- **Source-first package READMEs** (exists as tooling; no package README uses it yet). A library
+  that lists `readme_examples = glob(["examples/*.mojo"])` runs each file as its own welded test
+  and holds its README to the files with the tool's `check`; `fill` is the patch that mends a stale
+  README; `migrate` and `migrate --verify` turn an inline README into files and includes, and prove
+  them the same programs (piece 5 and the migration section below;
+  [README gate](../../tools/build/mojo/README.md#source-first-readmes)). The fixture is the README
+  of `src/anomaly` migrated, in
+  [`tests//functional/readme_examples/source_first`](../../tools/build/tests/functional/readme_examples/source_first/BUCK).
 
 What is missing: README examples cannot be copied and run (their imports are hidden), and the
 README gate does not map a failure back to `README.md:<line>` (`program.mapReport` exists; only
@@ -188,9 +199,47 @@ file holds a backtick run.
   fence today.
 - A Markdown viewer that hides HTML comments (GitHub) shows the filled fence and nothing else. A
   renderer that draws comments as text must drop every comment that starts with a marker word;
-  mopm.dev's renderer gets that change, tested against a shared vector file.
+  mopm.dev's renderer gets that change, tested against a shared vector file (below).
 - Ship-time rule: the contents are in the Markdown. A marker alone renders nothing, so a README
   whose fence is empty or stale never ships: the freshness check is welded into the library.
+
+Exists for package READMEs (`include.zig` of the README examples tool): `check` is the freshness
+check, and it also refuses the inline model's `mojo-hidden` comments, a comment that misspells a
+marker (`<!--include`, `<!-- Include`, `<!-- not-tested -->`, text after the `-->`), and a listed
+file no include shows or two includes show; `fill` writes the patch. A not-tested marker must stand on the line just before a fence. A README include names only
+`examples/<name>.mojo`: a `.txt` include waits for the exact compare of README cases, which this
+tier does not hold yet, and a README's `python` fences stay inline until a README shows `.py`
+files (none of today's package READMEs holds one).
+
+#### Marker comments
+
+The words `include` and `not-tested` (and `mojo-hidden`, readable in published versions and refused
+in new text) are a public format: additions only. A **marker comment** is an HTML comment block (a
+line that starts, after at most three spaces, with `<!--`, to the first line that holds `-->`)
+whose first word is exactly one of:
+
+| word | the comment | written by |
+|---|---|---|
+| `include` | `<!-- include <path> -->`, the whole line, directly before the fence that shows the file | `migrate`, the author |
+| `not-tested:` | `<!-- not-tested: <reason> -->`, the whole line, directly before a fence no run checks | the author |
+| `mojo-hidden` | one line, or a block to its `-->`: hidden lines of the inline model | published READMEs only |
+
+The first word is the text after `<!--` and any whitespace, up to whitespace or `-->`; it is
+compared byte for byte. A renderer that draws comments as text drops every line of a marker
+comment and keeps every other comment as it does today. A comment that does not start its line, a
+comment inside a fence, and one whose first word differs in any byte (`Include`, `includes`,
+`not-tested` without the colon, `not tested:`) are not marker comments. The freshness check refuses
+a misspelt marker in a source-first README (`Include`, `not-tested` without the colon,
+`not tested:`, `<!--include`), so a renderer that keeps one shows what the author wrote. No case
+holds a comment indented four spaces or more, which CommonMark reads as code (the tool's reader
+takes any indent as the comment's; nothing here depends on the difference).
+
+The cases are
+[`tools/build/readme_examples/marker_comments.json`](../../tools/build/readme_examples/marker_comments.json):
+for each, a document (`markdown`) and the same document with its marker comments' lines removed
+(`shown`). The tool's own renderer rule (`dropMarkers`) passes every case in its unit tests;
+mopm.dev's renderer is held to the same file *(not checked here)*. A new word or case is added to
+the file, never changed or removed.
 
 ### Whole file or a named region?
 
@@ -286,9 +335,10 @@ What each person sees:
 
 ## How the tests run the files
 
-- **Welded, as today.** `[tests][readme]` becomes one test per file of `readme_examples`, compiled
-  against `:lib` and run; the library exists only if every one passed and the freshness check
-  passed. No dynamic action: the list is the `glob`.
+- **Welded, as today** (exists). `[tests][readme]` becomes one test per file of `readme_examples`,
+  compiled against `:lib` and run; the library exists only if every one passed and the freshness
+  check passed. No dynamic action: the list is the `glob`. Each file is staged at its repository
+  path, so a failure names `src/<pkg>/examples/<name>.mojo:<line>`.
 - **Both platforms.** On linux-x86_64 in the pull request's check; on darwin-arm64 for the libraries
   of the macOS set, in the macOS part of the check, as the README gate builds them today.
 - **Against the installed package.** `release/readme_e2e` keeps reading the README the staged set
@@ -296,15 +346,16 @@ What each person sees:
   `mojo module` path) against the installed `.conda`, with nothing from the source tree. Shipping
   the files themselves in the `.conda` is an additive path in mopm's package layout (beside
   `<import name>.bins/`); it is not needed for this test.
-- **The zero-examples guard** becomes: every listed file is shown by exactly one marker, and every
-  `mojo` fence of the README is an include; `release-check` still refuses a released README with
+- **The zero-examples guard** becomes (exists): every listed file is shown by exactly one marker,
+  and every `mojo` fence of the README is an include; `release-check` still refuses a released README with
   no example, as today. A README with no example (44 of 265 today) lists none and is refused only
   when released, as today; a `readme = False` library has neither and is not checked.
 
 ## The migration of today's READMEs
 
-**The tool.** A `migrate` subcommand of the README examples tool turns each fence into a file and a
-marker. A `mojo` fence becomes the program the gate already runs, with one move: the leading run of
+**The tool** (exists: `migrate.zig`; a library still on the inline model has the result as
+`[tests][readme][migrated]`, proven by `migrate --verify` in the same build). A `migrate`
+subcommand of the README examples tool turns each fence into a file and a marker. A `mojo` fence becomes the program the gate already runs, with one move: the leading run of
 `from` and `import` lines (hidden or shown) goes above `def main() raises:`, and the rest of the
 hidden lines and the body follow, indented four spaces. Mojo accepts an import in either place, so
 the migrated example is the same program as today's. A `mojo module` fence becomes its hidden lines
@@ -314,7 +365,9 @@ each rename a marker edit.
 
 The fence word already decides the form: a `mojo` fence's body runs inside `def main()` today, so
 it cannot declare a `struct` or a function, and an example that does is a `mojo module` fence
-already. The tool infers nothing from the code.
+already. The tool infers nothing from the code. It refuses an example indented in a list item (a
+marker starts its line; none of today's are) and an example line that ends in a space or a tab (a
+shown file may not; none do).
 
 **The proof, for each migrated README.**
 
@@ -324,7 +377,9 @@ already. The tool infers nothing from the code.
 - Every migrated example still runs: the welded test, now per file, must pass.
 - A broken example still goes red: the tool's fixtures hold the migrated files of `src/anomaly` with
   one assert changed, and that test must fail naming the file and line; it runs with every build of
-  the tool.
+  the tool (exists: `changed_assert` of the fixture package, built by the pull request's check,
+  passes only when the run fails with `.../changed_assert/example_1.mojo:9:`; the tool's
+  `expect-failure` judges it).
 - The rendered README differs only where hidden lines became visible: `migrate --verify` takes the
   old README and the new one and refuses any difference except the added markers, the formerly
   hidden lines, the moved imports, `def main() raises:`, and the four-space indent.
@@ -399,7 +454,9 @@ Not checked: whether uv, poetry, pdm, pixi and conda can be pointed at a loopbac
 network-off platform on the farm; per-example Mojo compile time on the farm, which sets the cost of
 one test per file over about 660 files; whether buildrules can pin a Zig tool for our other repos.
 
-## Decisions to take
+## Decisions taken
+
+Taken on 2026-11-27, each as recommended below.
 
 1. **Source-first for READMEs too?** Recommendation: yes. A README is the first code most people
    copy, and only a whole tested file shown as it ran can be copied and run.
