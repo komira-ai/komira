@@ -50,3 +50,33 @@ The probe does not count allocations. The allocator behind Mojo's `alloc` is the
 `thread_usage` counts a worker only inside the bracketed phases. `thread_census` counts every thread of the process: `/proc/self/task/<tid>/status` (voluntary and involuntary switches) and `schedstat` (time on a CPU, time runnable and waiting for one) before and after each run, grouped by what the thread did in the run: `driver` (the thread that called `run_sql`; its figures include the cost of reading the snapshots), `task_workers` (threads that ran a segment task; reading the snapshots wakes them too, so at high thread counts their sum can exceed the process-wide figure: compare with `thread_census_idle_control` before dividing one figure by another) and `other` (every remaining thread: workers with no task in this run, I/O and helper threads), with `other_by_name` splitting the last by thread name. Compare the process-wide switches (`context_switches`) with `task_workers` and `thread_usage.task_busy`: what is in neither is outside the tasks.
 
 `thread_census_idle_control` is the same census over two snapshots taken back to back with no query between them (five times, after the timed runs): what the threads do over the time one snapshot takes. A run's census spans that time plus the run, so the control is the part of the run's figures that is not the run.
+
+## Example: the statistics of the probe
+
+The probe reports the median and the interquartile range of its timed runs, which one outlier does not move. `median` and `quantile` sort a copy of the samples (the argument keeps its order) and interpolate between the closest ranks. `faults_settled` says when the warm-up's page-fault counts have agreed within 20 percent.
+
+```mojo
+from std.testing import assert_equal, assert_false, assert_true
+from bench_q6_phases.stats import faults_settled, maximum, median, minimum, quantile, sorted_copy
+
+var runs = List[Int]()
+runs.append(40)
+runs.append(10)
+runs.append(30)
+runs.append(20)
+assert_equal(median(runs), 25.0)
+assert_equal(quantile(runs, 0.25), 17.5)
+assert_equal(quantile(runs, 0.75), 32.5)
+assert_equal(minimum(runs), 10)
+assert_equal(maximum(runs), 40)
+var ordered = sorted_copy(runs)
+assert_equal(ordered[0], 10)
+assert_equal(runs[0], 40)
+
+var faults = List[Int]()
+faults.append(10000)
+faults.append(900)
+assert_false(faults_settled(faults))
+faults.append(880)
+assert_true(faults_settled(faults))
+```

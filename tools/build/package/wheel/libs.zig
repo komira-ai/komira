@@ -15,19 +15,22 @@
 //!            import package) or the one `.dist-info` directory: no second
 //!            top-level directory, so no `modular/` beside the package;
 //!   entry    the entry library (the one the package opens) is a member and an
-//!            ELF or a Mach-O file;
+//!            ELF or a Mach-O file, and so is each opened library (one the
+//!            package opens itself beside the entry, under the same package
+//!            and of the entry's format);
 //!   runtime  each Mojo runtime library is in the wheel exactly once, with the
 //!            toolchain's bytes (a process holds one Mojo runtime);
 //!   runpath  every run path entry of a library the entry loads is `$ORIGIN`
 //!            or under it, and stays inside the import package once `$ORIGIN`
 //!            is the library's own directory;
 //!   needed   every DT_NEEDED of a library the entry loads is a manylinux
-//!            system library (policy.zig's list), a library already loaded,
+//!            system library (native_policy's policy.zig list), a library already loaded,
 //!            or a member at `<run path entry>/<name>` for one of that
 //!            library's run path entries, tried in order; a name holding `/`
 //!            (opened as a path, not looked up) is refused;
-//!   stray    every ELF and every Mach-O member is loaded from the entry: a
-//!            library nothing loads is refused, and so is a library of the
+//!   stray    every ELF and every Mach-O member is loaded from the entry or
+//!            from an opened library, each walked on its own as the entry is:
+//!            a library nothing loads is refused, and so is a library of the
 //!            other format (a Linux `.so` in a macOS wheel is loaded by
 //!            nothing);
 //!   licence  each licence file of the runtime is a non-empty member of
@@ -40,7 +43,7 @@
 //! SONAME of every library komira ships is its file name) before the run path
 //! of the library that needs it. It is stricter than the loader in one way:
 //! the DT_RPATH of the libraries that loaded a library is not searched, only
-//! the library's own run path (DT_RUNPATH and DT_RPATH as elf.zig reads them).
+//! the library's own run path (DT_RUNPATH and DT_RPATH as native_policy's elf.zig reads them).
 //!
 //! The Mach-O walk (dyld(1)), for a Mach-O entry, holds the same `runpath`,
 //! `needed` and `stray` checks in Mach-O's terms:
@@ -62,10 +65,10 @@
 const std = @import("std");
 const check_mod = @import("check.zig");
 const cli = @import("cli.zig");
-const diag = @import("diag.zig");
-const elf = @import("elf.zig");
-const macho = @import("macho.zig");
-const policy = @import("policy.zig");
+const diag = @import("native_policy").diag;
+const elf = @import("native_policy").elf;
+const macho = @import("native_policy").macho;
+const policy = @import("native_policy").policy;
 const zip = @import("zip.zig");
 const Alloc = std.mem.Allocator;
 const Diag = diag.Diag;
@@ -80,6 +83,11 @@ pub const Policy = struct {
     /// (`komira/_lib/libkomira.so`). Its first component is the import
     /// package.
     entry: []const u8,
+    /// The libraries the package opens itself beside the entry, as member
+    /// paths under the same package (`komira/_lib/libkomira_udf_python.so`,
+    /// the UDF runtime): each is walked from as the entry is, and what it
+    /// loads counts as loaded.
+    opened: []const []const u8 = &.{},
     /// The Mojo runtime libraries: carried once each by the wheel.
     runtime: []const Runtime,
     /// The names of the runtime's licence files under `.dist-info/licenses/`.
@@ -92,6 +100,14 @@ pub const Policy = struct {
 fn has(list: []const []const u8, s: []const u8) bool {
     for (list) |x| if (std.mem.eql(u8, x, s)) return true;
     return false;
+}
+
+fn occurrences(list: []const []const u8, s: []const u8) usize {
+    var n: usize = 0;
+    for (list) |x| {
+        if (std.mem.eql(u8, x, s)) n += 1;
+    }
+    return n;
 }
 
 fn find(members: []const policy.Member, name: []const u8) ?policy.Member {
@@ -172,7 +188,8 @@ fn normalise(alloc: Alloc, name: []const u8) ![]const u8 {
 
 /// Refuses the wheel `members` unless its libraries load as described above;
 /// returns the member paths of the libraries the entry loads, in load order,
-/// the entry first.
+/// the entry first, then those of each opened library that are not loaded yet,
+/// in the order `opened` gives.
 pub fn check(alloc: Alloc, d: *Diag, p: Policy, members: []const policy.Member) Refused![]const []const u8 {
     for (members) |m| {
         if (!plainPath(m.name)) return refuse(d, alloc, "path: the member `{s}` is not a relative path of plain components", .{m.name});
@@ -199,6 +216,16 @@ pub fn check(alloc: Alloc, d: *Diag, p: Policy, members: []const policy.Member) 
     const entry = find(members, p.entry) orelse return refuse(d, alloc, "entry: the wheel has no {s}", .{p.entry});
     const is_macho = macho.isMachO(entry.data);
     if (!is_macho and !elf.isElf(entry.data)) return refuse(d, alloc, "entry: {s} is neither an ELF nor a Mach-O file", .{p.entry});
+    const format: []const u8 = if (is_macho) "a Mach-O" else "an ELF";
+    for (p.opened) |o| {
+        if (!plainPath(o) or !std.mem.eql(u8, topDir(o), package) or topDir(o).len == o.len)
+            return refuse(d, alloc, "entry: the opened library `{s}` is not a path under {s}/", .{ o, package });
+        if (std.mem.eql(u8, o, p.entry) or occurrences(p.opened, o) > 1)
+            return refuse(d, alloc, "entry: {s} is named twice", .{o});
+        const lib = find(members, o) orelse return refuse(d, alloc, "entry: the wheel has no {s}", .{o});
+        if (!(if (is_macho) macho.isMachO(lib.data) else elf.isElf(lib.data)))
+            return refuse(d, alloc, "entry: the opened library {s} is not {s} file like {s}", .{ o, format, p.entry });
+    }
 
     for (p.runtime) |r| {
         var count: usize = 0;
@@ -219,13 +246,23 @@ pub fn check(alloc: Alloc, d: *Diag, p: Policy, members: []const policy.Member) 
         }
     }
 
-    const loaded = if (is_macho) try walkMachO(alloc, d, p.entry, package, members) else try walkElf(alloc, d, p.entry, package, members);
+    var roots = std.ArrayList([]const u8).empty;
+    try roots.append(alloc, p.entry);
+    try roots.appendSlice(alloc, p.opened);
+    var loaded = std.ArrayList([]const u8).empty;
+    for (roots.items) |root| {
+        const walked = if (is_macho) try walkMachO(alloc, d, root, package, members) else try walkElf(alloc, d, root, package, members);
+        for (walked) |w| {
+            if (!has(loaded.items, w)) try loaded.append(alloc, w);
+        }
+    }
 
     for (members) |m| {
-        if (!(elf.isElf(m.data) or macho.isMachO(m.data)) or has(loaded, m.name)) continue;
-        return refuse(d, alloc, "stray: {s} is a shared library that {s} does not load", .{ m.name, p.entry });
+        if (!(elf.isElf(m.data) or macho.isMachO(m.data)) or has(loaded.items, m.name)) continue;
+        if (p.opened.len == 0) return refuse(d, alloc, "stray: {s} is a shared library that {s} does not load", .{ m.name, p.entry });
+        return refuse(d, alloc, "stray: {s} is a shared library that neither {s} nor {s} loads", .{ m.name, p.entry, try std.mem.join(alloc, " nor ", p.opened) });
     }
-    return finish(alloc, d, p, members, info, loaded);
+    return finish(alloc, d, p, members, info, try loaded.toOwnedSlice(alloc));
 }
 
 /// ld.so's walk from the ELF library `entry`: the member paths loaded, in
@@ -330,7 +367,7 @@ fn walkMachO(alloc: Alloc, d: *Diag, entry_path: []const u8, package: []const u8
 }
 
 /// An operating system library: an absolute path under /usr/lib/ or
-/// /System/Library/, with no `..` step out of them (policy.zig's rule).
+/// /System/Library/, with no `..` step out of them (native_policy's policy.zig rule).
 fn systemLibrary(path: []const u8) bool {
     if (!std.mem.startsWith(u8, path, "/usr/lib/") and !std.mem.startsWith(u8, path, "/System/Library/")) return false;
     var parts = std.mem.splitScalar(u8, path, '/');
@@ -369,14 +406,15 @@ fn finish(alloc: Alloc, d: *Diag, p: Policy, members: []const policy.Member, inf
     return loaded;
 }
 
-pub const flags = [_][]const u8{ "--wheel", "--entry", "--runtime-lib", "--runtime-license", "--runtime-dist", "--expect-refusal", "--out" };
+pub const flags = [_][]const u8{ "--wheel", "--entry", "--opened", "--runtime-lib", "--runtime-license", "--runtime-dist", "--expect-refusal", "--out" };
 
 /// What `komira_wheel libs` writes: the marker, and the path it goes to.
 pub const Result = struct { out: []const u8, marker: []const u8 };
 
 /// `komira_wheel libs <argv>`: the flags (main.zig's usage) parsed, the files
 /// they name read with `files.read(alloc, d, path)`, the wheel checked; the
-/// marker lists the libraries the entry loads, one member path a line.
+/// marker lists the libraries the entry and each `--opened` library load, one
+/// member path a line.
 /// With `--expect-refusal TEXT` the run is a negative case: it ends ok, with the
 /// marker `refused: TEXT`, only if the check refuses the wheel with exactly
 /// TEXT, and is refused itself if the wheel passes or is refused otherwise.
@@ -390,6 +428,7 @@ pub fn command(alloc: Alloc, d: *Diag, argv: []const []const u8, files: anytype)
     if (runtime.items.len == 0) return refuse(d, alloc, "missing --runtime-lib", .{});
     const p = Policy{
         .entry = try a.one(alloc, d, "--entry"),
+        .opened = try a.all(alloc, "--opened"),
         .runtime = runtime.items,
         .runtime_licenses = try a.all(alloc, "--runtime-license"),
         .runtime_dists = try a.all(alloc, "--runtime-dist"),

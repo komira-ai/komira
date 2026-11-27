@@ -1,0 +1,7 @@
+['id', 'name', 'total']
+[{'id': 1, 'name': 'Ana', 'total': 120}, {'id': 2, 'name': 'Bo', 'total': 80}, {'id': 3, 'name': 'Cy', 'total': 45}]
+['id', 'customer', 'total']
+['ORDER_ID', 'CUSTOMER', 'AMOUNT']
+['o_order_id', 'o_customer', 'o_amount']
+['order_id', 'customer', 'total']
+['total']

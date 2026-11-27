@@ -1,0 +1,4 @@
+[{'city': 'Oslo', 'n': 3}, {'city': 'Lima', 'n': 2}, {'city': 'Pune', 'n': 1}, {'city': 'Rome', 'n': 1}]
+[{'city': 'Oslo', 'size': 3}, {'city': 'Lima', 'size': 2}, {'city': 'Pune', 'size': 1}, {'city': 'Rome', 'size': 1}]
+[{'city': 'Oslo', 'len': 3}, {'city': 'Lima', 'len': 2}, {'city': 'Pune', 'len': 1}, {'city': 'Rome', 'len': 1}]
+.value_counts() gives a Series indexed by the values in pandas, and a komira Series has no index: count the rows per value with df.groupby(column).size(), and sort them with sort_values("size", ascending=False)

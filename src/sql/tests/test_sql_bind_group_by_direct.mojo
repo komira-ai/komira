@@ -14,8 +14,12 @@
 #   3. A literal constant key is elided while a non-constant key remains and
 #      is kept as a zero-key aggregate otherwise; a SELECT item naming an
 #      elided key is re-projected.
-#   4. A SELECT item that is neither a key nor an aggregate, an aggregate or
-#      a window inside GROUP BY, and an unknown key are refused by name.
+#   4. A SELECT item that is neither a key nor an aggregate is answered when
+#      every column it reads is a column key (a literal reads none), computed
+#      above the aggregate; a bare integer literal there, or one naming an
+#      elided constant key, is INT32 for a result list. An item reading a
+#      non-key column or a computed key, an aggregate or a window inside
+#      GROUP BY, and an unknown key are refused by name.
 #   5. ORDER BY a group key that is not selected is carried and pruned; an
 #      ORDER BY on a non-key column is refused.
 
@@ -88,7 +92,7 @@ def _catalog() raises -> SqlCatalog:
     return cat^
 
 
-def _select(stmt: SelectStmt, cat: SqlCatalog) raises -> LogicalPlan:
+def _select(stmt: SelectStmt, cat: SqlCatalog, int32_literals: Bool = False) raises -> LogicalPlan:
     """Bind one single-table SELECT the way the statement binder will: scan,
     WHERE, then the window, aggregate or plain projection, DISTINCT, ORDER BY,
     LIMIT, and the final prune of the columns carried only for the sort. The
@@ -143,6 +147,7 @@ def _select(stmt: SelectStmt, cat: SqlCatalog) raises -> LogicalPlan:
         plan = _bind_aggregate(
             stmt, schema, scope, plan^, cat, cte, prebound, order_names,
             order_carry, order_expr_idx, order_expr_names,
+            result_int_literals=int32_literals,
         )
     else:
         plan = _bind_projection(
@@ -187,18 +192,31 @@ def _select(stmt: SelectStmt, cat: SqlCatalog) raises -> LogicalPlan:
     return plan^
 
 
-def _got(sql: String) raises -> String:
-    """The bound plan's text, or `ERR: ` and the binder's message."""
+def _got(sql: String, int32_literals: Bool = False) raises -> String:
+    """The bound plan's text, or `ERR: ` and the binder's message.
+    `int32_literals` binds the list as a query's result list is bound."""
     var cat = _catalog()
     try:
         var st = parse_sql(tokenize(sql))
-        return String(_select(st.query, cat))
+        return String(_select(st.query, cat, int32_literals))
     except e:
         return String("ERR: ") + String(e)
 
 
-def _check(sql: String, want: String) raises:
-    assert_equal(_got(sql), want, sql)
+def _got_expr(expr: String) raises -> String:
+    """The text of `expr` as the plain projection `SELECT <expr> AS x FROM t`
+    binds it: the same `_bind_scalar` over the same columns, so a grouped item
+    over the keys is expected to print the same."""
+    var p = _got("SELECT " + expr + " AS x FROM t")
+    var head = String("Project(exprs=[Alias(")
+    var tail = String(", \"x\")])\n")
+    var end = p.find(tail)
+    assert_true(p.startswith(head) and end > 0, p)
+    return String(p[byte = head.byte_length() : end])
+
+
+def _check(sql: String, want: String, int32_literals: Bool = False) raises:
+    assert_equal(_got(sql, int32_literals), want, sql)
 
 
 def test_group_by_ordinals_and_aliases() raises:
@@ -308,7 +326,7 @@ def test_computed_and_repeated_keys() raises:
     )
     _check(
         "SELECT CASE WHEN s = 'A' THEN 1 ELSE 0 END, count(*) FROM t GROUP BY CASE WHEN s = 'a' THEN 1 ELSE 0 END",
-        "ERR: SQL not supported: non-aggregate SELECT item must be a GROUP BY column"
+        "ERR: SQL bind error: SELECT column 's' must appear in GROUP BY"
     )
 
 
@@ -369,9 +387,13 @@ def test_constant_keys() raises:
         "  Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"count_star()\")])\n"
         "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
+    # `s` is the input column (a column beats an alias), so the literal is
+    # an item beside the keys s and k.
     _check(
         "SELECT 'x' AS s, k, count(*) FROM t GROUP BY s, k",
-        "ERR: SQL not supported: non-aggregate SELECT item must be a GROUP BY column"
+        "Project(exprs=[Alias(Literal(ScalarValue(utf8, \"x\")), \"s\"), ColRef(k), ColRef(count_star())])\n"
+        "  Aggregate(group_by=[ColRef(s), ColRef(k)], aggs=[COUNT(*).alias(\"count_star()\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
         "SELECT TIMESTAMP '2021-01-01 00:00:00' AS c, true AS b2, k, count(*) FROM t GROUP BY 1, 2, k",
@@ -381,7 +403,9 @@ def test_constant_keys() raises:
     )
     _check(
         "SELECT k, 1 FROM t GROUP BY k",
-        "ERR: SQL not supported: non-aggregate SELECT item must be a GROUP BY column"
+        "Project(exprs=[ColRef(k), Alias(Literal(ScalarValue(int64, 1)), \"1\")])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
 
 
@@ -419,8 +443,8 @@ def test_grouped_select_list_refusals() raises:
         "ERR: SQL bind error: SELECT column 'v' must appear in GROUP BY"
     )
     _check(
-        "SELECT k + 1, count(*) FROM t GROUP BY k",
-        "ERR: SQL not supported: non-aggregate SELECT item must be a GROUP BY column"
+        "SELECT v + 1, count(*) FROM t GROUP BY k",
+        "ERR: SQL bind error: SELECT column 'v' must appear in GROUP BY"
     )
     _check(
         "SELECT nosuchfn(v), count(*) FROM t GROUP BY k",
@@ -444,6 +468,190 @@ def test_grouped_select_list_refusals() raises:
         "  Project(exprs=[ColRef(k), ColRef(count_star())])\n"
         "    Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"count_star()\")])\n"
         "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def test_items_of_the_group_keys_beside_aggregates() raises:
+    # A literal reads no column: one value for the one group of a zero-key
+    # aggregate, and for every group of a grouped one.
+    _check(
+        "SELECT 'o' AS src, count(*) AS n FROM t",
+        "Project(exprs=[Alias(Literal(ScalarValue(utf8, \"o\")), \"src\"), ColRef(n)])\n"
+        "  Aggregate(group_by=[], aggs=[COUNT(*).alias(\"n\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT 'o' AS src, count(*) AS n FROM t WHERE k > 99 GROUP BY k",
+        "Project(exprs=[Alias(Literal(ScalarValue(utf8, \"o\")), \"src\"), ColRef(n)])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"n\")])\n"
+        "    Filter(predicate=BinaryOp(GT, ColRef(k), Literal(ScalarValue(int64, 99))))\n"
+        "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    # Over plain column keys the item is computed above the aggregate, named
+    # by its DuckDB deparse or its alias; a qualified or differently cased
+    # column is the same key.
+    _check(
+        "SELECT k + 1, count(*) FROM t GROUP BY k",
+        "Project(exprs=[Alias(BinaryOp(ADD, ColRef(k), Literal(ScalarValue(int64, 1))), \"(k + 1)\"), ColRef(count_star())])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"count_star()\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT t.k + 1 AS k1, K + 1 AS k2, count(*) FROM t GROUP BY k",
+        "Project(exprs=[Alias(BinaryOp(ADD, ColRef(k), Literal(ScalarValue(int64, 1))), \"k1\"), Alias(BinaryOp(ADD, ColRef(k), Literal(ScalarValue(int64, 1))), \"k2\"), ColRef(count_star())])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"count_star()\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT CASE WHEN s = 'A' THEN 1 ELSE 0 END AS c, count(*) FROM t GROUP BY s",
+        "Project(exprs=[Alias(When(WHEN BinaryOp(EQ, ColRef(s), Literal(ScalarValue(utf8, \"A\"))) THEN Literal(ScalarValue(int64, 1)), ELSE Literal(ScalarValue(int64, 0))), \"c\"), ColRef(count_star())])\n"
+        "  Aggregate(group_by=[ColRef(s)], aggs=[COUNT(*).alias(\"count_star()\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT k * g AS kg, sum(v) FROM t GROUP BY k, g",
+        "Project(exprs=[Alias(BinaryOp(MUL, ColRef(k), ColRef(g)), \"kg\"), ColRef(sum(v))])\n"
+        "  Aggregate(group_by=[ColRef(k), ColRef(g)], aggs=[SUM(ColRef(v)).alias(\"sum(v)\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    # A unary predicate, a LIKE and a call over a key are items of the key.
+    _check(
+        "SELECT s IS NULL AS sn, count(*) FROM t GROUP BY s",
+        "Project(exprs=[Alias(" + _got_expr("s IS NULL") + ", \"sn\"), ColRef(count_star())])\n"
+        "  Aggregate(group_by=[ColRef(s)], aggs=[COUNT(*).alias(\"count_star()\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT s LIKE 'a%' AS sl, upper(s) AS us, count(*) FROM t GROUP BY s",
+        "Project(exprs=[Alias(" + _got_expr("s LIKE 'a%'") + ", \"sl\"), Alias(" + _got_expr("upper(s)") + ", \"us\"), ColRef(count_star())])\n"
+        "  Aggregate(group_by=[ColRef(s)], aggs=[COUNT(*).alias(\"count_star()\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    # A key that shares its name with an aggregate's alias: the item reads
+    # the key, the aggregate is computed under an internal name.
+    _check(
+        "SELECT k + 1 AS k1, count(*) AS k FROM t GROUP BY k",
+        "Project(exprs=[Alias(BinaryOp(ADD, ColRef(k), Literal(ScalarValue(int64, 1))), \"k1\"), Alias(ColRef(_agg_as_1_k), \"k\")])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"_agg_as_1_k\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    # DISTINCT over such items, and ORDER BY a literal item.
+    _check(
+        "SELECT DISTINCT 'o' AS src, k + 1 AS k1 FROM t GROUP BY k",
+        "Distinct(all)\n"
+        "  Project(exprs=[Alias(Literal(ScalarValue(utf8, \"o\")), \"src\"), Alias(BinaryOp(ADD, ColRef(k), Literal(ScalarValue(int64, 1))), \"k1\")])\n"
+        "    Aggregate(group_by=[ColRef(k)], aggs=[])\n"
+        "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT 'o' AS src, k, count(*) AS n FROM t GROUP BY k ORDER BY src, k",
+        "Sort(keys=[src ASC, k ASC])\n"
+        "  Project(exprs=[Alias(Literal(ScalarValue(utf8, \"o\")), \"src\"), ColRef(k), ColRef(n)])\n"
+        "    Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"n\")])\n"
+        "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    # HAVING and ORDER BY see the item as they see any output column.
+    _check(
+        "SELECT k + 1 AS k1, count(*) AS n FROM t GROUP BY k HAVING count(*) > 1 ORDER BY k1",
+        "Sort(keys=[k1 ASC])\n"
+        "  Project(exprs=[Alias(BinaryOp(ADD, ColRef(k), Literal(ScalarValue(int64, 1))), \"k1\"), ColRef(n)])\n"
+        "    Filter(predicate=BinaryOp(GT, ColRef(n), Literal(ScalarValue(int64, 1))))\n"
+        "      Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"n\")])\n"
+        "        Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def test_a_bare_integer_literal_beside_an_aggregate_is_integer() raises:
+    # As a result list (DuckDB: `SELECT 1 AS one, count(*)` is INTEGER); a
+    # literal past INT32 stays BIGINT, and a literal inside an expression is
+    # BIGINT as everywhere else in the binder.
+    _check(
+        "SELECT 1 AS one, 5000000000 AS big, k + 1 AS k1, count(*) AS n FROM t GROUP BY k",
+        "Project(exprs=[Alias(Literal(ScalarValue(int32, 1)), \"one\"), Alias(Literal(ScalarValue(int64, 5000000000)), \"big\"), Alias(BinaryOp(ADD, ColRef(k), Literal(ScalarValue(int64, 1))), \"k1\"), ColRef(n)])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"n\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n",
+        int32_literals=True,
+    )
+    # A literal naming an elided constant key is INT32 on the same terms.
+    _check(
+        "SELECT 1, k, count(*) AS n FROM t GROUP BY 1, k",
+        "Project(exprs=[Alias(Literal(ScalarValue(int32, 1)), \"1\"), ColRef(k), ColRef(n)])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"n\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n",
+        int32_literals=True,
+    )
+    # Not a result list (a CTE body, a subquery): BIGINT.
+    _check(
+        "SELECT 1 AS one, count(*) AS n FROM t",
+        "Project(exprs=[Alias(Literal(ScalarValue(int64, 1)), \"one\"), ColRef(n)])\n"
+        "  Aggregate(group_by=[], aggs=[COUNT(*).alias(\"n\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+comptime _EXPR_KEY_REFUSAL = (
+    "SQL not supported: a SELECT item computed from an expression GROUP BY key"
+    " (`(k + 1) * 2` over `GROUP BY k + 1`). The key's own columns are gone"
+    " above the aggregate; group by the item itself, or select the key and"
+    " compute the item in an outer query"
+)
+
+
+def test_an_item_reading_a_column_that_is_not_a_key_is_refused() raises:
+    # DuckDB v1.5.3: `column "v" must appear in the GROUP BY clause`. The
+    # message names the first such column, left to right.
+    _check(
+        "SELECT k + v, count(*) FROM t GROUP BY k",
+        "ERR: SQL bind error: SELECT column 'v' must appear in GROUP BY"
+    )
+    _check(
+        "SELECT k + 1, count(*) FROM t",
+        "ERR: SQL bind error: SELECT column 'k' must appear in GROUP BY"
+    )
+    # A computed key covers its own text only, and an item computed from it
+    # is refused by name: its columns are gone above the aggregate.
+    _check(
+        "SELECT k + 2, count(*) FROM t GROUP BY k + 1",
+        "ERR: SQL bind error: SELECT column 'k' must appear in GROUP BY"
+    )
+    _check(
+        "SELECT (k + 1) * 2, count(*) FROM t GROUP BY k + 1",
+        String("ERR: ") + _EXPR_KEY_REFUSAL
+    )
+    _check(
+        "SELECT g + (k + 1), count(*) FROM t GROUP BY g, k + 1",
+        String("ERR: ") + _EXPR_KEY_REFUSAL
+    )
+    _check(
+        "SELECT CASE WHEN s = 'A' THEN k ELSE g END AS c, count(*) FROM t GROUP BY k, g",
+        "ERR: SQL bind error: SELECT column 's' must appear in GROUP BY"
+    )
+    # Inside a call, a unary predicate and each part of a CASE.
+    _check(
+        "SELECT upper(j), count(*) FROM t GROUP BY s",
+        "ERR: SQL bind error: SELECT column 'j' must appear in GROUP BY"
+    )
+    _check(
+        "SELECT v IS NULL, count(*) FROM t GROUP BY k",
+        "ERR: SQL bind error: SELECT column 'v' must appear in GROUP BY"
+    )
+    _check(
+        "SELECT CASE WHEN k > 0 THEN g ELSE 0 END AS c, count(*) FROM t GROUP BY k",
+        "ERR: SQL bind error: SELECT column 'g' must appear in GROUP BY"
+    )
+    _check(
+        "SELECT CASE WHEN k > 0 THEN 0 ELSE g END AS c, count(*) FROM t GROUP BY k",
+        "ERR: SQL bind error: SELECT column 'g' must appear in GROUP BY"
+    )
+    # An unknown name is reported as itself, before GROUP BY is named, and so
+    # is a window nested in the item.
+    _check(
+        "SELECT zz + 1, count(*) FROM t GROUP BY k",
+        "ERR: SQL bind error: unknown column 'zz'"
+    )
+    _check(
+        "SELECT k + rank() OVER (ORDER BY k) AS x, count(*) FROM t GROUP BY k",
+        "ERR: SQL not supported: a window function `f(...) OVER (...)` must be a top-level SELECT item (it cannot be nested inside an expression)"
     )
 
 

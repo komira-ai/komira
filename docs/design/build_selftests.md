@@ -148,9 +148,11 @@ rules. Graph checks are BXL scripts that the gate runs, following the test_weld 
 
 - **The target.** Each graph check is a `graph_check` target under `//tools/build/selftest/graph/`, in
   the declared check `build_selftests`, except `//:python_closure`, in the root package so that the
-  unit `repo_root`, which nearly every change reaches, runs it. It names the check and the targets it queries as strings, never
+  unit `repo_root`, which nearly every change reaches, runs it, and `//release:readme_coverage`, beside
+  the ledger it holds. It names the check and the targets it queries as strings, never
   as dependencies. Its only dependencies are its BXL source and its Zig checker (and, for `python_closure`,
-  the dotfiles of the root package it reads).
+  the dotfiles of the root package it reads; for `readme_coverage`, its ledger). The checker imports the
+  README examples tool's reader, `//tools/build/readme_examples:examples`, for `readme_coverage`.
 - **How the gate runs it.** `build_targets.sh` runs `buck2 bxl //tools/build/lint/test_weld.bxl:check`
   for every `test_weld_rule` target of the batch today. That step also queries the batch for
   `graph_check` targets and runs `buck2 bxl //tools/build/selftest/graph/checks.bxl:check -- --check
@@ -177,6 +179,13 @@ rules. Graph checks are BXL scripts that the gate runs, following the test_weld 
     `graph/python_closure.zig` says what is refused. Its allowlist, `tests/python_closure_allowlist.bzl`,
     holds the Python surface (the binding tests and `python/`) and a ceiling of today's findings that only shrinks. Its fixtures
     are `tests//negative/python_closure`, run by the scenario `graph_check_refusals`.
+  - `readme_coverage` (no row): `release/README_COVERAGE.md` is the text the graph and the READMEs make.
+    The facts are the mojo_adopted_library, mojo_library and readme_e2e targets of `//src/...` and
+    `//release/readme_e2e/verify:` (unconfigured: each one's rule kind and its `readme` or `package`),
+    the paths of the root tree's READMEs and `mopm.toml` files under `src/`, and the READMEs and the
+    ledger themselves; `graph/readme_coverage.zig` writes the ledger's text (counting each README's
+    examples with the README examples tool's reader) and says what is refused. Its cases are the
+    checker's unit tests.
 - A graph query that needs its own `-c` overrides, such as the aquery diffs across coverage and
   optimization switches, stays a scenario: a BXL script runs in the gate's own configuration.
 
@@ -482,8 +491,8 @@ filters them. The one change to `build_targets.sh` is for the graph checks, not 
 ### The farm connection
 
 `pr / check` runs on a GitHub-hosted runner. Its `farm-connect` step writes the farm's machine
-buckconfig (`$HOME/.buckconfig.d/farm.buckconfig`: the `[buck2_re_client]` addresses and
-`[komira_re] linux_x86_64_properties`), and the step after it fails the job when that key is empty.
+buckconfig (`$HOME/.buckconfig.d/farm.buckconfig`: the `[buck2_re_client]` addresses,
+`[komira_re] linux_x86_64_properties` and the CI's own `[komira_ci] farm_wait_seconds`), and the step after it fails the job when that key is empty.
 Every buck2 daemon on the runner reads that file, whatever its project root or isolation dir. So a
 scenario's inner daemon, in the checkout under its own isolation dir or in a scratch tree under
 `buck-out/selftest_tmp`, executes on the same farm as the outer build. The scenario needs no flag, variable or

@@ -1,6 +1,7 @@
 //! The README examples tool: a README's ```mojo examples as programs, one
 //! per example, and the line map of their reports (cli.zig has the commands;
-//! examples.zig what an example is; program.zig the programs). mojo_library
+//! examples.zig what an example is; program.zig the programs), and the
+//! check of the common-task pages (tasks.zig). mojo_library
 //! runs `generate` as an action on its package's README.md
 //! (tools/build/mojo/defs.bzl), and so do the coverage build and the README
 //! API census (tools/build/lint/readme_api_coverage.bzl).
@@ -25,4 +26,6 @@ test {
     _ = @import("program_test.zig");
     _ = @import("cli_test.zig");
     _ = @import("link_test.zig");
+    _ = @import("tasks_test.zig");
+    _ = @import("task_page_test.zig");
 }

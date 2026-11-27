@@ -1,0 +1,1 @@
+The npm rule packs this file at lib/data.txt.

@@ -16,12 +16,12 @@ test('the addon exposes exactly its calls', () => {
   assert.deepEqual(Object.keys(addon).sort(), [
     'abiVersion', 'arrowClose', 'arrowNextBatch', 'arrowSchema', 'freeSession',
     'importArrowStream', 'load', 'newSession', 'parquetSchema', 'planRender',
-    'registerParquet', 'sessionStats',
+    'registerParquet', 'sessionStats', 'sql',
   ]);
 });
 
 test('before load, every call that needs the library says it is not loaded', () => {
-  for (const call of [() => addon.abiVersion(), () => addon.newSession()]) {
+  for (const call of [() => addon.abiVersion(), () => addon.newSession(), () => addon.sql(null, 'SELECT 1')]) {
     assert.throws(call, { code: 'KOMIRA_NOT_LOADED', message: /not loaded/ });
   }
 });
@@ -60,18 +60,39 @@ test('a library without komira_plan_render names the missing symbol', () => {
   });
 });
 
+test('a library whose minor promises komira_sql_stream (1.3) and lacks it names the missing symbol', () => {
+  assert.throws(() => addon.load(fake('libkomira_fake_v1_3_no_sql.so')), {
+    code: 'KOMIRA_MISSING_SYMBOL',
+    message: 'libkomira has no symbol komira_sql_stream',
+  });
+});
+
+test('a library whose minor promises komira_ctx_new_with_options (1.4) and lacks it names the missing symbol', () => {
+  assert.throws(() => addon.load(fake('libkomira_fake_v1_4_no_options.so')), {
+    code: 'KOMIRA_MISSING_SYMBOL',
+    message: 'libkomira has no symbol komira_ctx_new_with_options',
+  });
+});
+
+test('a library whose minor promises komira_last_error_code (1.7) and lacks it names the missing symbol', () => {
+  assert.throws(() => addon.load(fake('libkomira_fake_v1_7_no_codes.so')), {
+    code: 'KOMIRA_MISSING_SYMBOL',
+    message: 'libkomira has no symbol komira_last_error_code',
+  });
+});
+
 test('after the refusals the addon is still unloaded', () => {
   assert.throws(() => addon.abiVersion(), { code: 'KOMIRA_NOT_LOADED' });
 });
 
-test('the real library loads, reports ABI 1.9, and loading it again is a no-op', () => {
+test('the real library loads, reports ABI 1.10, and loading it again is a no-op', () => {
   assert.equal(addon.load(REAL), undefined);
-  assert.equal(addon.abiVersion(), 1009);
+  assert.equal(addon.abiVersion(), 1010);
   assert.equal(addon.load(REAL), undefined);
-  assert.equal(addon.abiVersion(), 1009);
+  assert.equal(addon.abiVersion(), 1010);
 });
 
 test('another path is refused once a library is loaded', () => {
   assert.throws(() => addon.load(fake('libkomira_fake_v2.so')), { code: 'KOMIRA_LOADED' });
-  assert.equal(addon.abiVersion(), 1009);
+  assert.equal(addon.abiVersion(), 1010);
 });
