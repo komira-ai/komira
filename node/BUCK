@@ -221,7 +221,9 @@ tsc_build(
 # is its manifest here stamped: package.json for the main package, and
 # platforms/<npm platform>/package.json for a platform package. Unstamped (a
 # pull request) they are 0.0.0 and stay `"private": true`; the release stamp
-# gives 0.1.<N>, the wheel's version. Nothing here publishes them.
+# gives 0.1.<N>, the wheel's version. Nothing here publishes them: the
+# release set //release:npm_packages takes them, and .github/workflows/npm.yml
+# publishes that set.
 
 # @komira-ai/komira: the compiled JavaScript and declarations, LICENSE and
 # NOTICE.
@@ -235,7 +237,7 @@ npm_tarball(
         "NOTICE": "komira//:NOTICE",
         "dist": ":dist",
     },
-    visibility = ["komira//ci:"] + _NEGATIVE,
+    visibility = ["komira//ci:", "komira//release:"] + _NEGATIVE,
 )
 
 # @komira-ai/komira-linux-x64-gnu: the addon, libkomira's self-contained native
@@ -252,7 +254,7 @@ npm_tarball(
         "komira_addon.node": ":komira_addon",
         "native": "komira//src/so:libkomira[dist]",
     } | DIST_LICENSE_FILES,
-    visibility = ["komira//ci:"] + _NEGATIVE,
+    visibility = ["komira//ci:", "komira//release:"] + _NEGATIVE,
     **DIST_NATIVE_NEEDS["linux-x86_64"]
 )
 

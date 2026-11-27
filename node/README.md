@@ -220,7 +220,9 @@ names, when a native library needs what the platform does not give (a Mojo runti
 among them), or when the manifest's `repository.url` is not komira's. Each carries its manifest here
 stamped: unstamped, as in a pull request, it is `0.0.0` and stays private; the release stamp gives
 `0.1.<N>`, the wheel's version, on the package and on every optional dependency. Nothing publishes
-them yet.
+them yet: the release set `//release:npm_packages` takes them, and
+[`npm.yml`](../docs/ci.md#npmyml-publishing-the-npm-packages) builds and tests that set on every push
+to `main` and publishes it only once `release/npm_publish.txt` says `publish: on` (it says off).
 
 `:install_test` installs them as a user does: the pinned npm 11.20.0
 ([third_party/node](../third_party/node/README.md)) runs `npm install --offline --ignore-scripts

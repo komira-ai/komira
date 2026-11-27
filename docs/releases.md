@@ -15,7 +15,11 @@ same version `0.1.<run number>` (the same bytes on both), through the jobs `mopm
 push fails at `beta-stage` and publishes to neither ([docs/ci.md](ci.md#before-the-first-release)). The Python package `komira` is published by `pypi.yml` (the
 Linux x86_64 wheel) and `pypi-macos-arm64.yml` (the macOS arm64 wheel): to TestPyPI on a push to
 `main` that changes more than documentation, and to PyPI by their daily promotion
-([docs/ci.md](ci.md#pypiyml-publishing-the-python-package), [install.md](install.md)). Nothing is
+([docs/ci.md](ci.md#pypiyml-publishing-the-python-package), [install.md](install.md)). The npm
+packages (`@komira-ai/komira` and its linux-x64 platform package, `//release:npm_packages`) are built and
+tested by `npm.yml` on the same pushes, and published to npm by it only once `release/npm_publish.txt` says
+`publish: on`, the owner's go; it says `publish: off`, so nothing is published to npm yet
+([docs/ci.md](ci.md#npmyml-publishing-the-npm-packages)). Nothing is
 published for linux-arm64, and no workflow builds for it. The earlier conda channels on prefix.dev are no longer
 published to. Two checks that the retired build stage made are not
 made by this build and are not enforced until mopm's publish path re-creates
