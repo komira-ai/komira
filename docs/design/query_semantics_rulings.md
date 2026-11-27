@@ -20,7 +20,7 @@ The governing rule, same SQL, same result as DuckDB, was ruled by the maintainer
 | §4.9 | Zeros and NaNs in a sorted column | MATCHES | A float sort key comes back with `-0.0` as `0.0`, as DuckDB returns it; other values unchanged. |
 | §5.1 | `BIN_DIV` on two integers | MATCHES | At the SQL surface: the plan's operator is DuckDB's `//`, and the frontend lowers `/` to a DOUBLE division. |
 | §6.6 | String-to-integer grammar | MATCHES | DuckDB's grammar with all its extensions, each measured. |
-| §6.7 | String-to-double out of range | MATCHES | DuckDB's answer, measured (expected: an error). |
+| §6.7 | String-to-double out of range | MATCHES | DuckDB's answer, measured: ±inf. |
 | §6.8 | Casts between timestamp units | MATCHES | DuckDB's rounding, measured before the Unix epoch; out of range is an error. |
 | §6.9 | Time zones and the session zone | MATCHES | DuckDB with `TimeZone = 'UTC'`, the oracle's setting. |
 | §6.10 | CAST_TO_VARCHAR rendering | MATCHES | DuckDB's `CAST(x AS VARCHAR)` per type, measured row by row. |
@@ -95,8 +95,8 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 15. **A scan drops a projected name its schema lacks (§13.2).** `LogicalPlan.scan_from_source` and the positional `scan` factory skip it silently (`src/plan_ir/logical_plan.mojo:925-930`, `:775-780`); only the wire's value gate refuses it.
 16. **MEDIAN excludes NaN (§2.8).** `src/op_agg_state/columnar_acc_agg.mojo:79-82` drops NaN rows and answers NULL for an all-NaN group; the rule keeps NaN and answers NaN.
 17. **IEEE comparisons over NaN (§4.5).** The comparison kernels answer FALSE for every ordered comparison with a NaN and TRUE for `NaN <> x` (`src/column_kernels/comparison.mojo:316-325`); the rule is DuckDB's, where `NaN = NaN` is TRUE.
-18. **The strict string-to-integer grammar (§6.6).** `src/kernels/cast_to_varchar_kernels.mojo:40-50` rejects DuckDB's fractional, exponent, underscore, hexadecimal and binary forms.
-19. **String-to-double saturates (§6.7).** `src/kernels/cast_to_varchar_kernels.mojo:48` gives ±inf for an out-of-range value, unless the oracle shows DuckDB does the same.
+18. **The string-to-integer grammar (§6.6).** Followed: `src/kernels/cast_string_to_number.mojo` reads DuckDB's fractional, exponent, underscore, hexadecimal and binary forms. The number is kept so the items after it keep theirs.
+19. **String-to-double out of range (§6.7).** Followed: DuckDB saturates to ±inf too (measured), and `src/kernels/cast_string_to_number.mojo` rounds each width correctly. The number is kept so the items after it keep theirs.
 20. **SUBSTRING with a negative start or length (§7.16).** The IR defines the standard-SQL meaning (`src/plan_expr/expr.mojo:1821-1838`), so `substring('hello', -1, 3)` is `'h'` where the rule gives `'o'`, and a negative `length` is the two-argument sentinel.
 21. **"Left operand wins" in arithmetic result types (§8.9).** `src/plan_expr/expr_walk.mojo:968-975` and `src/plan_expr/typed_schema.mojo:1296-1325`.
 22. **Decimal addition, subtraction and multiplication types (§8.11, §8.12).** `src/scalar_arithmetic/decimal_arith.mojo:150-183` has no 18-digit case, and multiplication adds 1 to the precision.

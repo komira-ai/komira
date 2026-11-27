@@ -81,8 +81,8 @@ comptime DEFAULT_ENGLISH_STOPWORDS: String = "english"
 
 # =============================================================================
 # Private ASCII byte kernels — LOCAL copies.
-# `_is_ascii_ws` / `_to_lower` are PRIVATE in
-# kernels' cast_to_varchar_kernels; importing private symbols across
+# `_is_space` / `_lower` are PRIVATE in
+# kernels' cast_string_to_number; importing private symbols across
 # the module boundary violates the encapsulation rule. They are 3-line
 # predicates — lift local copies here.
 # =============================================================================
@@ -91,7 +91,7 @@ comptime DEFAULT_ENGLISH_STOPWORDS: String = "english"
 @always_inline
 def _is_ascii_ws(c: UInt8) -> Bool:
     """ASCII whitespace: space, tab, LF, CR, VT, FF. (Mirror of
-    kernels' cast_to_varchar_kernels `_is_ascii_ws`.)"""
+    kernels' cast_string_to_number `_is_space`.)"""
     return (
         c == UInt8(32)
         or c == UInt8(9)
@@ -105,7 +105,7 @@ def _is_ascii_ws(c: UInt8) -> Bool:
 @always_inline
 def _to_lower(c: UInt8) -> UInt8:
     """ASCII lowercase: A..Z -> a..z; every other byte unchanged. (Mirror of
-    kernels' cast_to_varchar_kernels `_to_lower`.)"""
+    kernels' cast_string_to_number `_lower`.)"""
     if c >= UInt8(65) and c <= UInt8(90):  # 'A'..'Z'
         return c + UInt8(32)
     return c

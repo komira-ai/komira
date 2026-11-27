@@ -36,6 +36,7 @@ CREATE VIEW in_supplier AS FROM read_parquet('in_supplier.parquet');
 CREATE VIEW in_partsupp AS FROM read_parquet('in_partsupp.parquet');
 CREATE VIEW in_part AS FROM read_parquet('in_part.parquet');
 CREATE VIEW floats AS FROM read_parquet('floats.parquet');
+CREATE VIEW cast_text AS FROM read_parquet('cast_text.parquet');
 -- The resident twins (runner.mojo, has_resident_twin).
 CREATE VIEW lj_customer_mem AS FROM read_parquet('lj_customer.parquet');
 CREATE VIEW lj_orders_mem AS FROM read_parquet('lj_orders.parquet');

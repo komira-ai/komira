@@ -15,9 +15,14 @@ package root exports nothing; import from the modules. The main ones:
 - `temporal_extract`: year, quarter, month, day, hour, minute, second, ISO
   week, day of week or year and `date_trunc` over `DATE32` (days since
   1970-01-01) and timestamp columns; NULL rows stay NULL.
-- `cast_to_varchar_kernels`: casts between strings and integer, float,
-  boolean, dictionary and null columns, with a strict mode that raises on a
-  value that does not parse and a `try_mode` that yields NULL for it.
+- `cast_string_to_number`: text read as BIGINT, INTEGER, DOUBLE or REAL
+  exactly as DuckDB reads it in `CAST` (a fraction rounds an integer half
+  away from zero, `'1e3'`, `'1_000'` and `'0x1F'` are numbers, floats are
+  correctly rounded): `parse_text_int64` and its three twins answer the value
+  or None, and the column casts raise DuckDB's Conversion Error on a value
+  that does not convert, or yield NULL for it in `try_mode` (TRY_CAST).
+- `cast_to_varchar_kernels`: integer, float, boolean, dictionary and null
+  columns written as strings.
 - `sel_kernels`, `match_fn`, `binary_fn`, `hash_fn` and their `builtin_*`
   conformers: compile-time specialised comparison, arithmetic and hash loops
   over columns and selection vectors; `kleene` and `comparison_kleene`:
@@ -65,13 +70,14 @@ assert_equal(b.kind, EVAL_KIND_BOOL)
 assert_true(b.bool_val)
 ```
 
-Date parts of a `DATE32` column, and a string column cast to integers:
+Date parts of a `DATE32` column, and text read as numbers:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
 from arrow.primitive_array import PrimitiveArray
 from arrow.string_array import StringArray
-from kernels.cast_to_varchar_kernels import cast_int64_to_string, cast_string_to_int64
+from kernels.cast_string_to_number import cast_string_to_int64, parse_text_float64, parse_text_int64
+from kernels.cast_to_varchar_kernels import cast_int64_to_string
 from kernels.temporal_extract import date_trunc_date32, extract_day_date32, extract_month_date32, extract_quarter_date32, extract_year_date32, parse_trunc_unit
 
 # 2026-11-04 and 2028-02-29, as days since 1970-01-01.
@@ -108,6 +114,14 @@ try:
 except:
     strict_refused = True
 assert_true(strict_refused)  # and an error in strict mode
+
+# One value, as DuckDB's CAST reads it: None where the cast fails.
+assert_equal(parse_text_int64("2.5").value(), 3)  # half away from zero
+assert_equal(parse_text_int64("-2.5").value(), -3)
+assert_equal(parse_text_int64(" 1e3 ").value(), 1000)
+assert_equal(parse_text_int64("0x1F").value(), 31)
+assert_true(not parse_text_int64("seven"))
+assert_equal(parse_text_float64("1_000.5").value(), 1000.5)
 
 var back = cast_int64_to_string(ints)
 assert_equal(back.get(0), "42")

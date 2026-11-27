@@ -8,8 +8,9 @@
 #   the Arrow logical type / unit (`CastData.target_arrow`), via the
 #   Expr.cast_to_arrow constructor + _eval_cast arm wiring.
 #
-# S1.string-numeric-cast — STRING<->numeric parse / format kernels
-#   in kernels/cast_to_varchar_kernels.mojo.
+# S1.string-numeric-cast — STRING<->numeric parse kernels in
+#   kernels/cast_string_to_number.mojo and format kernels in
+#   kernels/cast_to_varchar_kernels.mojo.
 #
 # Each test below was written BEFORE the production code passed (TDD-shaped)
 # and validates a single direction / edge case.
@@ -27,10 +28,12 @@ from byte_buffer.heap_region import HeapRegion
 from plan_expr.expr import Expr
 from plan_expr.expr_walk import walk_expr_field, ExecColRefFields
 from batch_eval.eval_column import _eval_column_expr
-from kernels.cast_to_varchar_kernels import (
+from kernels.cast_string_to_number import (
     i64_from_str, i32_from_str, f64_from_str, f32_from_str,
-    i64_to_str, i32_to_str, f64_to_str, f32_to_str,
     cast_string_to_int64, cast_string_to_float64,
+)
+from kernels.cast_to_varchar_kernels import (
+    i64_to_str, i32_to_str, f64_to_str, f32_to_str,
     cast_int64_to_string, cast_float64_to_string,
 )
 
@@ -299,14 +302,11 @@ def test_string_to_int64_whitespace_trimmed() raises:
     assert_equal(i64_from_str(String("\t-1\n")), Int64(-1))
 
 
-def test_string_to_int64_rejects_scientific() raises:
-    """REJECTS `1e2` -- DuckDB/Arrow INT-cast semantics."""
-    var raised = False
-    try:
-        var _ = i64_from_str(String("1e2"))
-    except e:
-        raised = True
-    assert_true(raised)
+def test_string_to_int64_reads_an_exponent() raises:
+    """`CAST('1e2' AS BIGINT)` is 100 in DuckDB v1.5.6, and `'25e-1'` rounds
+    half away from zero to 3."""
+    assert_equal(i64_from_str(String("1e2")), Int64(100))
+    assert_equal(i64_from_str(String("25e-1")), Int64(3))
 
 
 def test_string_to_int64_rejects_overflow() raises:

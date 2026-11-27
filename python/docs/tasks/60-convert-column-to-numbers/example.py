@@ -43,3 +43,18 @@ try:
     df.assign(count=df["count"].astype("int64")).materialize()
 except komira.KomiraError:
     print("astype failed")
+
+# SQL: TRY_CAST makes a value that is not a number NULL; CAST fails the query.
+# Text reads as DuckDB reads it: '2.5' is 3 as a BIGINT, and '1e3' is a number.
+Path("raw.csv").write_text("sensor,reading\na,12\nb,oops\nc,2.5\nd,\ne,1e3\n")
+with komira.Session() as s:
+    s.register_csv("raw", "raw.csv")
+    rows = s.sql(
+        "SELECT sensor, TRY_CAST(reading AS BIGINT) AS n, TRY_CAST(reading AS DOUBLE) AS x"
+        " FROM raw ORDER BY sensor"
+    )
+    print(rows.to_arrow().to_pylist())
+    try:
+        s.sql("SELECT CAST(reading AS BIGINT) AS n FROM raw").to_arrow()
+    except komira.KomiraError:
+        print("CAST failed")
