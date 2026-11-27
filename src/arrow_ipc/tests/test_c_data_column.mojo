@@ -29,7 +29,7 @@ from arrow_ipc.c_data_interface import ARROW_FLAG_NULLABLE
 
 
 def _batch() raises -> RecordBatch:
-    var b = ColumnBuilder[DType.int64]()
+    var b = ColumnBuilder[DType.int64].with_capacity(0)
     b.append(7)
     b.append_null()
     b.append(-3)

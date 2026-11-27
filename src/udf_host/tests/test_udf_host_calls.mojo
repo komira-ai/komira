@@ -177,7 +177,7 @@ def test_each_post_condition_is_named() raises:
         " type int64 is not nullable",
     )
     var inst = _instance(echo_ref("double", 1))
-    var b = ColumnBuilder[DType.int32]()
+    var b = ColumnBuilder[DType.int32].with_capacity(0)
     b.append(1)
     var narrow = _cols(b^.materialize())
     assert_true(

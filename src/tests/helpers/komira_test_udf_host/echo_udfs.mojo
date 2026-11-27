@@ -123,7 +123,7 @@ def bundle_ref(entry: String, digest: List[UInt8]) -> UdfRef:
 def int64_column(values: List[Int64], nulls: List[Bool]) raises -> Column[HeapRegion]:
     """An int64 column of `values`, row i NULL where `nulls[i]` (a shorter
     `nulls` leaves the rest valid)."""
-    var b = ColumnBuilder[DType.int64]()
+    var b = ColumnBuilder[DType.int64].with_capacity(0)
     for i in range(len(values)):
         if i < len(nulls) and nulls[i]:
             b.append_null()

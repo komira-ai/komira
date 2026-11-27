@@ -59,7 +59,7 @@ from so.udf_runtime import runtime_options, set_udf_runtime
 
 def _file(name: String) raises -> String:
     """A Parquet file of one nullable INT64 column `k`: 1, NULL, 3, 4."""
-    var b = ColumnBuilder[DType.int64]()
+    var b = ColumnBuilder[DType.int64].with_capacity(0)
     b.append(1)
     b.append_null()
     b.append(3)
