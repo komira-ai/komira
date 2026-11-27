@@ -346,6 +346,51 @@ except e:
 assert_true(refused.startswith("TABLE_ALREADY_REGISTERED: "))
 ```
 
+`parquet_source_bytes` is `komira_parquet_source` on values: the session, the
+path (one file, a glob or a directory) and a `KOMIRA_HIVE_*` mode in, the
+`WireParquetSource` bytes out, or a raise with the engine's named error.
+
+```mojo
+from std.os import makedirs
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.primitive_array import PrimitiveArray
+from arrow.schema import Field, RecordBatchBuilder, SchemaBuilder
+from parquet_writer.record_batch_writer import write_record_batch_to_parquet_bytes
+from plan_proto.plan import WireParquetSource
+from proto_codec import decode_proto
+from runtime_paths import test_tmpdir
+from so import KOMIRA_HIVE_AUTO, KOMIRA_HIVE_OFF, Session, parquet_source_bytes
+from std.testing import assert_equal, assert_true
+
+var root = test_tmpdir() + "/readme_by_year"
+for year in ["2026", "2027"]:
+    makedirs(root + "/year=" + year, exist_ok=True)
+    var ids = PrimitiveArray[DType.int64].allocate(1)
+    ids.set(0, Scalar[DType.int64](1))
+    var columns = SchemaBuilder()
+    columns.add_field(Field("id", ArrowType.INT64, False))
+    var rows = RecordBatchBuilder()
+    rows.add_column(Column.from_primitive[DType.int64](ids^))
+    var bytes = write_record_batch_to_parquet_bytes(rows.build(columns.build()))
+    with open(root + "/year=" + year + "/part.parquet", "w") as f:
+        f.write_bytes(Span(bytes))
+
+var session = Session()
+var keyed = decode_proto[WireParquetSource](parquet_source_bytes(session, root, KOMIRA_HIVE_AUTO))
+assert_equal(len(keyed.paths), 2)
+assert_equal(keyed.partition_cols[0].name, "year")
+assert_equal(keyed.partition_values[0].values[0], "2026")
+var plain = decode_proto[WireParquetSource](parquet_source_bytes(session, root + "/*/*.parquet", KOMIRA_HIVE_OFF))
+assert_equal(len(plain.partition_cols), 0)
+var no_match = String()
+try:
+    _ = parquet_source_bytes(session, root + "/*.csv", KOMIRA_HIVE_AUTO)
+except e:
+    no_match = String(e)
+assert_true(no_match.startswith("PARQUET_GLOB_NO_MATCH: "))
+```
+
 **Running SQL.** `komira_sql_stream(ctx, sql, out)` runs the one SQL statement
 `sql` on the session's engine, over the tables registered on it, and fills the
 caller's `struct ArrowArrayStream` (the Arrow C Stream Interface; `komira.h`

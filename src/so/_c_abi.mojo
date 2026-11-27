@@ -333,9 +333,8 @@ def _copy_in(plan: _Bytes, plan_len: UInt64) -> List[UInt8]:
 
 
 def _nulls(ctx: Handle, first: Int, second: Int, refusal: String) -> Int32:
-    """A call's first refusals: `KOMIRA_ERR_NULL_CTX` for a NULL `ctx`; else the last
-    error is cleared, and a NULL `first` or `second` (required pointers' addresses) is
-    `KOMIRA_ERR_NULL_ARG` with `refusal` as the last error; `KOMIRA_OK` otherwise."""
+    """`KOMIRA_ERR_NULL_CTX` for a NULL `ctx`; else the last error is cleared, and a NULL
+    `first` or `second` (required pointers) is `KOMIRA_ERR_NULL_ARG` with `refusal`; else OK."""
     if Int(ctx) == 0:
         return KOMIRA_ERR_NULL_CTX
     var session = _session(ctx)
@@ -346,9 +345,9 @@ def _nulls(ctx: Handle, first: Int, second: Int, refusal: String) -> Int32:
     return KOMIRA_OK
 
 
-def _bind_refusal(session: UnsafePointer[Session, MutUntrackedOrigin], e: Error) -> Int32:
+def _bind_refusal(mut session: Session, e: Error) -> Int32:
     """`KOMIRA_ERR_ENGINE`, with `e` stored as the last error at step bind."""
-    session[].set_error(String(e), KOMIRA_STEP_BIND)
+    session.set_error(String(e), KOMIRA_STEP_BIND)
     return KOMIRA_ERR_ENGINE
 
 
@@ -400,7 +399,7 @@ def komira_register_parquet(
         register_parquet(session[], _c_string(name), _c_string(path))
         return KOMIRA_OK
     except e:
-        return _bind_refusal(session, e)
+        return _bind_refusal(session[], e)
 
 
 @export
@@ -428,7 +427,7 @@ def komira_parquet_schema(
         var bytes = parquet_schema_bytes(_c_string(path))
         return _emit(session, Span(bytes), out_buf, out_cap, out_len)
     except e:
-        return _bind_refusal(session, e)
+        return _bind_refusal(session[], e)
 
 
 @export
@@ -436,13 +435,14 @@ def komira_parquet_source(
     ctx: Handle,
     path: CStr,
     hive_partitioning: Int32,
+    # SAFETY: the caller's buffer of `out_cap` writable bytes, alive for the call (`_emit`).
     out_buf: UnsafePointer[UInt8, MutUntrackedOrigin],
     out_cap: UInt64,
+    # SAFETY: the caller's one `uint64_t` slot, alive for the call, written after `_nulls` refuses NULL.
     out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
-    """Write the `WireParquetSource` of the Parquet files at `path` (a file, a glob or a
-    directory) with the Hive partition columns `hive_partitioning` (`KOMIRA_HIVE_*`)
-    asks for (two-call protocol). Errors are those of `komira_parquet_schema`."""
+    """Write the `WireParquetSource` of the Parquet files at `path` (a file, a glob or a directory),
+    Hive columns as `hive_partitioning` (`KOMIRA_HIVE_*`) asks; errors as `komira_parquet_schema`."""
     var refused = _nulls(ctx, Int(path), Int(out_len), "komira_parquet_source: path or out_len is NULL")
     if refused != KOMIRA_OK:
         return refused
@@ -451,7 +451,7 @@ def komira_parquet_source(
         var bytes = parquet_source_bytes(session[], _c_string(path), hive_partitioning)
         return _emit(session, Span(bytes), out_buf, out_cap, out_len)
     except e:
-        return _bind_refusal(session, e)
+        return _bind_refusal(session[], e)
 
 
 @export
@@ -483,7 +483,7 @@ def komira_csv_binding(
         )
         return _emit(session, Span(bytes), out_buf, out_cap, out_len)
     except e:
-        return _bind_refusal(session, e)
+        return _bind_refusal(session[], e)
 
 
 @export
@@ -505,7 +505,7 @@ def komira_json_binding(
         var bytes = json_binding_bytes(_c_string(path))
         return _emit(session, Span(bytes), out_buf, out_cap, out_len)
     except e:
-        return _bind_refusal(session, e)
+        return _bind_refusal(session[], e)
 
 
 @export
@@ -583,7 +583,7 @@ def komira_credential_add(
         out_id[0] = id
         return KOMIRA_OK
     except e:
-        return _bind_refusal(session, e)
+        return _bind_refusal(session[], e)
 
 
 @export
@@ -636,7 +636,7 @@ def komira_credential_set(
             )
         return KOMIRA_OK
     except e:
-        return _bind_refusal(session, e)
+        return _bind_refusal(session[], e)
 
 
 @export
@@ -657,7 +657,7 @@ def komira_credential_seal(ctx: Handle, id: Int32, scope: Int32) abi("C") -> Int
         session[].credentials.seal(id, scope)
         return KOMIRA_OK
     except e:
-        return _bind_refusal(session, e)
+        return _bind_refusal(session[], e)
 
 
 def _sql_stream(
@@ -883,7 +883,7 @@ def komira_register_csv(
         )
         return KOMIRA_OK
     except e:
-        return _bind_refusal(session, e)
+        return _bind_refusal(session[], e)
 
 
 @export
@@ -903,7 +903,7 @@ def komira_register_json(ctx: Handle, name: CStr, path: CStr) abi("C") -> Int32:
         register_json(session[], _c_string(name), _c_string(path))
         return KOMIRA_OK
     except e:
-        return _bind_refusal(session, e)
+        return _bind_refusal(session[], e)
 
 
 @export
@@ -966,7 +966,7 @@ def komira_register_arrow_stream(
     except e:
         # Live only if refused before the drain, which releases it on every path.
         consumer_release_c_stream(stream)
-        return _bind_refusal(session, e)
+        return _bind_refusal(session[], e)
 
 
 @export
@@ -995,4 +995,4 @@ def komira_add_sql_binding(
         add_sql_binding(session[], _c_string(name), _copy_in(source, source_len), scope)
         return KOMIRA_OK
     except e:
-        return _bind_refusal(session, e)
+        return _bind_refusal(session[], e)

@@ -125,6 +125,40 @@ var truncated: List[UInt8] = [0x0A, 0x7F, 0x00]
 assert_true(decode_error(truncated^) != "decoded")
 ```
 
+`parquet_source_to_bytes` writes a whole source, the way a frontend in
+another language takes the files a glob or a directory resolved to: its paths,
+the files' schema, and the Hive partition columns with one value row per
+file, which a scan reads after the files' columns.
+
+```mojo
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, SchemaBuilder
+from plan_proto.plan import WireParquetSource
+from plan_wire import parquet_source_to_bytes
+from proto_codec import decode_proto
+from scan_source.parquet_source import ParquetSource
+from std.testing import assert_equal
+
+var data = SchemaBuilder()
+data.add_field(Field("id", ArrowType.INT64, False))
+var keys = List[Field]()
+keys.append(Field("year", ArrowType.INT64, False))
+var values = List[List[String]]()
+values.append([String("2026")])
+values.append([String("2027")])
+var files = ParquetSource.partitioned(
+    [String("/sales/year=2026/a.parquet"), String("/sales/year=2027/b.parquet")],
+    data.build(),
+    keys^,
+    values^,
+)
+var source = decode_proto[WireParquetSource](parquet_source_to_bytes(files))
+assert_equal(len(source.paths), 2)
+assert_equal(source.schema.value().fields[0].name, "id")
+assert_equal(source.partition_cols[0].name, "year")
+assert_equal(source.partition_values[1].values[0], "2027")
+```
+
 ## User code: `UdfRef` and the UDF arms
 
 A plan calls user functions by index into a list that travels beside it
