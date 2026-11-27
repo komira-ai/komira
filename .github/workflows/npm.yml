@@ -98,7 +98,8 @@ jobs:
       # A guard on the file farm-connect wrote: without the linux property set
       # a build would run on this runner.
       - name: the buckconfig names the farm
-        run: ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
       # The tool the buck2-farm action runs over each step's output; its path
       # is the step's output.
       - name: build the farm assertion
@@ -207,7 +208,8 @@ jobs:
           # the publish queues behind the pull-request checks when the farm is full
           farm-qos: batch
       - name: the buckconfig names the farm
-        run: ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
       - name: build the farm assertion
         id: assert
         run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
