@@ -155,9 +155,9 @@ jobs:
       # The tool that reads the macOS part's selection (tools/build/ci/darwin_targets),
       # built on the farm like the change tool; its path is the step's output.
       - name: build the macOS targets tool
-        timeout-minutes: 30
         id: darwin_tool
         run: echo "path=$(./buck2 build komira//tools/build/ci:darwin_targets --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+        timeout-minutes: 30
       # The change: the files the pull request (or the merge group) touches
       # (renames as a delete and an add) and the coverage holds of the base and
       # of the head, into changed.txt and held.txt. The base: a pull request's
@@ -302,19 +302,19 @@ jobs:
       # linux part, so no step of it waits on a Mac; skipped when the linux part failed, so
       # a red check spends no Mac time.
       - name: select the macOS targets
-        timeout-minutes: 30
         uses: ./.github/actions/buck2-farm
         with:
           args: bxl komira//tools/build/ci/darwin.bxl:select @tools/build/ci/darwin_affected.args @${{ runner.temp }}/targets.txt
           assert-remote: ${{ steps.assert.outputs.path }}
+        timeout-minutes: 30
       # The labels of the selection's log into darwin_targets.txt, and `any` set when
       # there is one (tools/build/ci/darwin_targets says what it refuses).
       - name: the macOS targets to build
-        timeout-minutes: 5
         id: darwin
         env:
           DARWIN_TARGETS: ${{ steps.darwin_tool.outputs.path }}
         run: '"$DARWIN_TARGETS" --log "$RUNNER_TEMP/buck2-farm.log" --out "$RUNNER_TEMP/darwin_targets.txt" --github-output "$GITHUB_OUTPUT"'
+        timeout-minutes: 5
       # While every Mac is busy the farm queues the actions and this step waits: the check
       # stays pending. 60 minutes bound the wait (the whole set with 1021 new actions took
       # 14, docs/ci.md): past
