@@ -398,7 +398,10 @@ test "stdout file: a red test's stdout section is the last 200 lines of the file
     const section = r.err[i + heading.len ..];
     try std.testing.expect(std.mem.startsWith(u8, section, "line 51\n"));
     try std.testing.expect(std.mem.endsWith(u8, section, "line 250\n" ++ util.rule ++ "\n"));
-    try std.testing.expectEqualStrings("", output(r.err));
+    // The banner's own output section (the stderr log) is empty: only its rule line before the stdout heading.
+    const out_head = "------------------------------------------------------------------ output\n";
+    const k = std.mem.indexOf(u8, r.err, out_head).? + out_head.len;
+    try std.testing.expectEqualStrings(util.rule ++ "\n", r.err[k..i]);
     // The file itself keeps all 250 lines.
     const all = try kit.readFile(e.a, try e.path("got.txt"));
     try std.testing.expect(std.mem.startsWith(u8, all, "line 1\n"));
