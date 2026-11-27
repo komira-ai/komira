@@ -1,5 +1,5 @@
 # The completeness guard of `//ci:pr`: fails when a check target exists
-# outside it.
+# outside it, or when its committed roots are out of date.
 #
 #   ./buck2 bxl komira//tools/build/ci/guard.bxl:check
 #
@@ -7,31 +7,53 @@
 # but a source, SOURCE_KINDS) must be in the closure of the aggregate.
 # Building that closure is the whole check set, so a check outside it is
 # one the pull request check would never build. The failure lists the
-# targets and the command that regenerates ci/targets.bzl and its shards.
-# Configuring the aggregate also fails on a label in them that no longer exists.
-# With the default scope and aggregate it also holds the lists to the graph:
-# every row of TARGETS must be a root of the check set (the roots targets.bxl
-# writes) and every root a row, so a shard that is stale either way fails, and
-# no generated file may reach the line limit (ci_graph.bzl LINE_LIMIT).
+# targets and the command that writes the committed roots.
+# With the default scope and aggregate it also holds the committed roots
+# (roots.bzl: one empty file per root, ci/roots/ and ci/test_roots/) to the
+# graph, both ways: every root of the check set (the roots targets.bxl
+# writes) has its file in the tree its kind belongs to, and every file is
+# that of a root. The failure names each file to add and each to delete. The
+# files are listed from the source tree (`ctx.fs`), not through `//ci:pr`, so
+# a file whose target is gone is named here, before anything configures it.
 #
 # Options: --scope <patterns>, --aggregate <label>.
 
-load("@komira//ci:targets.bzl", "TARGETS", "TESTS")
-load(":ci_graph.bzl", "check_nodes", "closure", "findings", "roots", "shard_findings")
+load(":ci_graph.bzl", "check_nodes", "closure", "findings", "is_test", "root_findings", "roots")
+load(":roots.bzl", "PACKAGE_DIR", "ROOTS_DIR", "TEST_ROOTS_DIR", "root_files")
 load(":rules.bzl", "AGGREGATE", "EXCLUDED", "UNIVERSE")
+
+def _files(ctx, dir, out):
+    """Appends the cell-relative path of every file under `dir` (a cell-relative path) to `out`."""
+    if not ctx.fs.exists(dir):
+        return
+    for p in ctx.fs.list(dir):
+        if ctx.fs.is_file(p):
+            # `ctx.fs.list` names its entries `cell//path`
+            out.append(str(p).split("//", 1)[-1])
+        else:
+            _files(ctx, p, out)
+
+def committed(ctx):
+    """The cell-relative paths of the committed root files, both trees."""
+    out = []
+    for tree in [ROOTS_DIR, TEST_ROOTS_DIR]:
+        _files(ctx, "{}/{}".format(PACKAGE_DIR, tree), out)
+    return out
 
 def _check(ctx):
     scope = ctx.cli_args.scope or UNIVERSE
     aggregate = ctx.cli_args.aggregate or AGGREGATE
     left_out = [p for p, _ in EXCLUDED] if not ctx.cli_args.scope else []
     nodes = check_nodes(ctx, scope, aggregate.split(":")[0] + ":", left_out)
+    if not ctx.cli_args.scope and not ctx.cli_args.aggregate:
+        labels = roots(nodes)
+        want = root_files(labels, [l for l in labels if is_test(ctx, nodes[l])]).keys()
+        stale = root_findings(want, committed(ctx))
+        if stale:
+            fail(stale)
     text = findings(sorted(nodes.keys()), closure(ctx, aggregate), aggregate)
     if text:
         fail(text)
-    if not ctx.cli_args.scope and not ctx.cli_args.aggregate:
-        stale = shard_findings(roots(nodes), TARGETS, TESTS)
-        if stale:
-            fail(stale)
     ctx.output.print("guard: all {} check target(s) of {} are in {}; left out on purpose: {}".format(
         len(nodes),
         " + ".join(scope),

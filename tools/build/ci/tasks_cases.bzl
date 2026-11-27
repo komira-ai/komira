@@ -1,10 +1,9 @@
-"""The cases of the common-task examples in the check set's generated list (run by cases.bxl).
+"""The cases of the common-task examples in the check set's committed roots (run by cases.bxl).
 
 `task_examples` (python/task_examples.bzl) declares one wheel test per task
 directory and per probe, and an aggregate of them, `:examples`, so that the
-generated list (ci/targets.bzl and its shards) names the aggregate and no task:
-a pull request that adds a task directory then edits no generated file, and two
-such pull requests do not conflict there.
+check set's roots (one file per root, roots.bzl) hold the aggregate and no task:
+a pull request that adds a task directory then adds or deletes no root file.
 
 The fixture is two trees declared as python/docs/tasks/BUCK declares the real
 one (python/docs/task_tree_fixture/): `before` with two task directories (one
@@ -13,8 +12,8 @@ holds an expected output and, in 2-b, a probe: the macro reads the directory
 names and the probe file names, never their contents. The cases configure
 them (nothing builds them) and hold:
 
-  - the generated files: the roots of each tree, written as the real package's
-    rows, render the same loader and shards byte for byte;
+  - the root files: the roots of each tree, written as the real package's
+    labels, give the same root files;
   - the one row: each tree's only root is its `:examples`;
   - what the row builds: every task directory and probe of each tree, the added
     one too, has its own target named after it, and `:examples` reaches it;
@@ -23,7 +22,8 @@ them (nothing builds them) and hold:
     aggregate reaches every task directory's target.
 """
 
-load(":ci_graph.bzl", "check_nodes", "closure", "render_all", "roots")
+load(":ci_graph.bzl", "check_nodes", "closure", "roots")
+load(":roots.bzl", "root_files")
 load(":rules.bzl", "AGGREGATE", "EXCLUDED")
 
 TASKS_PACKAGE = "komira//python/docs/tasks"
@@ -54,8 +54,9 @@ def _as_real(labels, package):
     return [TASKS_PACKAGE + l[len(package):] for l in labels]
 
 def generated_files_differ(before, after):
-    """The paths of the generated files whose lines differ between two
-    `render_all` outputs (path -> lines), sorted; [] when they are byte-identical."""
+    """The paths whose content differs between two maps of generated files (path ->
+    content, as `root_files` returns), a path only one side has among them, sorted;
+    [] when they are the same."""
     paths = sorted({p: True for p in before.keys() + after.keys()}.keys())
     return [p for p in paths if before.get(p) != after.get(p)]
 
@@ -74,12 +75,12 @@ def task_tree_cases(ctx):
     before = _fixture_nodes(ctx, _BEFORE)
     after = _fixture_nodes(ctx, _AFTER)
 
-    # adding a task directory leaves every generated file byte-identical
-    files_before = render_all(_as_real(roots(before), _BEFORE), [])
-    files_after = render_all(_as_real(roots(after), _AFTER), [])
+    # adding a task directory adds or deletes no root file
+    files_before = root_files(_as_real(roots(before), _BEFORE), [])
+    files_after = root_files(_as_real(roots(after), _AFTER), [])
     differ = generated_files_differ(files_before, files_after)
     if differ:
-        out.append("tasks: adding the task directory 3-c changed the generated files {}: the roots were {}, then {}".format(
+        out.append("tasks: adding the task directory 3-c changed the root files {}: the roots were {}, then {}".format(
             ", ".join(differ),
             roots(before),
             roots(after),
@@ -115,7 +116,7 @@ def task_tree_cases(ctx):
     if lost:
         out.append("tasks: {}:examples does not reach {}".format(TASKS_PACKAGE, ", ".join(lost)))
 
-    # the comparison itself: a differing shard is named, identical outputs name none
+    # the comparison itself: a differing file is named, identical outputs name none
     if generated_files_differ({"a": ["x"], "b": ["y"]}, {"a": ["x"], "b": ["z"]}) != ["b"]:
         out.append("tasks: generated_files_differ must name the one file whose lines differ")
     if generated_files_differ({"a": ["x"]}, {"a": ["x"], "c": []}) != ["c"]:

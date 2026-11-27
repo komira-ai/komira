@@ -39,7 +39,10 @@
     "slug": "find-fill-missing-values",
     "category": "Clean",
     "question": "How do I find and fill missing values?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2362"
+    ]
   },
   {
     "rank": 7,
@@ -171,14 +174,20 @@
     "slug": "parse-strings-dates",
     "category": "Time",
     "question": "How do I parse strings into dates?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2366"
+    ]
   },
   {
     "rank": 24,
     "slug": "compute-summary-statistics-column",
     "category": "Aggregate",
     "question": "How do I compute summary statistics of a column?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2367"
+    ]
   },
   {
     "rank": 25,
@@ -202,14 +211,20 @@
     "slug": "write-table-parquet",
     "category": "Write",
     "question": "How do I write a table to Parquet?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2368"
+    ]
   },
   {
     "rank": 28,
     "slug": "process-csv-larger-than-memory",
     "category": "Read",
     "question": "How do I process a CSV that does not fit in memory?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2369"
+    ]
   },
   {
     "rank": 29,
@@ -382,42 +397,63 @@
     "slug": "make-pivot-table",
     "category": "Aggregate",
     "question": "How do I make a pivot table?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2399",
+      "komira-ai/komira#2400"
+    ]
   },
   {
     "rank": 52,
     "slug": "melt-wide-data-long",
     "category": "Transform",
     "question": "How do I melt (unpivot) wide data to long?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2399",
+      "komira-ai/komira#2400"
+    ]
   },
   {
     "rank": 53,
     "slug": "reshape-long-data-wide",
     "category": "Transform",
     "question": "How do I reshape long data to wide?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2399",
+      "komira-ai/komira#2400"
+    ]
   },
   {
     "rank": 54,
     "slug": "cross-tabulate-two-columns",
     "category": "Transform",
     "question": "How do I cross-tabulate two columns?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2400"
+    ]
   },
   {
     "rank": 55,
     "slug": "replace-values-with-null",
     "category": "Clean",
     "question": "How do I replace specific values such as 'N/A' with null?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2401"
+    ]
   },
   {
     "rank": 56,
     "slug": "detect-outliers",
     "category": "Clean",
     "question": "How do I detect outliers?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2367"
+    ]
   },
   {
     "rank": 57,
@@ -445,7 +481,10 @@
     "slug": "convert-column-to-numbers",
     "category": "Clean",
     "question": "How do I convert a column to numbers, turning bad values into null?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2402"
+    ]
   },
   {
     "rank": 61,
@@ -570,7 +609,10 @@
     "slug": "compare-row-previous-row",
     "category": "Time",
     "question": "How do I compare each row with the previous row (lag, lead, change)?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2387"
+    ]
   },
   {
     "rank": 78,
@@ -587,14 +629,20 @@
     "slug": "add-days-date-take-difference-dates",
     "category": "Time",
     "question": "How do I add days to a date or take the difference between dates?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2388"
+    ]
   },
   {
     "rank": 80,
     "slug": "group-month-week",
     "category": "Time",
     "question": "How do I group by month or week?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2408"
+    ]
   },
   {
     "rank": 81,
@@ -611,7 +659,7 @@
     "slug": "convert-unix-timestamp-datetime-back",
     "category": "Time",
     "question": "How do I convert a Unix timestamp to a datetime and back?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
       "komira-ai/komira#2344"
     ]
@@ -676,7 +724,7 @@
     "slug": "bulk-load-large-file-database",
     "category": "Databases",
     "question": "How do I bulk-load a large file into a database?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
       "komira-ai/komira#2335"
     ]
@@ -686,8 +734,9 @@
     "slug": "keep-history-changing-rows",
     "category": "Databases",
     "question": "How do I keep history of changing rows (slowly changing dimension)?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
+      "komira-ai/komira#2334",
       "komira-ai/komira#2335"
     ]
   },

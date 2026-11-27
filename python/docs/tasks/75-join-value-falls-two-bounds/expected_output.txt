@@ -1,0 +1,2 @@
+[{'id': 1, 'reading': 5, 'band': 'low'}, {'id': 2, 'reading': 10, 'band': 'mid'}, {'id': 3, 'reading': 19, 'band': 'mid'}, {'id': 4, 'reading': 25, 'band': 'high'}]
+[{'id': 1, 'band': 'low'}, {'id': 2, 'band': 'mid'}, {'id': 4, 'band': 'high'}]

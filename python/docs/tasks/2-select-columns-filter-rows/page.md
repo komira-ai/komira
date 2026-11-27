@@ -60,7 +60,7 @@ Output:
 
 ## Related
 
-- How do I filter rows where a value is in a list? (rank 29, works; no page yet)
+- [How do I filter rows where a value is in a list?](../29-filter-rows-value-list/page.md) (rank 29, works)
 - How do I select or drop columns? (rank 34, works; no page yet)
 - How do I filter rows where a text column contains a substring? (rank 41, works; no page yet)
-- How do I filter rows by a date range? (rank 83, works; no page yet)
+- How do I filter rows by a date range? (rank 83, works)
