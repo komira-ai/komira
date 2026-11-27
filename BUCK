@@ -286,7 +286,8 @@ zig_test(
 # The cases of the buck2-farm action (.github/actions/buck2-farm/action_test.zig
 # says what each catches): action.yml's shape, and its two run lines run
 # end to end over recorded buck2 output with the real //tools/build/ci:assert_remote,
-# a cut connection to the farm run again once a farm on a loopback port of the case's
+# a cut connection to the farm, or a job the farm failed to start for an
+# unavailable input, run again once a farm on a loopback port of the case's
 # own answers (at most three runs) and every other failure not.
 zig_test(
     name = "buck2_farm_cases",

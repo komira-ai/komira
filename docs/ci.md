@@ -235,6 +235,18 @@ cut too. A log that mixes a real failure with cuts, a test whose output quotes
 the phrase among output of its own, a buck2 ended by a signal, and a subcommand
 other than build, test or bxl are never run again.
 
+The farm's refusal to start a job because an input the job named could not be
+read on the host it was placed on is run again the same way. The farm settles
+it as an infrastructure failure for the client to run again, and buck2 prints
+it in the place of the channel error, word for word
+`Error: (Error was returned on the stream by RE: the job failed to start: input-unavailable)`.
+A block with that line, or a test whose stderr has it right after the
+`Remote Execution Error on Execute` line, counts as the farm's failure just as
+a cut does, and a log may mix the two. Any other reason the farm gives for not
+starting a job (such as `input-not-allowed`) is final. The job summary line
+then names the cause: ``had jobs the farm failed to start (the farm's `input-unavailable` in each of 2 failed block(s))``,
+or both causes with a count for each.
+
 Before it runs again, the tool waits for the farm
 ([`farm_wait.zig`](../tools/build/ci/assert_remote/farm_wait.zig)): the same
 probe as farm-connect's (a TCP connection to the farm's port, 5 s for each try,
@@ -246,7 +258,7 @@ the farm is buck2's own `engine_address`, and the bound is
 run is to be run again; a missing file, or one with no address or no bound,
 fails the step with exit 2 and the reason, and nothing runs again.
 
-- **The farm answers.** The cut run's output is kept beside the log as
+- **The farm answers.** The failed run's output is kept beside the log as
   `buck2-farm.first.log` (`buck2-farm.second.log` after the second run), and
   the job summary gets one line naming the wait, such as
   ``buck2-farm: the first run of `build` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 4 failed block(s)); farm unreachable for 3 min 10 s; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log``
@@ -254,11 +266,11 @@ fails the step with exit 2 and the reason, and nothing runs again.
   command runs again.
 - **The bound passes first.** The job summary gets
   `...; farm unreachable for <N> min <M> s, the longest wait; not run again`,
-  the cut run's log stays in place (later steps that read the log, such as
+  the failed run's log stays in place (later steps that read the log, such as
   `release-macos.yml`'s report, read it), and the step fails with buck2's code.
 
-A step runs at most three times: a third run that is cut too fails the step,
-saying so. The wait reports itself and never hides an outage: each wait is a
+A step runs at most three times: a third run that fails on the farm too (cut,
+or with a job the farm failed to start) fails the step, saying so. The wait reports itself and never hides an outage: each wait is a
 line in the job summary, unlike a longer client timeout, which would hide it
 (komira-ai/komira#2269). Three runs, not two, because a lost connection can
 come back for a few minutes and drop again, and a second run cut that way
