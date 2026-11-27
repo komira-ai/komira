@@ -424,7 +424,10 @@ def test_an_endpoint_of_the_sources_own_is_read() raises:
     _bind(s, "upper_b", _source("GS://raw/t/b.parquet"))
     _same(_ints(_sql(s, "SELECT id FROM upper_b ORDER BY id")), _range(100, 9), "GS://")
     # Google's endpoint does not serve `emu`: the endpoint reached the store.
-    var refused = _refused(s, "x", _source("gs://emu/t/a.parquet"))
+    # A fresh session, since this one reads gs://emu at the emulator's
+    # endpoint and would refuse the second way with BIND_STORE_CONFLICT.
+    var fresh = _session()
+    var refused = _refused(fresh, "x", _source("gs://emu/t/a.parquet"))
     assert_true(
         refused.find("StoreError[NOT_FOUND] GetObject gs://emu/t/a.parquet") >= 0,
         refused,
