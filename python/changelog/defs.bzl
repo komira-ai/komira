@@ -5,7 +5,8 @@
 as a build action. The default output is the changelog with the new section of the build: `## 0.1.<n>` for a
 build stamped with `-c komira.package_stamp=<n>` (the stamp the wheel reads), `## Unreleased` for an unstamped
 one. The sub-target `[description]` is `readme` followed by that changelog with its headings one level down,
-the text of the wheel's page; `[sources]` is the staged tree, which does not depend on the stamp, for a test
+the text of the wheel's page, with every link to the repository's `main` pinned to the commit of a stamped build
+(`-c komira.package_commit=<sha>`); `[sources]` is the staged tree, which does not depend on the stamp, for a test
 that reads the files themselves. The action fails, naming the file and the line, on a fragment or a changelog
 the tool refuses, so building the target is checking the entries.
 """
@@ -32,7 +33,8 @@ def _changelog_file_impl(ctx):
     subs = {"sources": [DefaultInfo(default_output = tree)]}
     if ctx.attrs.readme != None:
         description = ctx.actions.declare_output("description.md")
-        run("description", description, ["--readme", ctx.attrs.readme])
+        commit = ["--commit", ctx.attrs.commit] if ctx.attrs.commit else []
+        run("description", description, commit + ["--readme", ctx.attrs.readme])
         subs["description"] = [DefaultInfo(default_output = description)]
     return [DefaultInfo(default_output = assembled, sub_targets = subs)]
 
@@ -42,15 +44,18 @@ _changelog_file = rule(
         "changelog": attrs.source(),
         "fragments": attrs.list(attrs.source(), default = []),
         "readme": attrs.option(attrs.source(), default = None),
-        # The stamp (-c komira.package_stamp), set by the macro.
+        # The stamp (-c komira.package_stamp) and the commit (-c komira.package_commit, "" for none), set by the
+        # macro; the tool refuses one without the other.
+        "commit": attrs.string(),
         "stamp": attrs.string(),
         "_tool": attrs.exec_dep(default = "komira//python/changelog:changelog", providers = [RunInfo]),
     },
 )
 
 def _changelog_file_macro(**kwargs):
-    # The stamp is read here, in the macro, so it keys only this target, as the wheel's does.
+    # The stamp and the commit are read here, in the macro, so they key only this target, as the wheel's do.
     _changelog_file(
+        commit = read_config("komira", "package_commit", ""),
         stamp = read_config("komira", "package_stamp", "0"),
         exec_compatible_with = LINUX_X86_64,
         **kwargs

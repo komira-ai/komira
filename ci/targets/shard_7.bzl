@@ -5,8 +5,11 @@
 TARGETS = [
     "komira//node:arrow_test",
     "komira//node:load_test",
+    "komira//node:package",
+    "komira//node:package_linux_x64",
     "komira//node:package_test",
     "komira//node:session_test",
+    "komira//node:sql_conformance_test",
     "komira//node:thread_test",
     "komira//node:typecheck",
     "komira//python/smoke:pypi_smoke",
@@ -120,6 +123,7 @@ TARGETS = [
     "tests//functional/rustc_launch:driver",
     "tests//functional/src_layout:doc_tree",
     "tests//functional/src_layout:ok",
+    "tests//functional/surface_capability_matrix/src/tests/e2e/polars_e2e:test_filter",
 ]
 
 TESTS = [
@@ -127,5 +131,6 @@ TESTS = [
     "komira//src/iceberg_catalog:test_iceberg_rest_loopback",
     "komira//src/tests/helpers/komira_udf_spike_native:native_bench",
     "komira//tools/build/proto-codegen:xml_equiv_verdicts_test",
+    "tests//functional/surface_capability_matrix/src/tests/e2e/polars_e2e:test_filter",
 ]
 

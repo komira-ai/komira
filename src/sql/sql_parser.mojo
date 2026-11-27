@@ -28,6 +28,7 @@ from containers.slab import Slab
 
 from .sql_copy_format import copy_codec_from_path, copy_format_from_path
 from .sql_interval_parse import interval_literal_starts, parse_interval_literal
+from .sql_nesting import enter_sql_nesting, primary_opens_a_level
 from .sql_token import (
     Token,
     TK_EOF, TK_IDENT, TK_INT, TK_FLOAT, TK_STRING, TK_LPAREN, TK_RPAREN,
@@ -104,12 +105,16 @@ struct _Parser(Movable):
     # v1.5.3). Saved / reset / restored by `_parse_select_stmt`; see
     # `_parse_derived_table`.
     var unnamed_derived: Int
+    # How many nested constructs the parser is inside right now
+    # (`sql_nesting`).
+    var nesting: Int
 
     def __init__(out self, var tokens: List[Token]):
         self.tokens = tokens^
         self.pos = 0
         self.subqueries = Slab[SubqueryDef]()
         self.unnamed_derived = 0
+        self.nesting = 0
 
     @always_inline
     def _kind(self) -> UInt8:
@@ -171,6 +176,14 @@ struct _Parser(Movable):
         var subs = Slab[SubqueryDef]()
         swap(subs, self.subqueries)
         st.query.subqueries = subs^
+
+    def _parse_nested_select(mut self) raises -> SelectStmt:
+        """`_parse_select_stmt` for a SELECT inside a subquery or derived table,
+        counted as one level of nesting."""
+        enter_sql_nesting(self.nesting)
+        var body = self._parse_select_stmt()
+        self.nesting -= 1
+        return body^
 
     def _parse_query_body(mut self) raises -> SelectStmt:
         """Parse `WITH? SELECT ...` into a `SelectStmt` (WITHOUT the trailing
@@ -1470,8 +1483,12 @@ struct _Parser(Movable):
         self._advance()  # '('
         if not self._is_kw("select"):
             raise Error("SQL syntax error: expected SELECT in a derived table")
+        # The level covers the set operations' branches too: each one may
+        # hold a derived table of its own.
+        enter_sql_nesting(self.nesting)
         var body = self._parse_select_stmt()
         self._parse_set_operator_tail(body)
+        self.nesting -= 1
         self._expect(TK_RPAREN, "')' to close the derived table")
         var d_alias = self._parse_optional_alias()
         # ★ AN UNALIASED DERIVED TABLE. DuckDB v1.5.3
@@ -1863,7 +1880,9 @@ struct _Parser(Movable):
             ref nx = self.tokens[self.pos + 1]
             if not (nx.kind == TK_IDENT and nx.text == "exists"):
                 self._advance()  # consume NOT
+                enter_sql_nesting(self.nesting)
                 var operand = self._parse_not()  # right-associative: NOT NOT x
+                self.nesting -= 1
                 # `NOT (x IN (...))` is DuckDB's NOT IN:
                 # re-mark the IN list's comparisons so the binder keeps a cast.
                 _mark_in_list_negated(operand)
@@ -2049,7 +2068,7 @@ struct _Parser(Movable):
             # correlated subquery (SEMI / ANTI) with a synthesized
             # `inner_proj = x` equi-key. The LHS must be a column.
             if self._is_kw("select"):
-                var sq_body = self._parse_select_stmt()
+                var sq_body = self._parse_nested_select()
                 self._expect(TK_RPAREN, "')' to close IN subquery")
                 if left.tag != SX_COLUMN:
                     raise Error("SQL not supported: `IN (subquery)` requires a column on the left")
@@ -2061,7 +2080,9 @@ struct _Parser(Movable):
             # via `.copy()`; the original is dropped when this scope ends.
             var acc: Optional[SqlExpr] = None
             while True:
+                enter_sql_nesting(self.nesting)
                 var v = self._parse_expr()
+                self.nesting -= 1
                 var cmp: SqlExpr
                 # ⛔ THE DESUGARED COMPARISON REMEMBERS IT CAME FROM AN IN LIST.
                 # DuckDB 1.5.3 unwraps
@@ -2196,7 +2217,7 @@ struct _Parser(Movable):
         self._expect(TK_LPAREN, "'(' after EXISTS")
         if not self._is_kw("select"):
             raise Error("SQL syntax error: EXISTS expects a subquery `(SELECT ...)`")
-        var body = self._parse_select_stmt()
+        var body = self._parse_nested_select()
         self._expect(TK_RPAREN, "')' to close EXISTS subquery")
         var kind = SUBQ_NOT_EXISTS if negate else SUBQ_EXISTS
         var idx = len(self.subqueries)
@@ -2317,6 +2338,17 @@ struct _Parser(Movable):
         return left^
 
     def _parse_unary(mut self) raises -> SqlExpr:
+        """A prefix `+`, `-` or `@` operator counts as one level of nesting."""
+        var k = self._kind()
+        var prefix = k == TK_PLUS or k == TK_MINUS or k == TK_AT
+        if prefix:
+            enter_sql_nesting(self.nesting)
+        var e = self._parse_unary_body()
+        if prefix:
+            self.nesting -= 1
+        return e^
+
+    def _parse_unary_body(mut self) raises -> SqlExpr:
         if self._kind() == TK_PLUS:
             # Unary plus is the identity (`+0.5` is DECIMAL(2, 1) 0.5, `- +0.5`
             # is -0.5): it binds as its operand does, so a literal stays one.
@@ -2483,6 +2515,18 @@ struct _Parser(Movable):
         return ty^
 
     def _parse_primary(mut self) raises -> SqlExpr:
+        """A parenthesised expression, a function call and a CASE count as one
+        level of nesting each; a parenthesised SELECT counts in
+        `_parse_nested_select`."""
+        var nests = primary_opens_a_level(self.tokens, self.pos)
+        if nests:
+            enter_sql_nesting(self.nesting)
+        var e = self._parse_primary_body()
+        if nests:
+            self.nesting -= 1
+        return e^
+
+    def _parse_primary_body(mut self) raises -> SqlExpr:
         var k = self._kind()
         if k == TK_INT:
             var v = self.tokens[self.pos].int_val
@@ -2511,7 +2555,7 @@ struct _Parser(Movable):
             # the subquery gets the entire grammar. The binder lowers it to an
             # uncorrelated `CORR_KIND_SCALAR` subquery -> broadcast cross-join.
             if self._is_kw("select"):
-                var body = self._parse_select_stmt()
+                var body = self._parse_nested_select()
                 self._expect(TK_RPAREN, "')' to close subquery")
                 # Park the body in the flat side-table; the node carries only
                 # its index. A NESTED subquery inside `body` was appended by the

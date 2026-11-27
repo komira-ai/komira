@@ -311,7 +311,7 @@ static int32_t make_dirs(udfpy_rt* rt, char* dir, size_t n, komira_udf_error* er
 
 static int spawn(udfpy_rt* rt, udfpy_gen* g, const char* dir, komira_udf_error* err) {
   int sv[2];
-  if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) != 0)
+  if (udfpy_socketpair(sv) != 0)
     return udfpy_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "socketpair: %s", strerror(errno));
   int child = high_fd(sv[1]);
   if (child < 0) {
@@ -349,7 +349,14 @@ static int spawn(udfpy_rt* rt, udfpy_gen* g, const char* dir, komira_udf_error* 
   posix_spawn_file_actions_adddup2(&fa, child, 3);
   posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", O_RDONLY, 0);
   posix_spawn_file_actions_addchdir_np(&fa, cwd);
+#ifdef __APPLE__
+  /* No closefrom action on macOS: every descriptor is closed but 0, 1, 2
+   * and 3 (POSIX_SPAWN_CLOEXEC_DEFAULT keeps those the actions make). */
+  posix_spawn_file_actions_addinherit_np(&fa, 1);
+  posix_spawn_file_actions_addinherit_np(&fa, 2);
+#else
   posix_spawn_file_actions_addclosefrom_np(&fa, 4);
+#endif
   posix_spawnattr_init(&attr);
   sigset_t none, all;
   sigemptyset(&none);
@@ -357,7 +364,12 @@ static int spawn(udfpy_rt* rt, udfpy_gen* g, const char* dir, komira_udf_error* 
   posix_spawnattr_setsigmask(&attr, &none);
   posix_spawnattr_setsigdefault(&attr, &all);
   posix_spawnattr_setpgroup(&attr, 0);
+#ifdef __APPLE__
+  posix_spawnattr_setflags(&attr,
+                           POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT);
+#else
   posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETPGROUP);
+#endif
   pid_t pid = -1;
   int rc = posix_spawn(&pid, rt->opt.interpreter, &fa, &attr, (char* const*)argv, envp);
   posix_spawn_file_actions_destroy(&fa);

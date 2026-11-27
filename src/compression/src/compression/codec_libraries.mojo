@@ -21,11 +21,20 @@
 # that codec can be read or written. `_open_codec_library` is the opener the
 # init functions call; it raises, so a test can call it with a soname that
 # does not exist and check the message the abort would carry.
+#
+# `probe_codec_libraries` opens libzstd, libz and liblz4 through that raising
+# opener and drops each handle: a caller that must not die on a missing
+# library (libkomira) calls it before the first codec use, so a missing
+# library is a raise with the opener's message and the `_Global` init, which
+# runs later, finds the library. bz2 and lzma are not probed.
 # =============================================================================
 
 from std.ffi import OwnedDLHandle, _Global
 from std.os import abort
 from std.sys.info import CompilationTarget
+
+from lz4.codec import LIBLZ4_SONAME
+from zlib import LIBZ_SONAME
 
 
 # The sonames, per OS.
@@ -49,6 +58,30 @@ def _open_codec_library(soname: String) raises -> OwnedDLHandle:
         raise Error(
             "compression: cannot load " + soname + ": " + String(e)
         )
+
+
+def probe_libraries(sonames: List[String]) raises:
+    """Open each of `sonames` in order and drop the handle; raise `compression:
+    cannot load <soname>: <the loader's error>` for the first that cannot be
+    loaded."""
+    for soname in sonames:
+        _ = _open_codec_library(soname)
+
+
+def codec_probe_sonames() -> List[String]:
+    """The libraries `probe_codec_libraries` opens, in order: libzstd, libz,
+    liblz4."""
+    var sonames = List[String]()
+    sonames.append(String(LIBZSTD_SONAME))
+    sonames.append(String(LIBZ_SONAME))
+    sonames.append(String(LIBLZ4_SONAME))
+    return sonames^
+
+
+def probe_codec_libraries() raises:
+    """Open libzstd, libz and liblz4 (`codec_probe_sonames`), raising the
+    opener's error naming the first that cannot be loaded."""
+    probe_libraries(codec_probe_sonames())
 
 
 def _open_or_abort(soname: String) -> OwnedDLHandle:

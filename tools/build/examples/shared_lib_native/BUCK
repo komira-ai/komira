@@ -1,4 +1,5 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_shared_lib")
+load("@komira//tools/build/mojo:c_abi_check.bzl", "komira_c_abi_check")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_shared_lib")
 
 # One C-ABI export whose Mojo closure reaches libc, a library that owns
 # C and ships it as its own shared library. `native_owners` links that shared
@@ -12,4 +13,31 @@ mojo_shared_lib(
     gate_srcs = ["call_driver.mojo"],
     deps = ["//src/libc:libc"],
     native_owners = ["//src/libc:komira_libc_native"],
+    # tests//negative/shared_lib:dist_without_owner reads its [dist].
+    visibility = ["PUBLIC"],
+)
+
+# The gate driver, for its negative twin
+# tests//negative/shared_lib:owner_embedded_bound.
+export_file(
+    name = "call_driver.mojo",
+    visibility = ["PUBLIC"],
+)
+
+# A host of `[dist]`, the directory a language package copies: dist_load.mojo
+# opens the library from a copy of it at ./dist, with no other copy of the owner
+# in the run tree, and calls the export (on Linux and macOS arm64).
+# tests//negative/shared_lib:dist_without_owner is the same check on that
+# directory with the owner left out, and fails.
+mojo_binary(
+    name = "dist_load",
+    srcs = ["dist_load.mojo"],
+    visibility = ["PUBLIC"],
+)
+
+komira_c_abi_check(
+    name = "spike_native_dist_load",
+    driver = ":dist_load",
+    lib = ":spike_native",
+    data = {"dist": ":spike_native[dist]"},
 )

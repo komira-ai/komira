@@ -16,7 +16,9 @@
 #                  paths that must widen, the log and failure text.
 #   the rest       the aggregate's generator, shards and guards, the
 #                  toolchains per platform, the macOS selection, the checks of
-#                  the Python tests' suite (python/tests/families.bzl).
+#                  the Python tests' suite (python/tests/families.bzl), and
+#                  the common-task examples' one row in the generated list
+#                  (tasks_cases.bzl, over python/docs/task_tree_fixture/).
 #
 # Each case names what it proves.
 
@@ -28,6 +30,7 @@ load(":darwin_cases.bzl", "darwin_answer_cases", "darwin_real_cases", "darwin_ta
 load(":mojo_next.bzl", "TWINS")
 load(":mojo_next_cases.bzl", "mojo_next_real_cases", "mojo_next_table_cases")
 load(":heavy_cases.bzl", "heavy_cases")
+load(":tasks_cases.bzl", "task_tree_cases")
 load(":rules.bzl", "EXCLUDED", "INERT", "WIDEN")
 load(":affected.bxl", "CONFIG")
 load(":ci_graph.bzl", "check_nodes", "closure", "findings", "python_findings", "python_nodes", "render_all", "render_loader", "render_shard", "roots", "sdk_own_deps", "shard_findings", "shard_of", "SHARDS", "LINE_LIMIT")
@@ -223,6 +226,20 @@ def _roots_cases():
     }
     if roots(plain) != ["k//p:top"]:
         out.append("roots: an ordinary dependent still removes its dependency from the roots: got {}".format(roots(plain)))
+    # The surface capability matrix names each cell's test and builds none:
+    # the tests stay roots beside it. The library a test compiles against is
+    # an ordinary dependency, so it is no root.
+    matrix_kind = "komira//tools/build/lint/surface_capability_matrix.bzl:_surface_capability_matrix_rule"
+    test_kind = "komira//tools/build/mojo/defs.bzl:mojo_test_rule"
+    lib_kind = "komira//tools/build/mojo/defs.bzl:mojo_library_rule"
+    named = {
+        "k//:matrix": _fake("k//:matrix", matrix_kind, ["k//e:test_a", "k//e:test_b"]),
+        "k//e:lib": _fake("k//e:lib", lib_kind),
+        "k//e:test_a": _fake("k//e:test_a", test_kind, ["k//e:lib"]),
+        "k//e:test_b": _fake("k//e:test_b", test_kind, ["k//e:lib"]),
+    }
+    if roots(named) != ["k//:matrix", "k//e:test_a", "k//e:test_b"]:
+        out.append("roots: the tests the surface capability matrix names stay roots, the library they compile against is not: got {}".format(roots(named)))
     return out
 
 def _registration_cases(ctx):
@@ -629,7 +646,7 @@ def _shard_cases():
 
 def _run(ctx):
     table = _shard_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _shipped_config_cases() + heavy_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _proto_toolchain_cases(ctx) + _adopted_darwin_cases(ctx) + darwin_table_cases() + mojo_next_table_cases() + python_tests_cases()
-    real = _real_cases(ctx) + darwin_real_cases(ctx, DARWIN_PACKAGES, "komira//release:mopm_darwin_libs") + darwin_answer_cases(DARWIN_PACKAGES, "komira//release:mopm_darwin_libs") + mojo_next_real_cases(ctx, TWINS)
+    real = _real_cases(ctx) + darwin_real_cases(ctx, DARWIN_PACKAGES, "komira//release:mopm_darwin_libs") + darwin_answer_cases(DARWIN_PACKAGES, "komira//release:mopm_darwin_libs") + mojo_next_real_cases(ctx, TWINS) + task_tree_cases(ctx)
     failures = table + real
     if failures:
         fail("{} case(s) failed:\n  ".format(len(failures)) + "\n  ".join(failures))

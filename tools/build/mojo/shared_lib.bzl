@@ -162,11 +162,20 @@ def _shared_lib_impl(ctx):
     # symbols the owner defines are bound to it. The gate stages each owner
     # and everything it NEEDs in lib/ beside the library, where its run path
     # (`$ORIGIN/lib`) finds them.
+    #
+    # macOS arm64: the same link line. ld64 records each owner by the install
+    # name the owner was linked with (`@rpath/libkomira_<library>_native.1.dylib`,
+    # tools/build/native/shared.bzl) as an LC_LOAD_DYLIB, and binds each name
+    # the owner exports to it (two-level namespace: the symbol carries that
+    # library's ordinal). The library's run path, `@loader_path/lib`, finds
+    # the owner in the lib/ staged here, and an owner that needs another
+    # finds it beside itself through its own `@loader_path`. No codesign
+    # step: ld64 signs an arm64 output ad hoc as it writes it, and nothing
+    # rewrites the file afterwards (no install_name_tool), so the copies the
+    # gate and `[dist]` make keep a valid signature.
     link_head = None
     owner_files = {}
     if ctx.attrs.native_owners:
-        if darwin:
-            fail("{}: `native_owners` is Linux only: an owner's shared library builds on macOS (tools/build/native/shared.bzl), but no mojo_shared_lib links and stages one there yet".format(ctx.label))
         link_head = cmd_args([o[NativeSharedInfo].so for o in ctx.attrs.native_owners])
         for o in ctx.attrs.native_owners:
             for soname, so in o[NativeSharedInfo].closure.items():
@@ -284,12 +293,16 @@ def _shared_lib_impl(ctx):
     else:
         # macOS arm64: the gated .dylib and, in lib/ (its run path,
         # `@loader_path/lib`), the three Mojo runtime libraries of the darwin
-        # row. No owner libraries (refused above) and no C++ runtime: libc++
-        # and libSystem are the operating system's. The same directory a
+        # row and each native owner's closure. No C++ runtime: libc++ and
+        # libSystem are the operating system's. The same directory a
         # language package copies, as on Linux.
         dist = {so_file: public}
         for name in row("darwin-arm64")["runtime_libs"]:
             dist["lib/" + name] = tc.runtime.project(name)
+        for dest, so in owner_files.items():
+            if dest in dist:
+                fail("{}: native owner library {} is also a Mojo runtime library".format(ctx.label, dest))
+            dist[dest] = so
         sub_targets["dist"] = [DefaultInfo(default_output = ctx.actions.copied_dir(out_name + ".dist", dist))]
     return [DefaultInfo(
         default_output = public,

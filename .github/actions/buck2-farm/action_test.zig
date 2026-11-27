@@ -5,7 +5,12 @@
 //! zig_test's `data`, under KOMIRA_TEST_WORK) and checks its shape, then runs
 //! its two `run:` lines the way a runner does (`sh -e -o pipefail -c`, with
 //! the busybox sh), each with its `env:` filled from the case and
-//! GITHUB_STEP_SUMMARY a file of the case. `./buck2` of a case is
+//! GITHUB_STEP_SUMMARY a file of the case, and HOME a directory of the case
+//! holding the machine buckconfig farm-connect writes
+//! (`.buckconfig.d/farm.buckconfig`), whose `engine_address` is a loopback
+//! port of the case's own (port 0): one that listens, so the farm answers at
+//! once, or one bound but not listening, so it never answers (with a longest
+//! wait of 0 s, so no case sleeps). `./buck2` of a case is
 //! `stand_in_buck2` (//tools/build/ci:stand_in_buck2), which plays one
 //! recorded buck2 output per call (the tool's fixtures,
 //! //tools/build/ci:assert_remote_fixtures, or a log the case derived from
@@ -22,10 +27,18 @@
 //!    the job; a buck2 that fails after printing a good summary fails the
 //!    first step, run once; a fully cached run, which prints no summary, passes;
 //!  - a cut connection to the farm: a cut, then a pass, is green after two
-//!    runs (a build and a test step), the job summary says so and the first
-//!    log is kept; a cut twice is red after two runs, never three, and says
-//!    the second was cut too; a cut then a real failure is red and names that
-//!    failure; a compile error, a build with a compile error beside cuts, a
+//!    runs (a build and a test step), the job summary says the farm answered
+//!    and the step ran again, and the first log is kept; a cut twice, then a
+//!    pass, is green after three runs with two summary lines and both cut
+//!    logs kept; a cut three times is red after three runs, never four, and
+//!    says the third was cut too; a cut then a real failure is red and names
+//!    that failure; a cut while the farm does not answer within the longest
+//!    wait is red after one run, the summary saying how long the farm was
+//!    unreachable and that the step was not run again, the cut run's log left
+//!    where the tool step and later steps read it; a farm config that is
+//!    missing, or names no longest wait, ends a cut step with exit 2 and the
+//!    reason, never with a run again unbounded, while a passing run or a real
+//!    failure never reads it; a compile error, a build with a compile error beside cuts, a
 //!    test failure beside a cut and a test whose output prints the cut line
 //!    are red after one run, with no first log and nothing in the summary; a
 //!    subcommand other than build, test or bxl is never run again; a second
@@ -89,7 +102,7 @@ test "the two steps are the tool running buck2 and the tool reading its log, eac
     // bash, never sh: a runner's bash is `bash -eo pipefail`, its sh is `sh -e`
     try t.expectEqualStrings("bash", steps[0].shell);
     try t.expectEqualStrings("bash", steps[1].shell);
-    try t.expectEqualStrings("\"$ASSERT_REMOTE\" run --log \"$BUCK2_LOG\" --summary \"$GITHUB_STEP_SUMMARY\" -- ./buck2 $BUCK2_ARGS", steps[0].run);
+    try t.expectEqualStrings("\"$ASSERT_REMOTE\" run --log \"$BUCK2_LOG\" --summary \"$GITHUB_STEP_SUMMARY\" --farm-config \"$HOME/.buckconfig.d/farm.buckconfig\" -- ./buck2 $BUCK2_ARGS", steps[0].run);
     try t.expectEqualStrings("\"$ASSERT_REMOTE\" \"$BUCK2_LOG\"", steps[1].run);
 }
 
@@ -261,7 +274,38 @@ const Setup = struct {
     log_dir_missing: bool = false,
     /// There is no `./buck2`.
     no_buck2: bool = false,
+    /// The farm the machine buckconfig names, and how the buckconfig is.
+    farm: enum {
+        /// A listening loopback port: it answers at once.
+        answers,
+        /// A loopback port bound and not listening, with a longest wait of 0 s.
+        never_answers,
+        /// No machine buckconfig at all.
+        no_config,
+        /// A machine buckconfig without `farm_wait_seconds`.
+        no_wait,
+    } = .answers,
 };
+
+/// The machine buckconfig farm-connect writes, for a farm at 127.0.0.1:`port`
+/// and a longest wait of `wait` (no `[komira_ci]` when null).
+fn farmConfig(ar: std.mem.Allocator, port: u16, wait: ?u32) ![]u8 {
+    var out = std.ArrayList(u8).empty;
+    if (wait) |s| try out.print(ar, "[komira_ci]\n  farm_wait_seconds = {d}\n", .{s});
+    try out.print(ar, "[buck2_re_client]\n  engine_address = grpc://127.0.0.1:{d}\n  instance_name = main\n  tls = false\n[komira_re]\n  linux_x86_64_properties = OSFamily=Linux\n", .{port});
+    return out.items;
+}
+
+/// A loopback port of the case's own that refuses every connection: bound, not listening.
+fn refusingPort() !struct { fd: std.posix.socket_t, port: u16 } {
+    const fd = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.STREAM | std.posix.SOCK.CLOEXEC, std.posix.IPPROTO.TCP);
+    errdefer std.posix.close(fd);
+    var addr = try std.net.Address.parseIp("127.0.0.1", 0);
+    try std.posix.bind(fd, &addr.any, addr.getOsSockLen());
+    var len = addr.getOsSockLen();
+    try std.posix.getsockname(fd, &addr.any, &len);
+    return .{ .fd = fd, .port = addr.getPort() };
+}
 
 fn runCaseWith(ar: std.mem.Allocator, subcommand: []const u8, runs: []const Run, setup: Setup) !Case {
     const steps = try loadSteps(ar);
@@ -301,6 +345,29 @@ fn runCaseWith(ar: std.mem.Allocator, subcommand: []const u8, runs: []const Run,
     if (setup.summary_is_dir) try std.fs.cwd().makePath(summary);
     try env.put("GITHUB_STEP_SUMMARY", summary);
     try env.put("ASSERT_REMOTE", try std.process.getEnvVarOwned(ar, "ASSERT_REMOTE"));
+    // The farm: open for the whole case, closed when it ends.
+    try env.put("HOME", dir);
+    var listener: ?std.net.Server = null;
+    defer if (listener) |*l| l.deinit();
+    var refusing: ?std.posix.socket_t = null;
+    defer if (refusing) |fd| std.posix.close(fd);
+    const config: ?[]const u8 = switch (setup.farm) {
+        .answers, .no_wait => c: {
+            listener = try (try std.net.Address.parseIp("127.0.0.1", 0)).listen(.{});
+            break :c try farmConfig(ar, listener.?.listen_address.getPort(), if (setup.farm == .answers) 1200 else null);
+        },
+        .never_answers => c: {
+            const r = try refusingPort();
+            refusing = r.fd;
+            break :c try farmConfig(ar, r.port, 0);
+        },
+        .no_config => null,
+    };
+    if (config) |text| {
+        const config_dir = try std.fs.path.join(ar, &.{ dir, ".buckconfig.d" });
+        try std.fs.cwd().makePath(config_dir);
+        try std.fs.cwd().writeFile(.{ .sub_path = try std.fs.path.join(ar, &.{ config_dir, "farm.buckconfig" }), .data = text });
+    }
     const first = try runLine(ar, dir, steps[0].run, &env);
     var c: Case = .{ .code = first.code, .step = 1, .out1 = first.out, .out2 = "", .runs = 0, .dir = dir };
     const calls = (try c.file(ar, "stand_in_buck2.calls")) orelse "";
@@ -390,7 +457,8 @@ test "a buck2 that exits non-zero after a good summary fails the first step, run
 
 // ---- a cut connection to the farm ------------------------------------------------
 
-const summary_line = "buck2-farm: `build` ran again after a cut connection to the farm (buck2's `RE channel error` in each of 4 failed block(s)); the first run's log is buck2-farm.first.log\n";
+const summary_line = "buck2-farm: the first run of `build` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 4 failed block(s)); the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log\n";
+const summary_line_second = "buck2-farm: the second run of `build` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 4 failed block(s)); the farm answered at once; ran again (run 3 of at most 3); the second run's log is buck2-farm.second.log\n";
 
 /// The lines of `log` from the first holding `marker` to the empty line after it.
 fn firstBlock(log: []const u8, marker: []const u8) ![]const u8 {
@@ -464,21 +532,103 @@ test "a test step cut, then a pass: green after two runs" {
     try t.expectEqual(@as(u8, 2), c.step);
     try t.expectEqual(@as(u8, 0), c.code);
     try t.expectEqual(@as(usize, 2), c.runs);
-    try t.expectEqualStrings("buck2-farm: `test` ran again after a cut connection to the farm (buck2's `RE channel error` in each of 1 failed block(s)); the first run's log is buck2-farm.first.log\n", (try c.file(a, "summary.md")).?);
+    try t.expectEqualStrings("buck2-farm: the first run of `test` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 1 failed block(s)); the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log\n", (try c.file(a, "summary.md")).?);
 }
 
-test "a cut twice: red after two runs, never a third, saying the second run was cut too" {
+test "a cut twice, then a pass: green after three runs, a summary line for each cut, both cut logs kept" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     const c = try runCase(a, "build", &.{ fixture("build_cut.log", 2), fixture("build_cut.log", 2), fixture("build_remote.log", 0) });
     errdefer show(c);
+    try t.expectEqual(@as(u8, 2), c.step);
+    try t.expectEqual(@as(u8, 0), c.code);
+    try t.expectEqual(@as(usize, 3), c.runs);
+    try t.expectEqualStrings(summary_line ++ summary_line_second, (try c.file(a, "summary.md")).?);
+    try t.expect(has(c.out1, "buck2-farm: the third run passed\n"));
+    try t.expectEqualStrings(try recorded(a, "build_cut.log"), (try c.file(a, "buck2-farm.first.log")).?);
+    try t.expectEqualStrings(try recorded(a, "build_cut.log"), (try c.file(a, "buck2-farm.second.log")).?);
+    try t.expectEqualStrings(try recorded(a, "build_remote.log"), (try c.file(a, "buck2-farm.log")).?);
+    try t.expect(std.mem.startsWith(u8, c.out2, "assert_remote: ok"));
+}
+
+test "a cut three times: red after three runs, never a fourth, saying the third run was cut too" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCase(a, "build", &.{ fixture("build_cut.log", 2), fixture("build_cut.log", 2), fixture("build_cut.log", 2), fixture("build_remote.log", 0) });
+    errdefer show(c);
     try t.expectEqual(@as(u8, 1), c.step);
     try t.expectEqual(@as(u8, 2), c.code); // buck2's own exit code
-    try t.expectEqual(@as(usize, 2), c.runs);
-    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: FAILED: the second run was cut too: the connection to the farm was cut again (buck2's `RE channel error`); not run a third time\n"));
-    try t.expectEqualStrings(summary_line, (try c.file(a, "summary.md")).?);
+    try t.expectEqual(@as(usize, 3), c.runs);
+    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: FAILED: the third run was cut too: the connection to the farm was cut in each of 3 runs (buck2's `RE channel error`); not run again\n"));
+    try t.expectEqualStrings(summary_line ++ summary_line_second, (try c.file(a, "summary.md")).?);
     try t.expect((try c.file(a, "buck2-farm.first.log")) != null);
+    try t.expect((try c.file(a, "buck2-farm.second.log")) != null);
+    // the third run's log stays where the tool step and later steps read it
+    try t.expectEqualStrings(try recorded(a, "build_cut.log"), (try c.file(a, "buck2-farm.log")).?);
+}
+
+test "a cut while the farm does not answer within the longest wait: red after one run, the summary names the wait" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCaseWith(a, "build", &.{ fixture("build_cut.log", 2), fixture("build_remote.log", 0) }, .{ .farm = .never_answers });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 2), c.code); // buck2's own exit code
+    try t.expectEqual(@as(usize, 1), c.runs);
+    const line = "buck2-farm: the first run of `build` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 4 failed block(s)); farm unreachable for 0 min 0 s, the longest wait; not run again\n";
+    try t.expectEqualStrings(line, (try c.file(a, "summary.md")).?);
+    try t.expect(std.mem.endsWith(u8, c.out1, line ++ "buck2-farm: FAILED: the farm did not answer within the longest wait\n"));
+    // not run again, so the cut run's log is not moved
+    try t.expect((try c.file(a, "buck2-farm.first.log")) == null);
+    try t.expectEqualStrings(try recorded(a, "build_cut.log"), (try c.file(a, "buck2-farm.log")).?);
+}
+
+/// A cut step whose farm config cannot give a farm: exit 2 after one run, `why` said, no summary.
+fn expectNoFarm(setup: Setup, why: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCaseWith(a, "build", &.{ fixture("build_cut.log", 2), fixture("build_remote.log", 0) }, setup);
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 2), c.code);
+    try t.expectEqual(@as(usize, 1), c.runs);
+    try t.expect(has(c.out1, why));
+    try t.expect((try c.file(a, "summary.md")) == null);
+    try t.expect((try c.file(a, "buck2-farm.first.log")) == null);
+}
+
+test "a cut with no machine buckconfig ends the step with exit 2, not run again" {
+    try expectNoFarm(.{ .farm = .no_config }, "buck2-farm: not run again: cannot read the farm config ");
+}
+
+test "a cut with a machine buckconfig that names no longest wait ends the step with exit 2, not run again" {
+    try expectNoFarm(.{ .farm = .no_wait }, "names no farm: it has no farm_wait_seconds under [komira_ci]\n");
+}
+
+test "a passing run never reads the farm config" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const c = try runCaseWith(arena.allocator(), "build", &.{fixture("build_remote.log", 0)}, .{ .farm = .no_config });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 2), c.step);
+    try t.expectEqual(@as(u8, 0), c.code);
+    try t.expectEqual(@as(usize, 1), c.runs);
+}
+
+test "a real failure is final without the farm config, with buck2's own exit code" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCaseWith(a, "build", &.{ derived(try compileError(a), 3), fixture("build_remote.log", 0) }, .{ .farm = .no_config });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 3), c.code);
+    try t.expectEqual(@as(usize, 1), c.runs);
+    try t.expect(has(c.out1, "buck2-farm: not run again: a failure that is not a cut connection: "));
 }
 
 test "a cut, then a real failure: red, naming the failure of the second run" {

@@ -37,14 +37,14 @@ GRAPH_JSON = r'''{
       "kind": "lib",
       "root": "src/zlib/src/zlib",
       "srcs": [
-        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "d16afac82d5c8ca46ec620dd671830a2bbaf654ecb3e465f6b2ff299a160584f"},
-        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "e51ec456ca1df8df4f608883c118665a6f1cede91d55fa4dfdfd3301e90df148"}
+        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "0119e9a7efc28400ab692b924492d62e240245938f6d92ae6367d7e39891360e"},
+        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "99b80cc1871cce189c06c41127710fe0506af933ea56d2e628c8dfac54d61132"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["zlib.mojoc"],
-      "key": "02bf95016ca397c567460ef138237d3f5666d2723832e96766be00779f1ec4d9"
+      "key": "7d02c10d9cd77530ee779037c24a446cc6ef89c000b61992f590b0285579cabf"
     },
     {
       "id": "komira-ai/zlib@0.1.0#mojo1.1.0/test:src/zlib/tests/test_zlib_into.mojo",
@@ -60,7 +60,7 @@ GRAPH_JSON = r'''{
       "loads": ["libzlib"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_zlib_into.pass"],
-      "key": "7e030ea8e58ff199acba926bfd2d04989c65e0bd16fda9b2bf1f835ef36e6df1"
+      "key": "e6c488761312f0ec8931edd58c385cde9fd8d52465baccef6fbdd221ce6f5c65"
     }
   ]
 }
@@ -94,14 +94,14 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "kind": "lib",
       "root": "src/zlib/src/zlib",
       "srcs": [
-        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "d16afac82d5c8ca46ec620dd671830a2bbaf654ecb3e465f6b2ff299a160584f"},
-        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "e51ec456ca1df8df4f608883c118665a6f1cede91d55fa4dfdfd3301e90df148"}
+        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "0119e9a7efc28400ab692b924492d62e240245938f6d92ae6367d7e39891360e"},
+        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "99b80cc1871cce189c06c41127710fe0506af933ea56d2e628c8dfac54d61132"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["zlib.mojoc"],
-      "key": "20de72e02c5920dde3537ceadd047e398dbb6dbcb565466296888bf686f64562"
+      "key": "51fdaa6997f4e20e5d97eaf3bfc756b6048e6d5c0745f8ff714e4b0b8f7a49a7"
     },
     {
       "id": "komira-ai/zlib@0.1.0#mojo1.1.0/test:src/zlib/tests/test_zlib_into.mojo",
@@ -117,7 +117,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "loads": ["libzlib"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_zlib_into.pass"],
-      "key": "ffce3c8fa1053c2339d5afd1d4896560ddbd62b245cb0b994feda5432f28e5c5"
+      "key": "07042c76ebc3524f41c13e9b6b58e01196e35bad4b97698a89f3e2c2d3268a48"
     }
   ]
 }
@@ -148,14 +148,14 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "kind": "lib",
       "root": "src/zlib/src/zlib",
       "srcs": [
-        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "d16afac82d5c8ca46ec620dd671830a2bbaf654ecb3e465f6b2ff299a160584f"},
-        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "e51ec456ca1df8df4f608883c118665a6f1cede91d55fa4dfdfd3301e90df148"}
+        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "0119e9a7efc28400ab692b924492d62e240245938f6d92ae6367d7e39891360e"},
+        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "99b80cc1871cce189c06c41127710fe0506af933ea56d2e628c8dfac54d61132"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["zlib.mojoc"],
-      "key": "530185cec3529f2b5a6c7569b6c0472c271a2b81c7cab0a642e158975c6a11f7"
+      "key": "a8c64f9c31234a3e55dd63b33dab6d10d52ac5f1a05fab89bbd94da6640da652"
     },
     {
       "id": "komira-ai/zlib@0.1.0#mojo1.1.0/test:src/zlib/tests/test_zlib_into.mojo",
@@ -171,7 +171,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "loads": ["libzlib"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_zlib_into.pass"],
-      "key": "4d446ba13d13bc579323c11326efba7be9abb4d0e0a54f676cce62a6635ea50a"
+      "key": "968ca5bae358cd6b9fc9312fb145f03238a2017a467a4b08fcbed68898b89d09"
     }
   ]
 }

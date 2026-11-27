@@ -517,6 +517,7 @@ def test_join_and_union(mut L: _Ledger) raises:
     _u(L, b, "WireJoinNode.algo_hint", 2)
     _u(L, b, "WireJoinNode.has_residual", 1)
     _m(L, b, "WireJoinNode.residual", _raw_expr(14))
+    _u(L, b, "WireJoinNode.build_side", 2)
     var j = decode_proto[WireJoinNode](b.copy())
     assert_equal(_hash(j.left[0]), 12, "WireJoinNode: _hash(j.left[0])")
     assert_equal(_hash(j.right[0]), 13, "WireJoinNode: _hash(j.right[0])")
@@ -524,6 +525,7 @@ def test_join_and_union(mut L: _Ledger) raises:
     _strs(j.right_on, "rk1 rk2", "WireJoinNode.right_on")
     assert_equal(j.join_type.number(), 3, "WireJoinNode: j.join_type.number()")
     assert_equal(j.algo_hint.number(), 2, "WireJoinNode: j.algo_hint.number()")
+    assert_equal(j.build_side.number(), 2, "WireJoinNode: j.build_side.number()")
     assert_true(j.has_residual, "WireJoinNode: j.has_residual")
     assert_equal(j.residual[0].col_idx.value().index, Int64(14), "WireJoinNode: j.residual[0].col_idx.value().index")
     _same(encode_proto(j), b, "WireJoinNode")
@@ -863,6 +865,7 @@ WireJoinNode.join_type 5
 WireJoinNode.algo_hint 6
 WireJoinNode.has_residual 7
 WireJoinNode.residual 8
+WireJoinNode.build_side 9
 WireSortNode.keys 1
 WireSortNode.descending 2
 WireSortNode.nulls_first 3

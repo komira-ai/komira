@@ -19,13 +19,17 @@
 //! by `@executable_path`, an `@rpath` no run path reaches, an `@loader_path`
 //! name outside the package, a run path that is absolute or leaves the
 //! package, a Mach-O member nothing loads and a Linux `.so` beside the dylib
-//! are each refused by their exact message.
+//! are each refused by their exact message. A library the package opens
+//! itself (`--opened`, the UDF runtime beside libkomira) is walked as the
+//! entry is: it and what it loads count as loaded, after the entry's
+//! libraries; without it named, what only it loads is stray; and one missing,
+//! outside the package, named twice or of the other format is refused.
 
 const std = @import("std");
-const diag = @import("diag.zig");
-const elf = @import("elf.zig");
+const diag = @import("native_policy").diag;
+const elf = @import("native_policy").elf;
 const libs = @import("libs.zig");
-const policy = @import("policy.zig");
+const policy = @import("native_policy").policy;
 const zip = @import("zip.zig");
 const fixture = @import("testing.zig");
 const t = std.testing;
@@ -528,6 +532,140 @@ test "an expected refusal ends ok only on exactly that refusal" {
     try t.expectEqualStrings(
         "--expect-refusal is given 2 times",
         try commandRefusal(a, &(good_argv ++ [_][]const u8{ "--expect-refusal", why, "--expect-refusal", why }), good),
+    );
+}
+
+// ---- A library the package opens itself --------------------------------------
+
+const udf = "komira/_lib/libkomira_udf_python.so";
+const udf_dep = "komira/_lib/udf/libudf_dep.so";
+
+/// komira's layout with the UDF runtime beside libkomira: it needs libc, the
+/// owner libkomira already loads (found again through its run path) and one
+/// library of its own that its run path reaches.
+fn openedMembers(a: Alloc) !std.ArrayList(policy.Member) {
+    var ms = try goodMembers(a);
+    try ms.append(a, .{ .name = udf, .data = try fixture.elf(a, .{ .needed = &.{ "libc.so.6", "libkomira_fs_native.so.1", "libudf_dep.so" }, .runpath = "$ORIGIN/lib:$ORIGIN/udf" }) });
+    try ms.append(a, .{ .name = udf_dep, .data = try fixture.elf(a, .{ .needed = &.{"libc.so.6"} }) });
+    return ms;
+}
+
+fn openedPolicy(a: Alloc, opened: []const []const u8) !libs.Policy {
+    var p = try goodPolicy(a);
+    p.opened = opened;
+    return p;
+}
+
+test "an opened library and what it loads count as loaded, listed after the entry's libraries" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    const ms = try openedMembers(a);
+    const loaded = try libs.check(a, &d, try openedPolicy(a, &.{udf}), ms.items);
+    const want = [_][]const u8{ entry, kgen, owner, msupport, asyncrt, udf, udf_dep };
+    try t.expectEqual(want.len, loaded.len);
+    for (want, loaded) |w, g| try t.expectEqualStrings(w, g);
+}
+
+test "a library the package opens is stray when it is not named opened" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const ms = try openedMembers(a);
+    try t.expectEqualStrings(
+        "stray: " ++ udf ++ " is a shared library that " ++ entry ++ " does not load",
+        try refusal(a, try goodPolicy(a), ms.items),
+    );
+}
+
+test "with an opened library, a library neither it nor the entry loads is stray, naming both" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var ms = try openedMembers(a);
+    try ms.append(a, .{ .name = "komira/_lib/lib/libextra.so", .data = try fixture.elf(a, .{}) });
+    try t.expectEqualStrings(
+        "stray: komira/_lib/lib/libextra.so is a shared library that neither " ++ entry ++ " nor " ++ udf ++ " loads",
+        try refusal(a, try openedPolicy(a, &.{udf}), ms.items),
+    );
+}
+
+test "an opened library's own needs are walked: one its run path does not reach is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var ms = try openedMembers(a);
+    set(&ms, udf, try fixture.elf(a, .{ .needed = &.{"libudf_dep.so"}, .runpath = "$ORIGIN/lib" }));
+    try t.expectEqualStrings(
+        "needed: " ++ udf ++ " needs libudf_dep.so, which its run path `$ORIGIN/lib` does not reach in the wheel (the wheel has it at " ++ udf_dep ++ ")",
+        try refusal(a, try openedPolicy(a, &.{udf}), ms.items),
+    );
+}
+
+test "an opened library missing, outside the package, named twice or of another format is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var missing = try openedMembers(a);
+    drop(&missing, udf);
+    try t.expectEqualStrings("entry: the wheel has no " ++ udf, try refusal(a, try openedPolicy(a, &.{udf}), missing.items));
+    const ms = try openedMembers(a);
+    for ([_][]const u8{ "other/libkomira_udf_python.so", "libkomira_udf_python.so", "komira/../x.so", "komira" }) |o| {
+        try t.expectEqualStrings(
+            try std.fmt.allocPrint(a, "entry: the opened library `{s}` is not a path under komira/", .{o}),
+            try refusal(a, try openedPolicy(a, &.{o}), ms.items),
+        );
+    }
+    try t.expectEqualStrings("entry: " ++ udf ++ " is named twice", try refusal(a, try openedPolicy(a, &.{ udf, udf }), ms.items));
+    try t.expectEqualStrings("entry: " ++ entry ++ " is named twice", try refusal(a, try openedPolicy(a, &.{entry}), ms.items));
+    var text = try openedMembers(a);
+    set(&text, udf, "#!/bin/sh\n");
+    try t.expectEqualStrings(
+        "entry: the opened library " ++ udf ++ " is not an ELF file like " ++ entry,
+        try refusal(a, try openedPolicy(a, &.{udf}), text.items),
+    );
+    var dylib = try openedMembers(a);
+    set(&dylib, udf, try Dylib.msupLib(a));
+    try t.expectEqualStrings(
+        "entry: the opened library " ++ udf ++ " is not an ELF file like " ++ entry,
+        try refusal(a, try openedPolicy(a, &.{udf}), dylib.items),
+    );
+}
+
+test "the command takes --opened and lists what each opened library loads" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const good = try goodFiles(a);
+    const files = try a.dupe([2][]const u8, good.files);
+    files[0] = .{ "w.whl", try wheelBytes(a, (try openedMembers(a)).items) };
+    var d = diag.Diag{};
+    const r = try libs.command(a, &d, &(good_argv ++ [_][]const u8{ "--opened", udf }), Mem{ .files = files });
+    try t.expectEqualStrings(entry ++ "\n" ++ kgen ++ "\n" ++ owner ++ "\n" ++ msupport ++ "\n" ++ asyncrt ++ "\n" ++ udf ++ "\n" ++ udf_dep ++ "\n", r.marker);
+    try t.expectEqualStrings(
+        "stray: " ++ udf ++ " is a shared library that " ++ entry ++ " does not load",
+        try commandRefusal(a, &good_argv, .{ .files = files }),
+    );
+}
+
+test "macOS: an opened library must be Mach-O like the entry, and is walked as dyld walks it" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const mudf = "komira/_lib/libkomira_udf_python.dylib";
+    var ms = try macMembers(a);
+    try ms.append(a, .{ .name = mudf, .data = try fixture.machO(a, .{ .install_name = "@rpath/libkomira_udf_python.dylib", .loads = &.{ "@rpath/libMSupportGlobals.dylib", "/usr/lib/libSystem.B.dylib" }, .rpaths = &.{"@loader_path/lib"} }) });
+    var p = try macPolicy(a);
+    p.opened = &.{mudf};
+    var d = diag.Diag{};
+    const loaded = try libs.check(a, &d, p, ms.items);
+    try t.expectEqualStrings(mudf, loaded[loaded.len - 1]);
+    try t.expectEqual(@as(usize, 5), loaded.len);
+    set(&ms, mudf, try fixture.elf(a, .{ .needed = &.{"libc.so.6"} }));
+    try t.expectEqualStrings(
+        "entry: the opened library " ++ mudf ++ " is not a Mach-O file like " ++ mentry,
+        try refusal(a, p, ms.items),
     );
 }
 
