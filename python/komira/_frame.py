@@ -834,18 +834,32 @@ class DataFrame:
         self,
         path_or_buf: str | os.PathLike[str] | None = None,
         *,
+        sep: str = ",",
+        header: bool | list[str] = True,
         compression: str | dict | None = "infer",
         index: bool = True,
     ) -> None:
         """Runs the frame's plan and writes all its rows to the CSV file
         `path_or_buf`: a header line of the column names, then a line per row,
         in the frame's order when it is ordered. The format is CSV whatever the
-        file's extension. `compression` is "infer" (gzip for `.gz`, zstd for
-        `.zst`, else none), "gzip", "zstd" or None. `index` is accepted and
-        changes nothing, since a frame has no index. Path, replacement,
-        refusals and the return are as for `to_parquet`; there is no string
-        result: a `path_or_buf` of None is refused."""
+        file's extension. `sep` is "," and `header` is True, what the writer
+        writes; another `sep`, `header=False` and a list of header names are
+        refused with `UnsupportedOperation`. `compression` is "infer" (gzip
+        for `.gz`, zstd for `.zst`, else none), "gzip", "zstd" or None.
+        `index` is accepted and changes nothing, since a frame has no index.
+        Path, replacement, refusals and the return are as for `to_parquet`;
+        there is no string result: a `path_or_buf` of None is refused."""
         dest = _write.destination(path_or_buf, "to_csv")
+        if sep != ",":
+            raise _write.unsupported("to_csv", "sep", sep, _write.COMMA)
+        if isinstance(header, (list, tuple)):
+            raise _write.unsupported(
+                "to_csv", "header", header, "komira writes the column names as the header; rename the columns instead"
+            )
+        if not isinstance(header, bool):
+            raise TypeError(f"to_csv header must be a bool or a list of str, not {type(header).__name__}")
+        if not header:
+            raise _write.unsupported("to_csv", "header", False, _write.ALWAYS_HEADER)
         if not isinstance(index, bool):
             raise TypeError(f"to_csv index must be a bool, not {type(index).__name__}")
         codec = _write.text_codec(compression, dest, "to_csv")

@@ -10,3 +10,7 @@ id,region,amount
 "east",1
 "north",5
 "south",5
+id,region,amount
+1,north,2.5
+2,south,
+3,north,4.5
