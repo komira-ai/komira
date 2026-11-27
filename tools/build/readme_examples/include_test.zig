@@ -12,7 +12,7 @@ const D = "src/p/README.md";
 const MAIN = "def main():\n    pass\n";
 
 fn check(a: std.mem.Allocator, text: []const u8, listed: []const inc.Listed) !inc.Checked {
-    return inc.check(a, text, D, listed);
+    return inc.check(a, &inc.README, text, D, listed);
 }
 
 fn refusals(a: std.mem.Allocator, c: inc.Checked) ![]const u8 {
@@ -117,7 +117,7 @@ test "a text fence right after an included one needs a not-tested reason; other 
         "\nProse.\n\n```text\nsketch\n```\n" ++ // 15-20: inline
         "<!-- not-tested:  -->\n```text\nx\n```\n"; // 21-24: no reason
     const c = try check(a, text, &.{.{ .path = "examples/a.mojo", .data = MAIN }});
-    try t.expectEqualStrings("src/p/README.md:7: a ```text fence right after an included example shows output no run printed: put <!-- not-tested: <reason> --> on the line before it\n" ++
+    try t.expectEqualStrings("src/p/README.md:7: a ```text fence right after code shows output no run printed: include its file, or put <!-- not-tested: <reason> --> on the line before it\n" ++
         "src/p/README.md:21: a not-tested marker gives no reason", try refusals(a, c));
 }
 
@@ -158,9 +158,9 @@ test "an include names a listed examples/<name>.mojo shown in a closed ```mojo f
     };
     const c = try check(a, text, &listed);
     try t.expect(!c.fillable);
-    try t.expectEqualStrings("src/p/README.md:1: include \"../a.mojo\": a README shows examples/<name>.mojo, a file of the examples directory beside it\n" ++
-        "src/p/README.md:4: include \"examples/sub/a.mojo\": a README shows examples/<name>.mojo, a file of the examples directory beside it\n" ++
-        "src/p/README.md:7: include \"examples/a.py\": a README shows examples/<name>.mojo, a file of the examples directory beside it\n" ++
+    try t.expectEqualStrings("src/p/README.md:1: include \"../a.mojo\": a source-first README shows examples/<name>.mojo or examples/<name>.expected_output.txt, a file of examples/ beside it\n" ++
+        "src/p/README.md:4: include \"examples/sub/a.mojo\": a source-first README shows examples/<name>.mojo or examples/<name>.expected_output.txt, a file of examples/ beside it\n" ++
+        "src/p/README.md:7: include \"examples/a.py\": a source-first README shows examples/<name>.mojo or examples/<name>.expected_output.txt, a file of examples/ beside it\n" ++
         "src/p/README.md:11: include examples/a.mojo is shown in a ```python fence; a .mojo file is shown in ```mojo\n" ++
         "src/p/README.md:13: the include of examples/b.mojo is not on the line just before a fence\n" ++
         "src/p/README.md:16: include examples/c.mojo: the fence after it does not start its line\n" ++

@@ -458,6 +458,18 @@ test "C1 coverage limit: the whole group is killed, exit 1, the log tail and the
     kit.waitGone(try kit.pidsFrom(e.a, f, 2));
 }
 
+test "C1 coverage limit: with --stdout the log tail is followed by the stdout tail under its own heading" {
+    const e = try Env.init();
+    defer e.deinit();
+    const f = try e.pidFile("c1s.pids");
+    const r = try kit.runGate(e.a, e.dir, try e.args("spawnwait", &.{ "--limit-s", "2", "--limit-report", "coverage", "--stdout", "cov.out", "--arg", f }), .{ .clock = true });
+    try std.testing.expectEqual(@as(u8, 1), r.status);
+    try std.testing.expect(contains(r.err, "------------------------------------------------------------------ output (last 200 lines)\n"));
+    try std.testing.expect(contains(r.err, "------------------------------------------------------------------ stdout (last 200 lines)\n"));
+    try std.testing.expect(contains(r.err, "==================================================================\nCOVERAGE RUN FAILED: //x:y\n"));
+    kit.waitGone(try kit.pidsFrom(e.a, f, 2));
+}
+
 fn fakeSurvivor(alloc: std.mem.Allocator, pgid: i32) ?[]proctab.Member {
     _ = pgid;
     const m = alloc.alloc(proctab.Member, 1) catch return null;

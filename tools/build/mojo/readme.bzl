@@ -24,7 +24,10 @@ README shows through include markers (docs/design/documentation_tests.md):
 Each file is compiled against the library and run as a welded test of its
 own, and the README is held to the files byte for byte (the gate below).
 `readme_examples` needs the README; `[]` is a source-first README that shows
-no example.
+no example. An example may carry `examples/<name>.expected_output.txt`: its
+run's stdout must then be that file byte for byte. The macro adds every such
+file of the package to `readme_examples` itself (with_expected_outputs), so
+none is left out of the list by its glob.
 
 This module loads providers.bzl, compile.bzl, test_runtime.bzl,
 test_limit.bzl, opt_level.bzl, system_libs.bzl, the doc tree and rerun
@@ -39,6 +42,7 @@ load(":test_limit.bzl", "HANG_LIMIT_ATTRS", "hang_limit_flags")
 load(":test_runtime.bzl", "gate_mojo", "test_root")
 load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/readme_examples:pages.bzl", "page", "pages_check_and_fill")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 # The README examples tool, a Zig executable: no Mojo library, so any
@@ -72,6 +76,18 @@ def readme_kwargs(kwargs):
         return
     kwargs["readme"] = found[0]
     kwargs["readme_tool"] = _README_TOOL
+    with_expected_outputs(kwargs)
+
+def with_expected_outputs(kwargs):
+    """Adds to a source-first library's `readme_examples` (in `kwargs`)
+    every `examples/<name>.expected_output.txt` of the package it does not
+    list: an expected output is held whenever it exists, whatever the glob
+    the BUCK file wrote. A library with no `readme_examples` is left as it
+    is. mojo_adopted_library calls it too (adopt.bzl)."""
+    listed = kwargs.get("readme_examples")
+    if listed == None:
+        return
+    kwargs["readme_examples"] = listed + [f for f in glob(["examples/*" + _EXPECTED]) if f not in listed]
 
 # ---- The gate -----------------------------------------------------------------
 #
@@ -106,9 +122,15 @@ def readme_kwargs(kwargs):
 # path so a failure names `<package>/examples/<name>.mojo:<line>`; the
 # tool's `check` holds the README to the files (every listed file shown by
 # exactly one include, every ```mojo fence an include, each fence its file
-# byte for byte, the text-fence rule; include.zig), and the marker joins its
-# line and every file's marker. `[tests][readme][fill]` is the patch that
-# mends a stale README, which the author applies with `git apply`.
+# byte for byte, the text-fence rule; include.zig, the `readme` row of the rule
+# table a task page's `task` row shares), and the marker joins its line and
+# every file's marker. An example with `examples/<name>.expected_output.txt`
+# is run with the gate's `--stdout`, and the tool's `compare-output` holds that
+# stdout to the file; its marker joins too. `[tests][readme][check]` is the
+# freshness check alone and `[tests][readme][fill]` the patch that mends a
+# stale README, which the author applies with `git apply`: the same two
+# sub-targets, from the same implementation (pages.bzl), as a task tree's
+# `:pages` has.
 # `generate` still runs (it reads an included fence as a whole program) for
 # `[generated]` and the coverage build.
 
@@ -117,7 +139,10 @@ def readme_kwargs(kwargs):
 _ZIG_OS = {"darwin": "macos", "linux": "linux"}
 
 # The sub-targets of `[tests][readme]` that are not an example's.
-_RESERVED = ["file", "fill", "generated", "migrated", "objects"]
+_RESERVED = ["check", "file", "fill", "generated", "migrated", "objects"]
+
+# The suffix of a README example's expected output, beside its `.mojo`.
+_EXPECTED = ".expected_output.txt"
 
 def _tool_os_refusal(tool, os):
     """Why the exec_dep `tool` cannot run in an action of a toolchain whose
@@ -140,15 +165,20 @@ def _display(ctx, src):
     """`src` as a message names it: its path from the cell root."""
     return (ctx.label.package + "/" + src.short_path) if ctx.label.package else src.short_path
 
-def readme_file_test(ctx, tc, tool, example, stem, closure, link_tail_args, env_args, rerun, hang_flags, opt_level, owner = False, expect = None):
+def readme_file_test(ctx, tc, tool, example, stem, closure, link_tail_args, env_args, rerun, hang_flags, opt_level, owner = False, expect = None, expected_output = None):
     """One README example file as a welded test: `example` (a source of the
     package) compiled against `closure` (a MojoPkgTSet) and run through the
     gate as `<target>:<its short path>`. The file is staged at its path from
     the cell root, so the compiler, and an assertion's location, name it so.
-    Returns (marker, object or None): with `owner`, the program also as an
-    object file (`[tests][readme][objects]`). With `expect`, the run must
-    FAIL with `expect` in its output: the marker is written only then (the
-    tool's `expect-failure`; mojo_readme_example_failure below)."""
+    With `expected_output` (its `examples/<name>.expected_output.txt`), the
+    gate keeps the run's stdout (`--stdout`) and the tool's `compare-output`
+    holds it to that file byte for byte, naming the file's first differing
+    line. Returns (markers, object or None): the gate's marker, then the
+    compare's when there is one. With `owner`, the program also as an
+    object file (`[tests][readme][objects]`). With `expect`, the test must
+    FAIL with `expect` in its output: its last marker is written only then
+    (the tool's `expect-failure`; mojo_readme_example_failure below); with
+    `expected_output` too, the run must pass and the compare fail."""
     prefix = (ctx.label.package + "/") if ctx.label.package else ""
     exe = build_executable(ctx, tc, "tests/readme/bin/" + stem, [example], example, [closure], opt_level, "mojo_build_test", "readme_" + stem, None, link_extra = link_tail_args, src_prefix = prefix)
     obj = None
@@ -157,13 +187,18 @@ def readme_file_test(ctx, tc, tool, example, stem, closure, link_tail_args, env_
     root, staged = test_root(ctx, "tests/readme/root/" + stem, exe, {})
     marker = ctx.actions.declare_output("tests/readme/{}.passed".format(stem))
     label = "{}:{}".format(ctx.label.raw_target(), example.short_path)
-    if expect == None:
-        cmd = gate_mojo(tc, label, staged, marker.as_output(), hang_flags, env_args)
+    printed = None
+    flags = hang_flags
+    if expected_output != None:
+        printed = ctx.actions.declare_output("tests/readme/{}.stdout".format(stem))
+        flags = hang_flags + ["--stdout", printed.as_output()]
+    if expect == None or expected_output != None:
+        cmd = gate_mojo(tc, label, staged, marker.as_output(), flags, env_args)
         category = "mojo_gated_test"
     else:
         # The gate writes its marker only for a run that passed; this one must
         # not pass, so its marker goes nowhere and the tool writes this one.
-        cmd = cmd_args(tool, "expect-failure", "--text", expect, "--out", marker.as_output(), "--", gate_mojo(tc, label, staged, "/dev/null", hang_flags, env_args))
+        cmd = cmd_args(tool, "expect-failure", "--text", expect, "--out", marker.as_output(), "--", gate_mojo(tc, label, staged, "/dev/null", flags, env_args))
         category = "mojo_readme_expect_failure"
     ctx.actions.run(
         cmd_args(cmd, hidden = root),
@@ -171,24 +206,56 @@ def readme_file_test(ctx, tc, tool, example, stem, closure, link_tail_args, env_
         category = category,
         identifier = "readme_" + stem,
     )
-    return marker, obj
+    if expected_output == None:
+        return [marker], obj
+    compared = ctx.actions.declare_output("tests/readme/{}.output.passed".format(stem))
+    compare = cmd_args(tool, "compare-output", "--expected", expected_output, "--display", prefix + expected_output.short_path, "--printed", printed)
+    if expect == None:
+        cmd = cmd_args(compare, "--out", compared.as_output())
+        category = "mojo_readme_compare_output"
+    else:
+        cmd = cmd_args(tool, "expect-failure", "--text", expect, "--out", compared.as_output(), "--", compare, "--out", "/dev/null")
+        category = "mojo_readme_expect_failure"
+    ctx.actions.run(
+        cmd_args(cmd, hidden = marker),
+        env = salted(),
+        category = category,
+        identifier = "readme_" + stem + "_output",
+    )
+    return [marker, compared], obj
 
 def _source_first(ctx, tc, import_name, closure, link_tail_args, env_args, rerun, owner, hang, display):
     """The gate of a source-first README: (marker, objects directory, the
-    sub-targets of its examples, the fill patch)."""
+    sub-targets of its examples, the check and fill outputs)."""
     readme = ctx.attrs.readme
     tool = ctx.attrs.readme_tool[RunInfo]
     readme_dir = readme.short_path.rpartition("/")[0]
-    markers = []
-    built = {}
-    subs = {}
-    listed = []
-    for f in ctx.attrs.readme_examples:
+
+    def rel_of(f):
         rel = f.short_path
         if readme_dir:
             if not rel.startswith(readme_dir + "/"):
                 fail("{}: readme_examples lists {}, which is not beside {}".format(ctx.label, f.short_path, readme.short_path))
             rel = rel[len(readme_dir) + 1:]
+        return rel
+
+    # The expected outputs first, by the name of the example they are of.
+    expected = {}
+    for f in ctx.attrs.readme_examples:
+        rel = rel_of(f)
+        if rel.endswith(_EXPECTED):
+            if not regex_match("^examples/[a-z][a-z0-9_]*\\.expected_output\\.txt$", rel):
+                fail("{}: readme_examples lists {}: an expected output is examples/<name>.expected_output.txt beside the README, <name> its example's".format(ctx.label, f.short_path))
+            expected[rel[len("examples/"):-len(_EXPECTED)]] = f
+    markers = []
+    built = {}
+    subs = {}
+    files = []
+    for f in ctx.attrs.readme_examples:
+        rel = rel_of(f)
+        if rel.endswith(_EXPECTED):
+            files.append((rel, f))
+            continue
         if not regex_match("^examples/[a-z][a-z0-9_]*\\.mojo$", rel):
             fail("{}: readme_examples lists {}: a README's example is examples/<name>.mojo beside the README, <name> lower-case letters, digits and underscores".format(ctx.label, f.short_path))
         stem = rel[len("examples/"):-len(".mojo")]
@@ -196,32 +263,36 @@ def _source_first(ctx, tc, import_name, closure, link_tail_args, env_args, rerun
             fail("{}: readme_examples lists {}: `{}` names a sub-target of [tests][readme]; rename the file".format(ctx.label, f.short_path, stem))
         if stem in subs:
             fail("{}: readme_examples lists {} twice".format(ctx.label, f.short_path))
-        m, obj = readme_file_test(ctx, tc, tool, f, stem, closure, link_tail_args, env_args, rerun, hang, ctx.attrs.test_optimization_level, owner = owner)
-        markers.append(m)
-        subs[stem] = [DefaultInfo(default_output = m)]
+        ms, obj = readme_file_test(ctx, tc, tool, f, stem, closure, link_tail_args, env_args, rerun, hang, ctx.attrs.test_optimization_level, owner = owner, expected_output = expected.get(stem))
+        markers.extend(ms)
+        subs[stem] = [DefaultInfo(default_output = ms[-1], other_outputs = ms[:-1])]
         if obj != None:
             built["readme_{}_{}.o".format(import_name, stem)] = obj
-        listed.append(cmd_args("--example", cmd_args(rel, f, delimiter = "=")))
-    fresh = ctx.actions.declare_output("tests/readme/_fresh.passed")  # a stem starts with a letter
-    ctx.actions.run(
-        cmd_args(tool, "check", "--readme", readme, "--display", display, listed, "--out", fresh.as_output()),
+        files.append((rel, f))
+    for stem in expected:
+        if stem not in subs:
+            fail("{}: readme_examples lists examples/{}{}, and no examples/{}.mojo whose output it is".format(ctx.label, stem, _EXPECTED, stem))
+
+    # The same check and fill as a task page's (pages.bzl): a stem starts with
+    # a letter, so `_fresh` names no example's marker.
+    out = pages_check_and_fill(
+        ctx,
+        tool,
+        "readme",
+        [page(readme, display, files)],
+        "tests/readme/_fresh.passed",
+        "tests/readme/fill.patch",
         env = salted(),
-        category = "mojo_readme_check",
-    )
-    patch = ctx.actions.declare_output("tests/readme/fill.patch")
-    ctx.actions.run(
-        cmd_args(tool, "fill", "--readme", readme, "--display", display, listed, "--out", patch.as_output()),
-        env = salted(),
-        category = "mojo_readme_fill",
+        category = "mojo_readme",
     )
     marker = ctx.actions.declare_output("tests/readme.passed")
     ctx.actions.run(
-        cmd_args(tc.act, "cat", marker.as_output(), [fresh] + markers),
+        cmd_args(tc.act, "cat", marker.as_output(), [out.check] + markers),
         env = salted(),
         category = "mojo_readme_join",
     )
     objects = ctx.actions.copied_dir("tests/readme/objects", built)
-    return marker, objects, subs, patch
+    return marker, objects, subs, out
 
 def readme_gate(ctx, tc, import_name, ungated_tset, link_args, env_args, ships, readme_test, owner = False, rerun = {}):
     """The README gate, or None without a README: a struct of `marker` (the
@@ -286,9 +357,10 @@ def readme_gate(ctx, tc, import_name, ungated_tset, link_args, env_args, ships, 
         "generated": [DefaultInfo(default_output = src)],
     }
     if listed != None:
-        marker, objects, examples_subs, patch = _source_first(ctx, tc, import_name, ungated_tset, link_args, env_args, rerun, owner, hang, display)
+        marker, objects, examples_subs, out = _source_first(ctx, tc, import_name, ungated_tset, link_args, env_args, rerun, owner, hang, display)
         subs.update(examples_subs)
-        subs["fill"] = [DefaultInfo(default_output = patch)]
+        subs["check"] = [DefaultInfo(default_output = out.check)]
+        subs["fill"] = [DefaultInfo(default_output = out.fill)]
     else:
         marker = ctx.actions.declare_output("tests/readme.passed")
         objects = ctx.actions.declare_output("tests/readme/objects", dir = True)
@@ -342,7 +414,7 @@ def _example_failure_impl(ctx):
     if not ctx.attrs.example.basename.endswith(".mojo"):
         fail("{}: `example` {} is not a .mojo file".format(ctx.label, ctx.attrs.example.short_path))
     stem = ctx.attrs.example.basename[:-len(".mojo")]
-    marker, _ = readme_file_test(
+    markers, _ = readme_file_test(
         ctx,
         tc,
         ctx.attrs._tool[RunInfo],
@@ -355,16 +427,18 @@ def _example_failure_impl(ctx):
         hang_limit_flags(where, ctx.attrs.test_hang_limit_s),
         TEST_OPT_LEVEL,
         expect = ctx.attrs.expect,
+        expected_output = ctx.attrs.expected_output,
     )
-    return [DefaultInfo(default_output = marker), rerun_info(ctx)]
+    return [DefaultInfo(default_output = markers[-1], other_outputs = markers[:-1]), rerun_info(ctx)]
 
 _example_failure = rule(
     impl = _example_failure_impl,
-    doc = "A README example that must fail: `example` compiled against `deps` and run as a README example's welded test is (tools/build/mojo/readme.bzl, readme_file_test); the target builds only when the run fails with `expect` in its output (the README tool's `expect-failure`), so a broken example is shown to go red naming its file and line.",
+    doc = "A README example that must fail: `example` compiled against `deps` and run as a README example's welded test is (tools/build/mojo/readme.bzl, readme_file_test); the target builds only when the run fails with `expect` in its output (the README tool's `expect-failure`), so a broken example is shown to go red naming its file and line. With `expected_output`, the run must pass and its stdout's compare with that file must fail with `expect`, so a changed output is shown to go red naming the expected file's line.",
     attrs = {
         "deps": attrs.list(attrs.dep(), default = []),
         "example": attrs.source(),
         "expect": attrs.string(),
+        "expected_output": attrs.option(attrs.source(), default = None),
         "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
         "_tool": attrs.exec_dep(default = _README_TOOL, providers = [RunInfo]),
     } | HANG_LIMIT_ATTRS | RERUN_ATTRS,

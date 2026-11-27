@@ -1,8 +1,9 @@
 //! The README examples tool: a README's ```mojo examples as programs, one
 //! per example, and the line map of their reports (cli.zig has the commands;
 //! examples.zig what an example is; program.zig the programs); a
-//! source-first README's includes, `fill` and its freshness check
-//! (include.zig), and `migrate` from the inline model (migrate.zig); the
+//! the includes, `fill` and freshness check of every document that shows
+//! files, a README or a task page (include.zig), the exact output compare
+//! (output.zig), and `migrate` from the inline model (migrate.zig); the
 //! check that a fixture's run fails as it must (expect_failure.zig); and the
 //! check of the common-task pages (tasks.zig). mojo_library runs `generate`,
 //! and for a source-first README `check` and `fill`, as actions on its
@@ -34,4 +35,6 @@ test {
     _ = @import("include_test.zig");
     _ = @import("migrate_test.zig");
     _ = @import("expect_failure_test.zig");
+    _ = @import("output_test.zig");
+    _ = @import("kinds_test.zig");
 }

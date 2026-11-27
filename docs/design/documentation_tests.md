@@ -2,8 +2,10 @@
 
 Status: accepted; the six decisions at the end were taken on 2026-11-27, each as recommended.
 Built where a line says "exists": the task pages, and the first tier's tooling for package READMEs
-(the include marker, `fill`, the freshness check, one welded test per example file, `migrate` and
-`migrate --verify`), proven on fixtures, with no package README migrated yet. How every code block
+(the include marker, `fill`, the freshness check, one welded test per example file, the exact
+compare of an example's output, `migrate` and `migrate --verify`), proven on fixtures, with no
+package README migrated yet. Task pages and package READMEs are one framework: the same commands
+and the same rules, one row each of one rule table (piece 5). How every code block
 in our documentation is run or accounted for. Counts are from main of this repository; *(not checked
 here)* marks one from our other repositories, and *[est]* marks an estimate.
 
@@ -37,7 +39,8 @@ prints their count.
 ## What exists today
 
 Fences are counted by opening fence lines at any indentation; another fence rule moves a count by a
-few percent.
+few percent. The task row is `ls -d python/docs/tasks/*/ | wc -l` and
+`ls python/docs/tasks/*/probe_*.py | wc -l`.
 
 | Fact (main) | Count |
 |---|---|
@@ -47,7 +50,7 @@ few percent.
 | Example body lines: median / 90th percentile / largest | 19 / 44 / 145 |
 | Other fences in package READMEs: `text` / `sh` | 29 / 6 |
 | `readme = False` rows in `src/**/BUCK`; READMEs nested deeper under `src/` | 3; 11 |
-| Python task directories in `python/docs/tasks/` / probes | 12 / 1 |
+| Python task directories in `python/docs/tasks/` / probes | 80 / 43 |
 | Whole repository: Markdown files / fenced blocks / `python` / `sh` | 488 / about 1,000 / about 65 / about 100 |
 
 Three mechanisms exist in this repository.
@@ -59,16 +62,18 @@ Three mechanisms exist in this repository.
   holds against the installed `.conda` ([scenarios](../../tools/build/readme_e2e/README.md)).
 - **Source-first Python task pages** ([docs/tasks/README.md](../tasks/README.md)). Each
   `python/docs/tasks/<rank>-<slug>/` holds `example.py`, `expected_output.txt`, `page.md` and
-  optional probe pairs. `tasks-check` holds every `<!-- include <file> -->` fence equal to its file
-  byte for byte and refuses unmarked code and unproduced output; one wheel test per directory and
-  per probe runs the file against the built wheel; four fixtures prove those runs can fail.
+  optional probe pairs. `tasks-check` holds the catalogue to the directories and each page to the
+  same include rules a README is held to (piece 5); `//python/docs/tasks:pages[check]` and
+  `[fill]` are the same `check` and `fill` a README has; one wheel test per directory and per probe
+  runs the file against the built wheel; four fixtures prove those runs can fail.
 - **The Python quickstart pair**: `python/smoke/src/readme.zig` holds the quickstart blocks of
   [python/README.md](../../python/README.md) and [docs/install.md](../install.md) equal to
   `python/examples/quickstart.{py,expected}`.
 - **Source-first package READMEs** (exists as tooling; no package README uses it yet). A library
   that lists `readme_examples = glob(["examples/*.mojo"])` runs each file as its own welded test
   and holds its README to the files with the tool's `check`; `fill` is the patch that mends a stale
-  README; `migrate` and `migrate --verify` turn an inline README into files and includes, and prove
+  README; an example with `examples/<name>.expected_output.txt` has its stdout held to that file
+  byte for byte; `migrate` and `migrate --verify` turn an inline README into files and includes, and prove
   them the same programs (piece 5 and the migration section below;
   [README gate](../../tools/build/mojo/README.md#source-first-readmes)). The fixture is the README
   of `src/anomaly` migrated, in
@@ -140,10 +145,11 @@ is the honest price of a program that runs as shown.
 ### 1. Block reader
 
 Exists: `tools/build/markdown/markdown.zig` (38 tests) reads fences, HTML comments and links with no
-I/O; `examples.zig` refuses near misses of `mojo` and reports every refusal at once; `task_page.zig`
-reads the include and `not-tested` markers (spelled once, in `MARKERS`). New: `blocks --json` (the
-same data for programs that are not Zig), near-miss refusals for every known word, and a fence-word
-table per docset kind (`readme`, `sdk`, `tasks`): `include` for `mojo` and `python`, `inline` for
+I/O; `examples.zig` refuses near misses of `mojo` and reports every refusal at once; `markers.zig`
+spells the include and `not-tested` markers once (`MARKERS`), and `include.zig`'s rule table
+(`KINDS`) has a row per kind of document, `readme` and `task` (piece 5). New: `blocks --json` (the
+same data for programs that are not Zig), near-miss refusals for every known word, an `sdk` row, and
+the rest of a fence-word table per kind: `include` for `mojo` and `python` (exists), `inline` for
 `sh` and `text`, `ledger` for other known words, `ignored` for `mermaid` and fences with no word.
 `doc_links` moves onto this reader, so one reader remains.
 
@@ -157,6 +163,9 @@ today).
 
 - A case is `<name>.<ext>`, judged by exit 0 (a README example asserts in its own code), or with
   `<name>.expected_output.txt` beside it (a task page's `example.py` uses `expected_output.txt`).
+  Exists for both: a README example with `examples/<name>.expected_output.txt` passes only when its
+  stdout is that file byte for byte (`gate mojo --stdout`, then the tool's `compare-output`,
+  `output.zig`); one with none passes on exit 0, as before.
 - A probe is `probe_<name>.<ext>` with `probe_<name>.error.txt`, one line: it must fail with that
   line. When the feature lands, the probe runs to the end and goes red, and the page must change.
 - The example writes its own sample data into its working directory, so a page hides no input.
@@ -175,7 +184,8 @@ today).
 ### 4. Exact output compare
 
 Pass, or a diff naming `<name>.expected_output.txt:<line>` followed by the whole actual stdout.
-Exact; `\n` line ends; one final newline ignored. A case that exits non-zero is red whatever it
+Exact, byte for byte, as both built compares are: no final newline is ignored (a missing or extra
+one is named, as a line `missing`), and `\n` is the only line end. A case that exits non-zero is red whatever it
 printed. A probe passes only with class `ran`, a non-zero exit, and a summary equal to its
 `.error.txt` line; a hang or a signal is red. No `...` line, no regex. Three filters exist for the
 quickstart only (`<cwd>`, `<version>`, `<abi_version>`); a new one needs a user and a fixture.
@@ -203,13 +213,27 @@ file holds a backtick run.
 - Ship-time rule: the contents are in the Markdown. A marker alone renders nothing, so a README
   whose fence is empty or stale never ships: the freshness check is welded into the library.
 
-Exists for package READMEs (`include.zig` of the README examples tool): `check` is the freshness
-check, and it also refuses the inline model's `mojo-hidden` comments, a comment that misspells a
-marker (`<!--include`, `<!-- Include`, `<!-- not-tested -->`, text after the `-->`), and a listed
-file no include shows or two includes show; `fill` writes the patch. A not-tested marker must stand on the line just before a fence. A README include names only
-`examples/<name>.mojo`: a `.txt` include waits for the exact compare of README cases, which this
-tier does not hold yet, and a README's `python` fences stay inline until a README shows `.py`
-files (none of today's package READMEs holds one).
+Exists for both kinds, from one rule table (`KINDS` in `include.zig` of the README examples tool):
+every rule above is one code path, and a row says only what differs.
+
+| Kind | `--kind` | Files an include names | Fence word | Shown by every page | A code fence that shows no file |
+|---|---|---|---|---|---|
+| Package README | `readme` | `examples/<name>.mojo`, `examples/<name>.expected_output.txt` | `mojo`, `text` | each listed `.mojo` | refused (`mojo`, `mojo module` too) |
+| Task page | `task` | `<name>.py`, `<name>.txt` of its own directory | `python`, `text` | `example.py`, `expected_output.txt` | refused (`python`) unless `<!-- not-tested: <reason> -->` |
+
+`check --kind <kind>` is the freshness check of one or more pages, and `fill --kind <kind>` the
+patch; both are run by one Starlark implementation (`tools/build/readme_examples/pages.bzl`) as the
+sub-targets `[check]` and `[fill]`: a library's `[tests][readme][check]` and `[tests][readme][fill]`,
+and `//python/docs/tasks:pages[check]` and `:pages[fill]`. `tasks-check` adds the catalogue's rules
+and runs the same page rules, plus a page's first line. Common to both kinds, the check also refuses
+the inline model's `mojo-hidden` comments, a comment that misspells a marker (`<!--include`,
+`<!-- Include`, `<!-- not-tested -->`, text after the `-->`), an include that is not on the line
+just before a fence, a file shown twice, a required file no include shows, and a not-tested marker
+that does not stand on the line just before a fence. A file shown must end in a line feed. A
+README lists an expected output only beside its `.mojo`, and the macro adds every
+`examples/*.expected_output.txt` of the package to `readme_examples`, so none is left unchecked by a
+glob. A README's `python` fences stay inline until a README shows `.py` files (none of today's
+package READMEs holds one).
 
 #### Marker comments
 
@@ -415,8 +439,8 @@ fences become ledger rows.
 one komira `INSERT ... SELECT` and must fail with the one line of `probe_native_insert.error.txt`.
 The page shows the two files through include markers; its Postgres variant is a fence marked
 `<!-- not-tested: needs a Postgres server, which the check does not have -->`. If `example.py`
-changes and the page does not, `tasks-check` names `page.md:<line>`; if the output changes, the
-wheel test names `expected_output.txt:<line>`; when komira gains `INSERT`, the probe goes red and
+changes and the page does not, `tasks-check` names `page.md:<line>` and `:pages[fill]` is the patch
+that mends it; if the output changes, the wheel test names `expected_output.txt:<line>`; when komira gains `INSERT`, the probe goes red and
 the page and the catalogue status change together.
 
 ## What each check proves
@@ -430,7 +454,7 @@ Every row has a negative case that must go red and name the line.
 | Case run and line map | 1 | API drift, a removed symbol | a wrong call fails and names `<file>:<line>` |
 | Hermetic run | 1 | an example that works only on the author's disk or network | a read outside the directory fails; a socket fails (Linux) |
 | Classes | 1 | a hang or crash counted as a pass | an endless loop is `hang`; a self-kill is `signal` |
-| Exact compare | 1 | a changed number, column, error text or row order | one byte differs (exists: `refuses_wrong_expected_output`) |
+| Exact compare | 1 | a changed number, column, error text or row order | one byte differs (exists: `refuses_wrong_expected_output` for a task, `wrong_expected_output` of `tests//functional/readme_examples/expected_output` for a README) |
 | Freshness | 1 | a file edited without `fill`; a hand-edited fence; typed output | one changed byte; a deleted file; an unmarked `mojo` fence |
 | Probe | 1 | a `gap` page after the feature landed | a probe that runs, or fails with another line (exist) |
 | Migration | 1 | a migrated README that changed more than its hidden lines | `migrate --verify` over a README with one extra edit |

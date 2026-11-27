@@ -1,0 +1,25 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:readme.bzl", "mojo_readme_example_failure")
+
+# A source-first README whose example has an expected output
+# (docs/design/documentation_tests.md, piece 4): `[tests][readme][greet]` runs
+# examples/greet.mojo and holds its stdout to
+# examples/greet.expected_output.txt byte for byte (the macro adds the file
+# to readme_examples; the README shows it with the same include marker). The
+# target must build.
+mojo_library(
+    name = "expected_output",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    readme_examples = glob(["examples/*.mojo"]),
+)
+
+# The same example held to an expected output whose line 2 differs: the run
+# passes and the compare must fail, naming that file and line. The target
+# builds only when it does.
+mojo_readme_example_failure(
+    name = "wrong_expected_output",
+    example = "examples/greet.mojo",
+    expected_output = "wrong/greet.expected_output.txt",
+    expect = "functional/readme_examples/expected_output/wrong/greet.expected_output.txt:2: expected \"6\", printed \"5\"",
+)

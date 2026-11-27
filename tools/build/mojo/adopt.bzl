@@ -121,7 +121,7 @@ load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
 load(":native_facts.bzl", "native_facts")
 load(":opt_level.bzl", "TEST_OPT_LEVEL")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo", "mojo_pkg_children", "welded_tests_info")
-load(":readme.bzl", "readme_gate")
+load(":readme.bzl", "readme_gate", "with_expected_outputs")
 load(":system_libs.bzl", "dep_system_libs", "merge_system_libs", "own_system_libs", "run_args")
 load(":test_limit.bzl", "HANG_LIMIT_ATTRS")
 
@@ -338,6 +338,7 @@ def _mojo_adopted_library(**kwargs):
         if "readme_tool" in kwargs:
             fail("{}: `readme_tool` is set by mojo_adopted_library with the README; do not pass it".format(kwargs.get("name", "mojo_adopted_library")))
         kwargs["readme_tool"] = _README_TOOL
+        with_expected_outputs(kwargs)
     elif kwargs.get("readme_examples") != None:
         fail("{}: `readme_examples` lists the files a README shows, and there is no `readme`".format(kwargs.get("name", "mojo_adopted_library")))
     _adopted(**kwargs)

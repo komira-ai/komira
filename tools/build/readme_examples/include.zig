@@ -1,32 +1,43 @@
-//! The examples of a source-first README (docs/design/documentation_tests.md,
-//! "Include, `fill` and freshness"): each ```mojo fence shows a file of the
-//! `examples/` directory beside the README, named by the include marker on
-//! the line before it, and a test runs that file. Pure: no I/O.
+//! The examples of every document that shows files
+//! (docs/design/documentation_tests.md, "Include, `fill` and freshness"):
+//! a package README and a task page alike. Each fence that shows a file is
+//! named by the include marker on the line before it, a test runs that
+//! file, and the document is held to the file byte for byte. What differs
+//! between the two is a row of KINDS, and nothing else. Pure: no I/O.
 //!
-//!   - An include is the line `<!-- include examples/<name>.mojo -->`,
-//!     whole, at the start of a line, directly before a fence that also
-//!     starts its line. The fence's word is `mojo` and its body is the file
-//!     less one final line feed. When the file holds a line that would close
-//!     the fence, the fence is longer than that line's run (`fill` makes it
-//!     so).
-//!   - A file shown so is not empty and holds no byte order mark, no
-//!     carriage return and no line that ends in a space or a tab.
-//!   - Every file the library lists (`readme_examples` in its BUCK file) is
-//!     shown by exactly one include, and every ```mojo fence (`mojo module`
-//!     too) is an include: no example of a source-first README is inline.
-//!   - A ```text fence directly after an included fence, with only blank
-//!     lines between, is output no run printed, so it says why:
-//!     `<!-- not-tested: <reason> -->` on the line before it. A not-tested
-//!     marker stands on the line just before a fence, and gives a reason.
-//!   - Other fences stay inline: `text` sketches, `sh` commands, and (in
-//!     this tier) `python`, which a README includes once it shows `.py`
-//!     files.
+//!   - An include is the line `<!-- include <path> -->`, whole, at the
+//!     start of a line, directly before a fence that also starts its line.
+//!     `<path>` is relative to the document: the kind's directory, a plain
+//!     name (no `/`, no `..`) and one of the kind's extensions, each of
+//!     which names the fence word (KINDS). The fence's word is that word and
+//!     its body is the file less one final line feed. When the file holds a
+//!     line that would close the fence, the fence is longer than that
+//!     line's run (`fill` makes it so).
+//!   - A file shown so is not empty, ends in a line feed, and holds no byte
+//!     order mark, no carriage return and no line that ends in a space or a
+//!     tab.
+//!   - Every file the document must show is shown by exactly one include
+//!     (a README: each `.mojo` its library lists; a task page: `example.py`
+//!     and `expected_output.txt`), and no file is shown twice.
+//!   - A fence of the kind's code word (`mojo`, `mojo module` too, for a
+//!     README; `python` for a task page) is an include; a task page may
+//!     instead give `<!-- not-tested: <reason> -->` on the line before it.
+//!   - A ```text fence directly after code (a fence whose word is not
+//!     `text`) or after an included fence, with only blank lines between,
+//!     is output no run printed unless it is itself an include, so it says
+//!     why: `<!-- not-tested: <reason> -->` on the line before it. A
+//!     not-tested marker stands on the line just before a fence, and gives
+//!     a reason.
 //!   - The inline model's hidden lines (`<!-- mojo-hidden`) are refused: the
 //!     lines go in the file, where the reader sees them. So is a comment that
 //!     misspells a marker (`<!--include`, `<!-- Include`, `<!-- not-tested -->`,
 //!     text after the `-->`): it would hide nothing and show nothing.
+//!   - A README's `examples/<name>.expected_output.txt` is what
+//!     `examples/<name>.mojo` prints (its welded test compares the two,
+//!     output.zig); the README may show it, and lists it only beside that
+//!     `.mojo`.
 //!
-//! `check` returns every refusal of those rules and the README as `fill`
+//! `check` returns every refusal of those rules and the document as `fill`
 //! writes it: the body of every include rewritten from its file (and the
 //! fence lengthened when the file needs it), every other byte as it was. The
 //! freshness check is the rules plus "fill changes no byte".
@@ -38,11 +49,11 @@
 
 const std = @import("std");
 const md = @import("markdown");
-const task_page = @import("task_page.zig");
+const markers = @import("markers.zig");
 const Allocator = std.mem.Allocator;
 
-/// The marker words, spelled once (task_page.zig).
-pub const MARKERS = task_page.MARKERS;
+/// The marker words, spelled once (markers.zig).
+pub const MARKERS = markers.MARKERS;
 
 /// The first word of an HTML comment block that makes it a marker comment,
 /// which a renderer drops: an include, a not-tested reason, and the inline
@@ -50,25 +61,130 @@ pub const MARKERS = task_page.MARKERS;
 /// one).
 pub const MARKER_WORDS = [_][]const u8{ "include", "not-tested:", "mojo-hidden" };
 
-/// Where the files of a README's includes are, relative to the README.
+/// Where the files of a README's includes are, relative to the README, and
+/// the extension of an example (migrate.zig names its files so).
 pub const DIR = "examples/";
 pub const EXT = ".mojo";
+/// The extension of a README example's expected output, beside its `.mojo`.
+pub const EXPECTED_EXT = ".expected_output.txt";
 
-/// The stale refusal's last words: how the author mends it.
-pub const FILL_HINT = "build the library's [tests][readme][fill] sub-target and apply the patch it writes with git apply";
+/// An extension an include may name, and the fence word that shows it.
+pub const Ext = struct {
+    ext: []const u8,
+    word: []const u8,
+    /// Every listed file of this extension is shown by an include.
+    shown: bool,
+    /// The extension of the file this one is the output of, which must be
+    /// listed beside it (`<name>` the same), or null.
+    output_of: ?[]const u8 = null,
+};
 
-/// A file the library lists: its path as an include names it
-/// (`examples/<name>.mojo`) and its bytes.
+/// A kind of document that shows files: one row of the rule table
+/// (docs/design/documentation_tests.md, "Source-first for every kind that
+/// shows code"). Every rule of `check` is the same for every kind; a row
+/// says only where the files are, how each is fenced, which must be shown,
+/// and how a refusal names them.
+pub const Kind = struct {
+    /// Its name, as `check --kind` and `fill --kind` take it.
+    name: []const u8,
+    /// The document, as a refusal names it.
+    doc: []const u8,
+    /// The directory, relative to the document, of the files it shows (""
+    /// for the document's own).
+    dir: []const u8,
+    /// The extensions an include may name, each with its fence word.
+    exts: []const Ext,
+    /// What an include names, as a refusal says it.
+    pattern: []const u8,
+    /// The files every document of the kind shows, when they are listed.
+    required: []const []const u8,
+    /// Whether a listed file of no extension of `exts` must be shown too
+    /// (and so is refused, since no include can show it): a README's list
+    /// is its examples alone, a task directory's every file it holds.
+    show_unknown: bool,
+    /// The fence word whose fences are code a run must back.
+    code: []const u8,
+    /// Whether a not-tested reason may stand for an include on such a fence.
+    untested_code: bool,
+    /// The refusal of a code fence that shows no file, after its fence.
+    code_rule: []const u8,
+    /// Where the files are listed, as the refusal of an unlisted include
+    /// says it (the path follows).
+    unlisted: []const u8,
+    /// The refusal of a file that must be shown and is not, after its path
+    /// (`and no <!-- include ... --> shows it` follows).
+    unshown: []const u8,
+    /// The stale refusal's last words: how the author mends it.
+    fill_hint: []const u8,
+};
+
+/// A package README (src/<pkg>/README.md; tools/build/mojo/readme.bzl).
+pub const README = Kind{
+    .name = "readme",
+    .doc = "a source-first README",
+    .dir = DIR,
+    .exts = &.{
+        .{ .ext = EXT, .word = "mojo", .shown = true },
+        .{ .ext = EXPECTED_EXT, .word = "text", .shown = false, .output_of = EXT },
+    },
+    .pattern = "examples/<name>.mojo",
+    .required = &.{},
+    .show_unknown = true,
+    .code = "mojo",
+    .untested_code = false,
+    .code_rule = "every example of a source-first README is a file of examples/, shown by <!-- include examples/<name>.mojo --> on the line before its fence",
+    .unlisted = "no such example: the library's readme_examples (its BUCK file) lists no",
+    .unshown = "is listed in readme_examples",
+    .fill_hint = "build the library's [tests][readme][fill] sub-target and apply the patch it writes with git apply",
+};
+
+/// A task page (python/docs/tasks/<rank>-<slug>/page.md; tasks.zig,
+/// python/task_examples.bzl).
+pub const TASK = Kind{
+    .name = "task",
+    .doc = "a task page",
+    .dir = "",
+    .exts = &.{
+        .{ .ext = ".py", .word = "python", .shown = false },
+        .{ .ext = ".txt", .word = "text", .shown = false },
+    },
+    .pattern = "<file>",
+    .required = &.{ "example.py", "expected_output.txt" },
+    .show_unknown = false,
+    .code = "python",
+    .untested_code = true,
+    .code_rule = "put <!-- include <file> --> or <!-- not-tested: <reason> --> on the line before it",
+    .unlisted = "the task directory has no",
+    .unshown = "is a file every task page shows",
+    .fill_hint = "build the [fill] sub-target of the task pages' check (:pages of the tree's BUCK file) and apply the patch it writes with git apply",
+};
+
+/// Every kind, the rule table.
+pub const KINDS = [_]*const Kind{ &README, &TASK };
+
+/// The kind named `name`, or null.
+pub fn kindNamed(name: []const u8) ?*const Kind {
+    for (KINDS) |k| {
+        if (std.mem.eql(u8, k.name, name)) return k;
+    }
+    return null;
+}
+
+/// The README kind's stale hint (the README tests name it).
+pub const FILL_HINT = README.fill_hint;
+
+/// A file the document may show: its path as an include names it
+/// (`examples/<name>.mojo`, `example.py`) and its bytes.
 pub const Listed = struct {
     path: []const u8,
     data: []const u8,
 };
 
 pub const Checked = struct {
-    /// Every refusal, one line each, in README line order (those naming no
-    /// line last): `<display>:<line>: ...` or `<display>: ...`.
+    /// Every refusal, one line each, in document line order (those naming
+    /// no line last): `<display>:<line>: ...` or `<display>: ...`.
     refusals: []const []const u8,
-    /// The README as `fill` writes it. `text` itself when not `fillable`.
+    /// The document as `fill` writes it. `text` itself when not `fillable`.
     filled: []const u8,
     /// False when an include cannot be filled (a refusal says why).
     fillable: bool,
@@ -203,15 +319,17 @@ fn nearMiss(alloc: Allocator, text: []const u8) Allocator.Error!bool {
     return false;
 }
 
-/// The path an include names, when it is `examples/<name>.mojo` with a
-/// plain name (no `/`, no `..`).
-pub fn validPath(path: []const u8) bool {
-    if (!std.mem.startsWith(u8, path, DIR) or !std.mem.endsWith(u8, path, EXT)) return false;
-    if (path.len <= DIR.len + EXT.len) return false;
-    const name = path[DIR.len .. path.len - EXT.len];
-    if (std.mem.indexOfScalar(u8, name, '/') != null) return false;
-    if (std.mem.indexOf(u8, name, "..") != null) return false;
-    return true;
+/// The extension of `kind` that the path an include names has, when the
+/// path is the kind's directory, a plain name (no `/`, no `..`) and that
+/// extension; null otherwise.
+pub fn extOf(kind: *const Kind, path: []const u8) ?*const Ext {
+    if (!std.mem.startsWith(u8, path, kind.dir)) return null;
+    const rest = path[kind.dir.len..];
+    if (std.mem.indexOfScalar(u8, rest, '/') != null or std.mem.indexOf(u8, rest, "..") != null) return null;
+    for (kind.exts) |*e| {
+        if (std.mem.endsWith(u8, rest, e.ext) and rest.len > e.ext.len) return e;
+    }
+    return null;
 }
 
 /// The path `display` names a README's example by: the README's directory
@@ -227,6 +345,7 @@ pub fn fileRefusal(alloc: Allocator, name: []const u8, data: []const u8) Allocat
     if (data.len == 0 or std.mem.eql(u8, data, "\n")) return try std.fmt.allocPrint(alloc, "{s} is empty", .{name});
     if (std.mem.startsWith(u8, data, "\xEF\xBB\xBF")) return try std.fmt.allocPrint(alloc, "{s} starts with a byte order mark", .{name});
     if (std.mem.indexOfScalar(u8, data, '\r') != null) return try std.fmt.allocPrint(alloc, "{s} holds a carriage return", .{name});
+    if (data[data.len - 1] != '\n') return try std.fmt.allocPrint(alloc, "{s} does not end in a line feed", .{name});
     var it = std.mem.splitScalar(u8, data, '\n');
     var n: usize = 0;
     while (it.next()) |l| {
@@ -308,15 +427,18 @@ fn findListed(listed: []const Listed, path: []const u8) ?usize {
     return null;
 }
 
-/// Whether the last non-blank line before `line` (an index) closes an
-/// included fence.
-fn followsInclude(lines: []const []const u8, fences: []const md.Fence, included: []const bool, line: usize) bool {
+/// Whether the last non-blank line before `line` (an index) closes a code
+/// fence (one whose word is not `text`, nor empty) or an included fence.
+fn followsCode(lines: []const []const u8, fences: []const md.Fence, included: []const bool, line: usize) bool {
     var i = line;
     while (i > 0) {
         i -= 1;
         if (isBlank(lines[i])) continue;
         for (fences, 0..) |g, k| {
-            if (included[k] and g.close_line != null and g.close_line.? == i) return true;
+            const cl = g.close_line orelse continue;
+            if (cl != i) continue;
+            const word = firstWord(g.info);
+            return included[k] or (word.len > 0 and !std.mem.eql(u8, word, "text"));
         }
         return false;
     }
@@ -346,16 +468,16 @@ pub fn render(alloc: Allocator, text: []const u8, sp: []const Span, fills: []con
     return out.toOwnedSlice(alloc);
 }
 
-/// The refusals of the source-first README `text` (named `display`) whose
-/// library lists `listed`, and the README as `fill` writes it.
-pub fn check(alloc: Allocator, text: []const u8, display: []const u8, listed: []const Listed) Allocator.Error!Checked {
+/// The refusals of the document `text` of kind `kind` (named `display`),
+/// whose files are `listed`, and the document as `fill` writes it.
+pub fn check(alloc: Allocator, kind: *const Kind, text: []const u8, display: []const u8, listed: []const Listed) Allocator.Error!Checked {
     const lines = try md.splitLines(alloc, text);
     const sp = try spans(alloc, text);
     const fences = try md.fences(alloc, lines);
     const mask = try md.codeMask(alloc, lines);
     var refusals = std.ArrayList(Refusal).empty;
     const c = Ctx{ .alloc = alloc, .display = display, .out = &refusals };
-    // The README line of the include that shows each listed file; 0 for none.
+    // The document line of the include that shows each listed file; 0 for none.
     const shown_at = try alloc.alloc(usize, listed.len);
     @memset(shown_at, 0);
     const included = try alloc.alloc(bool, fences.len);
@@ -367,7 +489,7 @@ pub fn check(alloc: Allocator, text: []const u8, display: []const u8, listed: []
         const i = cm.open_line;
         const at = i + 1;
         const body = commentText(lines[i]);
-        if (task_page.marker(lines[i], MARKERS.include)) |path| {
+        if (markers.marker(lines[i], MARKERS.include)) |path| {
             const k_fence = fenceAt(fences, i + 1) orelse {
                 try c.refuse(at, "the include of {s} is not on the line just before a fence", .{path});
                 fillable = false;
@@ -376,13 +498,13 @@ pub fn check(alloc: Allocator, text: []const u8, display: []const u8, listed: []
             const f = fences[k_fence];
             // Shown, even when refused below: its refusal is the one to mend.
             included[k_fence] = true;
-            if (!validPath(path)) {
-                try c.refuse(at, "include \"{s}\": a README shows examples/<name>.mojo, a file of the examples directory beside it", .{path});
+            const ext = extOf(kind, path) orelse {
+                try c.refuse(at, "include \"{s}\": {s} shows {s}", .{ path, kind.doc, try shapes(alloc, kind) });
                 fillable = false;
                 continue;
-            }
+            };
             const k = findListed(listed, path) orelse {
-                try c.refuse(at, "include {s}: no such example: the library's readme_examples (its BUCK file) lists no {s}", .{ path, path });
+                try c.refuse(at, "include {s}: {s} {s}", .{ path, kind.unlisted, path });
                 fillable = false;
                 continue;
             };
@@ -396,8 +518,8 @@ pub fn check(alloc: Allocator, text: []const u8, display: []const u8, listed: []
                 fillable = false;
                 continue;
             }
-            if (!std.mem.eql(u8, f.info, "mojo")) {
-                try c.refuse(f.open_line + 1, "include {s} is shown in a ```{s} fence; a .mojo file is shown in ```mojo", .{ path, f.info });
+            if (!std.mem.eql(u8, f.info, ext.word)) {
+                try c.refuse(f.open_line + 1, "include {s} is shown in a ```{s} fence; a {s} file is shown in ```{s}", .{ path, f.info, ext.ext, ext.word });
                 fillable = false;
                 continue;
             }
@@ -418,45 +540,44 @@ pub fn check(alloc: Allocator, text: []const u8, display: []const u8, listed: []
             try fills.append(alloc, .{
                 .open = f.open_line,
                 .close = close,
-                .open_text = if (length == f.length) lines[f.open_line] else try std.mem.concat(alloc, u8, &.{ fence, "mojo" }),
+                .open_text = if (length == f.length) lines[f.open_line] else try std.mem.concat(alloc, u8, &.{ fence, ext.word }),
                 .body = want,
                 .close_text = if (length == f.length) lines[close] else fence,
             });
             const have = lines[f.open_line + 1 .. close];
             if (length != f.length) {
-                try c.refuse(f.open_line + 1, "include {s}: {s} holds a line that closes a fence of {d}, so its fence is {d} long; {s}", .{ path, name, f.length, length, FILL_HINT });
+                try c.refuse(f.open_line + 1, "include {s}: {s} holds a line that closes a fence of {d}, so its fence is {d} long; {s}", .{ path, name, f.length, length, kind.fill_hint });
             } else if (!eqlLines(have, want)) {
                 const d = firstDifference(have, want);
-                try c.refuse(f.open_line + 2 + d, "include {s} is stale: this line is not line {d} of {s}; {s}", .{ path, d + 1, name, FILL_HINT });
+                try c.refuse(f.open_line + 2 + d, "include {s} is stale: this line is not line {d} of {s}; {s}", .{ path, d + 1, name, kind.fill_hint });
             }
             continue;
         }
-        if (task_page.marker(lines[i], MARKERS.not_tested)) |why| {
+        if (markers.marker(lines[i], MARKERS.not_tested)) |why| {
             if (md.strip(why).len == 0) try c.refuse(at, "a not-tested marker gives no reason", .{});
             if (fenceAt(fences, i + 1) == null) try c.refuse(at, "a not-tested marker is not on the line just before a fence", .{});
             continue;
         }
         if (std.mem.eql(u8, commentWord(body), "mojo-hidden")) {
-            try c.refuse(at, "hidden lines (`<!-- mojo-hidden`) are the inline model's: a source-first README shows the whole file, so the lines go in the example's file", .{});
+            try c.refuse(at, "hidden lines (`<!-- mojo-hidden`) are the inline model's: {s} shows the whole file, so the lines go in the example's file", .{kind.doc});
             continue;
         }
         if (try nearMiss(alloc, body)) {
-            try c.refuse(at, "`{s}` is not a marker: an include is the whole line `<!-- include examples/<name>.mojo -->` and a reason the whole line `<!-- not-tested: <reason> -->`, each at the start of its line", .{md.strip(lines[i])});
+            try c.refuse(at, "`{s}` is not a marker: an include is the whole line `<!-- include {s} -->` and a reason the whole line `<!-- not-tested: <reason> -->`, each at the start of its line", .{ md.strip(lines[i]), kind.pattern });
         }
     }
 
     for (fences, 0..) |f, k| {
         if (included[k]) continue;
         const word = firstWord(f.info);
-        if (std.mem.eql(u8, word, "mojo")) {
-            try c.refuse(f.open_line + 1, "a ```{s} fence that shows no file: every example of a source-first README is a file of examples/," ++
-                " shown by <!-- include examples/<name>.mojo --> on the line before its fence", .{f.info});
+        const reason = f.open_line > 0 and markers.marker(lines[f.open_line - 1], MARKERS.not_tested) != null;
+        if (std.mem.eql(u8, word, kind.code)) {
+            if (!(reason and kind.untested_code)) try c.refuse(f.open_line + 1, "a ```{s} fence that shows no file: {s}", .{ f.info, kind.code_rule });
             continue;
         }
         if (!std.mem.eql(u8, word, "text")) continue;
-        const reason = f.open_line > 0 and task_page.marker(lines[f.open_line - 1], MARKERS.not_tested) != null;
-        if (!reason and followsInclude(lines, fences, included, f.open_line)) {
-            try c.refuse(f.open_line + 1, "a ```text fence right after an included example shows output no run printed: put <!-- not-tested: <reason> --> on the line before it", .{});
+        if (!reason and followsCode(lines, fences, included, f.open_line)) {
+            try c.refuse(f.open_line + 1, "a ```text fence right after code shows output no run printed: include its file, or put <!-- not-tested: <reason> --> on the line before it", .{});
         }
     }
 
@@ -464,9 +585,16 @@ pub fn check(alloc: Allocator, text: []const u8, display: []const u8, listed: []
     for (listed, shown_at) |l, at| {
         if (at != 0) {
             shown += 1;
-        } else {
-            try c.refuse(null, "{s} is listed in readme_examples and no <!-- include {s} --> shows it", .{ l.path, l.path });
+            continue;
         }
+        const must = if (extOf(kind, l.path)) |e| e.shown or isRequired(kind, l.path) else kind.show_unknown;
+        if (must) try c.refuse(null, "{s} {s} and no <!-- include {s} --> shows it", .{ l.path, kind.unshown, l.path });
+    }
+    for (listed) |l| {
+        const e = extOf(kind, l.path) orelse continue;
+        const of = e.output_of orelse continue;
+        const program = try std.mem.concat(alloc, u8, &.{ l.path[0 .. l.path.len - e.ext.len], of });
+        if (findListed(listed, program) == null) try c.refuse(null, "{s} is the expected output of {s}, which is not listed", .{ l.path, program });
     }
 
     // Document order; stable, so refusals of one line keep their order.
@@ -479,4 +607,28 @@ pub fn check(alloc: Allocator, text: []const u8, display: []const u8, listed: []
         .fillable = fillable,
         .shown = shown,
     };
+}
+
+fn isRequired(kind: *const Kind, path: []const u8) bool {
+    for (kind.required) |r| {
+        if (std.mem.eql(u8, r, path)) return true;
+    }
+    return false;
+}
+
+/// What an include of `kind` may name, for its refusal:
+/// `examples/<name>.mojo or examples/<name>.expected_output.txt, a file of
+/// examples/ beside it` or `<name>.py or <name>.txt, a file beside it`.
+fn shapes(alloc: Allocator, kind: *const Kind) Allocator.Error![]const u8 {
+    var out = std.ArrayList(u8).empty;
+    for (kind.exts, 0..) |e, k| {
+        if (k > 0) try out.appendSlice(alloc, " or ");
+        try out.writer(alloc).print("{s}<name>{s}", .{ kind.dir, e.ext });
+    }
+    if (kind.dir.len > 0) {
+        try out.writer(alloc).print(", a file of {s} beside it", .{kind.dir});
+    } else {
+        try out.appendSlice(alloc, ", a file beside it named alone");
+    }
+    return out.toOwnedSlice(alloc);
 }

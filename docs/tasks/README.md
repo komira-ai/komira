@@ -61,8 +61,24 @@ marker names a file of the task directory by its file name. Every page includes 
 `expected_output.txt`. A fence that shows no file says why on the line before it, as
 `<!-- not-tested: <reason> -->`, and the page should say so in its prose too. A `python` fence
 needs an include or that marker, and so does a `text` fence that directly follows code or an
-include with only blank lines between, so a page never shows output that no run printed. The
-marker words are spelled once, in `MARKERS` of `tools/build/readme_examples/task_page.zig`.
+include with only blank lines between, so a page never shows output that no run printed. A file
+is shown once, ends in a line feed, and holds no carriage return, byte order mark or line ending in
+a space or a tab.
+
+These are the rules of every document in komira that shows files, not of task pages alone: a
+package README's examples are held by the same rules, from the same code, through the same commands
+(`check` and `fill` of the README examples tool, one row each of the rule table in
+`tools/build/readme_examples/include.zig`). What differs is only the row: a README names
+`examples/<name>.mojo` (and `examples/<name>.expected_output.txt`) where a page names a file of its
+own directory, and fences its examples in `mojo` where a page uses `python`. The README side is
+[Source-first READMEs](../../tools/build/mojo/README.md#source-first-readmes), and the design of both
+is [docs/design/documentation_tests.md](../design/documentation_tests.md). The marker words are
+spelled once, in `MARKERS` of `tools/build/readme_examples/markers.zig`.
+
+**A stale page is mended by `fill`, as a README is.** After editing `example.py` or
+`expected_output.txt`, build `//python/docs/tasks:pages[fill]` and apply the patch it writes from the
+repository root with `git apply`: it rewrites every stale include block of every page from its file
+and touches nothing else, and it is empty when every page is fresh.
 
 ## What the pull request's check holds
 
@@ -77,8 +93,11 @@ These targets in `python/docs/tasks/BUCK` are all in the pull request's check:
   - every page follows the marker rules above, each include equal to its file byte for byte.
 
   It is `tasks-check` of the Zig tool `//tools/build/readme_examples:tool`, which reads the page
-  through the shared Markdown module. A stale include is named as `page.md:<line>`, with the first
-  line of the file that differs.
+  through the shared Markdown module and holds it by the rules above. A stale include is named as
+  `page.md:<line>`, the first line of the fence that is not the file's, with the line of the file it
+  should be and the `[fill]` that mends it. Building `:pages` also builds `:pages[check]`, the
+  tool's `check --kind task` over every page: the freshness check a package README's
+  `[tests][readme][check]` is. `:pages[fill]` is the patch above.
 - `//python/docs/tasks:<rank>-<slug>`, one per directory, runs `example.py`:
   - it installs the built wheel into an empty virtual environment of the hermetic CPython 3.13,
     with its pinned pyarrow and protobuf and nothing else, no network and no library path;

@@ -191,7 +191,12 @@ until it moves to the Zig module.
 #### Source-first READMEs
 
 A library whose README shows each example from a file lists the files
-([docs/design/documentation_tests.md](../../../docs/design/documentation_tests.md)):
+([docs/design/documentation_tests.md](../../../docs/design/documentation_tests.md)). This is the
+one framework of every document in komira that shows code: the common-task pages
+([docs/tasks/README.md](../../../docs/tasks/README.md)) are held by the same rules, from the same
+code, through the same `check` and `fill` (the `readme` and `task` rows of the rule table in
+`tools/build/readme_examples/include.zig`; the Starlark side of both is
+`tools/build/readme_examples/pages.bzl`).
 
 ```python
 mojo_library(
@@ -223,16 +228,29 @@ def main() raises:
   builds for. The file is staged at its path from the cell root, so a
   failure names `<package>/examples/<name>.mojo:<line>`, a file the author
   can open. `<name>` is lower-case letters, digits and underscores, and not
-  `file`, `fill`, `generated`, `migrated` or `objects`. The list is the glob,
+  `check`, `file`, `fill`, `generated`, `migrated` or `objects`. The list is the glob,
   so analysis has it: no dynamic action.
-- **The freshness check** (the tool's `check`, welded beside them): every
-  listed file is shown by exactly one include, every ```` ```mojo ```` fence
-  (`mojo module` too) is an include, each included fence is its file byte for
-  byte (a file with a carriage return, a byte order mark or a line ending in
-  a space or a tab is refused), a ```` ```text ```` fence right after an
-  included one carries `<!-- not-tested: <reason> -->`, and the inline
+- **An expected output**, `examples/<name>.expected_output.txt` beside
+  `examples/<name>.mojo`: the example's test then also holds its stdout to
+  that file byte for byte (`gate mojo --stdout`, then the tool's
+  `compare-output`), and a difference fails naming
+  `<package>/examples/<name>.expected_output.txt:<line>` with both lines and
+  both texts. The macro adds every such file of the package to
+  `readme_examples` itself, so a glob of `examples/*.mojo` leaves none
+  unchecked; one with no `.mojo` of its name is refused. The README may show
+  it with the same include marker, in a ```` ```text ```` fence. An example
+  with no expected output passes on exit 0, as before.
+- **The freshness check** (the tool's `check --kind readme`, welded beside
+  them): every listed `.mojo` is shown by exactly one include, every
+  ```` ```mojo ```` fence (`mojo module` too) is an include, each included
+  fence is its file byte for byte (an empty file, one with a carriage return
+  or a byte order mark, one that does not end in a line feed, and a line
+  ending in a space or a tab are refused), a ```` ```text ```` fence right
+  after code or an included fence is an include or carries
+  `<!-- not-tested: <reason> -->`, and the inline
   model's `mojo-hidden` comments and misspelt markers are refused. Each
-  refusal names `README.md:<line>`. With no file listed and no example shown
+  refusal names `README.md:<line>`. It is `[tests][readme][check]` on its
+  own. With no file listed and no example shown
   the marker reads `NO EXAMPLE`; `release-check` still refuses such a README
   when it is released.
 - **`[tests][readme][fill]`** is the patch that makes the README fresh (each

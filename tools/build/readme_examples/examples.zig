@@ -42,7 +42,7 @@
 
 const std = @import("std");
 const md = @import("markdown");
-const MARKERS = @import("task_page.zig").MARKERS;
+const MARKERS = @import("markers.zig").MARKERS;
 const Allocator = std.mem.Allocator;
 
 pub const Example = struct {
@@ -228,7 +228,7 @@ fn byLine(_: void, a: Refusal, b: Refusal) bool {
 }
 
 /// Whether `line` is an include marker, whole: `<!-- include <path> -->`
-/// at the start of the line (task_page.zig spells the words).
+/// at the start of the line (markers.zig spells the words).
 pub fn isInclude(line: []const u8) bool {
     const head = MARKERS.open ++ MARKERS.include;
     return line.len >= head.len + MARKERS.close.len and std.mem.startsWith(u8, line, head) and std.mem.endsWith(u8, line, MARKERS.close);

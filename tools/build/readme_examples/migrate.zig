@@ -344,7 +344,7 @@ pub fn verify(alloc: Allocator, old: []const u8, display: []const u8, new: []con
         },
     };
     // The new README is fresh against the files, every file shown once.
-    const checked = try include.check(alloc, new, display, files);
+    const checked = try include.check(alloc, &include.README, new, display, files);
     try out.appendSlice(alloc, checked.refusals);
 
     // The files are example_1 .. example_<n>, one per example.
