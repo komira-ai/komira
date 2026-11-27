@@ -1,6 +1,6 @@
 # Design: `OptimizedPlan`, comparisons and decided questions
 
-Status: proposed, not built. These are §13 and §14 of [`optimized_plan.md`](optimized_plan.md), kept in their own
+Status: partly built, as [`optimized_plan.md`](optimized_plan.md) states. These are §13 and §14 of [`optimized_plan.md`](optimized_plan.md), kept in their own
 file so each file stays under 1,000 lines. Section numbers are that document's: `§10.1`-`§10.9` are in
 [`optimized_plan_udfs.md`](optimized_plan_udfs.md), `§10.10`-`§10.14` in
 [`optimized_plan_udf_runtime.md`](optimized_plan_udf_runtime.md), `§15.x` in

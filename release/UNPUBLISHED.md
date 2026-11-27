@@ -40,7 +40,7 @@ superseded" are read from the code by hand, and no library has either today. In 
 | internal | 0 |
 | native dependency pending | 8 |
 | renamed or superseded | 0 |
-| depends on an unpublished library | 136 |
+| depends on an unpublished library | 137 |
 | none | 7 |
 
 ## The libraries
@@ -193,6 +193,7 @@ superseded" are read from the code by hand, and no library has either today. In 
 | [`op_typed_source_api`](../src/op_typed_source_api/) | depends on an unpublished library | imports `arrow`, `arrow_ipc`, `async_rt`, `avro`, `column_format`, `csv`, `fs`, `host_profile`, `jsonl`, `morsel`, `op_agg_row_api`, `parquet`, `parquet_codec`, `physical_plan`, `plan_expr`, `plan_ir`, `scan_source` |
 | [`op_window`](../src/op_window/) | no README example | its README.md holds no mojo example, which the release README gate refuses |
 | [`operator_api`](../src/operator_api/) | no README example | its README.md holds no mojo example, which the release README gate refuses |
+| [`optimized_plan`](../src/optimized_plan/) | depends on an unpublished library | imports `optimized_plan_header`, `plan_ir`, `plan_wire` |
 | [`optimized_plan_header`](../src/optimized_plan_header/) | none | every library it imports is published, and its README.md holds 1 example |
 | [`optimizer`](../src/optimizer/) | no README example | its README.md holds no mojo example, which the release README gate refuses |
 | [`orc`](../src/orc/) | depends on an unpublished library | imports `arrow`, `arrow_ipc`, `async_rt`, `column_kernels`, `fs`, `plan_expr` |

@@ -20,6 +20,8 @@ from .plan_wire_codec import (
     plan_to_bytes_with_udfs,
     optimized_plan_from_bytes,
     optimized_plan_to_bytes,
+    optimized_plan_to_wire,
+    optimized_plan_from_wire,
     # ★ THE PRODUCER-SIDE HALF. Everything else in this package serves a
     # CONSUMER: bytes arrive and become a plan. `schema_to_bytes` serves an
     # AUTHOR — a non-Mojo frontend that must emit `WireParquetSource.schema`
@@ -92,6 +94,13 @@ from .plan_wire_udf_check import (
     OPTIMIZED_UDF_IN_SCAN_FILTER,
     OPTIMIZED_UDF_LEGACY_FORM,
     PLAN_WIRE_UDF_CHECK_UNMODELLED_TAG,
+)
+
+# WHAT OPTIMIZED ADMITS THAT RAW DOES NOT, AND THE REVERSE, for the fields an
+# optimizer fills in (build side, estimated groups, scan statistics).
+from .plan_wire_optimized import (
+    OPTIMIZED_JOIN_BUILD_SIDE_MISSING,
+    OPTIMIZED_FIELD_UNSUPPORTED,
 )
 
 # THE STRUCTURAL GATE. Exported because a caller that receives plan bytes over

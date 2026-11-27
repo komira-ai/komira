@@ -1072,7 +1072,9 @@ python_binding_test(
 # wheel_install_test): the driver that installs the wheels into an empty
 # prefix and runs a test there, the three tests the installed interpreter runs
 # (the wheel alone, the wheel beside Modular's runtime, and the wheel after an
-# upgrade from the previous release), and the serialized plan the first renders
+# upgrade from the previous release), the test of a UDF from the installed
+# wheel with the host of the UDF runtime's C ABI it runs the runtime through
+# (test_udf_installed.py, udf_host.py), and the serialized plan the first renders
 # (the scan plan of src/so/tests/gate/gate_plan_render.mojo, as hex) and the
 # Parquet file whose aggregate it answers (fixtures/readings.parquet).
 [export_file(
@@ -1082,7 +1084,9 @@ python_binding_test(
     "test_installed.py",
     "test_analysis_job.py",
     "test_tpch_installed.py",
+    "test_udf_installed.py",
     "tpch_compare.py",
+    "udf_host.py",
     "test_beside_modular.py",
     "test_upgrade.py",
     "fixtures/scan_plan.hex",
@@ -1094,7 +1098,8 @@ python_binding_test(
 # python/docs/tasks.
 export_file(
     name = "wheel_install_run.py",
-    visibility = ["komira//python:", "komira//python/docs/tasks:"],
+    # The fixture trees of tools/build/ci/tasks_cases.bzl configure it, never run it.
+    visibility = ["komira//python:", "komira//python/docs/task_tree_fixture/...", "komira//python/docs/tasks:"],
 )
 
 # The driver of the common-task examples (run_task_example.py), and the
