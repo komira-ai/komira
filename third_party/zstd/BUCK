@@ -212,9 +212,9 @@ native_library(
     cflags = _DEFINES,
     prefix = {"name": "komira_zstd_", "strip": "ZSTD_", "min": 100},
     soname = "libkomira_zstd.a",
-    # Apple's clang lowers a loop that fills memory with a repeated 16-byte
-    # value to a call of memset_pattern16, a libSystem function the macOS
-    # floor list of the archive check lacks; every macOS host's libSystem
-    # defines it. No Linux compile references it.
+    # Undefined in the macOS archive and provided by libSystem: clang turns a
+    # fill loop into a call to memset_pattern16 when it compiles for Darwin,
+    # and the archive check's list of libSystem names lacks it. The linux
+    # archive never refers to it.
     allow = ["memset_pattern16"],
 )
