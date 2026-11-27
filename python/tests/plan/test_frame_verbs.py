@@ -513,6 +513,23 @@ def test_series_isna_of_an_expression_tests_the_expression_by_its_type():
     assert (df["a"] + 1).isna()._node == Unary("not", Unary("is_not_null", sum_))
 
 
+def test_series_isna_of_a_window_keeps_the_windows_it_reads():
+    df = Env().df.sort_values("n")
+    running = df["a"].cumsum()
+    got = running.isna()
+    assert got._windows == running._windows and got._windows
+    assert got._node == Unary("not", Unary("is_not_null", running._node))
+    assert df.assign(m=got).dtypes["m"] == "bool"
+
+
+def test_series_isna_of_a_float16_column_compares_it_as_float64():
+    df = Env((("h", "float16"),)).df
+    h = ColRef("h")
+    assert df["h"].isna()._node == Unary(
+        "not", BoolOp("and", Unary("is_not_null", h), not_nan(Cast(h, "float64")))
+    )
+
+
 def test_series_isna_filters_rows_and_notna_assigns_a_bool_column():
     df = Env().df
     assert df[df["x"].isna()]._plan == _ops.Filter(SCAN, missing("x", "float64"))

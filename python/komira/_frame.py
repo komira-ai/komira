@@ -40,8 +40,8 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
   changes none of them, a `dropna` and `head`
   keep it ordered, the builder placing filters and projections under the sort
   and a limit above it, and a sort above a limit when a verb comes after one.
-  `tail` of a sorted frame is sorted. A reduction, `isna`, `notna`, `drop_duplicates`,
-  `concat` and `merge` give an unordered frame, except that
+  `tail` of a sorted frame is sorted. A reduction, `isna`, `notna`,
+  `drop_duplicates`, `concat` and `merge` give an unordered frame, except that
   `groupby(sort=True)` and `merge(sort=True)` sort by their keys; a semi or
   anti join keeps the order, as a filter does.
 - The write terminals `to_parquet`, `to_csv` and `to_json(orient="records",

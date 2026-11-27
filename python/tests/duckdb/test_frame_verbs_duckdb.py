@@ -23,8 +23,11 @@ below is a copy of its own, since a test file cannot import another.
   NULL and NaN in float64, float32, an int32 with no NULL, which is all false),
   of the whole frame, then sum() (and sum(min_count=1)) counting per column;
   a Series of each as a filter and as an assigned column, of an expression,
-  the aliases agreeing, no row both isna and notna and none neither, a sorted
-  frame (isna leaves a multiset, a filter by it keeps the order);
+  the aliases agreeing, no row both isna and notna and none neither, an
+  infinity (not missing) beside NaN and NULL, a float32 NaN made by a cast, a
+  sorted frame (isna leaves a multiset, a filter by it keeps the order); the
+  sum of a bool column that is all NULL, whole and by group, is 0, and missing
+  with min_count=1;
 - rename with a dict, with a callable, with a name the frame does not have
   (skipped), then a filter on the new name, on a sorted frame (a renamed sort
   key leaves a multiset), add_prefix and add_suffix; column names are compared;
@@ -560,6 +563,32 @@ MISSING = [
         "isna of an expression over a float column",
         lambda d: d.assign(m=(d["v"] * 2).isna())[["m"]],
         "SELECT ((v * 2) IS NULL OR isnan(v * 2)) AS m FROM t",
+    ),
+    Case(
+        "isna of a float column is false for an infinity and true for NaN and NULL",
+        lambda d: d.assign(i=d["v"] * 0 + float("inf"))[["i"]].isna(),
+        "SELECT ((v * 0 + 'inf'::DOUBLE) IS NULL OR isnan(v * 0 + 'inf'::DOUBLE)) AS i FROM t",
+    ),
+    Case(
+        "isna marks NaN in a float32 column",
+        lambda d: d.assign(z=d["v"].astype("float32"))[["z"]].isna(),
+        "SELECT (CAST(v AS FLOAT) IS NULL OR isnan(CAST(v AS FLOAT))) AS z FROM t",
+    ),
+    Case(
+        "sum() of a bool column that is all NULL is 0",
+        lambda d: d[d["flag"].isna()][["flag"]].sum(),
+        "SELECT CAST(0 AS BIGINT) AS flag",
+    ),
+    Case(
+        "sum(min_count=1) of a bool column that is all NULL is missing",
+        lambda d: d[d["flag"].isna()][["flag"]].sum(min_count=1),
+        "SELECT CAST(NULL AS BIGINT) AS flag",
+    ),
+    Case(
+        "a group's sum() of a bool column that is all NULL is 0",
+        lambda d: d[d["flag"].isna()].groupby("k")["flag"].sum(),
+        "SELECT k, CAST(0 AS BIGINT) AS flag FROM t WHERE flag IS NULL AND k IS NOT NULL GROUP BY k ORDER BY k",
+        ("k",),
     ),
     Case(
         "isna of a sorted frame leaves a multiset",
