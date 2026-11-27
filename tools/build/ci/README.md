@@ -117,6 +117,15 @@ configuration, and those of the surface capability matrix
 and only analyses it. A test a cell names therefore stays a root, built by
 `//ci:pr` and run by `buck2 test`.
 
+A package whose targets come and go with its files declares an aggregate of
+them, so that the list names the aggregate and not each target: the common
+tasks' examples are `//python/docs/tasks:examples` (`task_examples` of
+`python/task_examples.bzl`), and a pull request that adds a task directory
+changes no generated file. `tasks_cases.bzl` (run by `cases.bxl`) holds that
+over two fixture trees, `python/docs/task_tree_fixture/before` and `after`,
+which differ by one task directory: their roots render the same shards byte
+for byte.
+
 `guard.bxl` is the completeness guard:
 
 ```sh

@@ -9,6 +9,7 @@ TARGETS = [
     "komira//node:package_linux_x64",
     "komira//node:package_test",
     "komira//node:session_test",
+    "komira//node:sql_conformance_test",
     "komira//node:thread_test",
     "komira//node:typecheck",
     "komira//python/smoke:pypi_smoke",
