@@ -225,7 +225,7 @@ def render_summary(
 
     s += String("### Set aside\n\n")
     s += String("- ") + String(a.ignored_files) + String(" report files outside the repository (the Mojo standard library, other code not in the repository)\n")
-    s += String("- ") + String(a.excluded_test_files) + String(" test source files (`<package>/tests/` and each `--test-source`; `--include-tests` counts them)\n")
+    s += String("- ") + String(a.excluded_test_files) + String(" test source files (`<package>/tests/`, `<package>/examples/*.mojo` and each `--test-source`; `--include-tests` counts them)\n")
     s += String("- ") + String(len(a.generated_paths)) + String(" generated source files (first line `# @generated`; neither measured nor counted)")
     if len(a.generated_paths) > 0:
         s += String(": ")

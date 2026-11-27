@@ -172,6 +172,28 @@ def test_test_sources_and_helpers() raises:
     assert_equal(b.packages[0].line_found, 6)
 
 
+def test_readme_examples_are_left_out_like_tests() raises:
+    # A source-first README's examples (examples/<name>.mojo directly in the
+    # package) are welded tests no coverage build compiles: left out of the
+    # numbers, not UnmeasuredFile; counted with --include-tests. A .mojo file
+    # one directory deeper is source.
+    var l = List[String]()
+    l.append("src/p/BUCK")
+    l.append("src/p/a.mojo")
+    l.append("src/p/examples/validate.mojo")
+    l.append("src/p/examples/deeper/helper.mojo")
+    var s = _sources()
+    s.texts[String("src/p/examples/validate.mojo")] = String("def main() raises:\n    var x = 1\n    print(x)\n")
+    s.texts[String("src/p/examples/deeper/helper.mojo")] = String("def g() -> Int:\n    return 2\n")
+    var a = analyze(_report(), List[Input](), repo_files_of(l), Held(), s, Options())
+    assert_equal(_kinds(a), "BelowTarget BranchNotMeasured UnmeasuredFile@src/p/examples/deeper/helper.mojo")
+    assert_equal(a.packages[0].line_found, 4)
+    var o = Options()
+    o.include_tests = True
+    var b = analyze(_report(), List[Input](), repo_files_of(l), Held(), s, o)
+    assert_equal(_kinds(b), "BelowTarget BranchNotMeasured UnmeasuredFile@src/p/examples/deeper/helper.mojo UnmeasuredFile@src/p/examples/validate.mojo")
+
+
 def test_gate_equals_report_with_unmeasured_files() raises:
     var rat = _held(String("line\n"))
     var full = analyze(_report(), List[Input](), _repo(), rat, _sources(), Options())
@@ -288,6 +310,7 @@ def main() raises:
     test_init_of_reexports_raises_nothing()
     test_markers_apply_to_a_file_no_test_compiled()
     test_test_sources_and_helpers()
+    test_readme_examples_are_left_out_like_tests()
     test_gate_equals_report_with_unmeasured_files()
     test_annotations_of_a_file_no_test_compiled()
     test_a_report_entry_with_no_record_counts_as_unmeasured()

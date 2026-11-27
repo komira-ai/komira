@@ -254,8 +254,15 @@ def package_of(path: String, repo: RepoFiles) raises -> String:
 
 
 def is_test_source(path: String, package: String) -> Bool:
-    """Whether `path` is under the `tests/` directory directly inside its
-    package."""
-    if package == String("(root)"):
-        return path.startswith("tests/")
-    return path.startswith(package + String("/tests/"))
+    """Whether `path` is a test source by its place in its package: under the
+    `tests/` directory directly inside it, or a source-first README's example,
+    a `.mojo` file directly in the `examples/` directory directly inside it
+    (each is a welded test of the README gate: tools/build/mojo/README.md,
+    "Source-first READMEs")."""
+    var base = String("") if package == String("(root)") else package + String("/")
+    if path.startswith(base + String("tests/")):
+        return True
+    var examples = base + String("examples/")
+    if not path.startswith(examples) or not path.endswith(".mojo"):
+        return False
+    return suffix(path, examples.byte_length()).find("/") < 0

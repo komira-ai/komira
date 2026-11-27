@@ -254,7 +254,11 @@ A file's package is the nearest directory above it holding a `BUCK` file
 one; an error when none does. Files under `tests/` directly inside a package
 (`src/m/tests/...`) are test sources: left out of the numbers, the changed-line
 coverage and the annotations, and counted in the summary, unless
-`--include-tests`. Only that directory is, and for `gate` each
+`--include-tests`. So are a source-first README's examples, the `.mojo` files
+directly in `examples/` directly inside a package (`src/m/examples/x.mojo`):
+each is a welded test of the README gate
+([Source-first READMEs](../mojo/README.md#source-first-readmes)), and no
+coverage build compiles it. Only those are, and for `gate` each
 `--test-source` (the build gate names every test the library welds, so a
 test elsewhere in its package is left out too): any other test file or test
 helper in the package (`src/m/testing.mojo`, `src/m/x/tests/t.mojo`) is

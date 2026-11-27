@@ -147,6 +147,21 @@ def test_test_sources() raises:
     assert_true(is_test_source(String("src/retry/tests/test_decide.mojo"), String("src/retry")))
     assert_true(not is_test_source(String("src/retry/policy.mojo"), String("src/retry")))
     assert_true(not is_test_source(String("src/retry/inner/tests/x.mojo"), String("src/retry")))
+    assert_true(is_test_source(String("tests/test_x.mojo"), String("(root)")))
+
+
+def test_readme_examples_are_test_sources() raises:
+    # A source-first README's example: a .mojo file directly in examples/
+    # directly inside the package, nothing deeper and nothing else.
+    assert_true(is_test_source(String("src/anomaly/examples/validate_series.mojo"), String("src/anomaly")))
+    assert_true(is_test_source(String("examples/x.mojo"), String("(root)")))
+    assert_true(not is_test_source(String("src/anomaly/examples/inner/x.mojo"), String("src/anomaly")))
+    assert_true(not is_test_source(String("src/anomaly/examples/notes.txt"), String("src/anomaly")))
+    assert_true(not is_test_source(String("src/anomaly/examples/x.mojo.bak"), String("src/anomaly")))
+    assert_true(not is_test_source(String("src/anomaly/inner/examples/x.mojo"), String("src/anomaly")))
+    assert_true(not is_test_source(String("src/anomaly/examples.mojo"), String("src/anomaly")))
+    assert_true(not is_test_source(String("src/anomaly/examplesx/x.mojo"), String("src/anomaly")))
+    assert_true(not is_test_source(String("src/other/examples/x.mojo"), String("src/anomaly")))
 
 
 def _bytes(s: String) -> List[UInt8]:
@@ -235,6 +250,7 @@ def main() raises:
     test_package_is_nearest_buck()
     test_no_buck_anywhere_is_an_error()
     test_test_sources()
+    test_readme_examples_are_test_sources()
     test_ls_files_z()
     test_prefixes_that_do_not_match_are_passed_over()
     test_buck_out_hash_must_be_all_hex()
