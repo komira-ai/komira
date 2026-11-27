@@ -348,6 +348,8 @@ def bind_correlated_scalar_body(
         raise _refuse(
             "with GROUP BY, HAVING, DISTINCT, ORDER BY, LIMIT or OFFSET in its body"
         )
+    if len(body.distinct_on) > 0 or body.qualify_pred:
+        raise _refuse("with DISTINCT ON or QUALIFY in its body")
     for i in range(len(body.joins)):
         if body.joins[i].kind != JK_CROSS or body.joins[i].is_keyed():
             raise _refuse("whose FROM has a JOIN other than a comma or CROSS join")

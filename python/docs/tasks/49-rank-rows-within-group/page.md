@@ -62,7 +62,7 @@ Output:
 - `RANK` gives tied rows the same rank and skips the ranks after them (1, 1, 3); `DENSE_RANK` does not skip (1, 1, 2); `ROW_NUMBER` gives every row its own number, so add a tie-breaker to the `ORDER BY` (here `rep`) to make it deterministic.
 - pandas-shaped `rank` returns float64, as pandas does, and `ascending=False` ranks the largest value first. `method="min"` matches SQL `RANK` and `method="dense"` matches `DENSE_RANK`; `na_option` takes `"keep"`, `"top"` and `"bottom"`.
 - pandas' default `method="average"` and `method="first"` are refused today, each with an error naming `min` and `dense`; pass the method explicitly. Use SQL `ROW_NUMBER` for the `"first"` behaviour. `rank(pct=True)` is refused too.
-- `QUALIFY` is refused: compute the rank in a subquery and filter it in the outer `WHERE`, naming the columns (`SELECT *` next to a window function is refused). pandas `groupby(...).cumcount()` is not supported either.
+- To keep only some ranks, filter with `QUALIFY`, which runs after the window functions (`QUALIFY rank() OVER (...) = 1`, or on the rank's alias), or compute the rank in a subquery and filter it in the outer `WHERE`. `SELECT *` next to a window function works. pandas `groupby(...).cumcount()` is not supported.
 - A named window (`OVER w` with a `WINDOW` clause) is refused: write the window inline in each `OVER (...)`.
 
 ## Related

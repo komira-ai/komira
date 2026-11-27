@@ -30,10 +30,13 @@
 #   6. WITH: several CTEs, WITH RECURSIVE refused, a keyword or a number as
 #      a CTE name refused, an unclosed body refused. (catches: a structural
 #      keyword accepted as a CTE name)
-#   7. DISTINCT and the refused DISTINCT ON; a column named `on`.
+#   7. DISTINCT, DISTINCT ON (k, ...) with its keys and an unclosed key list;
+#      a column named `on`.
 #   8. A FROM-less select list ends at every clause keyword DuckDB allows
 #      there, and the refused clause words are named. (catches: a missing
 #      clause word, which would fail on the missing FROM instead)
+#   8a. QUALIFY parses after HAVING and before ORDER BY, and is a syntax error
+#      after ORDER BY or LIMIT or written twice.
 #   9. GROUP BY / HAVING / ORDER BY with ASC / DESC and NULLS FIRST / LAST.
 #      (catches: NULLS FIRST and LAST swapped; a bare NULLS accepted)
 #  10. LIMIT / OFFSET / FETCH in either order with their noise words, each
@@ -488,7 +491,13 @@ def test_distinct_and_distinct_on() raises:
     var st = _parse("SELECT DISTINCT a FROM t")
     assert_true(st.query.distinct)
     assert_false(_parse("SELECT a FROM t").query.distinct)
-    _refuses("SELECT DISTINCT ON (a) a FROM t", "SELECT DISTINCT ON (...)")
+    var on = _parse("SELECT DISTINCT ON (a, b + 1) a, b FROM t ORDER BY a")
+    assert_false(on.query.distinct)
+    assert_equal(len(on.query.distinct_on), 2)
+    assert_equal(on.query.distinct_on[0].text, "a")
+    assert_equal(len(on.query.select_items), 2)
+    assert_equal(len(_parse("SELECT DISTINCT a FROM t").query.distinct_on), 0)
+    _refuses("SELECT DISTINCT ON (a a FROM t", "expected ')' to close DISTINCT ON")
     # `on` not followed by `(` is a column named `on`.
     var col = _parse("SELECT DISTINCT on FROM t")
     assert_true(col.query.distinct)
@@ -498,7 +507,7 @@ def test_distinct_and_distinct_on() raises:
 def test_from_less_select_ends_at_every_allowed_clause() raises:
     var tails: List[String] = [
         "", ";", " WHERE 1 = 0", " GROUP BY 1", " HAVING 1 = 1", " ORDER BY 1",
-        " LIMIT 1", " OFFSET 1", " FETCH FIRST 1 ROWS ONLY",
+        " LIMIT 1", " OFFSET 1", " FETCH FIRST 1 ROWS ONLY", " QUALIFY 1 = 1",
         " UNION ALL SELECT 2", " INTERSECT SELECT 2", " EXCEPT SELECT 2",
     ]
     for i in range(len(tails)):
@@ -508,7 +517,6 @@ def test_from_less_select_ends_at_every_allowed_clause() raises:
     var sub = _parse("SELECT (SELECT 1) AS one")
     assert_equal(sub.query.subqueries[0].body.from_tables[0].name, String(FROM_LESS_RELATION))
     _refuses("SELECT 1 WINDOW w AS (ORDER BY 1)", "a named WINDOW clause")
-    _refuses("SELECT 1 QUALIFY 1 = 1", "the QUALIFY clause")
     _refuses("SELECT a b c", "expected keyword 'from'")
 
 
@@ -559,8 +567,33 @@ def test_limit_offset_fetch() raises:
     _refuses("SELECT a FROM t LIMIT 1, 2", "unexpected trailing tokens after query")
 
 
+def test_qualify_parses_after_having_and_before_order_by() raises:
+    var st = _parse(
+        "SELECT a, row_number() OVER (ORDER BY a) AS rn FROM t WHERE a > 0"
+        " QUALIFY rn = 1 ORDER BY a LIMIT 3"
+    )
+    assert_true(Bool(st.query.qualify_pred))
+    assert_equal(len(st.query.order_by), 1)
+    assert_equal(st.query.limit.value(), 3)
+    var g = _parse("SELECT a FROM t GROUP BY a HAVING count(*) > 1 QUALIFY a = 1")
+    assert_true(Bool(g.query.having_pred))
+    assert_true(Bool(g.query.qualify_pred))
+    assert_false(Bool(_parse("SELECT a FROM t").query.qualify_pred))
+    _refuses(
+        "SELECT a FROM t ORDER BY a QUALIFY a = 1",
+        "SQL syntax error: QUALIFY is written once, before ORDER BY, LIMIT and OFFSET",
+    )
+    _refuses(
+        "SELECT a FROM t LIMIT 1 QUALIFY a = 1",
+        "SQL syntax error: QUALIFY is written once, before ORDER BY, LIMIT and OFFSET",
+    )
+    _refuses(
+        "SELECT a FROM t QUALIFY a = 1 QUALIFY a = 2",
+        "SQL syntax error: QUALIFY is written once, before ORDER BY, LIMIT and OFFSET",
+    )
+
+
 def test_unsupported_clause_words_are_named() raises:
-    _refuses("SELECT * FROM t QUALIFY a = 1", "the QUALIFY clause")
     _refuses("SELECT * FROM t WINDOW w AS (ORDER BY a)", "a named WINDOW clause")
     _refuses("SELECT * FROM t PIVOT (sum(a) FOR b IN (1))", "SQL not supported: PIVOT (reshaping")
     _refuses("SELECT * FROM t UNPIVOT (a FOR b IN (c))", "SQL not supported: UNPIVOT (reshaping")

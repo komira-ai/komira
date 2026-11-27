@@ -114,7 +114,13 @@ ordinal, alias or expression) and the plain projection. `sql_bind_window_order`
 binds window functions with their `PARTITION BY` and `ORDER BY` (each window
 order key may carry `NULLS FIRST` / `NULLS LAST`; an unwritten one is the
 derived default), and the statement-level `ORDER BY` (column, ordinal, output
-alias or expression, with explicit `NULLS FIRST` / `NULLS LAST`).
+alias or expression, with explicit `NULLS FIRST` / `NULLS LAST`), `SELECT *`
+beside a window, and the `QUALIFY` filter between the windows and the
+projection (`sql_bind_qualify` rewrites its inline windows into hidden window
+columns and its SELECT aliases into their items). `sql_bind_distinct_on` binds
+`SELECT DISTINCT ON (k, ...)` to a `ROW_NUMBER` over the SELECT output,
+partitioned by the keys and ordered by the statement's `ORDER BY`, filtered
+on 1: the first row of each key, as in DuckDB.
 
 `sql.sql_binder` turns a parsed statement into a plan:
 `bind_statement(stmt, catalog, footers)` returns a `BoundStatement` whose
@@ -128,7 +134,8 @@ grouped query; a correlated scalar in a WHERE or the SELECT list of an
 ungrouped query, see below; `[NOT] EXISTS`; `[NOT] IN`, NULL-aware, its body
 either one table projecting one bare column or, uncorrelated, any query of
 one column),
-window functions, ORDER BY, LIMIT / OFFSET, DISTINCT, UNION ALL, UNION,
+window functions, QUALIFY, ORDER BY, LIMIT / OFFSET, DISTINCT, DISTINCT ON,
+UNION ALL, UNION,
 INTERSECT and EXCEPT; and
 raises an `Error` starting `SQL bind error` or `SQL not supported`, naming
 the construct, for what it does not bind. The parquet facts a binding needs

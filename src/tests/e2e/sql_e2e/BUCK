@@ -403,6 +403,15 @@ _CAPABILITY_CASES = {
         "union_all_widening",
     ],
     "window": [
+        "distinct_on",
+        "distinct_on_order_not_led_by_key",
+        "distinct_on_two_keys",
+        "distinct_on_unselected_key",
+        "qualify",
+        "qualify_alias",
+        "qualify_distinct_limit",
+        "qualify_star",
+        "qualify_top_two",
         "window_int_aggregates_by_partition",
         "window_lag",
         "window_lag_lead_nulls_first",
@@ -414,6 +423,7 @@ _CAPABILITY_CASES = {
         "window_row_number",
         "window_rows_frame_nulls_first",
         "window_running_sum",
+        "window_star",
         "window_sum_integer",
     ],
 }

@@ -18,12 +18,18 @@ with komira.Session() as s:
     s.register_csv("people", "people.csv")
     print(s.sql("SELECT DISTINCT id, name, city FROM people ORDER BY id").to_arrow().to_pylist())
 
-    # One row per name: number the rows of each name, keep number 1.
+    # One row per name: DISTINCT ON keeps the first row of each name under
+    # ORDER BY, here the highest id.
+    latest = s.sql(
+        "SELECT DISTINCT ON (name) id, name, city FROM people ORDER BY name, id DESC"
+    )
+    print(latest.to_arrow().to_pylist())
+
+    # Or number the rows of each name and keep number 1 with QUALIFY, a filter
+    # over a window function's result.
     first = s.sql(
-        "SELECT id, name, city FROM ("
-        " SELECT id, name, city,"
-        " row_number() OVER (PARTITION BY name ORDER BY id) AS n FROM people"
-        ") d WHERE n = 1 ORDER BY id"
+        "SELECT id, name, city FROM people"
+        " QUALIFY row_number() OVER (PARTITION BY name ORDER BY id) = 1 ORDER BY id"
     )
     print(first.to_arrow().to_pylist())
 

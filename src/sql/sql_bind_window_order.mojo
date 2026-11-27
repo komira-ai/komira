@@ -4,7 +4,8 @@
 # =============================================================================
 
 from arrow.arrow_types import ArrowType
-from arrow.schema import Schema
+from arrow.schema import Schema, SchemaBuilder
+from containers.slab import Slab
 from plan_expr.expr import Expr
 from plan_expr.null_order_policy import derived_nulls_first
 from plan_expr.partition_expr import (
@@ -27,6 +28,9 @@ from sql.sql_ast import (
     SelectStmt, SqlExpr, SqlWindowData,
 )
 from sql.sql_bind_expr import _bind_scalar
+from sql.sql_bind_qualify import (
+    _qualify_has_window, _qualify_rewrite, _qualify_window_name,
+)
 from sql.sql_bind_names import _duckdb_expr_text
 from sql.sql_bind_ops import _sx_is_big_int
 from sql.sql_bind_scope import (
@@ -305,12 +309,13 @@ def _apply_window(sx: SqlExpr, schema: Schema, scope: BindScope, out_name: Strin
 
 
 def _has_window(stmt: SelectStmt) -> Bool:
-    """True iff any top-level SELECT item is a window function."""
+    """True iff any top-level SELECT item, or the QUALIFY predicate, holds a
+    window function."""
     for i in range(len(stmt.select_items)):
         ref it = stmt.select_items[i]
         if not it.is_star and it.expr.tag == SX_WINDOW:
             return True
-    return False
+    return _qualify_has_window(stmt)
 
 
 def _bind_window_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, var child: LogicalPlan, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> LogicalPlan:
@@ -319,15 +324,20 @@ def _bind_window_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, 
     column is named by the item's alias (or a synthesized `_w<n>`); the item
     projects a col_ref to that output. Non-window items bind as ordinary
     scalars over the input schema (they pass through the row-preserving
-    window nodes). The final Project emits the SELECT columns in order. The
-    caller refuses window functions beside GROUP BY / aggregation."""
+    window nodes). A `*` projects every input column, in the input's order.
+    A QUALIFY predicate filters between the window nodes and the Project
+    (`_bind_qualify_filter`). The final Project emits the SELECT columns in
+    order. The caller refuses window functions beside GROUP BY / aggregation."""
+    var in_width = child.output_schema.num_columns()
     var plan = child^
     var proj = ExprArray()
     var win_counter = 0
     for i in range(len(stmt.select_items)):
         ref item = stmt.select_items[i]
         if item.is_star:
-            raise Error("SQL not supported: SELECT * alongside a window function")
+            for c in range(in_width):
+                proj.append(Expr.col_ref(plan.output_schema.field_name(c)))
+            continue
         if item.expr.tag == SX_WINDOW:
             var out_name: String
             if item.out_alias:
@@ -352,7 +362,35 @@ def _bind_window_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, 
             if item.out_alias:
                 e = Expr.alias(e^, item.out_alias.value())
             proj.append(e^)
+    if stmt.qualify_pred:
+        plan = _bind_qualify_filter(
+            stmt, schema, scope, plan^, in_width, catalog, cte_scope, prebound
+        )
     return LogicalPlan.project(proj^, plan^)
+
+
+def _bind_qualify_filter(stmt: SelectStmt, schema: Schema, scope: BindScope, var child: LogicalPlan, in_width: Int, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> LogicalPlan:
+    """The QUALIFY filter over `child`, the input (`in_width` columns) with
+    the SELECT list's window columns appended (`sql_bind_qualify`). Each inline window of the
+    predicate is computed by its own PARTITION BY node under a hidden name; the
+    predicate then binds over the input columns plus every appended column, so
+    it can name an input column, a window item's alias or a hidden window."""
+    var windows = Slab[SqlExpr]()
+    var pred_sx = _qualify_rewrite(stmt.qualify_pred.value(), stmt, schema, windows)
+    var plan = child^
+    for n in range(len(windows)):
+        plan = _apply_window(windows[n], schema, scope, _qualify_window_name(n), plan^)
+    # The binding schema: the input's own fields (`schema`, the scope's
+    # binding types), then the window columns the PARTITION BY nodes appended
+    # at the end of the plan's output.
+    var sb = SchemaBuilder()
+    for c in range(schema.num_columns()):
+        sb.add_field(schema.field_at(c))
+    for c in range(in_width, plan.output_schema.num_columns()):
+        sb.add_field(plan.output_schema.field_at(c))
+    var bind_schema = sb.build()
+    var pred = _bind_scalar(pred_sx, bind_schema, scope, catalog, cte_scope, prebound)
+    return LogicalPlan.filter(pred^, plan^)
 
 
 def _order_key_name(sx: SqlExpr, scope: BindScope) -> String:
