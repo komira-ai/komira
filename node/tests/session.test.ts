@@ -1,9 +1,11 @@
-// Session against a stand-in libkomira whose komira_register_parquet fails
-// with status -3 (KOMIRA_ERR_ENGINE) and the last error FAKE_ENGINE_TEXT: an
-// engine refusal is a KomiraError carrying the status, the code and the
-// engine's text as its message. Arguments of the wrong type or value are
-// TypeError or RangeError, raised before the library is called (the stand-in
-// would refuse any call that reached it). Options and the registrations
+// Session against a stand-in libkomira of ABI 1.1 whose
+// komira_register_parquet fails with status -3 (KOMIRA_ERR_ENGINE) and the
+// last error FAKE_ENGINE_TEXT: an engine refusal is a KomiraError carrying the
+// status and the engine's text as its message, with no code and no step,
+// which a library older than ABI 1.7 cannot give. Arguments of the wrong type
+// or value are TypeError or RangeError, raised before the library is called
+// (the stand-in would refuse any call that reached it). Session options need
+// ABI 1.4 and `sql` ABI 1.3, so this library refuses them by both versions. The registrations
 // this package does not bind yet are refused by name. Closing is idempotent.
 
 import assert from "node:assert/strict";
@@ -35,6 +37,9 @@ test("session options: wrong types and values, before the library is loaded", ()
     [{ memoryLimit: -1 }, RangeError, "memoryLimit must be a positive integer, not -1"],
     [{ memoryLimit: 2 ** 53 }, RangeError, "memoryLimit must be a positive integer, not 9007199254740992"],
     [{ memoryLimit: 1n }, TypeError, "memoryLimit must be a number"],
+    [{ memoryLimit: Number.POSITIVE_INFINITY }, RangeError, "memoryLimit must be a positive integer, not Infinity"],
+    [{ threads: 8, memoryLimit: 0 }, RangeError, "memoryLimit must be a positive integer, not 0"],
+    [{ threads: null }, TypeError, "threads must be a number"],
   ];
   for (const [options, cls, message] of cases) {
     assert.equal(refused(() => new Session(options as never), cls), message, String(options));
@@ -42,29 +47,62 @@ test("session options: wrong types and values, before the library is loaded", ()
   assert.equal(addonOpened(), false);
 });
 
-test("session options of the right type are refused by name: this package does not set them yet", () => {
-  assert.equal(
-    refused(() => new Session({ threads: 8 }), UnsupportedOperation),
-    "the session option threads is not supported yet: this package does not set it yet; leave it out to take the " +
-      "engine's default",
-  );
-  assert.equal(
-    refused(() => new Session({ memoryLimit: 1 << 30 }), UnsupportedOperation),
-    "the session option memoryLimit is not supported yet: this package does not set it yet; leave it out to take " +
-      "the engine's default",
-  );
-  assert.equal(addonOpened(), false);
-});
-
-test("the stand-in loads, and an engine refusal carries its status, code and text", async () => {
-  loadFrom(ADDON_FILE, fake("engine_error"), LINUX_X64);
+test("the stand-in loads, and an engine refusal carries its status and text, with no code or step before ABI 1.7", async () => {
+  const native = loadFrom(ADDON_FILE, fake("engine_error"), LINUX_X64);
   const s = new Session({});
   const before = await s.registerParquet("t", "/nonexistent/t.parquet").catch((e: unknown) => e);
   assert.ok(before instanceof KomiraError);
   assert.equal(before.constructor, KomiraError);
-  assert.deepEqual([before.message, before.status, before.code, before.step], [FAKE_ENGINE_TEXT, -3, "KOMIRA_ERR_ENGINE", null]);
+  assert.deepEqual([before.message, before.status, before.code, before.step], [FAKE_ENGINE_TEXT, -3, null, null]);
   // Options left out, or given as undefined, are the engine's defaults.
   new Session({ threads: undefined, memoryLimit: undefined }).close();
+  await s[Symbol.asyncDispose]();
+  // An option needs komira_ctx_new_with_options, which ABI 1.1 lacks: the
+  // refusal names both versions, and no context is made.
+  const stats = (): { created: number; freed: number } => native.addon.sessionStats();
+  const made = stats().created;
+  for (const options of [{ threads: 8 }, { memoryLimit: 1 << 30 }, { threads: 2, memoryLimit: 1 << 20 }]) {
+    assert.throws(
+      () => new Session(options),
+      (e: unknown) => {
+        assert.ok(e instanceof KomiraError);
+        assert.equal(e.constructor, KomiraError);
+        assert.deepEqual(
+          [e.message, e.status, e.code, e.step],
+          [`komira_ctx_new_with_options needs libkomira ABI version 1.4; the library at ${native.library} is 1.1`, null, null, null],
+        );
+        return true;
+      },
+    );
+  }
+  assert.equal(stats().created, made);
+});
+
+test("sql on a library older than ABI 1.3 is refused naming both versions, and the session still works", async () => {
+  const native = load();
+  const s = new Session();
+  const e = await s.sql("SELECT 1").catch((err: unknown) => err);
+  assert.ok(e instanceof KomiraError);
+  assert.deepEqual(
+    [e.constructor, e.message, e.status, e.code, e.step],
+    [KomiraError, `komira_sql_stream needs libkomira ABI version 1.3; the library at ${native.library} is 1.1`, null, null, null],
+  );
+  assert.equal(await rejected(s.registerParquet("t", "/nonexistent/t.parquet"), KomiraError), FAKE_ENGINE_TEXT);
+  await s[Symbol.asyncDispose]();
+});
+
+test("sql: a query that is not a string is a TypeError, and a NUL byte or a lone surrogate a RangeError", async () => {
+  const s = new Session();
+  const cases: [unknown, ErrorConstructor, string][] = [
+    [1, TypeError, "the query must be a string"],
+    [undefined, TypeError, "the query must be a string"],
+    [Buffer.from("SELECT 1"), TypeError, "the query must be a string"],
+    ["SELECT 1\0", RangeError, "the query holds a NUL byte"],
+    ["SELECT '\ud800'", RangeError, "the query holds a lone surrogate, which UTF-8 cannot spell"],
+  ];
+  for (const [query, cls, message] of cases) {
+    assert.equal(await rejected(s.sql(query as string), cls), message, message);
+  }
   await s[Symbol.asyncDispose]();
 });
 
@@ -153,6 +191,7 @@ test("close frees the context once, and a closed session refuses every call", as
     s.registerParquet("t", "/x.parquet"),
     s.registerCsv("t", "/x.csv"),
     s.registerNdjson("t", "/x.ndjson"),
+    s.sql("SELECT 1"),
   ]) {
     const e = await call.catch((err: unknown) => err);
     assert.ok(e instanceof KomiraError);
@@ -161,6 +200,7 @@ test("close frees the context once, and a closed session refuses every call", as
   }
   // An argument of the wrong type is still a TypeError on a closed session.
   assert.equal(await rejected(s.registerParquet(1 as never, "/x"), TypeError), "the table name must be a string");
+  assert.equal(await rejected(s.sql(1 as never), TypeError), "the query must be a string");
 });
 
 test("Symbol.dispose and Symbol.asyncDispose close the session, and so do using and await using", async () => {

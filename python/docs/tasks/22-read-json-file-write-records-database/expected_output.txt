@@ -1,0 +1,8 @@
+4 3
+(1, 'ana', 'click', 120)
+(2, 'bo', 'view', 40)
+(3, 'ana', 'view', 75)
+(4, 'cy', 'click', None)
+('ana', 2, 120)
+('bo', 1, 40)
+('cy', 1, None)

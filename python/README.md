@@ -10,6 +10,15 @@ and a polars-shaped one (`komira.pl`), read files and build plans the engine
 runs with no SQL; The DataFrames, below, says where each is described. More
 DataFrame APIs come later.
 
+This README, and the pages it links to, describe the package at one commit.
+On PyPI that is the commit the release was built from, and every link of a
+release's page opens the files of that commit. On GitHub's `main` it can be
+newer than the newest release: what `main` has and 0.1.1623 does not says
+"newer than 0.1.1623", and the
+[changelog](https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md)
+lists what each release added (on PyPI it follows this README, with the
+release's own section first).
+
 ## Install
 
 ```sh
@@ -34,7 +43,9 @@ libkomira needs three Mojo runtime libraries, which are Modular's and come
 under Modular's licence. The wheel carries libkomira in `komira/_lib/` and, in `komira/_lib/lib/`,
 its native owner libraries (Linux only: on macOS they are linked into the
 dylib) and those three Mojo runtime libraries, with Modular's licence and
-third-party notices beside komira's own. It requires two other
+third-party notices beside komira's own. The Linux wheel also carries, beside
+libkomira, `libkomira_udf_python.so`, the runtime that will run Python UDFs in
+worker processes; no query opens it yet. It requires two other
 distributions, which `pip install komira` installs: `pyarrow>=25.0.1`, which a
 result is read as, and `protobuf>=5.29.1,<8`, which a DataFrame's plan is
 encoded with (the generated plan modules are in the wheel, at
@@ -105,7 +116,7 @@ print(s.closed)               # True: the session is freed
 It prints:
 
 ```text
-0.1.1512
+0.1.1623
 1009
 [{'days': 6, 'rain': 9.5}]
 city: string
@@ -124,7 +135,9 @@ True
 
 The first line is the installed version, and `<cwd>` stands for the
 directory the program ran in: a relative path is resolved against it, and
-the error names the file it looked for.
+the error names the file it looked for. The syntax error's message ends with
+` at line 1, column 42` in releases newer than 0.1.1623; 0.1.1623 and older
+print it without that part.
 
 The program is the file `python/examples/quickstart.py` of the source tree,
 and the text it prints is `python/examples/quickstart.expected` (shown here
@@ -176,7 +189,7 @@ package, and each compares what it prints with that file, every line.
   engine refuses by name. A refusal of the `parse` step ends with where the
   statement stopped parsing, `at line <L>, column <C>` (both from 1, the
   column counted in characters; the end of the text when the statement ends
-  early).
+  early; newer than 0.1.1623).
 - Ctrl-C while `Session.sql` runs cancels the query: the engine stops at its
   next check, `sql` raises `KeyboardInterrupt`, nothing the query computed is
   kept, and the session runs the next query. A second Ctrl-C while the query
@@ -296,8 +309,8 @@ by `import komira`.
   `KomiraError`, but an abort, a fault, running out of stack, or running out
   of memory that the session's `memory_limit` does not catch (a query over it
   raises `MemoryLimitError`) ends the Python process. Inputs known to cause
-  one are refused with `KomiraError` first, for example a statement nested
-  more than 100 levels deep.
+  one are refused with `KomiraError` first (newer than 0.1.1623), for example
+  a statement nested more than 100 levels deep.
 - The DataFrame verbs not built yet, for both skins: what each capability
   has and lacks is recorded in
   [docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md).
@@ -307,7 +320,8 @@ The DataFrame verbs not built yet come in later releases of this same package.
 
 ## Working on the package
 
-Most readers can skip this section.
+Most readers can skip this section. It describes the source tree of the
+commit it is read at, files and tests a release does not ship among them.
 
 The package's layout and API are designed in
 [docs/design/python_package.md](https://github.com/komira-ai/komira/blob/main/docs/design/python_package.md).
@@ -338,6 +352,8 @@ The package's layout and API are designed in
 | `komira/py.typed` | the PEP 561 marker |
 | `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the tests that encode or run a plan; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |
+| `task_examples.bzl` | `task_pages_check`, the check of the common-task pages against the catalogue (`docs/tasks/catalogue.json`) |
+| `docs/tasks/` | the Python examples of the common data-analysis tasks, one directory `<rank>-<slug>/` per task with `example.py`, `expected_output.txt` and `page.md`, and `BUCK`, which runs each example against the installed wheel ([docs/tasks/README.md](https://github.com/komira-ai/komira/blob/main/docs/tasks/README.md)) |
 | `pythons.bzl` | the supported Pythons, the one list of them (Supported Pythons, below) |
 | `CHANGELOG.md` | what the releases it keeps added or changed, newest first, and how a change gets an entry (Changelog entries, below) |
 | `changelog.d/` | the entries no kept release holds yet, one file `<slug>.md` for each change |
@@ -363,9 +379,24 @@ unstamped build calls it `## Unreleased`. The section a release ships therefore
 lists every change merged since the newest section kept in `CHANGELOG.md`. The
 wheel's description is this README followed by that changelog with its headings
 one level down (`//python:changelog[description]`), so the page of version
-0.1.`<N>` on PyPI shows its own section. To keep a section in `CHANGELOG.md`,
-move the entries of `changelog.d/` under a `## <version>` heading of it and
-delete their files, in one change.
+0.1.`<N>` on PyPI shows its own section. A stamped build also gives the
+description its commit, `-c komira.package_commit=<sha>`, and every link of it
+to the repository's `main` (`.../blob/main/...`, `.../tree/main/...`) opens
+that commit instead, so the pages a release's PyPI page links to describe that
+release; the wheel's `Documentation` URL is the install page of that commit.
+The tool refuses a stamp with no commit, a commit with no stamp, and a commit
+that is not 40 lower-case hexadecimal digits.
+
+`CHANGELOG.md` keeps a section for each version on PyPI. Once a version
+0.1.`<N>` is on PyPI, one change keeps its section: it moves the entries
+that `changelog.d/` held at the commit that version was built from (the
+`<N>`th commit of `main`'s first-parent history, `git rev-list --first-parent
+--reverse main | sed -n <N>p`) under a heading `## 0.1.<N>`, above the
+sections already kept, and deletes their files. A version that added nothing
+gets the line the tool writes for no entry. A page or a sentence of the docs
+that describes a change no kept section holds says so: "newer than
+0.1.`<K>`", `K` the newest section kept, and the change that keeps the
+section holding it drops those words.
 
 Building the changelog is the check of the entries: it refuses, naming the
 file and the line, a file whose name is not a slug and `.md`, an empty file, a
@@ -524,7 +555,10 @@ target and a new test changes no generated list.
 The Linux wheel is `./buck2 build //python:komira_wheel`: the package and, in
 `komira/_lib/`, `libkomira[dist]` whole: `libkomira.so`, and in `lib/` its
 native owner libraries and the three Mojo runtime libraries, taken from the
-toolchain's Mojo package so that runtime and compiler are one build. It is
+toolchain's Mojo package so that runtime and compiler are one build; beside
+`libkomira.so`, the komira/python UDF runtime `libkomira_udf_python.so`
+(`//src/udf_python:komira_udf_python`), which no query opens yet
+(`//python:udf_installed_test` runs a UDF through it from the installed wheel). It is
 tagged `py3-none-manylinux_2_35_x86_64`, declares the `Requires-Dist` lines
 `pyarrow>=25.0.1` and `protobuf>=5.29.1,<8` (`PYARROW_REQUIREMENT` and
 `PROTOBUF_REQUIREMENT`, `dependencies.bzl`), carries the generated plan
@@ -557,9 +591,9 @@ interpreter pinned), from the release workflow only. That test holds:
 | what | how |
 |---|---|
 | the installed package | `komira` imports from the environment, at the wheel's version |
-| its metadata | the `Requires-Dist` lines `pyarrow>=25.0.1` and `protobuf>=5.29.1,<8`, in that order, and no other; `Requires-Python` `>=3.11` and exactly the classifiers `python/BUCK` writes out (`_PYTHON_METADATA`: the four supported minors); the `License-Expression` given; `.dist-info/licenses/` holding `LICENSE`, `NOTICE`, and Modular's `LICENSE` and `Third-Party-Notices`, each byte-equal to its source, and no other; the description equal to `//python:changelog[description]` (this README followed by the assembled changelog) byte for byte, so PyPI shows the same quickstart |
+| its metadata | the `Requires-Dist` lines `pyarrow>=25.0.1` and `protobuf>=5.29.1,<8`, in that order, and no other; `Requires-Python` `>=3.11` and exactly the classifiers `python/BUCK` writes out (`_PYTHON_METADATA`: the four supported minors); the `License-Expression` given; `.dist-info/licenses/` holding `LICENSE`, `NOTICE`, `AWS_LC_LICENSE`, `S2N_TLS_LICENSE`, `MODULAR_LICENSE` and `MODULAR_THIRD_PARTY_NOTICES`, each byte-equal to its source, and no other; the description equal to `//python:changelog[description]` (this README followed by the assembled changelog) byte for byte, so PyPI shows the same quickstart |
 | nothing else | no `modular/` directory and no distribution in the environment but komira, pyarrow and protobuf; `import komira` imports neither protobuf nor the plan modules |
-| the library | `abi_version()` is the version of `src/so/abi/komira.tsv`; a Parquet file registers, a missing one raises `KomiraError`; `SELECT 1 AS n` and an aggregate over `tests/fixtures/readings.parquet` answer their rows through pyarrow; the DataFrame program of "The pandas-shaped DataFrame" above answers its two rows through the plan door; a serialized plan renders |
+| the library | `abi_version()` is the version of `src/so/abi/komira.tsv`; a Parquet file registers, a missing one raises `KomiraError`; `SELECT 1 AS n` and an aggregate over `tests/fixtures/readings.parquet` answer their rows through pyarrow; a DataFrame of `tests/fixtures/readings.parquet`, filtered, projected, given a computed column, sorted and cut with `head`, answers its two rows through the plan door; a serialized plan renders |
 | the quickstart | `examples/quickstart.py`, run in an empty directory, prints exactly `examples/quickstart.expected` (its version, ABI version and directory filled in) and leaves only the `weather.parquet` it wrote |
 | where it loaded from | `/proc/self/maps` (on macOS, the images dyld has loaded) lists libkomira and its owners (none on macOS, where `lib/` holds exactly the three runtime `.dylib` files) from `komira/_lib`, and the three Mojo runtime libraries from `komira/_lib/lib` |
 

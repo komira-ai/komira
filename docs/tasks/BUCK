@@ -1,0 +1,6 @@
+# The catalogue of common data-analysis tasks (README.md): read by the check
+# of each language's task pages, python/docs/tasks/BUCK's `:pages` today.
+export_file(
+    name = "catalogue.json",
+    visibility = ["komira//python/docs/tasks:"],
+)

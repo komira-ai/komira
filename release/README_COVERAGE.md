@@ -19,21 +19,21 @@ changes its row in the same change. Do not edit it by hand: copy the lines the c
 
 | READMEs | Count |
 |---|---|
-| every `src/<name>/README.md` | 264 |
+| every `src/<name>/README.md` | 265 |
 | with a `mopm.toml` | 66 |
 | with a README e2e target | 66 |
 | with a `mojo_adopted_library` gate | 66 |
-| with a `mojo_library` gate | 196 |
+| with a `mojo_library` gate | 197 |
 | with no gate | 2 |
-| with at least one example | 220 |
+| with at least one example | 221 |
 | refused by the README examples tool | 0 |
 | run by the release e2e | 66 |
-| run by a build gate | 220 |
+| run by a build gate | 221 |
 | run by nobody | 44 |
 
 ## Left out
 
-Run by a build gate and not by the release e2e: 154 READMEs. Their packages have no `mopm.toml`, so the release does not publish them; [UNPUBLISHED.md](UNPUBLISHED.md) says why for each library.
+Run by a build gate and not by the release e2e: 155 READMEs. Their packages have no `mopm.toml`, so the release does not publish them; [UNPUBLISHED.md](UNPUBLISHED.md) says why for each library.
 
 Run by nobody (44): [`agg`](../src/agg/README.md), [`agg_api`](../src/agg_api/README.md), [`batch_eval`](../src/batch_eval/README.md), [`bench_q6_phases`](../src/bench_q6_phases/README.md), [`bench_runner`](../src/bench_runner/README.md), [`broker_compaction`](../src/broker_compaction/README.md), [`chunk`](../src/chunk/README.md), [`comms_index`](../src/comms_index/README.md), [`decimal_literal`](../src/decimal_literal/README.md), [`dispatch_agg_exec`](../src/dispatch_agg_exec/README.md), [`dispatch_agg_folds`](../src/dispatch_agg_folds/README.md), [`dispatch_join_kernels`](../src/dispatch_join_kernels/README.md), [`dispatch_project`](../src/dispatch_project/README.md), [`dispatch_scan`](../src/dispatch_scan/README.md), [`dispatch_sources`](../src/dispatch_sources/README.md), [`engine_runtime`](../src/engine_runtime/README.md), [`eval`](../src/eval/README.md), [`exec_types`](../src/exec_types/README.md), [`expr`](../src/expr/README.md), [`group_ratchet`](../src/group_ratchet/README.md), [`iceberg`](../src/iceberg/README.md), [`json_index`](../src/json_index/README.md), [`log_index`](../src/log_index/README.md), [`lowering`](../src/lowering/README.md), [`mail_tls`](../src/mail_tls/README.md), [`op_agg_distinct`](../src/op_agg_distinct/README.md), [`op_agg_hash`](../src/op_agg_hash/README.md), [`op_agg_slab`](../src/op_agg_slab/README.md), [`op_agg_stage`](../src/op_agg_stage/README.md), [`op_join_sinks`](../src/op_join_sinks/README.md), [`op_sources`](../src/op_sources/README.md), [`op_window`](../src/op_window/README.md), [`operator_api`](../src/operator_api/README.md), [`optimizer`](../src/optimizer/README.md), [`phase_timers`](../src/phase_timers/README.md), [`search_http`](../src/search_http/README.md), [`shuffle_streaming`](../src/shuffle_streaming/README.md), [`smtp_server`](../src/smtp_server/README.md), [`table_store`](../src/table_store/README.md), [`telemetry_read`](../src/telemetry_read/README.md), [`telemetry_store`](../src/telemetry_store/README.md), [`udf`](../src/udf/README.md), [`udf_abi`](../src/udf_abi/README.md), [`udf_python`](../src/udf_python/README.md).
 
@@ -229,6 +229,7 @@ Run by nobody (44): [`agg`](../src/agg/README.md), [`agg_api`](../src/agg_api/RE
 | [`op_typed_source_api`](../src/op_typed_source_api/README.md) | no | no | mojo_library | yes | build gate |
 | [`op_window`](../src/op_window/README.md) | no | no | mojo_library | no | nobody |
 | [`operator_api`](../src/operator_api/README.md) | no | no | mojo_library | no | nobody |
+| [`optimized_plan`](../src/optimized_plan/README.md) | no | no | mojo_library | yes | build gate |
 | [`optimized_plan_header`](../src/optimized_plan_header/README.md) | no | no | mojo_library | yes | build gate |
 | [`optimizer`](../src/optimizer/README.md) | no | no | mojo_library | no | nobody |
 | [`orc`](../src/orc/README.md) | no | no | mojo_library | yes | build gate |

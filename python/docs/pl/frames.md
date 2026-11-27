@@ -25,7 +25,8 @@ imports polars.
 - **`LazyFrame`.** `select`, `with_columns`, `filter`, `sort`, `head`,
   `limit`, `slice`, `tail`, `top_k`, `bottom_k`, `drop`, `rename`,
   `drop_nulls`, `columns`, `schema`, `explain` and `collect`;
-  [`group_by`, `join` and `unique`](group_by_join_unique.md).
+  [`group_by`, `join` and `unique`](group_by_join_unique.md) (newer than
+  0.1.1623).
 - **Module functions.** `col`, `lit`, `when`, `len`, `concat`.
 - **Names it does not define** raise `AttributeError`, with the refusal
   tables' message for the names they hold.

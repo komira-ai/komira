@@ -30,8 +30,9 @@ the Mojo structs generated from it. Three files:
   schema stage, and fields whose types later stages add are left free at
   the numbers the design gives them (the file's header lists them).
   `optimized_plan_header` decodes and encodes the `OptimizedPlan`
-  header and runs its admission checks; no codec reads the body or the
-  segments yet.
+  header and runs its admission checks; the package `optimized_plan`
+  (`src/optimized_plan`) reads and writes the body and the segments, the
+  canonical form and the digests.
 
 This package is the schema, not the codec. `plan_wire` converts a
 `LogicalPlan` to and from these messages and checks sizes, versions and

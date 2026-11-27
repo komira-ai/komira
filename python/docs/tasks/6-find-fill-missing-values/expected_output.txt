@@ -1,0 +1,8 @@
+[{'id': 3}, {'id': 4}]
+[{'city_missing': 1, 'score_missing': 2, 'qty_missing': 3}]
+[{'id': 1, 'city': 'Oslo', 'score': 12.5, 'qty': 3}, {'id': 2, 'city': 'unknown', 'score': 8.0, 'qty': 0}, {'id': 3, 'city': 'Lima', 'score': 0.0, 'qty': 0}, {'id': 4, 'city': 'Rome', 'score': 0.0, 'qty': 0}]
+[{'id': 1, 'city': 'Oslo', 'score': 12.5, 'qty': 3}, {'id': 2, 'city': 'unknown', 'score': 8.0, 'qty': 0}, {'id': 3, 'city': 'Lima', 'score': 0.0, 'qty': 0}, {'id': 4, 'city': 'Rome', 'score': 0.0, 'qty': 0}]
+[{'id': 1, 'score': 12.5, 'qty': 3}, {'id': 2, 'score': 8.0, 'qty': 0}, {'id': 3, 'score': 0.0, 'qty': 0}, {'id': 4, 'score': 0.0, 'qty': 0}]
+[{'city': 1, 'score': 2, 'qty': 3}]
+[{'id': 3}, {'id': 4}]
+[{'id': 1, 'city': 'Oslo', 'score': 12.5, 'qty': 3}, {'id': 2, 'city': 'unknown', 'score': 8.0, 'qty': 0}, {'id': 3, 'city': 'Lima', 'score': 0.0, 'qty': 0}, {'id': 4, 'city': 'Rome', 'score': 0.0, 'qty': 0}]

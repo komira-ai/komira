@@ -105,12 +105,27 @@ It does three things, in this order:
    tokens whose subject is this repository, so no Tailscale secret is stored
    anywhere. The tailnet policy lets `tag:ci` reach the farm's nodes on the
    one port of the remote-execution service and nothing else.
-2. **Refuses to go on unless the farm answers** on that port, retrying for a
-   minute. buck2 with no farm configured builds on the machine it runs on, so
-   a job that cannot reach the farm must fail, not quietly build on the runner.
+2. **Waits for the farm to answer, and refuses to go on unless it does.** It
+   opens a TCP connection to the farm's port, giving each try 5 s with 5 s
+   between two, until one is accepted or `farm-wait-minutes` (20 by default,
+   a whole number from 1 to 120) have passed since the first; the probe that
+   starts at the bound is the last. A new node can take a few seconds to get
+   its routes, and the connection between the runner and the farm can be lost
+   for minutes at a time. Each minute without an answer prints
+   `farm-connect: the farm has not answered for <N> min <M> s; waiting up to <W> min 0 s`
+   in the job log. When the farm answers after the first try failed, the job
+   summary gets `farm-connect: farm unreachable for <N> min <M> s; went on when it answered (probe <n>)`;
+   when the bound passes, the job summary gets
+   `farm-connect: farm unreachable for <N> min <M> s, the longest wait; not building`
+   and the step fails. buck2 with no farm configured builds on the machine it
+   runs on, so a job that cannot reach the farm must fail, not quietly build on
+   the runner: the wait never falls back to a local build.
 3. **Writes the farm's machine buckconfig**, `~/.buckconfig.d/farm.buckconfig`
-   (buck2 reads `~/.buckconfig.d/` and `/etc/buckconfig.d/`): the
-   `[buck2_re_client]` addresses, instance name, `tls` and
+   (buck2 reads `~/.buckconfig.d/` and `/etc/buckconfig.d/`): first
+   `farm_wait_seconds` under `[komira_ci]`, the `farm-wait-minutes` input in
+   seconds, which buck2 does not read and the
+   [buck2-farm action](#running-a-buck2-command-on-the-farm) reads for its own
+   wait; then the `[buck2_re_client]` addresses, instance name, `tls` and
    `execution_concurrency_limit`, and `linux_x86_64_properties` under
    `[komira_re]`. It also writes two keys for a slow connection to the farm
    (through a tailnet relay it carries a few MB/s for all of a job's
@@ -137,8 +152,9 @@ It does three things, in this order:
 Every input is checked before the tailnet is joined: an empty required
 input, a value holding a line break, half of the macOS pair, a macOS set equal
 to the linux one, a macOS config file without a macOS set, relative or holding
-`$`, `tls` other than `true` or `false`, and a CA file that is not
-an absolute path to a readable file are refused. `//:farm_connect_cases` runs
+`$`, `tls` other than `true` or `false`, a CA file that is not
+an absolute path to a readable file, and a `farm-wait-minutes` that is not a
+whole number from 1 to 120 are refused. `//:farm_connect_cases` runs
 those checks and the writer from `action.yml`'s own scripts and compares the
 buckconfig written whole. It also reads every workflow and holds each step
 that uses the action to `tls: ${{ vars.FARM_TLS || 'false' }}` under its
@@ -171,7 +187,10 @@ endpoint out of every committed buckconfig, workflow and local action.
 
 The connection is checked on every farm-connected run: the action's
 `refuse unless the farm answers` step fails the job before any build when the
-farm's port does not answer.
+farm's port does not answer within `farm-wait-minutes`. The cases of that wait
+(`.github/actions/farm-connect/probe_test.zig`, part of `//:farm_connect_cases`)
+run the step's own script on a clock of their own, so none sleeps or touches
+the network.
 
 **Priority.** A farm that queues by priority class runs a `ci` action before a
 `batch` one. The action takes an optional `farm-qos` (`ci` or `batch`) and, when
@@ -205,7 +224,7 @@ When the connection between the runner and the farm is cut, buck2 fails every
 action in flight at once, each with its own `Error:` line holding
 `RE channel error: code:`. `assert_remote run`
 ([`farm_retry.zig`](../tools/build/ci/assert_remote/farm_retry.zig)) then runs
-the same command once more, when every failure in the output is such a cut:
+the same command again, when every failure in the output is such a cut:
 each failed action (`Action failed:`) or test (`✗ Fail:`) has that line among
 buck2's own lines before its output, no test timed out or was fatal, and no
 other error stands outside them. A test whose run was cut before it started
@@ -213,13 +232,46 @@ gets buck2's lines as its output instead: an empty stdout, and a stderr of only
 `Remote Execution Error on Execute with digest ...` with that line right after
 it. That output, with nothing else in it but empty lines around the two, is a
 cut too. A log that mixes a real failure with cuts, a test whose output quotes
-the phrase among output of its own, and a subcommand other than build, test or
-bxl are never run again. The first output is kept beside the log as
-`buck2-farm.first.log`, the job summary gets one line saying the step ran
-again after a cut connection, and the second run is final: when it is cut too,
-the step fails saying so. There is never a third run. The release workflows'
-publish and upload steps are not buck2-farm steps, so this never runs one of
-them twice; a publish cut half way stays a failed step.
+the phrase among output of its own, a buck2 ended by a signal, and a subcommand
+other than build, test or bxl are never run again.
+
+Before it runs again, the tool waits for the farm
+([`farm_wait.zig`](../tools/build/ci/assert_remote/farm_wait.zig)): the same
+probe as farm-connect's (a TCP connection to the farm's port, 5 s for each try,
+5 s between two, a line in the job log each minute without an answer), bounded
+by the same input. Both come from the machine buckconfig farm-connect wrote,
+which the action names as `--farm-config "$HOME/.buckconfig.d/farm.buckconfig"`:
+the farm is buck2's own `engine_address`, and the bound is
+`farm_wait_seconds` under `[komira_ci]`. The tool reads that file only when a
+run is to be run again; a missing file, or one with no address or no bound,
+fails the step with exit 2 and the reason, and nothing runs again.
+
+- **The farm answers.** The cut run's output is kept beside the log as
+  `buck2-farm.first.log` (`buck2-farm.second.log` after the second run), and
+  the job summary gets one line naming the wait, such as
+  ``buck2-farm: the first run of `build` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 4 failed block(s)); farm unreachable for 3 min 10 s; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log``
+  (`the farm answered at once` when the first probe answered). Then the same
+  command runs again.
+- **The bound passes first.** The job summary gets
+  `...; farm unreachable for <N> min <M> s, the longest wait; not run again`,
+  the cut run's log stays in place (later steps that read the log, such as
+  `release-macos.yml`'s report, read it), and the step fails with buck2's code.
+
+A step runs at most three times: a third run that is cut too fails the step,
+saying so. The wait reports itself and never hides an outage: each wait is a
+line in the job summary, unlike a longer client timeout, which would hide it
+(komira-ai/komira#2269). Three runs, not two, because a lost connection can
+come back for a few minutes and drop again, and a second run cut that way
+otherwise ends a long check that needed a hand re-run. What it costs in runner
+minutes: each wait is at most `farm-wait-minutes` (20 by default) of an idle
+runner, and each run again redoes only what the action cache does not hold
+(the actions cut in flight and those not yet started), so the most a step
+adds is two waits, 40 minutes by default, and two partial reruns; every step's
+own `timeout-minutes` still bounds the whole. The other choice, a second run
+that stays final, costs nothing more in a step, and a whole job's hand re-run
+each time an outage cut it twice. The release workflows' publish and upload
+steps are not buck2-farm steps, so this never runs one of them twice; a
+publish cut half way stays a failed step.
 
 The tool step fails when a `Commands:` summary line says `local:` anything
 but `0`, when the log ends a failed run (`BUILD FAILED`, `BXL FAILED`), or when
@@ -230,8 +282,10 @@ at all, only `Network: up 0B  down 0B`, and passes on that line. `build` and
 its path as `assert-remote`. That build, and the few other `./buck2` steps
 that do not go through the action (pr.yml's build of its change tool, for
 one), are not run again: a cut during one of them still fails its step. The cases are recorded buck2 output
-(`//tools/build/ci:assert_remote_unit`, `//tools/build/ci:farm_retry_unit`) and
-the action's own two lines run over it (`//:buck2_farm_cases`).
+(`//tools/build/ci:assert_remote_unit`, `//tools/build/ci:farm_retry_unit`, which also
+runs the wait on a fake clock and a fake farm) and the action's own two lines run over
+it (`//:buck2_farm_cases`), each case with a farm on a loopback port of its own that
+answers at once or never answers (with a bound of 0 s, so no case sleeps).
 
 ## Pull requests from forks
 
@@ -453,7 +507,7 @@ tests, which no pull request builds. The rest of this section is about `release-
   `cquery` of `attrregexfilter(exec_compatible_with, "macos", deps(//ci:pr))` is
   empty, and the same query for `--target-platforms
   komira//tools/build/platforms:darwin-arm64` over a library is not.
-  `//:release_macos_cases` holds the workflows and the shards of `ci/targets/` to it (the lines of
+  `//:release_macos_cases` holds the workflows and the root files of `ci/` (`ci/roots/`, `ci/test_roots/`) to it (the lines of
   `pr.yml`'s macOS part, `PR_MACOS_PART`, exactly as written, and where each stands), and holds
   `pypi.yml` (the macOS wheel's jobs are in it) to not running on a pull request or a merge group. The five targets of the macOS wheel
   (`//python:komira_wheel_macos_arm64`, `//python:wheel_install_test_macos_arm64`,
@@ -513,15 +567,24 @@ tests, which no pull request builds. The rest of this section is about `release-
   needs no ordering with the release (nothing waits on it), and `workflow_run` would
   start it only after the whole release finished, build the default branch's head
   instead of the pushed commit, and run for a pull request's `release.yml` run too if
-  that ever changed. `timeout-minutes: 90` still bounds a stalled build.
+  that ever changed. `timeout-minutes: 90` still bounds a stalled build, and the steps that
+  wait on the farm have bounds of their own inside it (farm-connect 5 minutes, the macOS set
+  65, the Python harness tests 10):
+  a step past its bound fails, so the run ends failed, where a job past its `timeout-minutes`
+  is cancelled and GitHub ends its run cancelled.
 - **Reported, not blocking (for now).** A red macOS build is a failed run of
   `release-macos.yml`, with a line in its summary, and the release run, the prod publish and
   `main_red.yml` do not see it: none of them `needs` it or reads its result. The job is not
   `continue-on-error`, which would end a failed build green. The last job,
-  `release-macos-result` (`needs: release-macos`, `if: always()`), fails with "the macOS build
+  `release-macos-result` (`needs: release-macos`, `if: ${{ !cancelled() }}`), fails with "the macOS build
   did not run" when the build job was skipped, and with "did not pass" when it failed, so the
   run list, the commit status and the badge never read green for a Mac build that did not
-  pass. Its message says what happened rather than guessing: when a buck2 step failed (the build
+  pass. A build job that ran out its `timeout-minutes` is cancelled by GitHub while the run
+  goes on, so `release-macos-result` runs and fails with "the macOS build was cancelled while
+  the run went on" (the run itself still reads cancelled, which is why the farm steps carry
+  their own bounds). Only when the run itself was cancelled (a newer push, or by hand) does
+  `release-macos-result` not run: the run ends cancelled and the newer run builds.
+  Its message says what happened rather than guessing: when a buck2 step failed (the build
   of the set, or of the Python harness tests), `//release/ci:buck2_failure` (built before them)
   reads that step's buck2 output and the message is buck2's own lines after `BUILD FAILED`
   (also written to the run's summary);
@@ -572,7 +635,7 @@ tests (komira-ai/komira#2206, komira-ai/komira#2207), the ELF-only native shared
 The proposal keeps this set built, in the same way as the mopm set:
 
 - **One named target, generated.** `//release:darwin_src_libs` is a generated list, like the
-  shards of `ci/targets/`, with a guard that fails when the list is stale. It holds every
+  root files of `ci/`, with a guard that fails when the list is stale. It holds every
   library target of `//src` except a `DARWIN_SRC_EXCLUDED` table. Each row of that table names
   a target and the issue above that keeps it out. A row is deleted in the pull request that
   closes its issue. When a new library is added under `//src`, it joins the set when the list
@@ -607,9 +670,8 @@ builds and installs that on every push that changes code
 **The release set itself publishes to no channel**: the job `release` builds the
 set, so a push to `main` still proves the release builds, keeps what it built as
 a workflow artifact, and holds no publishing credential and no channel. The
-libraries moved to mopm are published by mopm's own jobs: to prod, continuously, on every
-push to `main` (this workflow publishes to no beta registry; [below](#the-mopm-jobs); see
-[releases](releases.md)). Its job
+libraries moved to mopm are published by mopm's own jobs: to beta and then to prod, continuously,
+on every push to `main` ([below](#the-mopm-jobs); see [releases](releases.md)). Its job
 `release` (the mopm jobs, for the packages moved to mopm, are
 [below](#the-mopm-jobs)) is on a GitHub-hosted runner (`ubuntu-24.04`) joined to the farm by
 [`farm-connect`](#how-it-reaches-the-farm), in the environment `build`, with
@@ -638,7 +700,7 @@ runner; the programs those builds made are then run as binaries, never through
 
 One release at a time: a push to `main` is in the concurrency group `release-main` with
 `cancel-in-progress: false`, so a running release is never cancelled and two pushes never
-publish to prod at once (both would stage against the registry's current state). GitHub keeps at
+publish to beta or prod at once (both would stage against the registry's current state). GitHub keeps at
 most one pending run per group, and a newer run replaces only a pending run, which never started
 (the newest pushed revision wins; main moves forward only, so it carries the older one's
 changes). **Known behaviour:** a run that is pending behind a running release when another push
@@ -657,10 +719,10 @@ source is deleted. Their names stay reserved on the prod registry (`release/prod
 
 The libraries moved to mopm (every `src/<name>` that has a `mopm.toml`, built
 with buildrules' `mojo_package`, which gives each a `:lib` and a `:conda`) go
-to the mopm registry (`prod`) as one group, apart from the release set, **continuously: every
-push to `main` publishes**. The steps are **build, stage, try, publish**, and the publish is itself
-three steps (stage, test, commit). There is no beta publish from this workflow, no schedule and no
-variable that switches the publish on or off. The list is
+to the mopm registries `beta` and then `prod`, each as one group, apart from the release set,
+**continuously: every push to `main` publishes**. The steps are **build, stage, try, publish to beta,
+publish to prod**, and each publish is itself three steps (stage, test, commit). Prod starts only when
+beta committed. There is no schedule and no variable that switches either publish on or off. The list is
 [`packages.bzl`](../release/readme_e2e/packages.bzl), which
 `//:readme_e2e_complete` holds to the `src/` directories that have a
 `mopm.toml`, in both directions. Each package is published for two platforms, linux-64 and
@@ -674,13 +736,17 @@ for darwin-arm64; and `//release:mopm_release_artifacts` merges the two into one
 configures the macOS half for darwin-arm64 through a transition, so one build of it, for Linux,
 builds both). That is the layout mopm reads, which requires the namespace directory: `mopm stage`
 packs one `.conda` per subdir that holds a member's library, and refuses a member that declares a
-native with no archive for one of them. Seven jobs of `release.yml` carry the
+native with no archive for one of them. Eleven jobs of `release.yml` carry the
 steps (a documentation-only push does not start the workflow, so it publishes nothing):
 
 | job | when | what it does |
 |---|---|---|
-| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_138`, `MOPM` of `packages.bzl`) and `//release:mopm_release_artifacts`, the packages of both platforms: its osx-arm64 half compiles and runs its welded tests on the farm's macOS workers. The job's farm connection writes the macOS keys to a buckconfig of their own (`darwin-config-file`), which this build alone names with `--config-file`, so no other step of the job configures a macOS platform; it also passes `-c komira_release.mac_tree=true`, without which the target is incompatible (release/BUCK, limit `release-mac-tree`), so that a Linux graph query of `//...` skips it; a red macOS build fails the step, and nothing is staged. **Version:** `release_beta_version --workspace-root src --version 0.1.<run number>` gives every member the version of this run (below, "The version of every release"). **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.1.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Whole:** `release_staged_verify expect` holds the plan of S to every package on every platform the release builds (below). **Try:** `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)); every locked file of both platforms is checked against the plan, and the linux-64 ones, the farm's, are installed and run. Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as the workflow artifact `mopm-staged-<sha>`, kept 7 days, for the next job: a rerun of a failed prod job on a later day still downloads it. |
-| `prod-stage` | after `release` and `mopm-stage`, **only on a push to `main`** (a manual run skips all six prod jobs before they start; there is no other switch) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, kept 7 days, even when the step failed. |
+| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_138`, `MOPM` of `packages.bzl`) and `//release:mopm_release_artifacts`, the packages of both platforms: its osx-arm64 half compiles and runs its welded tests on the farm's macOS workers. The job's farm connection writes the macOS keys to a buckconfig of their own (`darwin-config-file`), which this build alone names with `--config-file`, so no other step of the job configures a macOS platform; it also passes `-c komira_release.mac_tree=true`, without which the target is incompatible (release/BUCK, limit `release-mac-tree`), so that a Linux graph query of `//...` skips it; a red macOS build fails the step, and nothing is staged. **Version:** `release_beta_version --workspace-root src --version 0.1.<run number>` gives every member the version of this run (below, "The version of every release"). **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.1.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Whole:** `release_staged_verify expect` holds the plan of S to every package on every platform the release builds (below). **Try:** `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)); every locked file of both platforms is checked against the plan, and the linux-64 ones, the farm's, are installed and run. Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as the workflow artifact `mopm-staged-<sha>`, kept 7 days, for the beta and prod jobs: a rerun of a failed beta or prod job on a later day still downloads it. |
+| `beta-stage` | after `release` and `mopm-stage`, **only on a push to `main`** (a manual run skips all four beta jobs and all six prod jobs before they start; there is no other switch) | in the environment `beta`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry beta --oidc --no-commit`: the beta registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the beta group), as the artifact `mopm-beta-staged-<sha>`, kept 7 days, even when the step failed. |
+| `beta-test` | after `beta-stage`, on a push to `main` | as `prod-test` below, on the directory `beta-stage` kept: environment `build`, **no registry identity and no secret**, `release_staged_verify verify` of every file against `plan.json`, then the README e2e on the farm on the files that matched. |
+| `beta-commit` | after `beta-test`, on a push to `main` | in the environment `beta`: `mopm publish --staged S --registry beta --oidc` on the directory with its `state.json`, after a fresh OIDC exchange: the beta group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-beta-committed-<sha>`. |
+| `beta-abort` | after `beta-stage`, `beta-test` and `beta-commit`, when one of them failed or the run was cancelled, on a push to `main` and with a `beta-stage` that was not skipped | in the environment `beta`: `mopm publish --staged S --registry beta --oidc --abort` ends the open beta group. |
+| `prod-stage` | after `release`, `mopm-stage` and `beta-commit`, **only on a push to `main`** (a manual run skips all six prod jobs before they start; there is no other switch) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, kept 7 days, even when the step failed. |
 | `prod-test` | after `prod-stage`, on a push to `main` | in the environment `build` (the farm's; `id-token: write` for the tailnet join only), with **no registry identity and no secret**. It downloads the directory `prod-stage` kept, checks every file against `plan.json` (`release_staged_verify verify`: sha256 and size), writes `release/staged_set` from the files that matched and from nothing else, and runs `-c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm. |
 | `prod-commit` | after `prod-test`, on a push to `main` | in the environment `prod`, with `contents: read` and `id-token: write`. The same command without `--no-commit`, on the same directory with its `state.json`, after a fresh OIDC exchange: the same group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-prod-committed-<sha>`. |
 | `prod-abort` | after `prod-stage`, `prod-test` and `prod-commit`, when one of them failed or the run was cancelled, on a push to `main` and with a `prod-stage` that was not skipped | in the environment `prod`, same permissions: `mopm publish --staged S --registry prod --oidc --abort` ends the open group and gives its place back. |
@@ -698,8 +764,8 @@ lacks a file for a subdir it must have or has one for a subdir it may not have (
 the two lists the release builds and from no other: every package of `PACKAGES`
 ([`packages.bzl`](../release/readme_e2e/packages.bzl)) on linux-64, and every package of `DARWIN_PACKAGES`
 ([`darwin_libs.bzl`](../release/darwin_libs.bzl): the packages not in `DARWIN_EXCLUDED`) on osx-arm64 as
-well. It runs before the README e2e and before `prod-stage` asks the registry for a group, so a short set
-never reaches the registry. It reads `plan.json` only. **It cannot see the natives:** a package's
+well. It runs before the README e2e and before `beta-stage` or `prod-stage` asks a registry for a group, so a
+short set never reaches either registry. It reads `plan.json` only. **It cannot see the natives:** a package's
 `[native.<id>]` archive is inside its `.conda`, not a file of the plan, so a `.conda` that lacks one passes
 this step (`mopm stage` refuses a member that declares a native with no archive, and the README e2e links
 the linux-64 ones).
@@ -728,9 +794,15 @@ Five of the six `prod-*` jobs publish the set `mopm-stage` tried to the prod reg
 `prod-add`, installs from it after the commit), on every push to
 `main` and with no switch, in three steps that the registry keeps apart: **stage** (upload, nothing visible), **test** (on the bytes the registry holds),
 **commit** (visible all at once). `prod-stage` needs `release` and `mopm-stage`: the set it stages is the one
-the README e2e of `mopm-stage` passed on, at the version of this run (below), so a release build or an e2e
-that failed stops the run before anything is staged in prod. There is no beta stage in front of prod. `//:release_workflow_cases` holds the job graph, the gates, the
-environments, the permissions, the commands and the order of the test's steps, that every upload of `mopm-staged-<sha>` and `mopm-prod-staged-<sha>` is kept 7 to 14 days, and that no beta job and no schedule exists; `//:release_plan_expect_cases` holds that `mopm-stage` checks the staged plan against the expectation as the step right after `mopm stage`, with no condition and no ignored failure.
+the README e2e of `mopm-stage` passed on, at the version of this run (below), and it needs `beta-commit`: a
+release build or an e2e that failed stops the run before anything is staged in prod, and so does any failure of
+the beta publish ([below](#the-beta-publish)). `//:release_workflow_cases` holds the job graph of both
+publishes, the gates, the environments, the permissions, the commands and the order of each test job's steps,
+that a beta job names only the registry `beta` and every other job only `prod`, that every upload of
+`mopm-staged-<sha>`, `mopm-beta-staged-<sha>` and `mopm-prod-staged-<sha>` is kept 7 to 14 days, and that no
+schedule exists; `//:release_plan_expect_cases` holds that `mopm-stage` checks the staged plan against the
+expectation as the step right after `mopm stage`, with no condition and no ignored failure, and that `beta-stage`
+and `prod-stage` need `mopm-stage`.
 
 **A member must be claimed on prod first.** The registry creates a package name only for its claimed owner, so a
 release member whose name is not claimed on the prod registry makes `prod-stage` refuse and turns `main` red. The
@@ -794,8 +866,10 @@ would be handed two files for one name.
    the actor's place among its open groups back at once; otherwise the registry expires the group after
    twelve hours. It `needs` all three jobs that can fail because `failure()` looks only at the jobs a job
    depends on: a test that failed would not reach an abort that needed `prod-stage` alone. A directory
-   without `state.json` means the stage failed before it asked for a group, and the step says there is
-   nothing to end. A group that was already committed is not ended: mopm refuses and says to yank it.
+   without `state.json` means the stage failed before it asked for a group, and a step says there is
+   nothing to end. Which of the two steps runs is each step's `if: hashFiles('mopm-prod/staged/state.json')`
+   (`!= ''` or `== ''`), so the job downloads the directory into the workspace, the only place `hashFiles`
+   reads, and no step holds shell logic; `beta-abort` is the same with `mopm-beta`. A group that was already committed is not ended: mopm refuses and says to yank it.
 5. **`prod-smoke`** runs once the group is visible. `release_staged_verify smoke` reads the prod index
    (`https://api.mopm.dev/index/config.json`, whose `stage` must be `prod` and whose `channel_url` must be
    exactly `https://conda.mopm.dev/`), downloads `<channel_url><namespace>/<subdir>/<filename>` (each
@@ -834,12 +908,14 @@ would be handed two files for one name.
    user would get, and a person decides what to do. Its cases (`//tools/build/ci:release_staged_verify_unit`)
    run a registry and a mopm in memory.
 
-**The identity.** No job holds a registry token and the environment `prod` holds no secret. The three jobs
-that talk to the registry run in the environment `prod` and exchange the job's GitHub OIDC token; the
-registry trusts this repository's `release.yml`, run on `main` from a push, in the environment `prod`, and
-lets that identity act for the owner of the packages (the names are owned by the maintainers' account, not
-by the repository). `prod-test` is in the environment `build`, whose identity the registry does not trust,
-and runs nothing that reads a token.
+**The identity.** No job holds a registry token and neither the environment `prod` nor `beta` holds a
+secret. The three prod jobs that talk to the registry run in the environment `prod` and exchange the job's
+GitHub OIDC token; the registry trusts this repository's `release.yml`, run on `main` from a push, in the
+environment `prod`, and lets that identity act for the owner of the packages (the names are owned by the
+maintainers' account, not by the repository). The three beta jobs that talk to the registry do the same in
+the environment `beta`, which the beta registry must trust in the same way ([not set up
+yet](#before-the-first-release)). `beta-test` and `prod-test` are in the environment
+`build`, whose identity no registry trusts, and run nothing that reads a token.
 
 **What this proves.** The files the registry holds in quarantine, which it copies when the group is
 committed, are the files of S: the registry pinned each sha256 when it opened the group, and `prod-test`
@@ -867,23 +943,66 @@ the full names under the namespace's channel at this run's version and install e
 `mopm-stage` job). The first mopm release with both flags is 0.0.66, so the pin has them; a later move of
 the pin must keep them, in the same change as the toolchain entry the job builds.
 
+#### The beta publish
+
+Before prod, every push to `main` publishes the same set S to the registry `beta`, in four jobs with the shape
+of the first four prod jobs above and the registry `beta` and the environment `beta` in place of `prod`:
+**`beta-stage`** (`mopm publish --staged S --registry beta --oidc --no-commit`, the directory kept as
+`mopm-beta-staged-<sha>` even when the step failed), **`beta-test`** (`release_staged_verify verify` of that
+directory against `plan.json`, then the README e2e on the files that matched, with no registry identity),
+**`beta-commit`** (the same command without `--no-commit`, after a fresh exchange; `plan.json`, `state.json`
+and `report.json` kept as `mopm-beta-committed-<sha>`, for whoever has to yank the beta group) and
+**`beta-abort`** (`--abort`, when one of the three failed or the run was cancelled and `beta-stage` was not
+skipped). `beta-stage` needs `release` and `mopm-stage`, as `prod-stage` did; `prod-stage` needs
+`beta-commit`.
+
+**One set, one version, two registries.** `mopm stage` plans S against prod, and `plan.json` names no
+registry (mopm's `spec/staged-set.md`). Every member of S is a version that neither registry holds yet,
+`0.1.<run number>` (below), so every member is an `upload` on either registry and the plan prod's stage wrote
+is the plan for beta as well: beta and prod get the same versions of the same bytes. `state.json`, which
+`--no-commit` writes, does name its registry, and mopm refuses a state of another registry; so the beta
+jobs work on their own directory (`mopm-beta-staged-<sha>`), and `prod-stage` downloads S again from
+`mopm-staged-<sha>`, which holds no state. `//:release_workflow_cases` refuses a beta job that names a
+registry other than `beta`, any other job that names a registry other than `prod`, the environment `beta`
+on any job but `beta-stage`, `beta-commit` and `beta-abort`, and a job that downloads the other registry's
+directory.
+
+**When beta fails.** A failure of `beta-stage`, `beta-test` or `beta-commit` (or a cancel) runs `beta-abort`,
+which ends the open beta group; `prod-stage` needs `beta-commit`, so every prod job is skipped, and
+`prod-abort` does not run either (its `prod-stage` was skipped: there is no prod group). Nothing reaches prod
+and the run is red. When beta committed and a prod job fails, the version stays published on beta and
+`prod-abort` ends the prod group; the next push publishes a new version to both. A rerun is not the way to
+recover: "Re-run failed jobs" of a failed `prod-test` or `prod-commit` finds the group that `prod-abort`
+already ended named in `state.json`, and mopm refuses it (the same holds for the beta jobs), and "Re-run all
+jobs" fails at `mopm-stage`'s upload of `mopm-staged-<sha>`, which already exists. A failed `beta-stage` or
+`prod-stage` does rerun cleanly with "Re-run failed jobs": it starts again from S, which holds no `state.json`,
+and the registry opens an ended group again as its next attempt. Otherwise, push again.
+
+**What it does not do yet.** No job downloads what the beta channel serves or adds from beta (there is no
+beta smoke and no beta add), so the beta publish proves that the beta registry accepted, held and committed
+the set, and that the README e2e passed on the bytes it held before the commit.
+
 #### Before the first release
 
-This is the one-time setup of the registry, outside this repository. It is done for komira's packages on
-`prod`; it is listed because a repository that copies this workflow must do the same before its first push.
-There is no variable that turns the publish on or off, so a push before the registry is ready fails at
-the first request that is refused and changes nothing, but that must not be the way it is found out. In
-this order:
+This is the one-time setup of the registries, outside this repository. It is done for komira's packages on
+`prod`. **It is not done on `beta` yet:** until the beta registry trusts this workflow in the environment
+`beta` as a publisher for the packages' owner, every push to `main` fails at `beta-stage` (the exchange is
+refused and nothing is created), and because `prod-stage` needs `beta-commit`, nothing is published to prod
+either. The first real beta publish is the first push to `main` after that setup. It is listed also because a
+repository that copies this workflow must do the same before its first push. There is no variable that turns
+the publish on or off, so a push before a registry is ready fails at the first request that is refused and
+changes nothing, but that must not be the way it is found out. For each of `beta` and `prod`, in this order:
 
 1. On the registry, the package names exist under the maintainers' publishing account (a personal account the
    maintainers designate, not an organization owner): that account claims the name of every package in
-   [`packages.bzl`](../release/readme_e2e/packages.bzl) (every `src/` directory with a `mopm.toml`) on `prod`.
+   [`packages.bzl`](../release/readme_e2e/packages.bzl) (every `src/` directory with a `mopm.toml`) on the
+   registry.
    Ownership is a registry record, not something `mopm.toml` can express.
-2. The registry's group publish is live on `prod` for that account, and the registry trusts this
-   repository's `release.yml`, run on `main` from a push, in the environment `prod`, as a CI publisher of
-   the owner. Without it the exchange is refused (`oidc_not_trusted`) and nothing is created. The registry's
+2. The registry's group publish is live for that account, and the registry trusts this
+   repository's `release.yml`, run on `main` from a push, in the environment of the same name (`beta` or
+   `prod`), as a CI publisher of the owner. Without it the exchange is refused (`oidc_not_trusted`) and nothing is created. The registry's
    trust should match the ref, the `job_workflow_ref` and the event (`push`), not the environment alone.
-3. The GitHub environment `prod` deploys only from `main` (selected branches, `main` only). The
+3. The GitHub environment (`beta`, `prod`) deploys only from `main` (selected branches, `main` only). The
    OIDC subject the registry sees names the environment, and a workflow on any branch can declare the same
    environment, so the environment's branch rule is what keeps a branch out; each job's `if` is a second lock,
    and `==` on `github.ref` compares ignoring case.
@@ -891,10 +1010,10 @@ this order:
 5. The versions: nothing to set. Each release carries the version `0.1.<run number>` (next section), so no
    version has to be reserved.
 
-The prod jobs start only on a push to `main`: a manual run builds and stages and publishes nothing.
+The beta and prod jobs start only on a push to `main`: a manual run builds and stages and publishes nothing.
 
-**Prod only on a push: a release without a push is not supported.** A manual run never reaches the
-environment `prod` (it is break-glass and publishes nothing). To release, merge to `main`: the push is the
+**Beta and prod only on a push: a release without a push is not supported.** A manual run never reaches the
+environment `beta` or `prod` (it is break-glass and publishes nothing). To release, merge to `main`: the push is the
 release, and its version is its run number.
 
 #### The version of every release
@@ -904,12 +1023,12 @@ A registry creates a (name, version) pair once, and a mopm version is exactly `M
 bytes refuses the set (`mopm stage` fails, and the README e2e refuses a plan member that is not an
 `upload`), so a fixed version in `mopm.toml` would let only the first release through. So every push to
 `main` gives each member of the checkout of `mopm-stage` the version
-`0.1.<github.run_number>` before `mopm stage`, and the set that is staged, tested and committed in prod
+`0.1.<github.run_number>` before `mopm stage`, and the set that is staged, tested and committed in beta and in prod
 has exactly those versions. The number stays inside the
 `>=0.1,<0.2` the packages ask of each other, sorts above `0.1.0`, and the newest push is the newest
 version. A run that was replaced while pending (above) used a number that is never published, so the
-published versions can skip numbers. The README e2e of `mopm-stage` and `prod-test` is told the number with
-`-c komira_release.beta_version=0.1.<run number>` (the name is from when a beta publish took it; it is
+published versions can skip numbers. The README e2e of `mopm-stage`, `beta-test` and `prod-test` is told the number with
+`-c komira_release.beta_version=0.1.<run number>` (the name is from an earlier beta publish that took it; it is
 optional with `staged=stage`, and the tool and the option keep their names so the labels and action keys do
 not move). Nothing is committed or pushed back: the
 rewritten files exist only on the runner of `mopm-stage`, and `mopm.toml` in the repository keeps its own version.
@@ -935,7 +1054,7 @@ bare name nor a quoted bare or `"<namespace>/<name>"` name (mopm's grammar), or 
 multi-line string or a dependency line it cannot read. Running it again with the same version changes
 nothing. Its cases (`//tools/build/ci:release_beta_version_unit`) run on scratch workspaces, and
 `//:release_workflow_cases` holds the placement: the rewrite is in `mopm-stage`,
-before the stage, with the run number, and the e2e of `mopm-stage` and `prod-test` is given the same number.
+before the stage, with the run number, and the e2e of `mopm-stage`, `beta-test` and `prod-test` is given the same number.
 
 #### The plan reader and the registry client
 
@@ -944,7 +1063,7 @@ before the stage, with the run number, and the e2e of `mopm-stage` and `prod-tes
 check: no member, a member that is not an `upload`, a path that leaves its directory, a malformed
 sha256, a file above 64 MiB, a name listed twice, two paths of the set that collide, in any letter case)
 and the https client that reads a registry's index and files with no redirect followed. It is no longer
-built as a program of its own (the beta job that ran it is gone); its cases
+built as a program of its own (the earlier beta job that ran it is gone; `beta-test` runs `release_staged_verify`); its cases
 (`//tools/build/ci:release_beta_fetch_unit`) run against a registry in memory and a socket on
 loopback, and cover a changed byte, another size, a missing package, an index of another stage, and
 a redirect.
@@ -989,7 +1108,11 @@ release heading of [`python/CHANGELOG.md`](../python/CHANGELOG.md), holding the 
 nests under the README. A change to the package adds a file there and never a line of `CHANGELOG.md`
 ([the working guide](../python/README.md#changelog-entries)), so queued pull requests edit no common line,
 and the section a release ships lists every change merged since the newest section `CHANGELOG.md` keeps.
-The Linux and the macOS wheel read the one target, so their `METADATA` is the same
+The build is stamped with its commit too (`-c komira.package_commit`), and every link of the description to
+the repository's `main` (`.../blob/main/...`, `.../tree/main/...`) opens that commit instead, so the pages a
+version's PyPI page links to describe that version; the `Documentation` URL is the install page of that
+commit, and the `Changelog` URL stays `main`'s `CHANGELOG.md`, which keeps a section for every version on
+PyPI. The Linux and the macOS wheel read the one target, so their `METADATA` is the same
 (`//python:wheel_same_macos_arm64`). The wheel depends on the target, so a malformed file of `changelog.d/`
 (a name that is not a slug and `.md`, an empty file, a line that is neither a bullet nor an indented
 continuation, a heading), a `## Unreleased` heading in `CHANGELOG.md` and a `CHANGELOG.md` with no release
@@ -1427,7 +1550,7 @@ macOS smoke jobs run the macOS driver, that each macOS job is in its half.
 
 **What the macOS wheel holds, read back.** Before anything is uploaded, the build holds the wheel to what a
 Mac loads (python/BUCK, "The macOS wheel, read back"). The wheel rule refuses, on every member
-(`tools/build/package/wheel/policy.zig`, `codesign.zig`): an ELF file (a Linux library), a Mach-O file for a
+(`tools/build/package/native_policy/policy.zig`, `codesign.zig`): an ELF file (a Linux library), a Mach-O file for a
 CPU other than arm64 or a universal one, a minimum macOS (LC_BUILD_VERSION) above the tag's `macosx_11_0`,
 an install name that is not `@rpath/<file>`, a run path that is not `@loader_path`-relative, a load that is
 neither a member nor under `/usr/lib` or `/System/Library`, and a code signature that is missing or whose
@@ -1482,8 +1605,8 @@ Apple silicon and macOS 11 or newer takes, of each version, only a file whose ta
 - a version that has only the Linux file does not exist for pip on a Mac: `pip install komira` installs the
   newest version that has a macOS file, `pip install --upgrade komira` stays there, and
   `pip install komira==<that version>` fails with `No matching distribution found`;
-- while no version has a macOS file (today, until the first macOS wheel passes), `pip install komira` on a Mac
-  fails with `No matching distribution found for komira`; on an Intel Mac it always does;
+- while no version had a macOS file (before 0.1.1623, the first with one), `pip install komira` on a Mac
+  failed with `No matching distribution found for komira`; on an Intel Mac it always does;
 - a lock file written on Linux (a pin, `uv lock`, Poetry) can name a version with no macOS file, and installing
   from it on a Mac then fails.
 
@@ -1510,7 +1633,7 @@ not run kci (retired).
 | job | the one job `check`, for every merge group and for a pull request only from a branch of this repository (`github.event_name == 'merge_group' \|\| github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here; a merge group's event has no `pull_request`, and without its own term the job would be skipped there, which counts as passed), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
 | runner | `runs-on: ubuntu-24.04`, written as that plain scalar: a GitHub-hosted machine, fresh per job. A self-hosted label, label list, runner group, expression (`${{ vars.X }}`) or quoted value is refused, so a pull request's code never reaches a runner that keeps state between jobs |
 | permissions | its own `permissions:` mapping, `contents: read` and `id-token: write` (for the farm connection, [farm-connect](#how-it-reaches-the-farm), only); no environment, no secret (no value of the job, nor of the workflow-level `env:`, names `secrets` other than `secrets.GITHUB_TOKEN`), no publish step |
-| steps | the pinned full-history checkout of the merge commit (a merge group: its head commit), `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change, written by `//tools/build/ci:change` (built on the farm like the assertion, run on the runner in the checkout, with the event, the merge group's `base_sha` and the output directory as flags; `tools/build/ci/change/change.zig` says what it runs and refuses, and its cases run its choice of base against a fake git): `git diff --name-only <base>...HEAD` and the coverage holds of both sides. A pull request's base is HEAD^1, the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. A merge group's base is its `merge_group.base_sha`, the commit the group's head was built on (the step stops when it is not an ancestor of HEAD); the head is a squash commit on top of it, not a merge commit. Any other event stops the step. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system; the heavy checks of `HEAVY` in `tools/build/ci/rules.bzl`, today none since only `komira_base` reaches them, only when the change touches paths that row owns, so a change that owns none builds `//ci:pr_default` in place of `//ci:pr`), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, `default_guard.bxl:check` that `//ci:pr_default` is `//ci:pr` without the roots of `HEAVY` and nothing else, `lock_graphs.bxl:check` that each package's `buildrules.mojo.lock.bzl` holds a unit graph for every platform subdir its `mopm.lock` records and that a package which loads a native shared library pins it in `system_libs` of that lock, `cases.bxl:run`, and `readme_e2e/cases.bxl:run`, the cases of the README e2e's completeness guard), and `test` of the list's targets that are not of the tests cell. Then [the macOS part](#the-macos-part-of-the-check): `tools/build/ci/darwin.bxl:select` over that list, its labels written by `//tools/build/ci:darwin_targets` (built on the farm like the change tool), and, when there is one, `build --config-file $RUNNER_TEMP/darwin.buckconfig --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going` of its labels (bounded at 60 minutes), skipped when an earlier step failed. Last, the analysis of the whole macOS set (`release/darwin_analysis.bxl:check`). A pull request that adds or deletes a package needs no edit to any release file; adding a target to the check set means regenerating `ci/targets.bzl` and its shards `ci/targets/shard_<n>.bzl` in one step (the guard fails, naming the command, when they are out of date or a shard nears the 1000-line limit). Nothing ships. |
+| steps | the pinned full-history checkout of the merge commit (a merge group: its head commit), `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change, written by `//tools/build/ci:change` (built on the farm like the assertion, run on the runner in the checkout, with the event, the merge group's `base_sha` and the output directory as flags; `tools/build/ci/change/change.zig` says what it runs and refuses, and its cases run its choice of base against a fake git): `git diff --name-only <base>...HEAD` and the coverage holds of both sides. A pull request's base is HEAD^1, the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. A merge group's base is its `merge_group.base_sha`, the commit the group's head was built on (the step stops when it is not an ancestor of HEAD); the head is a squash commit on top of it, not a merge commit. Any other event stops the step. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system; the heavy checks of `HEAVY` in `tools/build/ci/rules.bzl`, today none since only `komira_base` reaches them, only when the change touches paths that row owns, so a change that owns none builds `//ci:pr_default` in place of `//ci:pr`), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, `default_guard.bxl:check` that `//ci:pr_default` is `//ci:pr` without the roots of `HEAVY` and nothing else, `lock_graphs.bxl:check` that each package's `buildrules.mojo.lock.bzl` holds a unit graph for every platform subdir its `mopm.lock` records and that a package which loads a native shared library pins it in `system_libs` of that lock, `cases.bxl:run`, and `readme_e2e/cases.bxl:run`, the cases of the README e2e's completeness guard), and `test` of the list's targets that are not of the tests cell. Then [the macOS part](#the-macos-part-of-the-check): `tools/build/ci/darwin.bxl:select` over that list, its labels written by `//tools/build/ci:darwin_targets` (built on the farm like the change tool), and, when there is one, `build --config-file $RUNNER_TEMP/darwin.buckconfig --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going` of its labels (bounded at 60 minutes), skipped when an earlier step failed. Last, the analysis of the whole macOS set (`release/darwin_analysis.bxl:check`). A pull request that adds or deletes a package needs no edit to any release file; adding a root to the check set means adding its one empty file, `ci/roots/<cell>/<package>:<name>` (`ci/test_roots/...` for a test), and a new target that depends on an old root deletes the old root's file, so two pull requests that add targets never edit the same file (the guard fails, naming each file to add or delete and the command that writes them all, when they are out of date: [tools/build/ci/README.md](../tools/build/ci/README.md#the-aggregate-cipr)). Nothing ships. |
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.
@@ -1518,6 +1641,32 @@ The repository's branch settings require the check **`pr / check`**.
 trigger, the job's condition, the concurrency group, that the change step runs
 the change tool with the event and the group base, and the job's bound below the
 queue's check timeout, and that no other workflow has a job `check`.
+
+### Adding a target: one file per root
+
+`//ci:pr` lists its roots as literal labels, so they are committed, one empty
+file per root named by its label (`ci/roots/komira/src/avro:avro_conda`;
+`ci/test_roots/...` for a test; [tools/build/ci/README.md](../tools/build/ci/README.md#the-aggregate-cipr)).
+Before, they were rows of eight sorted shard files, so two pull requests that
+added targets near each other in one shard (any two task-example batches did,
+in one package) conflicted, and each had to merge `main` and regenerate after
+every other merge. With one file per root, two such pull requests add
+different files and merge in either order. The ways weighed, with what each costs:
+
+| | Merges of two pull requests that add targets | The check's time | What the guard proves |
+|---|---|---|---|
+| one file per root (this) | no conflict, in one package or two | as before: `ci/BUCK` globs about 1300 empty files | as before: every root has its file and every file is a root's, both ways, each named by its path |
+| one committed file per top-level package | a conflict still, for two in one package (`src/` holds most rows) | as before | as before |
+| the lists made in the check from the graph, none committed | no file to conflict | a query of the whole graph before the build (the guard asks it already) | nothing about a list: the list is the graph's by construction, and `./buck2 build //ci:pr` with no committed list is no longer one target a person or a step can name |
+
+A pull request opened before this layout conflicts once: each shard file it
+edited (`ci/targets/shard_<n>.bzl`) is a modify/delete conflict with `main`,
+which deleted them all (the files it did not edit are deleted with no conflict).
+Merge `main`, take the deletion of whatever is left
+(`git rm -qf --ignore-unmatch ci/targets.bzl 'ci/targets/shard_*.bzl'`), and write the roots
+from the graph (the command in the README), or add the one file the guard names
+for each root the pull request adds. From then on the pull request merges with
+the others with no second round.
 
 ## The merge queue
 
