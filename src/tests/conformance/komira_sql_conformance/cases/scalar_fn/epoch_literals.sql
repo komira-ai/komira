@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k, epoch(TIMESTAMP '2038-01-19 03:14:08') AS s, epoch_us(TIMESTAMP '1969-12-31 23:59:59.9995') AS us, epoch_ms(TIMESTAMP '1969-12-31 23:59:59.9995') AS ms FROM E WHERE k = 0

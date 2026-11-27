@@ -6,7 +6,8 @@ as Arrow (pyarrow). `Session.add_sql_binding` binds a SQL name to a
 `files` source: Parquet objects of `s3://` or Azure, read with a named
 credential (`AwsKeys`, `AzureKey`, `AzureSas`, ...). The pandas-shaped `DataFrame` reads the same files
 (`read_parquet`, `read_csv`, `read_json`), groups and reduces them
-(`groupby`, `agg`), stacks frames (`concat`), and builds a plan that runs, with no SQL, at
+(`groupby`, `agg`), stacks frames (`concat`), turns Unix counts into
+timestamps (`to_datetime`), and builds a plan that runs, with no SQL, at
 `materialize()` (docs/design/dataframe_surface.md). The public names
 are exactly `__all__`; every other module is private
 (docs/design/python_package.md). Importing the package does not load the
@@ -44,6 +45,7 @@ from ._refusals import refused as _refused
 from ._series import Series
 from ._session import Result, Session
 from ._sources import files
+from ._to_datetime import to_datetime
 
 _logging.getLogger("komira").addHandler(_logging.NullHandler())
 
@@ -98,4 +100,5 @@ __all__ = [
     "read_csv",
     "read_json",
     "read_parquet",
+    "to_datetime",
 ]

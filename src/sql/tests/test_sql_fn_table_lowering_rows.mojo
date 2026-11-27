@@ -137,6 +137,9 @@ from sql.sql_fn_table import (
     DSG_ISNAN,
     DSG_JSON_EXTRACT,
     DSG_JSON_EXTRACT_TEXT,
+    DSG_EPOCH,
+    DSG_EPOCH_MS,
+    DSG_EPOCH_US,
     DSG_LEAST,
     DSG_LEFT,
     DSG_MAKE_TS_MS,
@@ -383,6 +386,9 @@ def test_lowering_rows_4() raises:
     _lowers("make_timestamp", FNK_DESUGAR, DSG_MAKE_TS_US, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     _lowers("make_timestamp_ms", FNK_DESUGAR, DSG_MAKE_TS_MS, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     _lowers("make_timestamp_ns", FNK_DESUGAR, DSG_MAKE_TS_NS, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
+    _lowers("epoch", FNK_DESUGAR, DSG_EPOCH, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
+    _lowers("epoch_ms", FNK_DESUGAR, DSG_EPOCH_MS, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
+    _lowers("epoch_us", FNK_DESUGAR, DSG_EPOCH_US, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
 
 
 def main() raises:

@@ -58,7 +58,7 @@ date32[day]
 - `register_csv` types a column of `YYYY-MM-DD` values as a date (`date32`), so `year`, `month`, `date_diff` and comparisons with `DATE '...'` work on it with no parsing step.
 - komira's SQL cannot parse text itself yet: `CAST(<text> AS DATE)` and `CAST(<text> AS TIMESTAMP)` are refused by name, and so is `strptime` (komira-ai/komira#2366). `probe_cast_date.py` and `probe_strptime.py` beside this page try both and must fail with the lines of their `.error.txt` files. The day one runs, this page's check goes red, and the page and the catalogue status change with it.
 - The program parses with `pyarrow.compute.strptime` (a format of `%` directives, as in Python), casts the result to a date, and writes Parquet for komira to read. A value that does not match the format raises in pyarrow, so a bad row is found before komira sees it.
-- The pandas-shaped frame has no `to_datetime`: `komira.to_datetime()` is refused and points at `astype`, which does not parse text into dates today.
+- The pandas-shaped frame's `komira.to_datetime(s, unit=...)` takes integer Unix counts only; text, and its `format=` argument, are refused by name, and `astype` does not parse text into dates today.
 
 ## Related
 

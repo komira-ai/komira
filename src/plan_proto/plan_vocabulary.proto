@@ -523,10 +523,10 @@ enum MathFn2 {
 }
 
 // ----------------------------------------------------------------------
-// Temporal field extraction / truncation unit. Sparse: extraction 0-9,
-// truncation 16-25 — 10..15 is a RESERVED HOLE, and the membership test
-// consults this vocabulary rather than range-checking so a unit landing
-// in it is REFUSED at encode.
+// Temporal field extraction / truncation / epoch-count unit. Sparse:
+// extraction 0-14, truncation 16-25, epoch count 26-28 (engine numbers) —
+// 15 is a RESERVED HOLE, and the membership test consults this vocabulary
+// rather than range-checking so a unit landing in it is REFUSED at encode.
 // Derived from: src/plan_expr/expr.mojo
 // Engine prefix: EXTRACT_
 // ----------------------------------------------------------------------
@@ -557,6 +557,9 @@ enum ExtractField {
   EXTRACT_TRUNC_SECOND = 24;
   EXTRACT_TRUNC_MILLISECOND = 25;
   EXTRACT_TRUNC_MICROSECOND = 26;
+  EXTRACT_EPOCH = 27;
+  EXTRACT_EPOCH_MS = 28;
+  EXTRACT_EPOCH_US = 29;
 }
 
 // ----------------------------------------------------------------------

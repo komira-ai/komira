@@ -707,7 +707,7 @@
     "question": "How do I convert a Unix timestamp to a datetime and back?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2344"
+      "komira-ai/komira#2342"
     ]
   },
   {

@@ -128,7 +128,7 @@ currval	FNK_REFUSED	_R_SESSION	-	0	probe:refused_bind
 damerau_levenshtein	FNK_STRING_FN_N	-	-	1	equal:1
 date_add	FNK_REFUSED	_R_INTERVAL	yes	0	probe:refused_bind
 date_diff	FNK_DESUGAR	-	yes	18	equal:18
-date_part	FNK_DESUGAR	-	yes	56	equal:56
+date_part	FNK_DESUGAR	-	yes	57	equal:57
 date_sub	FNK_DESUGAR	-	-	21	equal:21
 date_trunc	FNK_DESUGAR	-	yes	57	equal:57
 datediff	FNK_DESUGAR	-	-	4	equal:4
@@ -155,10 +155,10 @@ enum_first	FNK_REFUSED	_R_ENUMT	-	0	probe:refused_bind
 enum_last	FNK_REFUSED	_R_ENUMT	-	0	probe:refused_bind
 enum_range	FNK_REFUSED	_R_ENUMT	-	0	probe:refused_bind
 enum_range_boundary	FNK_REFUSED	_R_ENUMT	-	0	probe:refused_bind
-epoch	FNK_REFUSED	_R_EPOCHCONV	yes	0	probe:refused_bind
-epoch_ms	FNK_REFUSED	_R_EPOCHCONV	yes	0	probe:refused_bind
+epoch	FNK_DESUGAR	-	yes	4	equal:4
+epoch_ms	FNK_DESUGAR	-	yes	6	equal:6
 epoch_ns	FNK_REFUSED	_R_EPOCHCONV	-	0	probe:refused_bind
-epoch_us	FNK_REFUSED	_R_EPOCHCONV	-	0	probe:refused_bind
+epoch_us	FNK_DESUGAR	-	-	5	equal:5
 equi_width_bins	FNK_REFUSED	_R_LISTCTOR	-	0	probe:refused_bind
 era	FNK_DESUGAR	-	-	1	equal:1
 error	FNK_REFUSED	_R_SIDEEFFECT	-	0	probe:refused_bind
@@ -496,8 +496,8 @@ ltrim	FNK_STRING_FN	-	yes	1	equal:1
 mad	FNK_REFUSED	_R_AGGRETAIN	-	0	probe:refused_bind
 make_date	FNK_REFUSED	_R_TSMINT	yes	0	probe:refused_bind
 make_time	FNK_REFUSED	_R_TSMINT	-	0	probe:refused_bind
-make_timestamp	FNK_DESUGAR	-	yes	1	equal:1
-make_timestamp_ms	FNK_DESUGAR	-	-	1	equal:1
+make_timestamp	FNK_DESUGAR	-	yes	2	equal:2
+make_timestamp_ms	FNK_DESUGAR	-	-	2	equal:2
 make_timestamp_ns	FNK_DESUGAR	-	-	1	equal:1
 make_timestamptz	FNK_REFUSED	_R_TSMINT	-	0	probe:refused_bind
 make_type	FNK_REFUSED	_R_TYPEVAL	-	0	probe:refused_bind
@@ -688,7 +688,7 @@ to_minutes	FNK_REFUSED	_R_INTERVALCTOR	yes	0	probe:refused_bind
 to_months	FNK_REFUSED	_R_INTERVALCTOR	yes	0	probe:refused_bind
 to_quarters	FNK_REFUSED	_R_INTERVALCTOR	-	0	probe:refused_bind
 to_seconds	FNK_REFUSED	_R_INTERVALCTOR	yes	0	probe:refused_bind
-to_timestamp	FNK_REFUSED	_R_TSMINT	yes	0	probe:refused_bind
+to_timestamp	FNK_REFUSED	_R_TOTIMESTAMP	yes	0	probe:refused_bind
 to_weeks	FNK_REFUSED	_R_INTERVALCTOR	-	0	probe:refused_bind
 to_years	FNK_REFUSED	_R_INTERVALCTOR	yes	0	probe:refused_bind
 today	FNK_REFUSED	_R_WALLCLOCK	-	0	probe:refused_bind

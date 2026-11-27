@@ -106,7 +106,7 @@ MODULE = _rows(
         ("merge_ordered",),
         "merge_ordered() fills by row order, which a frame does not have; use merge() then sort_values()",
     ),
-    (("to_datetime", "to_numeric"), "komira.{name}() is not supported; cast a column with s.astype(...)"),
+    (("to_numeric",), "komira.{name}() is not supported; cast a column with s.astype(...)"),
     (("NamedAgg",), 'use a tuple: agg(out=("column", "func"))'),
 )
 

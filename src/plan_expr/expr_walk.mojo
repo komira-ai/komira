@@ -91,6 +91,7 @@ from plan_expr.expr import (
     EXPR_UDF_APPLY,
     EXPR_EXTRACT,
     EXPR_JSON_EXTRACT,
+    EXTRACT_EPOCH,
     _is_trunc_unit,
     string_fn_returns_int,
     string_fn_n_returns_int,
@@ -1286,7 +1287,9 @@ def walk_expr_field[P: ColRefFieldPolicy](
         #                   declared type must follow the child, not the
         #                   Int32/Int64 storage the kernel returned.
         #   field units  -> INT64 (year / month / day / quarter / hour /
-        #                   minute / second).
+        #                   minute / second), and epoch_ms / epoch_us.
+        #   EXTRACT_EPOCH -> FLOAT64: DuckDB v1.5.5 `epoch(ts)` is DOUBLE
+        #                   seconds, fractional for a sub-second instant.
         #
         # ⭐ TWO RULES IN THIS ARM, BOTH INVISIBLE TO A VALUE COMPARISON:
         #
@@ -1309,6 +1312,8 @@ def walk_expr_field[P: ColRefFieldPolicy](
             )
             trunc_child.name = String("date_trunc")
             return trunc_child^
+        if expr.extract_unit() == EXTRACT_EPOCH:
+            return Field("extract", ArrowType.FLOAT64, True)
         return Field("extract", ArrowType.INT64, True)
 
     elif expr.tag == EXPR_STRUCT_FIELD:

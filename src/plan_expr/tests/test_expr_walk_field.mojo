@@ -33,7 +33,8 @@ from plan_expr.expr import (
     REGEXP_LIKE, REGEXP_MATCH, REGEXP_REPLACE, REGEXP_EXTRACT,
     REGEXP_SPLIT_TO_ARRAY, REGEXP_EXTRACT_ALL, REGEXP_COUNT, REGEXP_INSTR,
     REGEXP_SUBSTR, REGEXP_FULL_MATCH,
-    EXTRACT_YEAR, EXTRACT_TRUNC_MONTH,
+    EXTRACT_YEAR, EXTRACT_TRUNC_MONTH, EXTRACT_TRUNC_MICROSECOND,
+    EXTRACT_EPOCH, EXTRACT_EPOCH_MS, EXTRACT_EPOCH_US,
     STRFNN_STRPOS, STRFNN_JARO,
 )
 from plan_expr.expr_walk import (
@@ -404,6 +405,16 @@ def test_date_trunc_keeps_child_type() raises:
     var t = _x(Expr.date_trunc(EXTRACT_TRUNC_MONTH, _c("ts")))
     _is(t, "date_trunc", ArrowType.TIMESTAMP_US, True)
     assert_equal(t.timezone(), "UTC")
+
+
+def test_epoch_counts_are_numbers_not_the_childs_timestamp() raises:
+    """epoch is FLOAT64 (DuckDB's DOUBLE); epoch_ms and epoch_us are INT64.
+    The epoch units sit above the date_trunc run, so none of them is typed
+    as the child's timestamp; the top trunc unit still is."""
+    _is(_x(Expr.extract(EXTRACT_EPOCH, _c("ts"))), "extract", ArrowType.FLOAT64, True)
+    _is(_x(Expr.extract(EXTRACT_EPOCH_MS, _c("ts"))), "extract", ArrowType.INT64, True)
+    _is(_x(Expr.extract(EXTRACT_EPOCH_US, _c("ts"))), "extract", ArrowType.INT64, True)
+    _is(_x(Expr.extract(EXTRACT_TRUNC_MICROSECOND, _c("ts"))), "date_trunc", ArrowType.TIMESTAMP_US, True)
 
 
 def test_struct_field_by_name() raises:

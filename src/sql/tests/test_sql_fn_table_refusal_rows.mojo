@@ -87,6 +87,7 @@ from sql.sql_fn_table import (
     _R_TABLEFN,
     _R_TAGGED,
     _R_TSFORMAT,
+    _R_TOTIMESTAMP,
     _R_TSMINT,
     _R_TYPEOF,
     _R_TYPEVAL,
@@ -414,15 +415,11 @@ def test_refusal_families_4() raises:
     _refused(
         _R_TSMINT,
         [
-            "make_date", "make_time", "make_timestamptz", "to_timestamp",
+            "make_date", "make_time", "make_timestamptz",
         ],
     )
-    _refused(
-        _R_EPOCHCONV,
-        [
-            "epoch", "epoch_ms", "epoch_ns", "epoch_us",
-        ],
-    )
+    _refused(_R_TOTIMESTAMP, ["to_timestamp"])
+    _refused(_R_EPOCHCONV, ["epoch_ns"])
     _refused(
         _R_TZFN,
         [

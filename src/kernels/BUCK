@@ -34,6 +34,7 @@ mojo_library(
         "tests/test_match_offset_validity.mojo",
         "tests/test_sel_kernels.mojo",
         "tests/test_simd_of.mojo",
+        "tests/test_temporal_epoch.mojo",
         "tests/test_temporal_extract_fields.mojo",
         "tests/test_temporal_extract_trunc.mojo",
         "tests/test_temporal_offset_and_units.mojo",

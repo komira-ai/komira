@@ -195,14 +195,18 @@ comptime EXPR_JSON_EXTRACT: UInt8 = 19
 # entry points are in `kernels/temporal_extract.mojo`.
 #
 # Unit semantics:
-#   - EXTRACT_YEAR / MONTH / DAY / HOUR / MINUTE / SECOND / QUARTER
-#     -> Int32 column.  HOUR / MINUTE / SECOND raise on DATE32 (no
-#     sub-day field).
+#   - EXTRACT_YEAR / MONTH / DAY / HOUR / MINUTE / SECOND / QUARTER and the
+#     other calendar fields -> Int64 column. HOUR / MINUTE / SECOND are 0 on
+#     a DATE32.
 #   - EXTRACT_TRUNC_* -> same type as input (DATE32 / TIMESTAMP_*),
 #     value rounded down to the period start.
+#   - EXTRACT_EPOCH / EPOCH_MS / EPOCH_US -> the whole instant as a count
+#     since 1970-01-01 00:00:00 (seconds as Float64; milliseconds and
+#     microseconds as Int64).
 #
 # Output type:
-#   * Field extracts (year/month/day/hour/...) -> INT32 Column.
+#   * Field extracts (year/month/day/hour/...) -> INT64 Column.
+#   * EXTRACT_EPOCH -> FLOAT64; EXTRACT_EPOCH_MS / EPOCH_US -> INT64.
 #   * date_trunc(DATE32, *) -> DATE32 Column.
 #   * date_trunc(TIMESTAMP_*, *) -> same TIMESTAMP_* unit.
 comptime EXPR_EXTRACT: UInt8 = 20
@@ -577,33 +581,18 @@ comptime EXTRACT_SECOND: UInt8 = 6
 
 # -- the DAY-INDEX family ------------
 #
-# ⚠ THESE MUST STAY BELOW 16 AND THE REASON IS `_is_trunc_unit`, NOT TIDINESS.
-# The whole engine discriminates "field extract" from "date_trunc" with the
-# single predicate `unit >= EXTRACT_TRUNC_YEAR` below — one function, delegated
-# by `expr_walk` (and by the column evaluator and the row-mode walkers, which
-# are not in this tree) rather than restated (see `expr_walk.mojo`'s EXTRACT
-# arm, which says so). A new FIELD unit numbered above 25 would be typed as a
-# date_trunc by every one of them: DECLARED as the child's temporal type over an
-# INT64 buffer. The 7..15 run was left free for exactly this, and 15 is
-# deliberately still free — `test_an_extract_unit_in_the_sparse_hole_is_refused`
-# needs a value BETWEEN the two declared runs, because a codec that
-# RANGE-CHECKED instead of consulting the vocabulary would accept it.
+# ⚠ THE FIELD RUN IS 0..14, THE TRUNCATION RUN IS 16..25 AND THE EPOCH RUN
+# IS 26..28. The engine tells "date_trunc" from every other unit with the
+# single BOUNDED predicate `_is_trunc_unit` below — one function, delegated by
+# `expr_walk` and by the column evaluator rather than restated. 15 is
+# deliberately left free: `test_an_extract_unit_in_the_sparse_hole_is_refused`
+# needs a value BETWEEN two declared runs, because a codec that RANGE-CHECKED
+# instead of consulting the vocabulary would accept it.
 #
-# ⚠ THE FIELD RUN IS 0..14 AND **15 IS THE ONLY HOLE LEFT**.
-# The next temporal field unit (`era` / `decade` / `century` / `millennium`
-# / `epoch` / `julian` / `nanosecond` / `timezone_hour` / `timezone_minute`
-# are all real DuckDB parts with no unit here) cannot simply take 16+:
-# that is the truncation run and `_is_trunc_unit` is an OPEN-ENDED `>= 16`.
-# Extending the field family past 15 means turning that predicate into a
-# BOUNDED range (`16..25`) first — one edit, in one place, because every
-# consumer delegates to it — and then the hole test has to move above the
-# whole space, where it stops discriminating a range check from a
-# vocabulary lookup. That is a decision, not a mechanical step.
-#
-# ⚠ EVERY MEMBER RETURNS BIGINT AND NONE OF THEM IS A "SMALL" INT. Measured on
-# DuckDB v1.5.3: `typeof(dayofweek(DATE '2026-09-13'))` = BIGINT. `walk_expr_field`
-# types the whole non-trunc family INT64 in one line, so a new field unit needs
-# no type arm — which is only true while every member IS an INT64.
+# ⚠ EVERY CALENDAR FIELD RETURNS BIGINT AND NONE OF THEM IS A "SMALL" INT.
+# Measured on DuckDB v1.5.3: `typeof(dayofweek(DATE '2026-09-13'))` = BIGINT.
+# `walk_expr_field` types every non-trunc unit INT64 except EXTRACT_EPOCH, the
+# one unit that answers DOUBLE.
 #
 # ⛔ `dayofweek` AND `isodow` ARE TWO UNITS, NOT ONE WITH AN OFFSET, AND SUNDAY
 # IS THE ONLY WITNESS. MEASURED v1.5.3: `dayofweek` is Sunday=**0**, Monday=1 …
@@ -649,8 +638,8 @@ comptime EXTRACT_YEARWEEK: UInt8 = 12
 comptime EXTRACT_MILLISECOND: UInt8 = 13
 comptime EXTRACT_MICROSECOND: UInt8 = 14
 
-# date_trunc units.  Encoded in a separate sub-range so the eval-arm
-# can branch on (unit >= EXTRACT_TRUNC_YEAR) for the trunc family.
+# date_trunc units.  Encoded in a separate sub-range (16..25) so the eval-arm
+# can branch on `_is_trunc_unit` for the trunc family.
 comptime EXTRACT_TRUNC_YEAR: UInt8 = 16
 comptime EXTRACT_TRUNC_QUARTER: UInt8 = 17
 comptime EXTRACT_TRUNC_MONTH: UInt8 = 18
@@ -662,10 +651,25 @@ comptime EXTRACT_TRUNC_SECOND: UInt8 = 23
 comptime EXTRACT_TRUNC_MILLISECOND: UInt8 = 24
 comptime EXTRACT_TRUNC_MICROSECOND: UInt8 = 25
 
+# -- the EPOCH-COUNT family ----------
+#
+# The whole instant as a count since 1970-01-01 00:00:00, the counterpart of
+# the `make_timestamp` relabel. DuckDB v1.5.5 (measured):
+#     epoch(TIMESTAMP '2026-09-01 00:00:00.123456')    = 1788220800.123456 :: DOUBLE
+#     epoch_ms(TIMESTAMP '1969-12-31 23:59:59.9995')   = 0       :: BIGINT
+#     epoch_us(TIMESTAMP '1969-12-31 23:59:59.9995')   = -500    :: BIGINT
+#     epoch(DATE '2026-09-01')                         = 1788220800.0
+# A TIMESTAMP is first brought to microseconds (TIMESTAMP_NS truncates toward
+# zero, TIMESTAMP_S / _MS multiply with an overflow check), then EPOCH divides
+# by 1e6 in DOUBLE and EPOCH_MS divides by 1000 truncating toward zero.
+comptime EXTRACT_EPOCH: UInt8 = 26
+comptime EXTRACT_EPOCH_MS: UInt8 = 27
+comptime EXTRACT_EPOCH_US: UInt8 = 28
+
 @always_inline
 def _is_trunc_unit(unit: UInt8) -> Bool:
-    """True if `unit` is an EXTRACT_TRUNC_* (date_trunc family)."""
-    return unit >= EXTRACT_TRUNC_YEAR
+    """True if `unit` is an EXTRACT_TRUNC_* (date_trunc family, 16..25)."""
+    return unit >= EXTRACT_TRUNC_YEAR and unit <= EXTRACT_TRUNC_MICROSECOND
 
 
 comptime REGEXP_LIKE: UInt8 = 0           # Bool — `regexp_like` / `regexp_matches` / `~`
@@ -3522,8 +3526,8 @@ struct Expr(Movable, Writable):
     def extract(unit: UInt8, var child: Expr) -> Expr:
         """Create an `EXPR_EXTRACT` node carrying a temporal field selector.
 
-        `unit` is one of the `EXTRACT_*` (field) or `EXTRACT_TRUNC_*`
-        (date_trunc family) constants.  `child` must evaluate to a
+        `unit` is one of the `EXTRACT_*` (field and epoch count) or
+        `EXTRACT_TRUNC_*` (date_trunc family) constants.  `child` must evaluate to a
         DATE32 or TIMESTAMP_* Column at eval time.
         """
         var e = Expr(EXPR_EXTRACT)

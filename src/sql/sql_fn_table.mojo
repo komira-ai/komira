@@ -125,7 +125,7 @@ from plan_expr.expr import (
     EXTRACT_MINUTE, EXTRACT_SECOND,
     EXTRACT_DAYOFWEEK, EXTRACT_ISODOW, EXTRACT_DAYOFYEAR,
     EXTRACT_WEEK, EXTRACT_ISOYEAR, EXTRACT_YEARWEEK,
-    EXTRACT_MILLISECOND, EXTRACT_MICROSECOND,
+    EXTRACT_MILLISECOND, EXTRACT_MICROSECOND, EXTRACT_EPOCH,
     EXTRACT_TRUNC_YEAR, EXTRACT_TRUNC_QUARTER, EXTRACT_TRUNC_MONTH,
     EXTRACT_TRUNC_WEEK, EXTRACT_TRUNC_DAY, EXTRACT_TRUNC_HOUR,
     EXTRACT_TRUNC_MINUTE, EXTRACT_TRUNC_SECOND, EXTRACT_TRUNC_MILLISECOND,
@@ -418,6 +418,20 @@ visible failure.
 `make_timestamp`, `make_date(y, m, d)`, `make_time`) still refuse through
 `_R_TSMINT`, whose missing primitive — civil-calendar-to-days — is REAL and is
 untouched by this. See `_bind_make_timestamp_epoch`."""
+
+comptime DSG_EPOCH: UInt8 = 36
+comptime DSG_EPOCH_MS: UInt8 = 37
+comptime DSG_EPOCH_US: UInt8 = 38
+"""The epoch-count conversion selectors, the inverse of the three above:
+`epoch(x)` (DOUBLE seconds), `epoch_ms(x)` and `epoch_us(x)` (BIGINT) of a
+TIMESTAMP or DATE, lowered to `EXPR_EXTRACT` with `EXTRACT_EPOCH` /
+`_EPOCH_MS` / `_EPOCH_US`. They are desugars rather than `FNK_EXTRACT_FIELD`
+rows because the binder must read the argument's TYPE: DuckDB v1.5.5 gives
+`epoch_ms` two overloads that point in opposite directions,
+
+    epoch_ms(TIMESTAMP) -> BIGINT       epoch_ms(BIGINT) -> TIMESTAMP
+
+and the BIGINT one is `make_timestamp_ms`. See `_bind_epoch_count`."""
 
 
 # -----------------------------------------------------------------------------
@@ -1192,15 +1206,26 @@ comptime _R_TSFORMAT: String = (
     "twin is."
 )
 
+comptime _R_TOTIMESTAMP: String = (
+    "SQL not supported: `to_timestamp(<seconds>)` returns TIMESTAMP WITH TIME "
+    "ZONE on DuckDB v1.5.5, and this engine has no zone-aware scalar value "
+    "yet: a `TIMESTAMPTZ '...'` literal binds to zone-less UTC microseconds "
+    "and `ScalarValue` has no tz field. It waits on the time-zone design of "
+    "komira-ai/komira#2342. ⛔ A NAIVE TIMESTAMP IS NOT THE SAME ANSWER: its "
+    "type differs and so does the text it renders under a session time "
+    "zone. For a naive TIMESTAMP of a Unix second count, write "
+    "`make_timestamp(CAST(s AS BIGINT) * 1000000)`; `epoch(ts)` goes back."
+)
+
 comptime _R_TSMINT: String = (
     "SQL not supported: this name MINTS A TEMPORAL VALUE from non-temporal "
     "parts by CALENDAR ARITHMETIC or in a ZONE-AWARE type — `make_date(y, m, "
     "d)`, `make_time(h, m, s)`, the SIX-ARY `make_timestamp(y, m, d, h, mi, "
-    "s)`, `make_timestamptz` and `to_timestamp(<epoch DOUBLE>)` on DuckDB "
-    "v1.5.5. TWO MISSING PRIMITIVES, one per half. (1) CIVIL-CALENDAR-TO-DAYS "
+    "s)` and `make_timestamptz` on DuckDB "
+    "v1.5.5 (`to_timestamp` has its own row, `_R_TOTIMESTAMP`). TWO MISSING PRIMITIVES, one per half. (1) CIVIL-CALENDAR-TO-DAYS "
     "— `make_date(y, m, d)` needs month lengths and leap years, and no "
     "`EXPR_*` tag or binder desugar computes it. (2) A ZONE-AWARE TEMPORAL "
-    "VALUE — `make_timestamptz` and `to_timestamp` both return TIMESTAMP WITH "
+    "VALUE — `make_timestamptz` returns TIMESTAMP WITH "
     "TIME ZONE, and no `sql_bind_*` module produces a value that carries a "
     "zone: a `TIMESTAMPTZ '...'` literal binds to zone-less UTC microseconds "
     "(`ScalarValue` has no tz field) (the same wall `_R_TZFN` measures). "
@@ -1225,38 +1250,14 @@ comptime _R_TSMINT: String = (
 )
 
 comptime _R_EPOCHCONV: String = (
-    "SQL not supported: this name is an EPOCH-COUNT CONVERSION across the "
-    "temporal boundary — `epoch(ts) -> DOUBLE`, `epoch_us`/`epoch_ns -> "
-    "BIGINT`, and `epoch_ms` with TWO overloads on DuckDB v1.5.3 that point "
-    "in OPPOSITE directions (`BIGINT(TIMESTAMP)` and `TIMESTAMP(BIGINT)`). "
-    "THE MISSING PRIMITIVE IS A TEMPORAL-TO-NUMERIC UNIT CONVERSION: "
-    "`EXPR_EXTRACT` reads CALENDAR FIELDS (year, month, day, hour, minute, "
-    "second) and has no unit that answers 'the whole instant as a count "
-    "since 1970' — which is why `epoch` and `julian` are also refused in the "
-    "`date_part` SPECIFIER namespace by `sql_date_part_unit`, a DIFFERENT "
-    "table and the same measured gap. ⭐ `epoch_ms`'s MINTING DIRECTION "
-    "(`TIMESTAMP(BIGINT)`) IS NOT THE BLOCKER — it is byte-for-byte what "
-    "`make_timestamp_ms` lowers to. "
-    "⛔ THAT DOES NOT MAKE `epoch_ms` SERVABLE, AND THE REASON IS OVERLOAD "
-    "RESOLUTION RATHER THAN A KERNEL: this table dispatches on the NAME and "
-    "this one name means BOTH directions on v1.5.3, so a row would have to "
-    "choose by the ARGUMENT's type, and the reading it would have to get right "
-    "for the other direction — TIMESTAMP in, BIGINT out — is the "
-    "unit-conversion this row measures absent. Serving half an overload set by "
-    "name is how `<ts>` silently takes the `<bigint>` arm. "
-    "⛔ AND THE `TIMESTAMP_* -> INT64` RELABEL ARM IN "
-    "`compiler_eval_column`'s EXPR_CAST LADDER IS NOT A SERVING ROUTE FOR "
-    "ANY OF THE FOUR, stated here because it looks like one: it is a "
-    "RELABEL, so it hands back the column's STORED integer unchanged "
-    "whatever unit the column is in. `CAST(ts AS BIGINT)` over a "
-    "TIMESTAMP_US answers microseconds and over a TIMESTAMP_NS answers "
-    "nanoseconds — the SAME expression, two answers 1000x apart, neither "
-    "labelled — so it cannot even serve `epoch_us`, the one name whose "
-    "output is microseconds. The conversion has to READ THE UNIT, and "
-    "nothing in the ladder does. ⚠ THERE IS ALSO NO VERIFIED ORACLE ROW "
-    "TO SERVE AGAINST: the scalar-function oracle carries "
-    "REFUSEDFN rows for all four and no QUERY row for any of them, so a "
-    "lowering added without one would be graded by nothing."
+    "SQL not supported: `epoch_ns(x)` is the instant as a NANOSECOND count "
+    "(BIGINT) on DuckDB v1.5.5, and `EXPR_EXTRACT` has no nanosecond count "
+    "unit: its epoch-count units stop at microseconds (`EXTRACT_EPOCH`, "
+    "`EXTRACT_EPOCH_MS`, `EXTRACT_EPOCH_US`, which serve `epoch`, `epoch_ms` "
+    "and `epoch_us`). ⛔ `epoch_us(x) * 1000` IS NOT A SERVING ROUTE: over a "
+    "TIMESTAMP_NS column it drops the three sub-microsecond digits DuckDB "
+    "keeps, a wrong answer with a success code. Use `epoch_us(x)` for a "
+    "microsecond count."
 )
 
 comptime _R_TZFN: String = (
@@ -1329,8 +1330,9 @@ comptime _R_DATEMINT: String = (
     "number) on DuckDB v1.5.3. TWO DIFFERENT MISSING PRIMITIVES under one "
     "family because both are temporal arithmetic with no `EXTRACT_*` unit: "
     "`last_day` needs the temporal-MINTING route `_R_TSMINT` measures "
-    "absent, and `julian` needs the whole-instant-as-a-number route "
-    "`_R_EPOCHCONV` measures absent. ⚠ `julian` IS ALSO A `date_trunc` "
+    "absent, and `julian` needs a fractional Julian-day conversion, which "
+    "no `EXTRACT_*` unit carries (`EXTRACT_EPOCH` counts seconds since 1970, "
+    "a different origin and unit). ⚠ `julian` IS ALSO A `date_trunc` "
     "PERIOD IN THIS FILE — `sql_date_trunc_unit` maps it to "
     "EXTRACT_TRUNC_DAY — and that is a DIFFERENT NAMESPACE with a different "
     "meaning; the FUNCTION `julian(x)` has no row until this one."
@@ -2774,10 +2776,11 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     # field", which would be 123456000. Mapping it onto a fractional field is
     # wrong by the seconds and plausible while doing it.
     #
-    # ⛔ `epoch` / `julian` ARE NOT ROWS AND ARE NOT DERIVABLE THIS WAY. Both
-    # return DOUBLE and both need the raw temporal value, not a field of it
+    # ⛔ `epoch` / `julian` ARE NOT DERIVABLE THIS WAY. Both return DOUBLE and
+    # both need the raw temporal value, not a field of it
     # (`epoch('2026-09-04 12:30:45')` = 1788525045.0, `julian('2026-09-04')` =
-    # 2461288.0). They need new `EXTRACT_*` units, which no desugar supplies.
+    # 2461288.0). `epoch` has its own unit, `EXTRACT_EPOCH` (`DSG_EPOCH`);
+    # `julian` is refused by `_R_DATEMINT`.
     #
     # ⛔ `timezone_hour` / `timezone_minute` ARE NOT ROWS. They read 0 for every
     # naive TIMESTAMP, which is every timestamp this engine has — so a literal
@@ -3953,13 +3956,15 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     if name == "make_date": return SqlFnSpec(FNK_REFUSED, _R_TSMINT)
     if name == "make_time": return SqlFnSpec(FNK_REFUSED, _R_TSMINT)
     if name == "make_timestamptz": return SqlFnSpec(FNK_REFUSED, _R_TSMINT)
-    if name == "to_timestamp": return SqlFnSpec(FNK_REFUSED, _R_TSMINT)
+    if name == "to_timestamp": return SqlFnSpec(FNK_REFUSED, _R_TOTIMESTAMP)
     #
-    # ---- EPOCH-COUNT conversions — 4 names
-    if name == "epoch": return SqlFnSpec(FNK_REFUSED, _R_EPOCHCONV)
-    if name == "epoch_ms": return SqlFnSpec(FNK_REFUSED, _R_EPOCHCONV)
+    # ---- EPOCH-COUNT conversions — 4 names, 3 SERVED / 1 REFUSED
+    # `_bind_epoch_count` reads the argument's type: `epoch_ms(BIGINT)` is
+    # `make_timestamp_ms`, the other overloads are `EXTRACT_EPOCH*`.
+    if name == "epoch": return SqlFnSpec(FNK_DESUGAR, DSG_EPOCH, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
+    if name == "epoch_ms": return SqlFnSpec(FNK_DESUGAR, DSG_EPOCH_MS, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     if name == "epoch_ns": return SqlFnSpec(FNK_REFUSED, _R_EPOCHCONV)
-    if name == "epoch_us": return SqlFnSpec(FNK_REFUSED, _R_EPOCHCONV)
+    if name == "epoch_us": return SqlFnSpec(FNK_DESUGAR, DSG_EPOCH_US, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     #
     # ---- TIME-ZONE reads — 3 names
     if name == "timezone": return SqlFnSpec(FNK_REFUSED, _R_TZFN)
@@ -4270,7 +4275,7 @@ def sql_date_part_unit(name: String) -> Optional[UInt8]:
     the former — so they land on one table and cannot drift apart.
 
     ⛔ WHAT IS ABSENT HERE, AND WHY IT IS ABSENT RATHER THAN WRONG.
-    `epoch` / `julian` / `timezone` / `timezone_hour` / `timezone_minute` are
+    `julian` / `timezone` / `timezone_hour` / `timezone_minute` are
     REAL DuckDB date parts with no `EXTRACT_*` unit and no kernel in this
     engine. Mapping one onto the nearest unit that DOES exist is exactly the
     silent-wrong-answer shape this table is written to avoid.
@@ -4373,6 +4378,10 @@ def sql_date_part_unit(name: String) -> Optional[UInt8]:
     # spelling, two tables, two meanings — which is the header's point.
     if name == "millisecond" or name == "milliseconds" or name == "msec" or name == "msecs" or name == "ms" or name == "msecond" or name == "mseconds": return Optional[UInt8](EXTRACT_MILLISECOND)
     if name == "microsecond" or name == "microseconds" or name == "usec" or name == "usecs" or name == "us" or name == "usecond" or name == "useconds": return Optional[UInt8](EXTRACT_MICROSECOND)
+    # `date_part('epoch', x)` is DOUBLE seconds on DuckDB v1.5.5, the same as
+    # the function `epoch(x)` (`date_part('epoch', TIMESTAMP '2026-09-01
+    # 00:00:00.5')` = 1788220800.5).
+    if name == "epoch": return Optional[UInt8](EXTRACT_EPOCH)
     return None
 
 
@@ -4435,8 +4444,8 @@ def sql_date_part_desugar(name: String) -> Optional[UInt8]:
     one, which is exactly why it cannot see this.
     """
     # ⚠ NOT DERIVED FROM `sql_scalar_fn_spec`'s rows for the same four names.
-    # A specifier is not a function (`dow` is a specifier and no function;
-    # `date_part('epoch', …)` is served there and refused here), and the file
+    # A specifier is not a function (`dow` is a specifier and no function),
+    # and the file
     # header's rule is that a wrong SHARED fact propagates while a wrong
     # INDEPENDENT row does not.
     if name == "century" or name == "centuries" or name == "cent": return Optional[UInt8](DSG_CENTURY)
@@ -4502,14 +4511,14 @@ def sql_date_part_universe() -> List[String]:
         String("millennium"), String("millennia"), String("mil"),
         String("mils"),
         String("era"),
+        String("epoch"),
         # -- REAL v1.5.3 SPECIFIERS THIS ENGINE REFUSES ----------------------
         # Values on `TIMESTAMP '2026-11-15 13:45:30.123456'` (computed):
-        # epoch 1794750330.123456, julian 2461360.573265318, and 0 for all
-        # three timezone reads on a NAIVE timestamp. Each one's measured
-        # blocker is stated in the refusal message below;
-        # the day one grows a row above it leaves the refused half of the
-        # rendered message BY ITSELF.
-        String("epoch"), String("julian"),
+        # julian 2461360.573265318, and 0 for all three timezone reads on a
+        # NAIVE timestamp. Each one's measured blocker is stated in the
+        # refusal message below; the day one grows a row above it leaves the
+        # refused half of the rendered message BY ITSELF.
+        String("julian"),
         String("timezone"), String("timezone_hour"),
         String("timezone_minute"),
     ]
@@ -4545,8 +4554,8 @@ def sql_date_part_supported_summary() -> String:
         String("this engine serves ") + served
         + ". It does NOT serve " + refused
         + ", each of which IS a real v1.5.3 specifier with a measured blocker"
-        + " (epoch / julian"
-        + " read a RAW value no unit on this wire carries; the timezone reads"
+        + " (julian"
+        + " is a Julian day number no unit on this wire carries; the timezone reads"
         + " answer 0 for every naive timestamp and are refused rather than"
         + " served as a plausible zero). This list is DERIVED from the"
         + " specifier tables, not written beside them"
