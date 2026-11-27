@@ -69,4 +69,4 @@ Output:
 
 - [How do I compute summary statistics of a column?](../24-compute-summary-statistics-column/page.md) (rank 24, partial)
 - How do I group by a column and sum another column? (rank 4, works; no page yet)
-- How do I count rows per group? (rank 35, works; no page yet)
+- [How do I count rows per group?](../35-count-rows-per-group/page.md) (rank 35, works)

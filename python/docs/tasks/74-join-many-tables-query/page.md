@@ -68,7 +68,7 @@ Output:
 ## Related
 
 - How do I join two tables on a key? (rank 10, works; no page yet)
-- How do I left join and keep unmatched rows? (rank 36, works; no page yet)
+- [How do I left join and keep unmatched rows?](../36-left-join-keep-unmatched-rows/page.md) (rank 36, works)
 - How do I join on multiple columns? (rank 73, works)
 - How do I cross join two tables? (rank 71, works)
 - How do I join where a value falls between two bounds? (rank 75, works)

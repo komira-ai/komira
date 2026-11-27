@@ -70,4 +70,4 @@ Output:
 - [How do I get the top N rows per group?](../47-get-top-n-rows-per-group/page.md) (rank 47, partial)
 - [How do I compute a running total per group?](../48-compute-running-total-per-group/page.md) (rank 48, works)
 - [How do I compute each row's percent of its group total?](../50-percent-of-group-total/page.md) (rank 50, partial)
-- How do I count rows per group? (rank 35, works; no page yet)
+- [How do I count rows per group?](../35-count-rows-per-group/page.md) (rank 35, works)
