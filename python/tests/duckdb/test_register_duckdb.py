@@ -36,7 +36,10 @@ CPython 3.13, the real libkomira).
   unit and with a zone, decimal128 and decimal256, time32, time64, duration
   and dictionaries; each once as a table and once as a reader of one-row
   batches cut from it, whose columns start past the start of their buffers;
-- a reader of several batches cut from one table answers equal to DuckDB;
+- a reader of several batches cut from one table answers equal to DuckDB, and
+  so does a table shaped as pandas 3 exports one (its strings `large_string`);
+- the rows are a copy: a frame whose file is rewritten after it was
+  registered still answers the old rows, and registering it again the new;
 - a frame whose file is gone when its plan runs raises the engine's exact
   refusal, and the name keeps its table;
 - argument errors: a name that is not a `str`, an empty one, one with a NUL
@@ -268,6 +271,19 @@ def test_a_table_of_no_row_keeps_its_schema(work):
     assert count == [{"n": 0}], count
 
 
+def test_a_table_shaped_as_pandas_exports_one_answers_equal_to_duckdb(work):
+    import pyarrow as pa
+
+    # pandas 3 exports its string dtype as large_string, and its nullable
+    # Int64, Float64 and boolean dtypes as int64, double and bool with NULLs.
+    t = sales_table()
+    pandas_shaped = t.set_column(1, "region", t.column("region").cast(pa.large_string()))
+    with komira.Session() as s:
+        s.register("t", pandas_shaped)
+        s.register("targets", targets_table())
+        assert_queries_equal_duckdb(s, "a pandas-shaped pyarrow.Table")
+
+
 # ---- registered frames ---------------------------------------------------------------
 
 
@@ -311,6 +327,23 @@ def test_a_registered_polars_shaped_frame_answers_equal_to_duckdb(work):
         s.register("big", lazy)
         got = s.sql("SELECT id FROM big ORDER BY id").to_arrow().to_pylist()
     assert got == [{"id": 1}, {"id": 4}, {"id": 6}], got
+
+
+def test_registered_rows_are_a_copy_of_the_frame_when_it_was_registered(work):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    path = os.path.join(work, "changing.parquet")
+    pq.write_table(pa.table({"id": [1], "amount": pa.array([120], pa.int64())}), path)
+    sql = "SELECT amount FROM f WHERE id = 1"
+    with komira.Session() as s:
+        frame = komira.read_parquet(path, session=s)
+        s.register("f", frame)
+        pq.write_table(pa.table({"id": [1], "amount": pa.array([999], pa.int64())}), path)
+        assert s.sql(sql).to_arrow().to_pylist() == [{"amount": 120}]
+        # Registering the frame again runs its plan again, over the new file.
+        s.register("f", frame)
+        assert s.sql(sql).to_arrow().to_pylist() == [{"amount": 999}]
 
 
 def test_a_frame_the_engine_refuses_raises_and_registers_nothing(work):
@@ -655,12 +688,14 @@ TESTS = [
     test_a_registered_pyarrow_table_answers_equal_to_duckdb,
     test_a_registered_record_batch_answers_equal_to_duckdb,
     test_a_reader_of_several_batches_answers_equal_to_duckdb,
+    test_a_table_shaped_as_pandas_exports_one_answers_equal_to_duckdb,
     test_nulls_survive_in_every_column,
     test_a_table_of_no_row_keeps_its_schema,
     test_a_registered_komira_frame_answers_equal_to_duckdb,
     test_a_frame_of_another_session_registers_its_rows,
     test_a_filtered_frame_registers_the_rows_its_plan_answers,
     test_a_registered_polars_shaped_frame_answers_equal_to_duckdb,
+    test_registered_rows_are_a_copy_of_the_frame_when_it_was_registered,
     test_a_frame_the_engine_refuses_raises_and_registers_nothing,
     test_a_reader_is_read_once_when_it_is_registered,
     test_a_result_registers_and_is_then_read,
