@@ -1,9 +1,9 @@
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_libs")
 load("@komira//tools/build/node:defs.bzl", "node_dist", "npm_package")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
-load(":pins.bzl", "NODE", "NODE_LINES", "NPM", "NPM_CLI", "NPM_INSTALL_ONLY", "npm_target")
+load(":pins.bzl", "NODE", "NODE_LINES", "NODE_MACOS", "NPM", "NPM_CLI", "NPM_INSTALL_ONLY", "npm_target")
 
 # The hermetic Node.js of the tests (README.md): the Node 24 LTS runtime from
 # its linux-x64 release archive and the npm packages the tests bundle, and,
@@ -106,6 +106,29 @@ node_dist(
     version = n["version"],
     visibility = _INSTALL_TEST + _NEGATIVE,
 ) for n in NODE_LINES]
+
+# `:node_22_macos_arm64`, `:node_macos_arm64` and `:node_26_macos_arm64`, the
+# same lines' darwin-arm64 archives (pins.bzl, NODE_MACOS), for the macOS
+# install test of the npm packages alone: unpacked and run (`node --version`)
+# by the macOS build of node_act on a macOS worker. A macOS node links only the
+# system's libraries: no native_libs.
+[pinned_file(
+    name = n["archive"],
+    url = n["url"],
+    sha256 = n["sha256"],
+    size_bytes = n["size"],
+) for n in NODE_MACOS]
+
+[node_dist(
+    name = n["name"],
+    act = "komira//tools/build/node_tools:node_act_darwin",
+    archive = ":" + n["archive"],
+    exec_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-node
+    top = n["top"],
+    version = n["version"],
+    visibility = _INSTALL_TEST,
+) for n in NODE_MACOS]
 
 # The packages' tarballs are also what the install test hands npm.
 [pinned_file(

@@ -43,6 +43,10 @@
 //!    are red after one run, with no first log and nothing in the summary; a
 //!    subcommand other than build, test or bxl is never run again; a second
 //!    run that ran an action locally is refused by the tool step;
+//!  - a job the farm failed to start (`input-unavailable`, a recorded release
+//!    build): then a pass, green after two runs, the summary naming the
+//!    farm's `input-unavailable` and the failed log kept; three times, red
+//!    after three runs, never four, saying the third failed on the farm too;
 //!  - a buck2 ended by a signal is never run again, and a second run ended by
 //!    one fails saying so; a job summary that cannot be written, a log that
 //!    cannot be written and a buck2 that cannot be run end the step with the
@@ -207,13 +211,13 @@ fn workDir(ar: std.mem.Allocator) ![]const u8 {
     return std.process.getEnvVarOwned(ar, "KOMIRA_TEST_WORK");
 }
 
-fn recorded(ar: std.mem.Allocator, name: []const u8) ![]u8 {
+pub fn recorded(ar: std.mem.Allocator, name: []const u8) ![]u8 {
     const path = try std.fmt.allocPrint(ar, "{s}/fixtures/{s}", .{ try workDir(ar), name });
     return std.fs.cwd().readFileAlloc(ar, path, 1 << 20);
 }
 
 /// One call of the stand-in buck2: what it prints and how it exits.
-const Run = struct {
+pub const Run = struct {
     log: union(enum) {
         /// A recorded log, by file name.
         fixture: []const u8,
@@ -231,23 +235,23 @@ const Run = struct {
     farm_bytes: ?usize = null,
 };
 
-fn hanging(log: []const u8) Run {
+pub fn hanging(log: []const u8) Run {
     return .{ .log = .{ .text = log }, .hang = .yes };
 }
 
 /// What a hanging run prints before it waits: buck2's line for an action in
 /// `[re_execute]`, as the console prints it every few seconds.
-const waiting_log = "[2026-11-27T06:15:49.491+00:00] Waiting on komira//src/so:so (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- mojo_build_test test_sources [re_execute]\n";
+pub const waiting_log = "[2026-11-27T06:15:49.491+00:00] Waiting on komira//src/so:so (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- mojo_build_test test_sources [re_execute]\n";
 
-fn fixture(name: []const u8, code: u8) Run {
+pub fn fixture(name: []const u8, code: u8) Run {
     return .{ .log = .{ .fixture = name }, .code = code };
 }
 
-fn derived(log: []const u8, code: u8) Run {
+pub fn derived(log: []const u8, code: u8) Run {
     return .{ .log = .{ .text = log }, .code = code };
 }
 
-const Case = struct {
+pub const Case = struct {
     /// The exit code of the step that ended the case.
     code: u8,
     /// That step, 1 (the tool running buck2) or 2 (the tool reading the log).
@@ -262,7 +266,7 @@ const Case = struct {
     dir: []const u8,
 
     /// The file `name` of the case's directory, or null if there is none.
-    fn file(c: Case, ar: std.mem.Allocator, name: []const u8) !?[]const u8 {
+    pub fn file(c: Case, ar: std.mem.Allocator, name: []const u8) !?[]const u8 {
         const path = try std.fs.path.join(ar, &.{ c.dir, name });
         return std.fs.cwd().readFileAlloc(ar, path, 1 << 22) catch |e| switch (e) {
             error.FileNotFound => null,
@@ -280,7 +284,7 @@ fn runCase(ar: std.mem.Allocator, subcommand: []const u8, runs: []const Run) !Ca
 }
 
 /// What a case breaks around the action, to reach the tool's own errors.
-const Setup = struct {
+pub const Setup = struct {
     /// GITHUB_STEP_SUMMARY is a directory, which cannot be appended to.
     summary_is_dir: bool = false,
     /// BUCK2_LOG is in a directory that does not exist.
@@ -366,7 +370,7 @@ fn refusingPort() !struct { fd: std.posix.socket_t, port: u16 } {
     return .{ .fd = fd, .port = addr.getPort() };
 }
 
-fn runCaseWith(ar: std.mem.Allocator, subcommand: []const u8, runs: []const Run, setup: Setup) !Case {
+pub fn runCaseWith(ar: std.mem.Allocator, subcommand: []const u8, runs: []const Run, setup: Setup) !Case {
     const steps = try loadSteps(ar);
     const w = try workDir(ar);
     case_no += 1;
@@ -454,11 +458,11 @@ fn runCaseWith(ar: std.mem.Allocator, subcommand: []const u8, runs: []const Run,
     return c;
 }
 
-fn has(out: []const u8, part: []const u8) bool {
+pub fn has(out: []const u8, part: []const u8) bool {
     return std.mem.indexOf(u8, out, part) != null;
 }
 
-fn show(c: Case) void {
+pub fn show(c: Case) void {
     std.debug.print("step {d}, code {d}, {d} run(s), {d} kill(s)\nstep 1:\n{s}\nstep 2:\n{s}\n", .{ c.step, c.code, c.runs, c.kills, c.out1, c.out2 });
 }
 
@@ -562,7 +566,7 @@ fn dropBlocks(a: std.mem.Allocator, log: []const u8, marker: []const u8) ![]u8 {
 }
 
 /// The recorded build with a compile error and cuts, without its cuts: a compile error alone.
-fn compileError(a: std.mem.Allocator) ![]u8 {
+pub fn compileError(a: std.mem.Allocator) ![]u8 {
     const log = try dropBlocks(a, try recorded(a, "build_cut_and_compile_error.log"), "Action failed: komira//tools/build/proto-codegen");
     try t.expect(!has(log, "RE channel error"));
     return log;
@@ -641,6 +645,43 @@ test "a cut three times: red after three runs, never a fourth, saying the third 
     try t.expect((try c.file(a, "buck2-farm.second.log")) != null);
     // the third run's log stays where the tool step and later steps read it
     try t.expectEqualStrings(try recorded(a, "build_cut.log"), (try c.file(a, "buck2-farm.log")).?);
+}
+
+// ---- a job the farm failed to start ---------------------------------------------
+
+const unavailable_summary = "buck2-farm: the first run of `build` had jobs the farm failed to start (the farm's `input-unavailable` in each of 2 failed block(s)); the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log\n";
+const unavailable_summary_second = "buck2-farm: the second run of `build` had jobs the farm failed to start (the farm's `input-unavailable` in each of 2 failed block(s)); the farm answered at once; ran again (run 3 of at most 3); the second run's log is buck2-farm.second.log\n";
+
+test "a job the farm failed to start, then a pass: green after two runs, the summary names input-unavailable, the first log kept" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCase(a, "build", &.{ fixture("build_input_unavailable.log", 2), fixture("build_remote.log", 0) });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 2), c.step);
+    try t.expectEqual(@as(u8, 0), c.code);
+    try t.expectEqual(@as(usize, 2), c.runs);
+    try t.expectEqualStrings(unavailable_summary, (try c.file(a, "summary.md")).?);
+    try t.expect(has(c.out1, unavailable_summary));
+    try t.expect(has(c.out1, "buck2-farm: the second run passed\n"));
+    try t.expectEqualStrings(try recorded(a, "build_input_unavailable.log"), (try c.file(a, "buck2-farm.first.log")).?);
+    try t.expectEqualStrings(try recorded(a, "build_remote.log"), (try c.file(a, "buck2-farm.log")).?);
+    try t.expect(std.mem.startsWith(u8, c.out2, "assert_remote: ok"));
+}
+
+test "a job the farm failed to start three times: red after three runs, never a fourth, saying the third failed on the farm too" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const u = fixture("build_input_unavailable.log", 2);
+    const c = try runCase(a, "build", &.{ u, u, u, fixture("build_remote.log", 0) });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 1), c.step);
+    try t.expectEqual(@as(u8, 2), c.code); // buck2's own exit code
+    try t.expectEqual(@as(usize, 3), c.runs);
+    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: FAILED: the third run failed on the farm too, as each of 3 runs did: it had jobs the farm failed to start (the farm's `input-unavailable` in each of 2 failed block(s)); not run again\n"));
+    try t.expectEqualStrings(unavailable_summary ++ unavailable_summary_second, (try c.file(a, "summary.md")).?);
+    try t.expectEqualStrings(try recorded(a, "build_input_unavailable.log"), (try c.file(a, "buck2-farm.log")).?);
 }
 
 test "a cut while the farm does not answer within the longest wait: red after one run, the summary names the wait" {
@@ -844,139 +885,7 @@ test "a buck2 that cannot be run fails the step with 127 and is not run again" {
     try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: not run again: an error outside the failed actions and tests: assert_remote run: cannot run ./buck2: FileNotFound\n"));
 }
 
-// ---- a run that hangs on a dead connection to the farm -----------------------------
-
-/// The watchdog's bound in the cases: 2 s, so a hanging case ends in seconds.
-const fast: Setup = .{ .serve = .silent, .dead_seconds = 2 };
-
-/// The line the watchdog writes when it ends a run, but for the time the connection was silent.
-const cut_head = "buck2-farm: watchdog: the connection to the farm from local port ";
-const cut_tail = ", past the bound of 0 min 2 s: the farm has closed it and buck2 would wait on it for ever; ending buck2 (SIGINT)\n";
-const dead_head = "buck2-farm: the first run of `build` hung on a dead connection to the farm (nothing heard for 0 min ";
-const dead_tail = ", past the watchdog's bound of 0 min 2 s), so buck2 and its daemon were ended; the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log\n";
-
-/// The number of lines of `text` that start with `head` and end with `tail`.
-fn linesLike(text: []const u8, head: []const u8, tail: []const u8) usize {
-    var n: usize = 0;
-    var it = std.mem.splitScalar(u8, text, '\n');
-    while (it.next()) |l| {
-        if (std.mem.startsWith(u8, l, head) and std.mem.endsWith(u8, l, tail[0 .. tail.len - 1])) n += 1;
-    }
-    return n;
-}
-
-test "a farm that takes the request and then goes silent with the socket open: the run is ended and run again, green" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const c = try runCaseWith(a, "build", &.{ hanging(waiting_log), fixture("build_remote.log", 0) }, fast);
-    errdefer show(c);
-    try t.expectEqual(@as(u8, 2), c.step);
-    try t.expectEqual(@as(u8, 0), c.code);
-    try t.expectEqual(@as(usize, 2), c.runs);
-    // the client ended, then its daemon stopped, once
-    try t.expectEqual(@as(usize, 1), c.kills);
-    try t.expectEqual(@as(usize, 1), linesLike(c.out1, cut_head, cut_tail));
-    try t.expect(has(c.out1, "buck2-farm: stopping buck2's daemon, which holds the dead connection (`./buck2 kill`)\n"));
-    try t.expect(has(c.out1, "buck2-farm: the first run hung on a dead connection to the farm and was ended; waiting for the farm's port to answer, up to 20 min 0 s\n"));
-    try t.expect(has(c.out1, "buck2-farm: the second run passed\n"));
-    // one line in the job summary, saying why and what followed
-    const summary = (try c.file(a, "summary.md")).?;
-    try t.expectEqual(@as(usize, 1), std.mem.count(u8, summary, "\n"));
-    try t.expectEqual(@as(usize, 1), linesLike(summary, dead_head, dead_tail));
-    // the ended run's log is kept, the tool step read the second
-    try t.expectEqualStrings(waiting_log, (try c.file(a, "buck2-farm.first.log")).?);
-    try t.expectEqualStrings(try recorded(a, "build_remote.log"), (try c.file(a, "buck2-farm.log")).?);
-    try t.expect(std.mem.startsWith(u8, c.out2, "assert_remote: ok"));
-}
-
-test "a hanging buck2 that ignores SIGINT is ended with SIGKILL, and the step runs again" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    var stubborn = hanging(waiting_log);
-    stubborn.hang = .stubborn;
-    const c = try runCaseWith(a, "build", &.{ stubborn, fixture("build_remote.log", 0) }, fast);
-    errdefer show(c);
-    try t.expectEqual(@as(u8, 2), c.step);
-    try t.expectEqual(@as(u8, 0), c.code);
-    try t.expectEqual(@as(usize, 2), c.runs);
-    try t.expectEqual(@as(usize, 1), c.kills);
-    try t.expect(has(c.out1, "buck2-farm: buck2 has not ended 2 s after SIGINT; ending it with SIGKILL\n"));
-    try t.expect(has(c.out1, "buck2-farm: the second run passed\n"));
-}
-
-test "three runs that hang: red after three, never a fourth, saying the third hung too" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const c = try runCaseWith(a, "build", &.{ hanging(waiting_log), hanging(waiting_log), hanging(waiting_log), fixture("build_remote.log", 0) }, fast);
-    errdefer show(c);
-    try t.expectEqual(@as(u8, 1), c.step);
-    try t.expectEqual(@as(u8, 130), c.code); // the third run, ended by SIGINT
-    try t.expectEqual(@as(usize, 3), c.runs);
-    try t.expectEqual(@as(usize, 3), c.kills);
-    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: FAILED: the third run hung on a dead connection to the farm too: the connection to the farm was lost in each of 3 runs; not run again\n"));
-    try t.expectEqual(@as(usize, 2), std.mem.count(u8, (try c.file(a, "summary.md")).?, "\n"));
-}
-
-test "a run that hangs, then a real failure: red after two runs, naming the failure" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const c = try runCaseWith(a, "build", &.{ hanging(waiting_log), derived(try compileError(a), 3), fixture("build_remote.log", 0) }, fast);
-    errdefer show(c);
-    try t.expectEqual(@as(u8, 1), c.step);
-    try t.expectEqual(@as(u8, 3), c.code);
-    try t.expectEqual(@as(usize, 2), c.runs);
-    try t.expectEqual(@as(usize, 1), c.kills);
-    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: FAILED: the second run failed: a failure that is not a cut connection: [2026-11-21T13:40:17.627+00:00] Action failed: komira//tools/build/examples/cshim:add (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (c_compile add_files/add.c (pic))\n"));
-}
-
-test "a subcommand other than build, test or bxl that hangs is ended and not run again" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const c = try runCaseWith(a, "run", &.{ hanging(waiting_log), fixture("build_remote.log", 0) }, fast);
-    errdefer show(c);
-    try t.expectEqual(@as(u8, 1), c.step);
-    try t.expectEqual(@as(u8, 130), c.code);
-    try t.expectEqual(@as(usize, 1), c.runs);
-    try t.expectEqual(@as(usize, 1), c.kills);
-    try t.expectEqual(@as(usize, 1), linesLike(c.out1, cut_head, cut_tail));
-    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: not run again: `run` is not build, test or bxl\n"));
-    try t.expect((try c.file(a, "summary.md")) == null);
-}
-
-test "a farm that is slow but alive is never cut: a run longer than twice the bound passes, run once" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    // 200 bytes, one every 25 ms: the run lasts at least 5 s on a connection that keeps hearing from the farm
-    var slow = fixture("build_remote.log", 0);
-    slow.farm_bytes = 200;
-    const c = try runCaseWith(a, "build", &.{ slow, fixture("build_remote.log", 0) }, .{ .serve = .alive, .dead_seconds = 2 });
-    errdefer show(c);
-    try t.expectEqual(@as(u8, 2), c.step);
-    try t.expectEqual(@as(u8, 0), c.code);
-    try t.expectEqual(@as(usize, 1), c.runs);
-    try t.expectEqual(@as(usize, 0), c.kills);
-    try t.expect(!has(c.out1, "watchdog"));
-    try t.expect((try c.file(a, "summary.md")) == null);
-}
-
-test "a real failure after talking to a live farm is not run again, and nothing is ended" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    var failed = derived(try compileError(a), 3);
-    failed.farm_bytes = 40;
-    const c = try runCaseWith(a, "build", &.{ failed, fixture("build_remote.log", 0) }, .{ .serve = .alive, .dead_seconds = 2 });
-    errdefer show(c);
-    try t.expectEqual(@as(u8, 1), c.step);
-    try t.expectEqual(@as(u8, 3), c.code);
-    try t.expectEqual(@as(usize, 1), c.runs);
-    try t.expectEqual(@as(usize, 0), c.kills);
-    try t.expect(std.mem.endsWith(u8, c.out1, "buck2-farm: not run again: a failure that is not a cut connection: [2026-11-21T13:40:17.627+00:00] Action failed: komira//tools/build/examples/cshim:add (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (c_compile add_files/add.c (pic))\n"));
-    try t.expect((try c.file(a, "summary.md")) == null);
+// The cases of a run that hangs on a dead connection to the farm.
+test {
+    _ = @import("watchdog_cases.zig");
 }

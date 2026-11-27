@@ -3,7 +3,12 @@
 // script run (node/BUCK, :install_test; tools/build/node/defs.bzl,
 // npm_install_test), and this file, in that project, imports the package by
 // its name: what it loads is what npm laid out under node_modules, and nothing
-// of the repository. It runs on each pinned Node.js line.
+// of the repository. It runs on each pinned Node.js line, on Linux x64 and on
+// macOS arm64 (:install_test_macos_arm64, on a macOS worker), where it loads
+// the ad-hoc-signed addon and libkomira from the files npm wrote: the loader
+// refuses a library it will not run (an invalid signature, or a quarantine
+// Gatekeeper rejects), so the load is the test of those files, not a read of
+// their attributes.
 
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, realpathSync } from "node:fs";
@@ -19,8 +24,13 @@ const PROJECT = import.meta.dirname;
 
 const MODULES = path.join(PROJECT, "node_modules");
 
-/** The platform package npm chose for this host, Linux on x64 with glibc. */
-const PLATFORM = path.join(MODULES, "@komira-ai", "komira-linux-x64-gnu");
+/** Whether this host is macOS (arm64): the other host the test runs on is Linux on x64 with glibc. */
+const MACOS = process.platform === "darwin";
+
+/** The platform package npm chose for this host, its name and its `os`, `cpu` and `libc` as npm records them. */
+const PLATFORM_NAME = MACOS ? "komira-darwin-arm64" : "komira-linux-x64-gnu";
+const PLATFORM_FIELDS = MACOS ? [["darwin"], ["arm64"], undefined] : [["linux"], ["x64"], ["glibc"]];
+const PLATFORM = path.join(MODULES, "@komira-ai", PLATFORM_NAME);
 
 /** The package's public names, those exports.test.ts holds for its sources. */
 const PUBLIC_NAMES = [
@@ -36,8 +46,10 @@ const PUBLIC_NAMES = [
   "version",
 ];
 
-/** The Mojo runtime libraries the platform package's native directory carries. */
-const RUNTIME = ["libAsyncRTRuntimeGlobals.so", "libKGENCompilerRTShared.so", "libMSupportGlobals.so"];
+/** The library's file name and the Mojo runtime libraries the platform package's native directory carries. */
+const LIBRARY_SUFFIX = MACOS ? ".dylib" : ".so";
+const LIBRARY = "libkomira" + LIBRARY_SUFFIX;
+const RUNTIME = ["libAsyncRTRuntimeGlobals", "libKGENCompilerRTShared", "libMSupportGlobals"].map((n) => n + LIBRARY_SUFFIX);
 
 function json(file: string): Record<string, unknown> {
   return JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
@@ -59,12 +71,9 @@ test("npm installed the package, the one platform package for this host, and apa
   const packages = lockPackages();
   assert.deepEqual(Object.keys(packages[""]?.["dependencies"] as object), ["@komira-ai/komira"]);
   // Of the optionalDependencies, only the package whose os, cpu and libc match.
-  assert.deepEqual(readdirSync(path.join(MODULES, "@komira-ai")).sort(), ["komira", "komira-linux-x64-gnu"]);
-  const platform = packages["node_modules/@komira-ai/komira-linux-x64-gnu"];
-  assert.deepEqual(
-    [platform?.["optional"], platform?.["os"], platform?.["cpu"], platform?.["libc"]],
-    [true, ["linux"], ["x64"], ["glibc"]],
-  );
+  assert.deepEqual(readdirSync(path.join(MODULES, "@komira-ai")).sort(), ["komira", PLATFORM_NAME]);
+  const platform = packages[`node_modules/@komira-ai/${PLATFORM_NAME}`];
+  assert.deepEqual([platform?.["optional"], platform?.["os"], platform?.["cpu"], platform?.["libc"]], [true, ...PLATFORM_FIELDS]);
   // npm installed the peer dependency, which the project does not name.
   const peer = packages["node_modules/apache-arrow"];
   assert.deepEqual([peer?.["version"], peer?.["peer"]], ["21.2.0", true]);
@@ -87,18 +96,24 @@ test("the package exports exactly its public names", () => {
 
 test("the environment holds no Mojo toolchain, and its one library path is node's C++ runtime", () => {
   for (const key of Object.keys(process.env)) {
-    assert.doesNotMatch(key, /MOJO|MODULAR|CONDA|PIXI/i, key);
+    assert.doesNotMatch(key, /MOJO|MODULAR|CONDA|PIXI|^DYLD_/i, key);
   }
   assert.equal(process.env["LD_PRELOAD"], undefined);
   for (const dir of (process.env["PATH"] ?? "").split(path.delimiter)) {
     assert.doesNotMatch(dir, /mojo|modular/i, dir);
   }
-  // The pinned node links libstdc++ and libgcc_s (Node 26 also libatomic),
-  // which a user's system has and the build workers do not: that directory,
-  // holding those GCC runtime libraries and nothing else.
+  // On Linux the pinned node links libstdc++ and libgcc_s (Node 26 also
+  // libatomic), which a user's system has and the build workers do not: that
+  // directory, holding those GCC runtime libraries and nothing else. The macOS
+  // node links only the system's libraries, and its directory holds none
+  // (macOS's loader does not read LD_LIBRARY_PATH, and no DYLD_ variable is set).
   const libraryPath = (process.env["LD_LIBRARY_PATH"] ?? "").split(path.delimiter);
   assert.equal(libraryPath.length, 1, libraryPath.join(path.delimiter));
   const held = readdirSync(libraryPath[0] as string).sort();
+  if (MACOS) {
+    assert.deepEqual(held.filter((f) => /\.(dylib|so)(\.|$)/.test(f)), []);
+    return;
+  }
   assert.ok(held.includes("libgcc_s.so.1") && held.includes("libstdc++.so.6"), held.join(" "));
   assert.deepEqual(held.filter((f) => !["libatomic.so.1", "libgcc_s.so.1", "libstdc++.so.6"].includes(f)), []);
 });
@@ -108,8 +123,8 @@ test("libkomira, its addon and the Mojo runtime load from the installed platform
   // ABI major 1, the one this package loads.
   assert.equal(Math.floor(abi / 1000), 1, String(abi));
   const report = process.report.getReport() as unknown as { sharedObjects: string[] };
-  const ours = report.sharedObjects.filter((f) => ["komira_addon.node", "libkomira.so", ...RUNTIME].includes(path.basename(f)));
-  assert.deepEqual([...new Set(ours.map((f) => path.basename(f)))].sort(), ["komira_addon.node", "libkomira.so", ...RUNTIME].sort());
+  const ours = report.sharedObjects.filter((f) => ["komira_addon.node", LIBRARY, ...RUNTIME].includes(path.basename(f)));
+  assert.deepEqual([...new Set(ours.map((f) => path.basename(f)))].sort(), ["komira_addon.node", LIBRARY, ...RUNTIME].sort());
   const platform = realpathSync(PLATFORM) + path.sep;
   const native = realpathSync(path.join(PLATFORM, "native")) + path.sep;
   for (const f of ours) {

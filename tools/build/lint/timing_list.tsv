@@ -16,7 +16,7 @@ use	release/ci/npm_smoke/cli.zig	Thread.sleep	1	production: the pause between in
 use	tools/build/bisect/main.zig	milliTimestamp	1	production: the bisect tool's default rerun nonce
 use	tools/build/bisect/probe.zig	milliTimestamp	6	production: the bisect tool's probe has a time limit of its own, and measures its seconds
 use	tools/build/bisect/probe.zig	Thread.sleep	1	production: the poll of the probe's time limit
-use	tools/build/ci/assert_remote/farm_retry.zig	Instant	3	production: the run's clock for the watchdog's next look at the connections to the farm and for the SIGKILL after SIGINT (whether a connection is dead is read from the kernel's own times, never from this clock)
+use	tools/build/ci/assert_remote/farm_run.zig	Instant	3	production: the run's clock for the watchdog's next look at the connections to the farm and for the SIGKILL after SIGINT (whether a connection is dead is read from the kernel's own times, never from this clock)
 use	tools/build/ci/assert_remote/farm_wait.zig	Instant	3	production: the real clock of the bounded wait for the farm before a cut buck2 command runs again (the tests give the wait a clock of their own)
 use	tools/build/ci/assert_remote/farm_wait.zig	Thread.sleep	1	production: the pause between two probes of the farm's port in that wait (the tests give the wait a clock of their own)
 use	tools/build/ci/release_beta_fetch/release_staged_verify.zig	Thread.sleep	1	production: the pause between prod smoke passes while the channel catches up (tests pass a delay of 0)

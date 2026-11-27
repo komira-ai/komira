@@ -1,6 +1,7 @@
 //! The cases of farm_retry.zig's `classify`, //tools/build/ci:farm_retry_unit:
-//! which failed runs are a cut connection to the farm, run again, and
-//! which are final. Each case is a log the tool must read right; the ones that
+//! which failed runs are the farm's (a cut connection to the farm, or a job
+//! the farm failed to start, `input-unavailable`), run again, and which are
+//! final. Each case is a log the tool must read right; the ones that
 //! must be final are the ones a wrong reading would pass over.
 //!
 //! The logs in fixtures/ are recorded buck2 output, excerpts of failed runs on
@@ -15,7 +16,10 @@
 //! phrase) is a recorded one with lines added or changed, in the case.
 //! test_cut.log is a test run whose every test failed because the connection
 //! to the farm was cut before it ran: its progress lines cut to two, the
-//! action digests zeroed.
+//! action digests zeroed. build_input_unavailable.log is a release build
+//! whose one failure was a job the farm failed to start, an input unavailable
+//! on its host: its progress lines cut to two, its build id and action
+//! digests zeroed.
 //!
 //! The wait for the farm before a run again (farm_wait.zig) runs on a fake
 //! clock and a fake farm, so a case of twenty minutes takes none: a farm that
@@ -33,6 +37,7 @@ const t = std.testing;
 const build_cut = @embedFile("fixtures/build_cut.log");
 const build_cut_after_file_changes = @embedFile("fixtures/build_cut_after_file_changes.log");
 const test_cut = @embedFile("fixtures/test_cut.log");
+const build_input_unavailable = @embedFile("fixtures/build_input_unavailable.log");
 
 const build_mixed = @embedFile("fixtures/build_cut_and_compile_error.log");
 const test_failed = @embedFile("fixtures/test_failed.log");
@@ -48,6 +53,11 @@ const unrun_cut = "[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on
 const unrun_next = "[2026-11-25T02:24:32.807+00:00] \xe2\x9c\x97 Fail: komira//tests/scan_binding_links:test_scan_binding_links (0.0s)";
 /// A line of the test's own.
 const own = "[2026-11-25T02:24:32.807+00:00] the test's own line\n";
+
+/// buck2's line for a job the farm failed to start, an input unavailable on its host.
+const unavailable_error = "Error: (Error was returned on the stream by RE: the job failed to start: input-unavailable)";
+/// The first failed block of fixtures/build_input_unavailable.log.
+const unavailable_first = "[2026-11-27T05:17:43.695+00:00] Action failed: komira//src/atomic_alias:atomic_alias_conda (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (conda_pack atomic_alias_conda)";
 
 const cut_error = "Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: \"h2 protocol error: error reading a body from connection\", source: None)";
 
@@ -92,11 +102,15 @@ fn dropBlocks(a: std.mem.Allocator, log: []const u8, marker: []const u8) ![]u8 {
     return out.toOwnedSlice(a);
 }
 
-fn expectCut(log: []const u8, blocks: usize) !void {
+fn expectFarm(log: []const u8, want: fr.Farm) !void {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const v = try classify(arena.allocator(), log);
-    try t.expectEqualDeep(fr.Verdict{ .cut = blocks }, v);
+    try t.expectEqualDeep(fr.Verdict{ .farm = want }, v);
+}
+
+fn expectCut(log: []const u8, blocks: usize) !void {
+    try expectFarm(log, .{ .cut = blocks });
 }
 
 /// The log is final, for the reason `tag`, with `line` the line that says so.
@@ -107,7 +121,7 @@ fn expectFinal(log: []const u8, tag: std.meta.Tag(fr.Verdict), line: []const u8)
     try t.expectEqual(tag, std.meta.activeTag(v));
     const got = switch (v) {
         .failure, .test_status, .unexplained, .unmatched_target => |l| l,
-        .cut, .no_failure => "",
+        .farm, .no_failure => "",
     };
     try t.expectEqualStrings(line, got);
 }
@@ -429,11 +443,77 @@ test "a failed run with no failure block is final" {
     try expectFinal(@embedFile("fixtures/build_remote.log"), .no_failure, "");
 }
 
+// ---- a job the farm failed to start, run again --------------------------------
+
+test "a recorded build whose every failure is a job the farm failed to start (input-unavailable) is the farm's, counting each block" {
+    // one action, printed once as it failed and once under BUILD ERRORS
+    try expectFarm(build_input_unavailable, .{ .input_unavailable = 2 });
+}
+
+test "input-unavailable blocks beside cut blocks are the farm's, each counted by its cause" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const at = "[2026-11-27T05:17:43.708+00:00] Cache hits";
+    try expectFarm(try edit(arena.allocator(), build_input_unavailable, at, cut_block ++ at), .{ .cut = 1, .input_unavailable = 2 });
+}
+
+test "a job the farm failed to start for another reason is final: only input-unavailable is run again" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_][]const u8{ "input-not-allowed", "rootfs-unsupported-here", "invalid-mount" }) |code| {
+        try expectFinal(try edit(a, build_input_unavailable, "failed to start: input-unavailable)", try std.mem.concat(a, u8, &.{ "failed to start: ", code, ")" })), .failure, unavailable_first);
+    }
+}
+
+test "the input-unavailable line counts only word for word" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // more after it, its closing parenthesis gone, another stream's error before it
+    try expectFinal(try edit(a, build_input_unavailable, unavailable_error, unavailable_error ++ " and more"), .failure, unavailable_first);
+    try expectFinal(try edit(a, build_input_unavailable, unavailable_error, unavailable_error[0 .. unavailable_error.len - 1]), .failure, unavailable_first);
+    try expectFinal(try edit(a, build_input_unavailable, "by RE: the job failed", "by CAS: the job failed"), .failure, unavailable_first);
+}
+
+test "the input-unavailable line without buck2's prefix in a block's head does not make it the farm's" {
+    const log = "[2026-11-21T16:00:00.000+00:00] Action failed: komira//src/a:a (cfg) (zig_test)\n" ++ unavailable_error ++ "\n" ++
+        "[2026-11-21T16:00:00.000+00:00] Stdout: <empty>\n\nBUILD FAILED\n";
+    try expectFinal(log, .failure, "[2026-11-21T16:00:00.000+00:00] Action failed: komira//src/a:a (cfg) (zig_test)");
+}
+
+test "an action that failed on its own and quotes the input-unavailable line after Stderr is final" {
+    const log = "[2026-11-21T16:00:00.000+00:00] Action failed: komira//src/a:a (cfg) (zig_test)\n" ++
+        "[2026-11-21T16:00:00.000+00:00] Remote command returned non-zero exit code 1\n" ++
+        "[2026-11-21T16:00:00.000+00:00] Stdout: <empty>\n" ++
+        "[2026-11-21T16:00:00.000+00:00] Stderr:\n" ++
+        "[2026-11-21T15:59:59.000+00:00] " ++ unavailable_error ++ "\n\n" ++
+        "BUILD FAILED\n";
+    try expectFinal(log, .failure, "[2026-11-21T16:00:00.000+00:00] Action failed: komira//src/a:a (cfg) (zig_test)");
+}
+
+test "a failed test the farm never started (input-unavailable after buck2's Execute line) is the farm's" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const end = std.mem.indexOf(u8, test_cut, unrun_next).?;
+    const unavailable = "[2026-11-25T02:24:32.807+00:00] " ++ unavailable_error ++ "\n";
+    try expectFarm(try edit(a, test_cut[0..end], unrun_cut, unavailable), .{ .input_unavailable = 1 });
+    // with a line of the test's own after it, the test ran: final
+    try expectFinal(try edit(a, test_cut[0..end], unrun_cut, unavailable ++ own), .failure, unrun_fail);
+}
+
 test "the verdict says why, for the job log" {
     var buf: [256]u8 = undefined;
     var w = std.Io.Writer.fixed(&buf);
-    try fr.describe(.{ .cut = 4 }, &w);
+    try fr.describe(.{ .farm = .{ .cut = 4 } }, &w);
     try t.expectEqualStrings("every failure (4 block(s)) is a cut connection to the farm (buck2's `RE channel error`)", w.buffered());
+    w = std.Io.Writer.fixed(&buf);
+    try fr.describe(.{ .farm = .{ .input_unavailable = 2 } }, &w);
+    try t.expectEqualStrings("every failure (2 block(s)) is a job the farm failed to start (the farm's `input-unavailable`)", w.buffered());
+    w = std.Io.Writer.fixed(&buf);
+    try fr.describe(.{ .farm = .{ .cut = 1, .input_unavailable = 2 } }, &w);
+    try t.expectEqualStrings("every failure (3 block(s)) is the farm's: 1 a cut connection (buck2's `RE channel error`), 2 a job it failed to start (the farm's `input-unavailable`)", w.buffered());
     w = std.Io.Writer.fixed(&buf);
     try fr.describe(.{ .failure = "X" }, &w);
     try t.expectEqualStrings("a failure that is not a cut connection: X", w.buffered());
@@ -696,15 +776,29 @@ test "the job summary line names the wait: at once, for how long, or past the lo
     const a = arena.allocator();
     try t.expectEqualStrings(
         "buck2-farm: the first run of `build` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 4 failed block(s)); the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log",
-        try fr.summaryLine(a, "build", 1, 4, .{ .answered = 0 }, "buck2-farm.first.log"),
+        try fr.summaryLine(a, "build", 1, .{ .cut = 4 }, .{ .answered = 0 }, "buck2-farm.first.log"),
     );
     try t.expectEqualStrings(
         "buck2-farm: the second run of `test` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 1 failed block(s)); farm unreachable for 3 min 10 s; ran again (run 3 of at most 3); the second run's log is buck2-farm.second.log",
-        try fr.summaryLine(a, "test", 2, 1, .{ .answered = 190 }, "buck2-farm.second.log"),
+        try fr.summaryLine(a, "test", 2, .{ .cut = 1 }, .{ .answered = 190 }, "buck2-farm.second.log"),
     );
     try t.expectEqualStrings(
         "buck2-farm: the first run of `bxl` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 2 failed block(s)); farm unreachable for 20 min 5 s, the longest wait; not run again",
-        try fr.summaryLine(a, "bxl", 1, 2, .{ .gave_up = 1205 }, "unused"),
+        try fr.summaryLine(a, "bxl", 1, .{ .cut = 2 }, .{ .gave_up = 1205 }, "unused"),
+    );
+}
+
+test "the job summary line names the farm's cause: input-unavailable alone, or beside cuts" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings(
+        "buck2-farm: the first run of `build` had jobs the farm failed to start (the farm's `input-unavailable` in each of 2 failed block(s)); the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log",
+        try fr.summaryLine(a, "build", 1, .{ .input_unavailable = 2 }, .{ .answered = 0 }, "buck2-farm.first.log"),
+    );
+    try t.expectEqualStrings(
+        "buck2-farm: the second run of `test` was cut by a lost connection to the farm and had jobs the farm failed to start (buck2's `RE channel error` in 3 and the farm's `input-unavailable` in 1 failed block(s)); farm unreachable for 20 min 5 s, the longest wait; not run again",
+        try fr.summaryLine(a, "test", 2, .{ .cut = 3, .input_unavailable = 1 }, .{ .gave_up = 1205 }, "unused"),
     );
 }
 

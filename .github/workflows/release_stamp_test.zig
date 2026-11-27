@@ -22,8 +22,9 @@
 //!  - the premise: release_set.bzl reads exactly the keys package_stamp, release_revision, release_run_id and
 //!    release_attempt of `komira`, and release/BUCK loads release_set and calls it, so a fourth key or a moved
 //!    call turns this case red until it is changed with them;
-//!  - the real files: every workflow and action passes, and npm.yml holds two stamped builds of
-//!    //release:npm_packages and release.yml one of //release:release_set, so the case reads the builds it
+//!  - the real files: every workflow and action passes, and npm.yml holds three stamped builds of
+//!    release/BUCK (two of //release:npm_packages, one of //release:npm_packages_macos_arm64) and
+//!    release.yml one of //release:release_set, so the case reads the builds it
 //!    is about.
 //! Each defect is written into the real text, or into a new workflow, and must be refused with its exact
 //! message.
@@ -341,14 +342,14 @@ test "every workflow and action passes the release's values on each stamped buil
         }
     }
     // the case reads the builds it is about
-    try t.expectEqual(@as(usize, 2), (try stampedReleaseBuilds(ar, try readData(ar, "workflows/npm.yml"))).len);
+    try t.expectEqual(@as(usize, 3), (try stampedReleaseBuilds(ar, try readData(ar, "workflows/npm.yml"))).len);
     try t.expectEqual(@as(usize, 1), (try stampedReleaseBuilds(ar, try readData(ar, "workflows/release.yml"))).len);
     try t.expectEqual(@as(usize, 0), (try stampedReleaseBuilds(ar, try readData(ar, "workflows/pypi.yml"))).len);
     try t.expect((try checkMacro(ar, try readData(ar, "release_set.bzl"))) == null);
     try t.expect((try checkBuck(ar, try readData(ar, "release.BUCK"))) == null);
 }
 
-test "npm.yml's stamped builds of //release:npm_packages without the release's values are refused" {
+test "npm.yml's stamped builds of //release:npm_packages and //release:npm_packages_macos_arm64 without the release's values are refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -360,6 +361,10 @@ test "npm.yml's stamped builds of //release:npm_packages without the release's v
     const record = " " ++ FLAGS_TEXT ++ " //release:npm_packages[npm_set.json]";
     const old_record = try edit(ar, text, record, " //release:npm_packages[npm_set.json]");
     try expectRefused(ar, "npm.yml", old_record, try refusal(ar, "npm.yml", try lineOf(text, record), "//release:npm_packages[npm_set.json]", RELEASE_FLAGS[0]));
+    // the macOS job's set, without them
+    const macos = " " ++ FLAGS_TEXT ++ " //release:npm_packages_macos_arm64 --out";
+    const old_macos = try edit(ar, text, macos, " //release:npm_packages_macos_arm64 --out");
+    try expectRefused(ar, "npm.yml", old_macos, try refusal(ar, "npm.yml", try lineOf(text, macos), "//release:npm_packages_macos_arm64", RELEASE_FLAGS[0]));
     // the real text passes; its stamped install test is of //node, which loads no release/BUCK
     try expectAccepted(ar, "npm.yml", text);
 }

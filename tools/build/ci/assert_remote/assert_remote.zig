@@ -10,8 +10,10 @@
 //!
 //!     assert_remote run --log <file> --summary <file> --farm-config <file> -- <buck2> <subcommand> [args...]
 //!
-//! runs the buck2 command that writes that log and, when its only failure is
-//! a cut connection to the farm, waits (bounded) for the farm to answer and
+//! runs the buck2 command that writes that log and, when its only failures
+//! are the farm's (a cut connection to the farm, or a job the farm failed to
+//! start because an input was unavailable on its host), waits (bounded) for
+//! the farm to answer and
 //! runs it again, at most three runs in all (farm_retry.zig and farm_wait.zig,
 //! beside this file, say what it runs, reads and writes). One executable does both
 //! because the buck2-farm action gets one built tool from its caller.

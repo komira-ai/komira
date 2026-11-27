@@ -1,7 +1,7 @@
 //! npm_smoke: the command line of the npm release (//release:npm_packages and .github/workflows/npm.yml;
 //! docs/ci.md, "npm.yml: publishing the npm packages").
 //!
-//!   npm_smoke set --main <name> --require-stamped <true|false> --out <file> --package <name>=<tarball> ...
+//!   npm_smoke set --main <name> --main-optional <names> --require-stamped <true|false> --out <file> --package <name>=<tarball> ...
 //!   npm_smoke gate --file <path> --github-output <file>
 //!   npm_smoke verify --set <file> --dir <dir> --github-output <file> [--built <file>]
 //!   npm_smoke publish --set <file> --dir <dir> --node <exe> --npm <dir> --work <dir>
@@ -9,7 +9,9 @@
 //!
 //! `set` is the build action of //release:npm_packages: it writes npm_set.json (set.zig) for the tarballs
 //! given, one `--package` per package (the flag is given once per package), the main package named by
-//! `--main`; with `--require-stamped true` an unstamped set is refused.
+//! `--main`; with `--require-stamped true` an unstamped set is refused. `--main-optional` is the main
+//! package's optional dependencies, comma-separated, as its rule names them (NpmTarballInfo), and the set is
+//! refused unless they are exactly its platform packages (set.zig `checkOptional`).
 //! `gate` reads the publish gate (gate.zig, release/npm_publish.txt) and appends `publish=true` or
 //! `publish=false` to the output file.
 //! `verify` holds a directory to the set it holds (set.zig `verifyDir`: exactly the set's tarballs and
@@ -42,7 +44,7 @@ pub const Deps = struct {
 };
 
 pub const usage =
-    \\usage: npm_smoke set --main <name> --require-stamped <true|false> --out <file> --package <name>=<tarball> ...
+    \\usage: npm_smoke set --main <name> --main-optional <names> --require-stamped <true|false> --out <file> --package <name>=<tarball> ...
     \\       npm_smoke gate --file <path> --github-output <file>
     \\       npm_smoke verify --set <file> --dir <dir> --github-output <file> [--built <file>]
     \\       npm_smoke publish --set <file> --dir <dir> --node <exe> --npm <dir> --work <dir>
@@ -146,7 +148,7 @@ fn appendOutput(a: Allocator, out: *std.Io.Writer, err: *std.Io.Writer, path: []
 }
 
 fn cmdSet(a: Allocator, args: []const []const u8, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
-    const p = (try parseFlags(a, args, &.{ "--main", "--require-stamped", "--out" }, 3, "--package", err)) orelse return 2;
+    const p = (try parseFlags(a, args, &.{ "--main", "--require-stamped", "--out", "--main-optional" }, 4, "--package", err)) orelse return 2;
     const stamped = p.get(1);
     if (!std.mem.eql(u8, stamped, "true") and !std.mem.eql(u8, stamped, "false")) {
         _ = try usageError(err, "--require-stamped is true or false, not {s}", .{stamped});
@@ -168,6 +170,10 @@ fn cmdSet(a: Allocator, args: []const []const u8, out: *std.Io.Writer, err: *std
         };
     }
     const set = set_mod.build(a, &why, p.get(0), inputs.items, std.mem.eql(u8, stamped, "true")) catch |e| switch (e) {
+        error.Refused => return failed(a, out, err, why),
+        else => return e,
+    };
+    set_mod.checkOptional(a, &why, set, p.get(3)) catch |e| switch (e) {
         error.Refused => return failed(a, out, err, why),
         else => return e,
     };
