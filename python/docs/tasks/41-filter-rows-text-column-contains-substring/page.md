@@ -68,6 +68,6 @@ Output:
 
 ## Related
 
-- How do I filter rows where a value is in a list? (rank 29, works; no page yet)
+- [How do I filter rows where a value is in a list?](../29-filter-rows-value-list/page.md) (rank 29, works)
 - How do I extract part of a string with a regex? (rank 40, works; no page yet)
 - [How do I lowercase, trim and replace text in a column?](../42-lowercase-trim-replace-text-column/page.md) (rank 42, partial)

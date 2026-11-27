@@ -1,0 +1,3 @@
+[{'day_no': 1, 'sales': 10, 'avg3': 10.0}, {'day_no': 2, 'sales': 20, 'avg3': 15.0}, {'day_no': 3, 'sales': 60, 'avg3': 30.0}, {'day_no': 4, 'sales': 40, 'avg3': 40.0}, {'day_no': 5, 'sales': 50, 'avg3': 50.0}]
+[None, None, 30.0, 40.0, 50.0]
+[{'day_no': 1, 'sales': 10, 'avg3': 10.0}, {'day_no': 2, 'sales': 20, 'avg3': 15.0}, {'day_no': 3, 'sales': 60, 'avg3': 30.0}, {'day_no': 4, 'sales': 40, 'avg3': 40.0}, {'day_no': 5, 'sales': 50, 'avg3': 50.0}]

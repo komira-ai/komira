@@ -1,0 +1,1 @@
+AttributeError: komira.to_datetime() is not supported; cast a column with s.astype(...)

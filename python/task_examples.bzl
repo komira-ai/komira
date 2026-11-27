@@ -21,8 +21,8 @@ package's `glob(["*/**"])`), named as the directory, and one per probe,
 `--probe <task>/<name>` over `tree`. It also declares `name`, a
 `ci_aggregate` (tools/build/ci/aggregate.bzl) of every one of them. Each wheel
 test is a dependency of `name`, so none is a root of the check set: the
-generated target list (ci/targets.bzl) names `name` alone, and adding or
-removing a task directory leaves it as it is. Building `name` builds every
+check set's root files (ci/roots/, tools/build/ci/roots.bzl) hold `name` alone, and
+adding or removing a task directory adds or deletes none. Building `name` builds every
 wheel test, and a failing one fails the build under its own label, the
 directory's name. `task_dirs(files)` and `task_probes(files)` are the two
 lists it reads off `files`.

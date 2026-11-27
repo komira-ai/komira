@@ -1,0 +1,4 @@
+[{'team': 'api', 'high': 0, 'low': 2}, {'team': 'data', 'high': 1, 'low': 0}, {'team': 'web', 'high': 2, 'low': 1}]
+[{'team': 'api', 'priority': 'low', 'n': 2}, {'team': 'data', 'priority': 'high', 'n': 1}, {'team': 'web', 'priority': 'high', 'n': 2}, {'team': 'web', 'priority': 'low', 'n': 1}]
+[{'team': 'api', 'priority': 'low', 'n': 2}, {'team': 'data', 'priority': 'high', 'n': 1}, {'team': 'web', 'priority': 'high', 'n': 2}, {'team': 'web', 'priority': 'low', 'n': 1}]
+[{'team': 'api', 'high': 0, 'low': 2}, {'team': 'data', 'high': 1, 'low': 0}, {'team': 'web', 'high': 2, 'low': 1}]

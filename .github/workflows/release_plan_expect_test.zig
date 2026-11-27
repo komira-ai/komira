@@ -11,7 +11,8 @@
 //!    itself has no `continue-on-error`;
 //!  - it is the step right after `mopm stage`, so it runs before the README e2e and before the staged set is
 //!    kept for `prod-stage`;
-//!  - `prod-stage` needs `mopm-stage`, so a failed check stops the run before a group is opened on the registry.
+//!  - `beta-stage` and `prod-stage`, the two jobs that open a group on a registry, need `mopm-stage`, so a
+//!    failed check stops the run before a group is opened on either registry.
 //! Each defect is written into the real text and must be refused with its message.
 
 const std = @import("std");
@@ -23,7 +24,8 @@ const ASSERT = "          assert-remote: ${{ steps.assert.outputs.path }}";
 const MOPM_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.1.0 --out release/staged_set --registry prod'";
 const EXPECT_NAME = "      - name: the staged set is every package on every platform";
 const EXPECT_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" expect --staged release/staged_set --expect \"$RUNNER_TEMP/mopm-publish/plan_expectation.json\"'";
-const PROD_STAGE_NEEDS = "    needs: [release, mopm-stage]";
+const BETA_STAGE_NEEDS = "    needs: [release, mopm-stage]";
+const PROD_STAGE_NEEDS = "    needs: [release, mopm-stage, beta-commit]";
 const STEP_START = "      - ";
 
 /// The lines of the job `name` of the `jobs:` map (a key at two spaces of indent), without comment lines and
@@ -112,6 +114,9 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
         return "the whole-set check is not exactly `release_staged_verify expect --staged release/staged_set --expect` with the expectation built in this job";
     if (nextStep(job, stage_at) != name_at) return "the whole-set check is not the step right after mopm stage: the e2e or the kept set would come before it";
 
+    var bn: usize = 0;
+    const beta_stage = (try jobLines(ar, text, "beta-stage", &bn)) orelse return "release.yml has no job beta-stage";
+    if (countOf(beta_stage, BETA_STAGE_NEEDS) != 1) return "beta-stage does not need mopm-stage: a group could be opened before the whole-set check";
     var pn: usize = 0;
     const prod_stage = (try jobLines(ar, text, "prod-stage", &pn)) orelse return "release.yml has no job prod-stage";
     if (countOf(prod_stage, PROD_STAGE_NEEDS) != 1) return "prod-stage does not need mopm-stage: a group could be opened before the whole-set check";
@@ -224,10 +229,11 @@ test "an expectation that is not built, built twice, not on the farm, or built a
     try expectRefused(ar, late, "mopm-stage builds the plan expectation after mopm stage");
 }
 
-test "a prod-stage that does not need mopm-stage is refused" {
+test "a beta-stage or prod-stage that does not need mopm-stage is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try readWorkflow(ar);
-    try expectRefused(ar, try replaced(ar, text, PROD_STAGE_NEEDS ++ "\n", "    needs: [release]\n"), "prod-stage does not need mopm-stage: a group could be opened before the whole-set check");
+    try expectRefused(ar, try replaced(ar, text, BETA_STAGE_NEEDS ++ "\n", "    needs: [release]\n"), "beta-stage does not need mopm-stage: a group could be opened before the whole-set check");
+    try expectRefused(ar, try replaced(ar, text, PROD_STAGE_NEEDS ++ "\n", "    needs: [release, beta-commit]\n"), "prod-stage does not need mopm-stage: a group could be opened before the whole-set check");
 }
