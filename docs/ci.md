@@ -12,7 +12,7 @@ Nothing is compiled on the runner.
 
 | event | runs |
 |---|---|
-| push to `main` | [`release.yml`](#releaseyml-the-release): builds the release set and publishes the mopm packages to the prod registry, on every push (no schedule, no switch); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert). And, when the push changes more than documentation, the TestPyPI half of [`pypi.yml`](#pypiyml-publishing-the-python-package): builds the `komira` wheel on the farm, installs the wheel file on a fresh runner per supported Python, uploads it to TestPyPI, installs it from there per supported Python and runs the quickstart, and records the version when all of that passed. And, on the same pushes, [the macOS arm64 wheel in `pypi.yml`](#the-macos-arm64-wheel-in-pypiyml): the same for the macOS arm64 wheel of the same version, in jobs of the same run |
+| push to `main` | [`release.yml`](#releaseyml-the-release): builds the release set and publishes the mopm packages to the prod registry, on every push (no schedule, no switch); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert). And, when the push changes more than documentation, the TestPyPI half of [`pypi.yml`](#pypiyml-publishing-the-python-package): builds the `komira` wheel on the farm, installs the wheel file on a fresh runner per supported Python, uploads it to TestPyPI, installs it from there per supported Python and runs the quickstart, and records the version when all of that passed. And, on the same pushes, [the macOS arm64 wheel in `pypi.yml`](#the-macos-arm64-wheel-in-pypiyml): the same for the macOS arm64 wheel of the same version, in jobs of the same run. And, on the same pushes, [`npm.yml`](#npmyml-publishing-the-npm-packages): builds the npm packages on the farm and runs their install test on each pinned Node.js, the macOS arm64 package's on the farm's macOS workers ([the macOS package in `npm.yml`](#the-macos-package-in-npmyml)); it publishes them only once `release/npm_publish.txt` says `publish: on`, which it does not yet |
 | pull request from a branch of this repository | `pr / check`, whose [macOS part](#the-macos-part-of-the-check) builds the libraries of the macOS set the change reaches on the farm's Macs; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | merge group of the [merge queue](#the-merge-queue) (`merge_group`) | `pr / check` on the group's head commit, which is what `main` becomes; `coverage` does not run |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
@@ -160,7 +160,7 @@ buckconfig written whole. It also reads every workflow and holds each step
 that uses the action to `tls: ${{ vars.FARM_TLS || 'false' }}` under its
 `with:`: a caller that dropped `tls` would connect in plain text whatever
 `FARM_TLS` says.
-It holds `farm-qos` to `batch` on every step of `release.yml`, `release-macos.yml` and `pypi.yml`
+It holds `farm-qos` to `batch` on every step of `release.yml`, `release-macos.yml`, `pypi.yml` and `npm.yml`
 and to absent on every step of any other workflow.
 
 A job that calls it needs `permissions: id-token: write` (to ask GitHub for the
@@ -177,7 +177,7 @@ repository variables (Settings > Secrets and variables > Actions > Variables):
 | `FARM_ADDRESS` | the remote-execution service as a URL with its port |
 | `FARM_INSTANCE` | its instance name |
 | `FARM_LINUX_X86_64_PROPERTIES` | the worker property set of the linux x86_64 actions |
-| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml`, by the job `build-macos-arm64` of `pypi.yml` and by the job `check` of `pr.yml` (which also passes `darwin-config-file`, so that only its step `build for macOS` sees them: [The macOS part of the check](#the-macos-part-of-the-check)), and by the job `mopm-stage` of `release.yml` (which also passes `darwin-config-file`, so that only its step `build the packages`, the build of `//release:mopm_release_artifacts`, sees them: [the mopm jobs](#the-mopm-jobs)), and by no other job |
+| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml`, by the job `build-macos-arm64` of `pypi.yml`, by the job `build-macos-arm64` of `npm.yml` and by the job `check` of `pr.yml` (which also passes `darwin-config-file`, so that only its step `build for macOS` sees them: [The macOS part of the check](#the-macos-part-of-the-check)), and by the job `mopm-stage` of `release.yml` (which also passes `darwin-config-file`, so that only its step `build the packages`, the build of `//release:mopm_release_artifacts`, sees them: [the mopm jobs](#the-mopm-jobs)), and by no other job |
 | `FARM_TLS` | `true` when the service serves REAPI over TLS; unset or empty means `false`. Each workflow passes it as farm-connect's `tls`, so the address and its transport change together |
 
 Variables are not masked, and a job's logs are public. The action masks the
@@ -195,7 +195,7 @@ the network.
 **Priority.** A farm that queues by priority class runs a `ci` action before a
 `batch` one. The action takes an optional `farm-qos` (`ci` or `batch`) and, when
 it is set, writes the request header `x-kbf-qos` as buck2's `http_headers`.
-Every job of `release.yml` passes `batch`, and so do the job `build` of `pypi.yml`, the job `build-macos-arm64` of `pypi.yml` and the job `release-macos` of `release-macos.yml`, so the release work that a push to
+Every job of `release.yml` passes `batch`, and so do the job `build` of `pypi.yml`, the job `build-macos-arm64` of `pypi.yml`, the jobs `build`, `test` and `build-macos-arm64` of `npm.yml` and the job `release-macos` of `release-macos.yml`, so the release work that a push to
 `main` starts waits behind the pull-request checks when the farm is full; no
 other workflow passes it, so they stay at `ci`. The class is not a platform
 property: it is not part of an action's digest, so a release build and a pull
@@ -235,6 +235,18 @@ cut too. A log that mixes a real failure with cuts, a test whose output quotes
 the phrase among output of its own, a buck2 ended by a signal, and a subcommand
 other than build, test or bxl are never run again.
 
+The farm's refusal to start a job because an input the job named could not be
+read on the host it was placed on is run again the same way. The farm settles
+it as an infrastructure failure for the client to run again, and buck2 prints
+it in the place of the channel error, word for word
+`Error: (Error was returned on the stream by RE: the job failed to start: input-unavailable)`.
+A block with that line, or a test whose stderr has it right after the
+`Remote Execution Error on Execute` line, counts as the farm's failure just as
+a cut does, and a log may mix the two. Any other reason the farm gives for not
+starting a job (such as `input-not-allowed`) is final. The job summary line
+then names the cause: ``had jobs the farm failed to start (the farm's `input-unavailable` in each of 2 failed block(s))``,
+or both causes with a count for each.
+
 Before it runs again, the tool waits for the farm
 ([`farm_wait.zig`](../tools/build/ci/assert_remote/farm_wait.zig)): the same
 probe as farm-connect's (a TCP connection to the farm's port, 5 s for each try,
@@ -246,7 +258,7 @@ the farm is buck2's own `engine_address`, and the bound is
 run is to be run again; a missing file, or one with no address or no bound,
 fails the step with exit 2 and the reason, and nothing runs again.
 
-- **The farm answers.** The cut run's output is kept beside the log as
+- **The farm answers.** The failed run's output is kept beside the log as
   `buck2-farm.first.log` (`buck2-farm.second.log` after the second run), and
   the job summary gets one line naming the wait, such as
   ``buck2-farm: the first run of `build` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 4 failed block(s)); farm unreachable for 3 min 10 s; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log``
@@ -254,11 +266,11 @@ fails the step with exit 2 and the reason, and nothing runs again.
   command runs again.
 - **The bound passes first.** The job summary gets
   `...; farm unreachable for <N> min <M> s, the longest wait; not run again`,
-  the cut run's log stays in place (later steps that read the log, such as
+  the failed run's log stays in place (later steps that read the log, such as
   `release-macos.yml`'s report, read it), and the step fails with buck2's code.
 
-A step runs at most three times: a third run that is cut too fails the step,
-saying so. The wait reports itself and never hides an outage: each wait is a
+A step runs at most three times: a third run that fails on the farm too (cut,
+or with a job the farm failed to start) fails the step, saying so. The wait reports itself and never hides an outage: each wait is a
 line in the job summary, unlike a longer client timeout, which would hide it
 (komira-ai/komira#2269). Three runs, not two, because a lost connection can
 come back for a few minutes and drop again, and a second run cut that way
@@ -529,7 +541,9 @@ tests, which no pull request builds. The rest of this section is about `release-
   `bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check`,
   which configures `//release:mopm_darwin_libs` and the macOS Python harness tests
   (`DARWIN_PYTHON_HARNESS` of `release/darwin_libs.bzl`, the targets of the workflow's second build
-  step) for darwin-arm64 and analyses them, with their whole closure, as the release's build would.
+  step) for darwin-arm64 and analyses them, with their whole closure, as the release's build would,
+  and so the macOS npm targets of `npm.yml`'s macOS job (`DARWIN_NPM`, the macOS package and its install
+  test, and `//release:npm_packages_macos_arm64`, for Linux, whose transition configures the macOS package).
   It also refuses a Zig tool that an action of the closure runs and that is built for another
   platform than the one the action runs on (`release/exec_tools.bzl`): a Linux tool configured for
   the macOS execution platform analyses fine and fails only on the worker, with "cannot execute
@@ -690,7 +704,8 @@ or a change outside `src` that breaks a library no pull request touched.
 conda packages that `release/artifacts.textproto` declares, as one release set,
 with Buck2 targets on the farm. It is written by hand. It holds no job of the Python wheel: `pypi.yml`
 builds and installs that on every push that changes code
-([below](#pypiyml-publishing-the-python-package)).
+([below](#pypiyml-publishing-the-python-package)). Nor of the npm packages: `npm.yml` builds and tests
+them, the macOS one on the farm's macOS workers ([below](#npmyml-publishing-the-npm-packages)).
 **The release set itself publishes to no channel**: the job `release` builds the
 set, so a push to `main` still proves the release builds, keeps what it built as
 a workflow artifact, and holds no publishing credential and no channel. The
@@ -760,22 +775,24 @@ for darwin-arm64; and `//release:mopm_release_artifacts` merges the two into one
 configures the macOS half for darwin-arm64 through a transition, so one build of it, for Linux,
 builds both). That is the layout mopm reads, which requires the namespace directory: `mopm stage`
 packs one `.conda` per subdir that holds a member's library, and refuses a member that declares a
-native with no archive for one of them. Eleven jobs of `release.yml` carry the
+native with no archive for one of them. Thirteen jobs of `release.yml` carry the
 steps (a documentation-only push does not start the workflow, so it publishes nothing):
 
 | job | when | what it does |
 |---|---|---|
 | `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_138`, `MOPM` of `packages.bzl`) and `//release:mopm_release_artifacts`, the packages of both platforms: its osx-arm64 half compiles and runs its welded tests on the farm's macOS workers. The job's farm connection writes the macOS keys to a buckconfig of their own (`darwin-config-file`), which this build alone names with `--config-file`, so no other step of the job configures a macOS platform; it also passes `-c komira_release.mac_tree=true`, without which the target is incompatible (release/BUCK, limit `release-mac-tree`), so that a Linux graph query of `//...` skips it; a red macOS build fails the step, and nothing is staged. **Version:** `release_beta_version --workspace-root src --version 0.1.<run number>` gives every member the version of this run (below, "The version of every release"). **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.1.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Whole:** `release_staged_verify expect` holds the plan of S to every package on every platform the release builds (below). **Try:** `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)); every locked file of both platforms is checked against the plan, and the linux-64 ones, the farm's, are installed and run. Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as the workflow artifact `mopm-staged-<sha>`, kept 7 days, for the beta and prod jobs: a rerun of a failed beta or prod job on a later day still downloads it. |
-| `beta-stage` | after `release` and `mopm-stage`, **only on a push to `main`** (a manual run skips all four beta jobs and all six prod jobs before they start; there is no other switch) | in the environment `beta`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry beta --oidc --no-commit`: the beta registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the beta group), as the artifact `mopm-beta-staged-<sha>`, kept 7 days, even when the step failed. |
+| `beta-stage` | after `release` and `mopm-stage`, **only on a push to `main`** (a manual run skips all five beta jobs and all seven prod jobs before they start; there is no other switch) | in the environment `beta`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry beta --oidc --no-commit`: the beta registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the beta group), as the artifact `mopm-beta-staged-<sha>`, kept 7 days, even when the step failed. |
 | `beta-test` | after `beta-stage`, on a push to `main` | as `prod-test` below, on the directory `beta-stage` kept: environment `build`, **no registry identity and no secret**, `release_staged_verify verify` of every file against `plan.json`, then the README e2e on the farm on the files that matched. |
 | `beta-commit` | after `beta-test`, on a push to `main` | in the environment `beta`: `mopm publish --staged S --registry beta --oidc` on the directory with its `state.json`, after a fresh OIDC exchange: the beta group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-beta-committed-<sha>`. |
 | `beta-abort` | after `beta-stage`, `beta-test` and `beta-commit`, when one of them failed or the run was cancelled, on a push to `main` and with a `beta-stage` that was not skipped | in the environment `beta`: `mopm publish --staged S --registry beta --oidc --abort` ends the open beta group. |
-| `prod-stage` | after `release`, `mopm-stage` and `beta-commit`, **only on a push to `main`** (a manual run skips all six prod jobs before they start; there is no other switch) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, kept 7 days, even when the step failed. |
+| `beta-served-readmes` | after `beta-commit`, on a push to `main` | as `prod-served-readmes` below, on what the beta registry serves (`--stage beta`). `prod-stage` does not wait for it. |
+| `prod-stage` | after `release`, `mopm-stage` and `beta-commit`, **only on a push to `main`** (a manual run skips all seven prod jobs before they start; there is no other switch) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, kept 7 days, even when the step failed. |
 | `prod-test` | after `prod-stage`, on a push to `main` | in the environment `build` (the farm's; `id-token: write` for the tailnet join only), with **no registry identity and no secret**. It downloads the directory `prod-stage` kept, checks every file against `plan.json` (`release_staged_verify verify`: sha256 and size), writes `release/staged_set` from the files that matched and from nothing else, and runs `-c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm. |
 | `prod-commit` | after `prod-test`, on a push to `main` | in the environment `prod`, with `contents: read` and `id-token: write`. The same command without `--no-commit`, on the same directory with its `state.json`, after a fresh OIDC exchange: the same group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-prod-committed-<sha>`. |
 | `prod-abort` | after `prod-stage`, `prod-test` and `prod-commit`, when one of them failed or the run was cancelled, on a push to `main` and with a `prod-stage` that was not skipped | in the environment `prod`, same permissions: `mopm publish --staged S --registry prod --oidc --abort` ends the open group and gives its place back. |
 | `prod-smoke` | after `prod-commit`, on a push to `main` | no environment, no identity, no secret, no farm: `release_staged_verify smoke` downloads the published files from the prod channel and compares each with the plan. On a difference it prints the `mopm yank --group <id> ...` command for a human and fails; it yanks nothing. |
 | `prod-add` | after `prod-commit` and `prod-smoke`, on a push to `main` | no environment, no identity, no secret, no farm (a farm action has no network): `release_staged_verify add` makes a fresh project with the mopm `mopm-stage` built, sets its Mojo to the one this release was built for, runs `mopm add komira-ai/<name> --registry prod` for `json`, `uuid` and every package that ships a native archive (`async_api`, `awslc`, `compression`, `crypto`, `libc`, `log`, `metrics`) and then `mopm sync`, and checks the lock and the installed files against the plan. It yanks nothing. |
+| `prod-served-readmes` | after `prod-commit`, on a push to `main` | in the environment `build` (the farm's; `id-token: write` for the tailnet join only), with **no registry identity and no secret**. `release_staged_verify served --stage prod` downloads, on the runner, every file of the plan from the prod channel and every member's README from the prod API at this run's version, checks them against the plan of the set `mopm-stage` kept (sha256 and size; each README byte for byte), writes `release/staged_set` from what matched, and runs `-c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on that set on the farm ([below](#the-readme-e2e-on-what-the-registry-serves)). |
 
 **The staged set is the whole set.** `mopm stage` packs one `.conda` per subdir a member has a library in,
 and the checks after it (`verify`, `smoke`, `add`) read the plan, so a plan that lost a platform or a package
@@ -814,8 +831,8 @@ completeness of the list.
 
 #### The prod publish
 
-Five of the six `prod-*` jobs publish the set `mopm-stage` tried to the prod registry as one group (the sixth,
-`prod-add`, installs from it after the commit), on every push to
+Five of the seven `prod-*` jobs publish the set `mopm-stage` tried to the prod registry as one group (`prod-add`
+installs from it after the commit, and `prod-served-readmes` runs the README e2e on what it serves), on every push to
 `main` and with no switch, in three steps that the registry keeps apart: **stage** (upload, nothing visible), **test** (on the bytes the registry holds),
 **commit** (visible all at once). `prod-stage` needs `release` and `mopm-stage`: the set it stages is the one
 the README e2e of `mopm-stage` passed on, at the version of this run (below), and it needs `beta-commit`: a
@@ -932,6 +949,9 @@ would be handed two files for one name.
    user would get, and a person decides what to do. Its cases (`//tools/build/ci:release_staged_verify_unit`)
    run a registry and a mopm in memory.
 
+7. **`prod-served-readmes`** runs once the group is visible, beside the smoke and the add. See
+   [the README e2e on what the registry serves](#the-readme-e2e-on-what-the-registry-serves).
+
 **The identity.** No job holds a registry token and neither the environment `prod` nor `beta` holds a
 secret. The three prod jobs that talk to the registry run in the environment `prod` and exchange the job's
 GitHub OIDC token; the registry trusts this repository's `release.yml`, run on `main` from a push, in the
@@ -945,7 +965,8 @@ yet](#before-the-first-release)). `beta-test` and `prod-test` are in the environ
 committed, are the files of S: the registry pinned each sha256 when it opened the group, and `prod-test`
 hashed the same directory against the same plan. The README examples of every package ran on exactly those
 bytes before anything was committed, and after the commit the channel serves bytes whose sha256 and size
-are the plan's. A user's `mopm add komira-ai/<name> --registry prod` and `mopm sync` on a clean runner lock
+are the plan's, the API serves each package's README as the plan staged it, and the README examples ran
+again on those served files and READMEs. A user's `mopm add komira-ai/<name> --registry prod` and `mopm sync` on a clean runner lock
 the full names under the namespace's channel at this run's version and install exactly those bytes.
 
 **What it does not prove.**
@@ -966,6 +987,46 @@ the full names under the namespace's channel at this run's version and install e
 `MOPM` in [`packages.bzl`](../release/readme_e2e/packages.bzl) (`toolchains//:mopm_0_0_138` in the
 `mopm-stage` job). The first mopm release with both flags is 0.0.66, so the pin has them; a later move of
 the pin must keep them, in the same change as the toolchain entry the job builds.
+
+#### The README e2e on what the registry serves
+
+`prod-test` and `beta-test` run the README e2e on the files the registry holds in quarantine, before the
+commit; after the commit, a user gets what the registry serves: the files from its channel and each README
+from its API. `beta-served-readmes` (after `beta-commit`) and `prod-served-readmes` (after `prod-commit`)
+run the README e2e of every package on exactly that. Each is a job of the environment `build` with no
+registry identity and no secret, and runs, in order:
+
+1. `release_staged_verify served --stage <beta|prod> --staged <the set mopm-stage kept> --out release/staged_set --attempts 5 --delay 30`
+   ([source](../tools/build/ci/release_beta_fetch/served.zig)), on the runner, which has the network the
+   farm lacks. It reads `plan.json` and each member's README from the set `mopm-stage` kept (its `.conda`
+   files are not read). It reads the registry's index (`https://api.beta.mopm.dev/index/config.json` or
+   `https://api.mopm.dev/index/config.json`) and refuses one whose `stage` is not the registry's, whose
+   `channel_url` is not its pinned channel (`https://conda.beta.mopm.dev/`, `https://conda.mopm.dev/`) or
+   whose `api_v2_url` is not its pinned API root (`https://api.beta.mopm.dev/api/v2`,
+   `https://api.mopm.dev/api/v2`). Then, with https GETs that follow no redirect, it downloads every file
+   of the plan from `<channel><namespace>/<subdir>/<filename>` and compares its sha256 and size with the
+   plan, and reads `<api_v2_url>/packages/<namespace>/<name>/<version>` (mopm's `getVersion`) for every
+   member at this run's version: the answer must name the member and the version, in the state
+   `published`, with a `readme` equal byte for byte to the plan's README. Every difference (a file or a
+   version not served, another size or hash, no readme, a readme of another length or with another byte,
+   with the first differing byte) is reported at once; a pass that found one is repeated up to five times
+   30 seconds apart, as the smoke's is, because a cache can lag the commit. Only when everything matched
+   does it write `release/staged_set` (beside its checked-in `BUCK`): `plan.json`, each README as served
+   and each file as downloaded. Its cases (`//tools/build/ci:served_unit`) run a registry in memory, and
+   `//tools/build/ci:served_cli_cases` run the built tool with `served` on cases that fail before any request.
+2. `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all`
+   on the farm: the README e2e of every package installs from that set and compiles and runs the
+   examples of the README the registry served. A package the set lacks fails at the e2e's phase
+   `staged`, and `expect` of `mopm-stage` already holds the plan to every package of the release.
+
+The job fails when a file or a README the registry serves is not the plan's, when a package's version is
+not served, or when any README example fails. It yanks nothing: a failure after the commit says what a
+user gets, and a person decides what to do ([Yanking a bad release](#yanking-a-bad-release)). `prod-stage` does not need
+`beta-served-readmes`, so a beta failure here does not stop the prod publish of the same run; it makes the
+run red. `//:release_workflow_cases` holds both jobs
+([`release_served_readmes.zig`](../.github/workflows/release_served_readmes.zig)): the needs, the gate, the
+environment and permissions, the one artifact (`mopm-staged-<sha>`), the `served` command of its own
+registry, the order of the steps, the e2e asserted remote, and no write to a registry.
 
 #### The beta publish
 
@@ -1002,9 +1063,9 @@ jobs" fails at `mopm-stage`'s upload of `mopm-staged-<sha>`, which already exist
 `prod-stage` does rerun cleanly with "Re-run failed jobs": it starts again from S, which holds no `state.json`,
 and the registry opens an ended group again as its next attempt. Otherwise, push again.
 
-**What it does not do yet.** No job downloads what the beta channel serves or adds from beta (there is no
-beta smoke and no beta add), so the beta publish proves that the beta registry accepted, held and committed
-the set, and that the README e2e passed on the bytes it held before the commit.
+**After the commit.** `beta-served-readmes` downloads what the beta registry serves (every file from its
+channel, every README from its API) and runs the README e2e on it, as `prod-served-readmes` does for prod
+([above](#the-readme-e2e-on-what-the-registry-serves)). No job adds from beta (there is no beta add).
 
 #### Before the first release
 
@@ -1445,7 +1506,7 @@ and make no network request; the live indexes are reached only by a run of this 
    the quickstart runs with `python -I` in a directory holding only the example (it writes its own Parquet
    file there, so no data file is passed): it must exit 0 and print what `python/examples/quickstart.expected`
    says, compared exactly, with `<version>` replaced by the version, `<abi_version>` by the ABI version of the
-   `--abi-table` file (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.9` is 1009) and `<cwd>` by the real
+   `--abi-table` file (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.10` is 1010) and `<cwd>` by the real
    path (symlinks resolved) of that directory, which the missing-file message names. A failed step names the command, its exit
    status and the last lines of its stderr.
 
@@ -1642,6 +1703,151 @@ the newest version that has their file. Once macOS builds pass routinely, a hold
 and removes the lock-file failure, and is worth deciding then. The promotion rule is unchanged by the move
 of the macOS wheel's jobs into `pypi.yml`.
 
+## npm.yml: publishing the npm packages
+
+[`.github/workflows/npm.yml`](../.github/workflows/npm.yml) builds, tests and publishes the npm packages of
+[`node/`](../node/README.md) ([the design, section 4](design/typescript_package.md#4-release)): the main
+package `@komira-ai/komira` and its platform packages `@komira-ai/komira-linux-x64-gnu` and, built on the
+farm's macOS workers, `@komira-ai/komira-darwin-arm64` ([below](#the-macos-package-in-npmyml)). It is written by
+hand. **It publishes nothing yet**: the publish waits for the owner's go (the design's D4), and the go is a
+change of one committed file ([the gate](#the-publish-gate)). Until then every run builds the packages and
+runs their install test, and the publish and the smoke are skipped.
+
+It runs on a push to `main` that changes more than documentation (`paths-ignore`: `docs/**`, `**.md`, the
+list of `release.yml` and `pypi.yml`), and on nothing else: no pull request, no schedule, no manual run. The
+version is `0.1.<N>`, the wheel's (`<N>` the build number of `release_json stamp`), so the npm packages and
+the wheel of one commit carry one version. Every run is in the concurrency group `npm-main` with
+`cancel-in-progress: false`: a running run is never cancelled, and of the waiting runs only the newest is
+kept, so two runs never publish at once.
+
+| job | environment | permissions | what it does |
+|---|---|---|---|
+| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp, builds `//release/ci:npm_smoke` and the pinned `//third_party/node:node` and `//third_party/node:npm` (npm 11.20.0), reads the gate (`npm_smoke gate`, its output `publish`), builds `//release:npm_packages` with the three stamp flags and release.yml's three release values ([why](#stamped-builds-of-releasebuck)) and holds the directory to its record (`npm_smoke verify`, its output `version`). Keeps `npm-set-<sha>` (the tarballs and `npm_set.json`) and `npm-tools-<sha>` (`npm_smoke`, Node.js, npm) for 14 days. No publish step. |
+| `test` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm: downloads the two artifacts, builds `//release:npm_packages[npm_set.json]` again with the build job's stamp and the release values, and runs `npm_smoke verify --built`: the kept directory is its record, and the record is the one this stamp builds, so the tarballs the install test installs (built from the same stamp, reproducible) are the kept ones. Then builds `//node:install_test` with the same stamp: npm installs the tarballs into an empty project and the package's tests import it by its name, on Node.js 22, 24 and 26. No npm identity. |
+| `build-macos-arm64` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm with its macOS workers, beside `test`, with the build job's stamp ([below](#the-macos-package-in-npmyml)): builds `//node:install_test_macos_arm64` for darwin-arm64, then `//release:npm_packages_macos_arm64` (with the release values as well), holds the directory to its record (`npm_smoke verify`), and keeps it as `npm-set-macos-arm64-<sha>` for 14 days. No npm identity. |
+| `publish` | `npm` | `contents: read`, `id-token: write` (trusted publishing) | only when `build`'s output `publish` is `true`, after `build` and `test` passed and `build-macos-arm64` ended, whatever its result (a cancelled run publishes nothing); no checkout, no farm, no build, no token. Downloads the set with the macOS package (`npm-set-macos-arm64-<sha>`) when `build-macos-arm64` succeeded and the set without it (`npm-set-<sha>`) otherwise, and the tools, and runs `npm_smoke publish`: holds the directory to `npm_set.json` again, then, for each platform package and last the main package (which names them in its `optionalDependencies`), asks the registry for that version and runs `npm publish <file> --access public` when it is absent. |
+| `smoke` | none | none | only when `publish` ran and succeeded, with the set `publish` took (its output `set`); no checkout, no identity. Runs `npm_smoke smoke`: installs `@komira-ai/komira` at exactly the set's version from the registry into an empty project (`npm install --ignore-scripts --engine-strict`, tried up to five times, 30 seconds apart, while the registry catches up), holds the `integrity` npm recorded in `package-lock.json` for each package to `npm_set.json`, and, with no step between, runs `SELECT 1 AS n` through the installed package, which must print the set's version, `n` and `1`. The one job whose test reaches the network, and it reaches only the npm registry. |
+
+**The set and its record.** `//release:npm_packages` ([release/npm_packages.bzl](../release/npm_packages.bzl))
+is one directory: each package's tarball, under the name `npm pack` gives it, and `npm_set.json`, which
+`npm_smoke set` writes from the tarballs as a build action: the main package's name, the version, and each
+package's name, version, file, SHA-256 and the sha512 `integrity` npm reports, the platform packages first
+and the main package last, the order they are published in. Stamped, it takes each package's `[release]`
+tarball and refuses an unstamped one; a pull request builds it unstamped (`0.0.0`), which checks all but
+the stamp. The main package names exactly the set's platform packages in its `optionalDependencies`:
+`npm_smoke set` refuses the set otherwise (`--main-optional`, the names the main package's rule gives it),
+so a main package never names a platform package that is not published with it. It is not a member of the
+conda `//release:release_set` and not an entry of `release/artifacts.textproto`.
+`//release:npm_packages_macos_arm64` is the same set with the macOS package and the main package that names
+it ([below](#the-macos-package-in-npmyml)). [`release/npm_names.txt`](../release/npm_names.txt) lists the
+two sets' names, and `//release:npm_names_cases` holds the list equal to them (the macOS set's names read
+from the list `release/BUCK` declares it with, `//release:npm_macos_arm64_names`, since a pull request does
+not build it).
+
+**The tool.** [`//release/ci:npm_smoke`](../release/ci/npm_smoke/cli.zig) is one Zig program for every
+step (`set`, `gate`, `verify`, `publish`, `smoke`), built behind its cases
+(`//release/ci/tests:test_npm_smoke`, with npm and node in memory), so each step of the workflow is one
+command. It runs the pinned npm as `<node> <npm>/bin/npm-cli.js` with the public registry, the config files
+of its own work directory, written empty, and a cache of its own, so no npmrc of a runner is read. Trusted
+publishing needs npm 11.5.1 or later under Node.js 22.14 or later; the pins are npm 11.20.0 and Node.js
+24.21.0.
+
+### Stamped builds of release/BUCK
+
+`release/BUCK` holds `//release:npm_packages` and also calls the macro `release_set`
+([release_set.bzl](../release/release_set.bzl)), which fails the evaluation of the whole file, and so the
+build of every target in it, when the build is stamped (`komira.package_stamp` set to anything but `0`) and
+does not also pass `komira.release_revision`, `komira.release_run_id` and `komira.release_attempt`. So the
+three stamped builds of `release/BUCK` in `npm.yml` (the set twice, and the macOS job's
+`//release:npm_packages_macos_arm64`) pass the three values exactly as `release.yml`'s build of
+`//release:release_set` does (`${{ github.sha }}`, `gh-${{ github.run_id }}`, `${{ github.run_attempt }}`);
+the set reads none of them. A pull request builds everything unstamped, so its check never evaluates
+`release/BUCK` this way. `//:release_stamp_cases`
+([release_stamp_test.zig](../.github/workflows/release_stamp_test.zig) says what it holds), part of the pull
+request's check, reads every workflow and local action instead: each command that sets
+`komira.package_stamp` and names a target of `release` or of a package that holds a target depending on one
+of `release` (the root package, `ci` and `tools/build/ci`; any target of them counts, which is stricter than
+the failure), or a recursive pattern over one, must pass the three values, and a
+new workflow is read the same way. It also holds `release_set.bzl` to read exactly those keys, so a fourth
+value it starts to need turns the case red.
+
+### The publish gate
+
+[`release/npm_publish.txt`](../release/npm_publish.txt) holds one line, `publish: off` or `publish: on`.
+`build` reads it (`npm_smoke gate`, the step `gate`) and hands it on as its output `publish`; `publish` and
+`smoke` run only when it is `true`. The file says `publish: off`. The owner's go is a pull request that
+changes it to `publish: on`, after the owner steps below; it is under `release/`, so it needs the release
+approver's review. `//release:npm_publish_gate_cases` refuses any other text, so a typo or a merge cannot
+leave a gate the build job would fail on, or read as on. To stop publishing again, the same change back.
+
+### Trusted publishing
+
+npm's trusted publishing binds a package's publisher to the workflow file name and an environment, so
+publishing has a file of its own, as PyPI's has, and only the job `publish` runs in the environment `npm`.
+npm exchanges that job's OIDC token for the publish and generates the provenance itself: no `NPM_TOKEN`
+exists, and no secret is read. `build`, `test` and `build-macos-arm64` hold `id-token: write` for the farm
+connection alone, in the environment `build`, which npm does not trust. `smoke` holds no permission.
+`//:npm_workflow_cases` ([npm_workflow_test.zig](../.github/workflows/npm_workflow_test.zig) says what it
+holds) pins the trigger, the top-level `permissions: {}`, the five jobs and each one's condition, runner,
+`needs`, environment and permissions, the gate, the set `publish` and `smoke` take, the macOS job's install
+test, set and artifact in that order with no step it may skip or pass over, that only `publish` runs the
+publish command and that neither `publish` nor `smoke` has a checkout, the farm or buck2, and that no line
+names a token or a secret; each defect written into the real file is refused.
+
+### The macOS package in npm.yml
+
+`@komira-ai/komira-darwin-arm64` (`//node:package_macos_arm64`: the Mach-O addon and libkomira's macOS
+directory, `libkomira.dylib` and the three Mojo runtime libraries, as the macOS arm64 wheel carries them) is
+built for darwin-arm64 by the job `build-macos-arm64`, on the farm's macOS workers, never by a pull request
+(rule B9). The job runs beside `test`, after `build`, whose stamp it takes, so both sets carry one version.
+farm-connect passes it the macOS worker set and hosts (`FARM_DARWIN_ARM64_PROPERTIES`,
+`FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS`), as it does `pypi.yml`'s macOS job.
+
+1. `//node:install_test_macos_arm64`, with `--target-platforms komira//tools/build/platforms:darwin-arm64`:
+   on a macOS worker, the pinned npm installs `//node:package_with_macos_arm64` (the main package naming both
+   platform packages) into an empty project, offline and with no install script, npm resolves its platform
+   package to the macOS one by `os` and `cpu`, and `node/install/`'s tests import it by its name on the
+   macOS Node.js 22, 24 and 26 (`//third_party/node:node_22_macos_arm64` and the others, unpacked by the
+   macOS build of `node_act`). The tests load the addon and `libkomira.dylib`, ad-hoc signed by the linker
+   and nothing else, from the files npm wrote; the loader refuses a library it will not run (an invalid
+   signature, or a quarantine Gatekeeper rejects), so the load is the test of those files.
+2. `//release:npm_packages_macos_arm64` from the same stamp: the macOS package configured for darwin-arm64 by
+   the set's transition, as step 1 configured it, so its tarball is the one step 1 installed; the linux-x64
+   package and the main package are built on the Linux workers. `npm_smoke verify` holds the directory to
+   its record, and the job keeps it as `npm-set-macos-arm64-<sha>`.
+
+`publish` takes that set when the job succeeded, and `npm-set-<sha>` (`//release:npm_packages`, whose main
+package names the linux-x64 package alone) otherwise: when the install test failed, the build failed, or the
+job ran out of its 120 minutes, nothing was kept, and the main package of the release does not name the
+macOS package. The Linux packages are published whatever the Macs did; `publish` waits for the job to end. A
+failed macOS job turns the run red. `publish` hands its choice on as its output `set`, which `smoke` reads,
+so a re-run of failed jobs that re-runs the macOS job but not `publish` cannot point the smoke at another set
+than the one published; a re-run of `publish` itself after the macOS job's result changed stops at the main
+package (the registry holds that version with other bytes), and the next code commit publishes again. Both steps build with `-c komira_release.mac_tree=true`, the gate of the
+targets that need the macOS execution platform; pr.yml's last step configures and analyses the macOS package,
+its install test and the set with it (`release/darwin_analysis.bxl`), running no action, so a change that
+leaves them unanalysable fails its pull request.
+
+### A failed run
+
+npm creates a (name, version) once. `npm_smoke publish` asks the registry for each version first: one it
+holds with the set's integrity is not published again (a re-run of a run whose publish stopped part way),
+and one it holds with other bytes stops the job before anything else is published. A run that fails before
+the main package is published leaves only platform packages that nothing names, and the next code commit
+publishes `0.1.<N+1>`. A failed smoke turns the run red ([main_red.yml](#main_redyml-the-main-red-alert)
+watches `npm`); whether to `npm deprecate` that version is the owner's call. No one publishes by hand.
+
+### Owner steps before the first publish
+
+- Confirm that the `komira-ai` scope on npm is the company's.
+- Create each package of `release/npm_names.txt` (`@komira-ai/komira-darwin-arm64` among them) on npm with
+  its trusted publisher: the repository
+  `komira-ai/komira`, the workflow `npm.yml`, the environment `npm`. Whether npm lets a trusted publisher be
+  configured before the package exists, and so how the first version of each is created, is the owner's to
+  settle.
+- Create the environment `npm` on GitHub, deployable from `main` only.
+- Then change `release/npm_publish.txt` to `publish: on`.
+
 ## pr.yml: the pull request's check
 
 [`.github/workflows/pr.yml`](../.github/workflows/pr.yml) is workflow `pr` with
@@ -1814,7 +2020,7 @@ pull request, within an hour of the alert, before anything else merges on
 top of it.
 
 [`.github/workflows/main_red.yml`](../.github/workflows/main_red.yml) is the
-alert. It runs when a run of `release.yml` or `pypi.yml` on `main` completes (`workflow_run`),
+alert. It runs when a run of `release.yml`, `pypi.yml` or `npm.yml` on `main` completes (`workflow_run`),
 builds the Zig program [`//release/ci:main_red`](../release/ci/main_red.zig)
 on the farm (`./buck2 build`, then runs the binary that build produced) with
 `issues: write`, `actions: read`, `contents: read` and the `id-token: write`
@@ -1822,8 +2028,10 @@ the farm connection exchanges, checking out `main` and running no code of any
 pull request. The workflows it reads are `--workflow <name>` flags of that
 step (and the trigger's `workflows:` list): the program names none itself, so
 a replacement push workflow is added to both in its own pull request. It names
-two: `release`, and `pypi`, whose push run builds the Python wheels (Linux and macOS) and installs them from their files
-and from TestPyPI (its scheduled and manual runs are not push runs and are never read). The macOS
+three: `release`; `pypi`, whose push run builds the Python wheels (Linux and macOS) and installs them from their files
+and from TestPyPI (its scheduled and manual runs are not push runs and are never read); and `npm`, whose
+push run builds the npm packages and runs their install test (and, once its gate is on, publishes and smokes
+them). The macOS
 workflow `release-macos` is not named: a Mac build is reported, not blocking
 ([The macOS build of the release](#the-macos-build-of-the-release)), so its red run opens no issue. The macOS
 wheel's jobs are in `pypi.yml`, so a red macOS chain makes the `pypi` run red and is reported; the

@@ -10,8 +10,9 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # every action ran on the farm (assert_remote.zig says what buck2 prints and
 # what is accepted). The CI action `buck2-farm` runs it over the run's log.
 # `assert_remote run` is the action's first line: it runs the buck2 command,
-# and when its only failure is a cut connection to the farm
-# (assert_remote/farm_retry.zig says what counts as one) waits for the farm's
+# and when its only failures are the farm's, a cut connection to the farm or a
+# job the farm failed to start because an input was unavailable on its host
+# (assert_remote/farm_retry.zig says what counts as one), waits for the farm's
 # port to answer, for a bounded time (assert_remote/farm_wait.zig), and runs it
 # again, at most three runs in all.
 # Its cases are recorded buck2 output (assert_remote/fixtures); welded: the
@@ -37,8 +38,8 @@ zig_test(
 )
 
 # Which failed runs `assert_remote run` runs again (assert_remote/farm_retry_test.zig
-# says what each case holds): recorded failed runs on the farm, a cut and real
-# failures, and logs made from them with a line added or changed; and the wait
+# says what each case holds): recorded failed runs on the farm, a cut, a job
+# the farm failed to start and real failures, and logs made from them with a line added or changed; and the wait
 # for the farm before a run again, on a clock of the case's own.
 zig_test(
     name = "farm_retry_unit",
@@ -51,6 +52,7 @@ zig_test(
         "assert_remote/fixtures/build_cut_after_file_changes.log",
         "assert_remote/fixtures/build_cut_and_compile_error.log",
         "assert_remote/fixtures/build_failed_unknown_target.log",
+        "assert_remote/fixtures/build_input_unavailable.log",
         "assert_remote/fixtures/build_remote.log",
         "assert_remote/fixtures/test_cut.log",
         "assert_remote/fixtures/test_failed.log",
@@ -237,17 +239,19 @@ zig_module(
     visibility = ["//python/smoke:"],
 )
 
-# release_staged_verify: the four checks of the release that write nothing to a registry
+# release_staged_verify: the five checks of the release that write nothing to a registry
 # (release_staged_verify.zig says what each reads and refuses). release.yml's `mopm-stage` runs
 # `expect` (plan_expect.zig) on the plan `mopm stage` wrote, before anything is staged in beta or prod;
 # `beta-test` and `prod-test` run `verify` on the staged set `beta-stage` and `prod-stage` uploaded, before
 # anything is committed, and
 # writes the directory the README e2e runs on; `prod-smoke` runs `smoke` against the prod channel
 # once the group is visible; `prod-add` then runs `add` (prod_add.zig): a user's `mopm add` and
-# `mopm sync` from prod with the pinned mopm, checked against the plan. It reads the plan and the
+# `mopm sync` from prod with the pinned mopm, checked against the plan; `beta-served-readmes` and
+# `prod-served-readmes` run `served` (served.zig) after each commit: the files and READMEs that registry
+# serves, checked against the plan and written for the README e2e. It reads the plan and the
 # client of release_beta_fetch.zig, which sits beside it. Its cases run on scratch directories, a
-# registry in memory and a mopm in memory; welded: the tool is built only when they and prod_add_set_cases
-# (below) pass.
+# registry in memory and a mopm in memory; welded: the tool is built only when they, served_unit and
+# prod_add_set_cases (below) pass.
 zig_test(
     name = "release_staged_verify_unit",
     exec_compatible_with = LINUX_X86_64,
@@ -257,6 +261,23 @@ zig_test(
         "release_beta_fetch/release_beta_fetch.zig",
         "release_beta_fetch/prod_add.zig",
         "release_beta_fetch/plan_expect.zig",
+        "release_beta_fetch/served.zig",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# `release_staged_verify served` (served.zig): what a registry serves after its commit, every file from its
+# channel and every README from its API at the plan's version, held to the plan (served_test.zig lists its
+# cases). Its cases run on scratch directories and a registry in memory.
+zig_test(
+    name = "served_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_fetch/served_test.zig",
+    imports = [
+        "release_beta_fetch/served.zig",
+        "release_beta_fetch/release_beta_fetch.zig",
+        "release_beta_fetch/prod_add.zig",
     ],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
@@ -304,11 +325,25 @@ zig_exe(
         "release_beta_fetch/release_beta_fetch.zig",
         "release_beta_fetch/prod_add.zig",
         "release_beta_fetch/plan_expect.zig",
+        "release_beta_fetch/served.zig",
     ],
-    unit_tests = [":release_staged_verify_unit", ":plan_expect_unit", ":prod_add_set_cases", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":release_staged_verify_unit", ":served_unit", ":plan_expect_unit", ":prod_add_set_cases", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
+)
+
+# The cases of release_staged_verify's executable run through its verbs (release_beta_fetch/
+# served_cli_test.zig says what each catches): the built tool (`RELEASE_STAGED_VERIFY`) is run with
+# `served`, as release.yml's served jobs run it, on cases that make no request, and its exit code,
+# stdout and stderr are checked by exact equality. A build action.
+zig_test(
+    name = "served_cli_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_fetch/served_cli_test.zig",
+    exec_tools = {"RELEASE_STAGED_VERIFY": ":release_staged_verify"},
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 # lock_graphs: the action of lock_graphs.bxl, which holds the graphs a package's

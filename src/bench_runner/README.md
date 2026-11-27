@@ -124,3 +124,43 @@ Exit status: 0 only when every query ran and its values matched, 1 otherwise (a 
 ## Tests
 
 `tests/test_inputs.mojo` (digests, tables and scale, flags, the refusal arm, settings), `tests/test_js_measure.mojo` (the summary line and the flag), `tests/test_runner.mojo` (the run over a DuckDB transport, an arm and a cache dropper that live in the test, with a manual clock) and `tests/test_komira_arm.mojo` (the real engine arm over a lineitem-shaped Parquet file and a DuckDB stand-in whose Q6 answer is computed in the test, and the conversion of result batches). No test asserts a duration the machine produced: every time is a number the fakes add to the clock. Each test file's header says what each test proves.
+
+## Example: flags, a query and the refusal arm
+
+`parse_flags` reads the program's flags and fills the defaults: the thread count is the core count and the memory limit is 80 percent of the memory, rounded down to a whole KiB. `QuerySpec` names one query and hashes its text. `RefusalArm` is an arm that refuses every query with one named construct.
+
+```mojo
+from std.testing import assert_equal, assert_false, assert_raises, assert_true
+from bench_runner import ARM_REFUSED, QuerySpec, RefusalArm, TableBinding, parse_flags
+
+var words = List[String]()
+var text = String(
+    "--duckdb d --cache-dir c --out-dir o --dataset tpch --scale sf1 --suite tpch --query q6"
+    " --sql-file q.sql --hostclass test-class --cpu-model cpu --os linux --komira-version v"
+    " --cores 8 --mem-bytes 1000000 --order-key 0 --order-key 2:desc:nulls_first"
+)
+for p in text.split(" "):
+    words.append(String(p))
+var flags = parse_flags(words)
+assert_equal(flags.threads, 8)
+assert_equal(flags.memory_limit_bytes, 800_000 // 1024 * 1024)
+assert_equal(len(flags.order_keys), 2)
+assert_true(flags.order_keys[1].descending)
+assert_true(flags.order_keys[1].nulls_first)
+
+words.append(String("--bogus"))
+words.append(String("1"))
+with assert_raises(contains="unknown flag"):
+    _ = parse_flags(words)
+
+var query = QuerySpec(String("tpch"), String("q6"), String("tpch"), String("abc"))
+assert_equal(query.key(), String("tpch/q6"))
+assert_equal(query.sha256(), String("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"))
+
+var arm = RefusalArm()
+arm.prepare(List[TableBinding](), 4, 4096)
+var answer = arm.run(query, True)
+assert_equal(answer.kind, ARM_REFUSED)
+assert_equal(answer.detail, String("no_engine_arm"))
+assert_false(answer.completed())
+```

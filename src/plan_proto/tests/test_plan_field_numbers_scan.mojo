@@ -5,7 +5,9 @@
 # THE FIELD-NUMBER CENSUS of `komira.plan.v1`, part 1 of 3: the schema, the
 # scalar and the scan messages (WireField, WireSchema, WireScalar, WireParam,
 # WirePushdownGate, WireScanBinding, WireParquetSource, WirePartitionValueRow,
-# WireScanSource, WireScanNode, WireUdfColumn, WireUdf). Parts 2 and 3 are
+# WireScanSource, WireScanNode, WireUdfColumn, WireUdf) and the messages of
+# bound_source.proto (WireSourceAccess, WireFileSource, WireBoundSource).
+# Parts 2 and 3 are
 # test_plan_field_numbers_expr.mojo and test_plan_field_numbers_plan.mojo;
 # the enum values are test_plan_enum_numbers_*.mojo; and
 # test_plan_census_complete.mojo holds the ledgers of all of them to the
@@ -36,8 +38,9 @@
 # message with one singular bool sets it in its main stream. Repeated bools
 # are pinned by distinct patterns and lengths ([true, false] against
 # [false, true, true]), read back by name.
-# ONEOFS. Three: WireScanSource.payload (1 parquet, 2 binding; each written
-# with a full payload, here), WireExpr.node (25 arms, 2 to 26) and
+# ONEOFS. Four: WireScanSource.payload (1 parquet, 2 binding; each written
+# with a full payload, here), WireBoundSource.kind (1 files, here; the numbers
+# 2 to 4 are held and decode to no arm), WireExpr.node (25 arms, 2 to 26) and
 # WirePlan.node (16 arms, 4 to 19); each arm of the last two is written empty
 # and checked by arm name, oneof position and re-encoded tag (parts 2, 3).
 # A message field holds a non-empty sub-message; when its type is pinned in
@@ -48,6 +51,7 @@
 from std.testing import assert_equal, assert_true
 
 from proto_codec import decode_proto, encode_proto
+from plan_proto.bound_source import WireBoundSource, WireFileSource, WireSourceAccess
 from plan_proto.plan import (
     WireField,
     WireParam,
@@ -716,6 +720,60 @@ def test_scan_node(mut L: _Ledger) raises:
         _same(encode_proto(g), h, q)
 
 
+# ---- the bound source: a source as `komira_add_sql_binding` takes it ----------------
+
+
+def _access(mut L: _Ledger) raises -> List[UInt8]:
+    var b = List[UInt8]()
+    _s(L, b, "WireSourceAccess.credential", "raw-etl")
+    _s(L, b, "WireSourceAccess.endpoint", "http://store.example.com:9000")
+    _s(L, b, "WireSourceAccess.region", "eu-west-1")
+    _u(L, b, "WireSourceAccess.addressing", 2)
+    _s(L, b, "WireSourceAccess.signing_service", "glue")
+    return b^
+
+
+def test_source_access(mut L: _Ledger) raises:
+    var b = _access(L)
+    var m = decode_proto[WireSourceAccess](b.copy())
+    assert_equal(m.credential, "raw-etl", "WireSourceAccess: m.credential")
+    assert_equal(m.endpoint, "http://store.example.com:9000", "WireSourceAccess: m.endpoint")
+    assert_equal(m.region, "eu-west-1", "WireSourceAccess: m.region")
+    assert_equal(m.addressing.number(), 2, "WireSourceAccess: m.addressing.number()")
+    assert_equal(m.signing_service, "glue", "WireSourceAccess: m.signing_service")
+    _same(encode_proto(m), b, "WireSourceAccess")
+
+
+def test_file_source(mut L: _Ledger) raises:
+    var b = List[UInt8]()
+    _s(L, b, "WireFileSource.location", "s3://bucket/orders/")
+    _m(L, b, "WireFileSource.access", _access(L))
+    _u(L, b, "WireFileSource.hive_partitioning", 1)
+    var m = decode_proto[WireFileSource](b.copy())
+    assert_equal(m.location, "s3://bucket/orders/", "WireFileSource: m.location")
+    assert_equal(m.access.value().credential, "raw-etl", "WireFileSource: m.access.value().credential")
+    assert_true(m.hive_partitioning, "WireFileSource: m.hive_partitioning")
+    _same(encode_proto(m), b, "WireFileSource")
+
+
+def test_bound_source(mut L: _Ledger) raises:
+    """oneof kind { 1 files }: the arm by name; the held numbers 2 to 4 set no arm."""
+    var f = List[UInt8]()
+    _s(L, f, "WireFileSource.location", "data/orders.parquet")
+    var b = List[UInt8]()
+    _m(L, b, "WireBoundSource.files", f)
+    var m = decode_proto[WireBoundSource](b.copy())
+    assert_equal(m._oneof0_case, 1, "WireBoundSource.files is the first arm")
+    assert_equal(m.files.value().location, "data/orders.parquet", "WireBoundSource: m.files.value().location")
+    _same(encode_proto(m), b, "WireBoundSource.files")
+    for held in range(2, 5):
+        var h = List[UInt8]()
+        _raw_m(h, held, f)
+        var g = decode_proto[WireBoundSource](h^)
+        assert_equal(g._oneof0_case, 0, "WireBoundSource: a held number sets no arm, " + String(held))
+        assert_true(not Bool(g.files), "WireBoundSource: a held number leaves files absent, " + String(held))
+
+
 # ---- the UDF description -----------------------------------------------------------
 
 
@@ -784,11 +842,14 @@ def main() raises:
     test_scan_node(L)
     test_udf_column(L)
     test_udf(L)
+    test_source_access(L)
+    test_file_source(L)
+    test_bound_source(L)
     L.check_all_hit()
     print("ALL komira.plan.v1 SCAN FIELD NUMBERS PINNED:", len(L.names), "fields")
 
 
-# ---- THE LEDGER: every field of the twelve messages above, numbers written by hand --------
+# ---- THE LEDGER: every field of the fifteen messages above, numbers written by hand --------
 # Change a number here only with the .proto, and only one that never
 # shipped: a shipped number is permanent.
 
@@ -895,6 +956,15 @@ WireUdf.order_keys 9
 WireUdf.has_vector_path 10
 WireUdf.operator_factory_id 11
 WireUdf.call_site_salt 12
+WireSourceAccess.credential 1
+WireSourceAccess.endpoint 2
+WireSourceAccess.region 3
+WireSourceAccess.addressing 4
+WireSourceAccess.signing_service 5
+WireFileSource.location 1
+WireFileSource.access 2
+WireFileSource.hive_partitioning 3
+WireBoundSource.files 1
 """
 
 

@@ -77,6 +77,11 @@ coverage_ci_cases(
 # `./buck2 build //...`.
 WORKFLOWS = glob([".github/workflows/*.yml"])
 
+# The local actions the workflows call (.github/actions/<name>/action.yml): not
+# workflows, so actionlint does not read them, but the pins, the endpoint
+# lints and //:release_stamp_cases do.
+ACTIONS = glob([".github/actions/*/action.yml"])
+
 zig_test(
     name = "farm_connect_cases",
     exec_compatible_with = LINUX_X86_64,
@@ -119,12 +124,16 @@ zig_test(
 # mopm-prod-staged-<sha>) is kept 7 to 14 days for a rerun on a later day
 # (.github/workflows/release_workflow_test.zig and release_publish_group.zig say what each
 # catches), and no wheel stage (no wheel job, no setup-python, no wheel target, no smoke driver:
-# pypi.yml tests the wheel). A build action.
+# pypi.yml tests the wheel), and the jobs that run the README e2e on what beta and prod serve after
+# each commit (.github/workflows/release_served_readmes.zig). A build action.
 zig_test(
     name = "release_workflow_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/workflows/release_workflow_test.zig",
-    imports = [".github/workflows/release_publish_group.zig"],
+    imports = [
+        ".github/workflows/release_publish_group.zig",
+        ".github/workflows/release_served_readmes.zig",
+    ],
     data = {
         "workflows/release.yml": ".github/workflows/release.yml",
         "packages.bzl": "//release/readme_e2e:packages.bzl",
@@ -204,6 +213,47 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# The cases of npm.yml, the publish of the npm packages (.github/workflows/npm_workflow_test.zig says what
+# each catches): a push to main of code alone, top-level permissions {}, the five jobs build, test,
+# build-macos-arm64, publish and smoke on the hosted runner, each job's exact condition, needs, environment
+# and permissions (the environment npm and its id-token for the publish alone, the farm's for build, test and
+# the macOS job, nothing for the smoke), the publish and the smoke gated on the build job's output of
+# release/npm_publish.txt, the set with the macOS package taken exactly when the macOS job succeeded and
+# kept by that job alone after its install test, the publish command in the publish job alone, no checkout
+# or farm in the publish or the smoke, and no token or secret. A build action.
+zig_test(
+    name = "npm_workflow_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/npm_workflow_test.zig",
+    data = {"workflows/npm.yml": ".github/workflows/npm.yml"},
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# The cases of the stamped builds that evaluate release/BUCK (.github/workflows/release_stamp_test.zig says
+# what each catches): release/BUCK calls release_set, which fails a stamped evaluation of the file without
+# the release's revision, run id and attempt, so every command of a workflow or a local action that builds
+# a target of release, or of a package holding a target that depends on one, with komira.package_stamp passes
+# the three values the way
+# release.yml does; a new workflow is read too. A build action.
+zig_test(
+    name = "release_stamp_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/release_stamp_test.zig",
+    data = dict(
+        {
+            "release_set.bzl": "//release:release_set.bzl",
+            "release.BUCK": "//release:release_buck",
+        },
+        **dict(
+            {"workflows/" + w.removeprefix(".github/workflows/"): w for w in WORKFLOWS},
+            **{"actions/" + a.removeprefix(".github/actions/").replace("/action.yml", ".yml"): a for a in ACTIONS}
+        )
+    ),
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # The cases of the macOS builds of the release workflows (.github/workflows/release_macos_test.zig
 # says what each catches): the workflow release-macos.yml builds the macOS set on the farm, in a
 # concurrency group of its own, and release.yml holds no macOS job; pypi.yml's macOS jobs build only when
@@ -237,7 +287,8 @@ zig_test(
 # The cases of the buck2-farm action (.github/actions/buck2-farm/action_test.zig
 # says what each catches): action.yml's shape, and its two run lines run
 # end to end over recorded buck2 output with the real //tools/build/ci:assert_remote,
-# a cut connection to the farm run again once a farm on a loopback port of the case's
+# a cut connection to the farm, or a job the farm failed to start for an
+# unavailable input, run again once a farm on a loopback port of the case's
 # own answers (at most three runs) and every other failure not.
 zig_test(
     name = "buck2_farm_cases",
@@ -255,11 +306,6 @@ zig_test(
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
 )
-
-# The local actions the workflows call (.github/actions/<name>/action.yml): not
-# workflows, so actionlint does not read them, but the pins and the endpoint
-# lints do.
-ACTIONS = glob([".github/actions/*/action.yml"])
 
 workflow_lint(
     name = "workflow_lint",

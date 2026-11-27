@@ -57,5 +57,5 @@ id,region,amount
 
 - [How do I read a CSV file?](../1-read-csv-file/page.md) (rank 1, works)
 - [How do I write a table to Parquet?](../27-write-table-parquet/page.md) (rank 27, partial)
-- How do I turn a query result into pandas, polars or Arrow? (rank 33, works; no page yet)
+- [How do I turn a query result into pandas, polars or Arrow?](../33-turn-query-result-pandas-polars-arrow/page.md) (rank 33, works)
 - How do I write a dataset partitioned by a column? (rank 97, gap; no page yet)

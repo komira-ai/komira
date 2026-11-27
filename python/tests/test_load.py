@@ -85,9 +85,17 @@ def main(args):
 
     # The public names, and importing the package loaded no library.
     want = [
+        "AMBIENT",
+        "ANONYMOUS",
+        "AwsKeys",
+        "AwsProfile",
+        "AzureKey",
+        "AzureSas",
         "BindError",
         "CredentialsError",
         "DataFrame",
+        "GcpServiceAccount",
+        "GcpToken",
         "GroupBy",
         "KomiraError",
         "LibraryLoadError",
@@ -102,6 +110,7 @@ def main(args):
         "__version__",
         "abi_version",
         "concat",
+        "files",
         "read_csv",
         "read_json",
         "read_parquet",

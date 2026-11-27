@@ -2,12 +2,12 @@
 //! (tools/build/node/defs.bzl), each with its exact message: an empty
 //! expect_error or exe, a source or bundle entry listed twice, a data
 //! destination that is a source or a package, conflicting pins, a package in
-//! its own deps, a node_dist with both or neither of native_libs and
-//! foreign, and a c_shared_lib's target_os with a zig_triple or with an
-//! `out` that is not a `.so` name; an npm_install_test of no test or no
-//! Node.js, of a test that is not staged, of a file staged where npm writes
-//! or reads its configuration, or of two releases of one Node.js line.
-//! Catches the staged-twice check deleted.
+//! its own deps, a node_dist with both native_libs and foreign or, run by the
+//! linux node_act, with neither, and a c_shared_lib's target_os with a
+//! zig_triple or with an `out` that is neither a `.so` nor a `.node` name; an
+//! npm_install_test of no test or no Node.js, of a test that is not staged, of
+//! a file staged where npm writes or reads its configuration, or of two
+//! releases of one Node.js line. Catches the staged-twice check deleted.
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -105,7 +105,7 @@ const ROWS = [_]lib.Row{
     .{
         .name = "node_target_os_not_so",
         .target = "tests//negative/node:target_os_not_so",
-        .text = "tests//negative/node:target_os_not_so: with target_os, out names the linux file and ends in .so; it is addon.node",
+        .text = "tests//negative/node:target_os_not_so: with target_os, out names the linux file and ends in .so, or is a Node addon's .node; it is addon.dll",
     },
 };
 

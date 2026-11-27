@@ -78,4 +78,4 @@ Output:
 - [How do I make a pivot table?](../51-make-pivot-table/page.md) (rank 51, partial)
 - [How do I reshape long data to wide?](../53-reshape-long-data-wide/page.md) (rank 53, partial)
 - How do I count how many times each value appears? (rank 9, works; no page yet)
-- How do I count rows per group? (rank 35, works; no page yet)
+- [How do I count rows per group?](../35-count-rows-per-group/page.md) (rank 35, works)

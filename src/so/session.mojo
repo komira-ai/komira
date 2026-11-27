@@ -10,6 +10,7 @@ from sdk_exec.engine_sql import (
     STEP_PARSE,
 )
 
+from .bound_store import BoundStores
 from .credentials import SessionCredentials
 from .status import (
     KOMIRA_STEP_BIND,
@@ -97,7 +98,8 @@ def error_code(reason: String) -> String:
 struct Session(Movable):
     """What `komira_ctx_new` (and `komira_ctx_new_with_options`) creates: the last error (its text, step and
     code), the engine (`sdk_exec`'s `EngineContext`) the session's tables are registered
-    on and its queries will run against, and the credentials defined on it.
+    on and its queries will run against, the credentials defined on it, and the
+    object stores its bound tables read.
 
     The C surface owns a `Session` through an `OwnedPointer` and lends it to
     each call; it is destroyed by `komira_ctx_free`, which stops the engine's
@@ -115,6 +117,10 @@ struct Session(Movable):
     """The credentials defined on this session (`komira_credential_add`,
     `_set`, `_seal`), by name; their values are wiped when the session is
     dropped."""
+    var bound_stores: BoundStores
+    """The object store each table bound to an `s3://` or `az://` location
+    reads (`add_sql_binding`): the bucket, the credential's name and the
+    settings, never a value."""
 
     def __init__(out self, options: EngineOptions = EngineOptions()) raises:
         """A session with no error, no table and no credential, over an engine
@@ -131,6 +137,7 @@ struct Session(Movable):
         self._last_error_code = String()
         self.engine = EngineContext(options)
         self.credentials = SessionCredentials()
+        self.bound_stores = BoundStores()
 
     def set_error(mut self, var message: String, step: Int32 = KOMIRA_STEP_NONE):
         """Replace the last error with `message`, at `step`; its code is

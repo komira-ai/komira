@@ -12,8 +12,10 @@ time, by `name`.
 
 `NODE` is the runtime of every node rule; `NODE_LINES` are the other Node.js
 lines, and `NPM_CLI` the npm program, that the install test of the npm
-packages (//node:install_test) runs; `NPM_INSTALL_ONLY` are packages npm
-installs there that no test imports.
+packages (//node:install_test) runs; `NODE_MACOS` are the same three lines'
+darwin-arm64 archives, which only the macOS install test of the npm packages
+(//node:install_test_macos_arm64) runs, on a macOS worker; `NPM_INSTALL_ONLY`
+are packages npm installs there that no test imports.
 """
 
 NODE = {
@@ -29,22 +31,6 @@ NODE = {
     "license": "MIT",
 }
 
-# The same release's darwin-arm64 archive, for the node of a macOS target
-# platform (BUCK, `node_runtime`). Its sha256 is the one the same release's
-# signed `SHASUMS256.txt` lists for `node-v24.21.0-darwin-arm64.tar.gz`; the
-# size is the archive's Content-Length. It is never run by an action (the
-# execution platform is linux): `node_dist` checks its `bin/node` is a Mach-O
-# arm64 executable and that `include/node/node_version.h` states `version`.
-NODE_DARWIN_ARM64 = {
-    "name": "node_darwin_arm64",
-    "version": NODE["version"],
-    "archive": "node-v24.21.0-darwin-arm64.tar.gz",
-    "top": "node-v24.21.0-darwin-arm64",
-    "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-darwin-arm64.tar.gz",
-    "sha256": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057",
-    "size": 52909993,
-    "license": "MIT",
-}
 # The other Node.js lines the installed npm packages are tested on
 # (//node:install_test): the 22 and 26 LTS lines, the newest release of each
 # in nodejs.org's release index (dist/index.json), linux-x64. Each is its own
@@ -78,6 +64,51 @@ NODE_LINES = [
         "native_libs": ":native_libs_atomic",
     },
 ]
+
+# The darwin-arm64 archives of the three lines above, for the macOS install
+# test of the npm packages (//node:install_test_macos_arm64) alone: the same
+# releases, each sha256 the one its release's SHASUMS256.txt lists. A macOS
+# `node` links only the system's libraries, so none has `native_libs`.
+NODE_MACOS = [
+    {
+        "name": "node_22_macos_arm64",
+        "version": "22.23.5",
+        "archive": "node-v22.23.5-darwin-arm64.tar.gz",
+        "top": "node-v22.23.5-darwin-arm64",
+        "url": "https://nodejs.org/dist/v22.23.5/node-v22.23.5-darwin-arm64.tar.gz",
+        "sha256": "e7131995759b61a0170b646010d2ad35a5d37b4cb0d471f3e8317eac6f742f3d",
+        "size": 50004868,
+        "license": "MIT",
+    },
+    {
+        "name": "node_macos_arm64",
+        "version": "24.21.0",
+        "archive": "node-v24.21.0-darwin-arm64.tar.gz",
+        "top": "node-v24.21.0-darwin-arm64",
+        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-darwin-arm64.tar.gz",
+        "sha256": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057",
+        "size": 52909993,
+        "license": "MIT",
+    },
+    {
+        "name": "node_26_macos_arm64",
+        "version": "26.13.1",
+        "archive": "node-v26.13.1-darwin-arm64.tar.gz",
+        "top": "node-v26.13.1-darwin-arm64",
+        "url": "https://nodejs.org/dist/v26.13.1/node-v26.13.1-darwin-arm64.tar.gz",
+        "sha256": "aec2514ea1ceb2ba52455e9ec65986f6749a06dd759e5db2a72e6889668c9735",
+        "size": 58340590,
+        "license": "MIT",
+    },
+]
+
+# The darwin-arm64 archive of `NODE`'s release, for the node of a macOS target
+# platform (BUCK, `node_runtime`): the `NODE_MACOS` entry of the same version,
+# so the archive is one pin and one target. It is never run by an action (the
+# execution platform is linux): `node_dist` with `foreign` checks its
+# `bin/node` is a Mach-O arm64 executable and that
+# `include/node/node_version.h` states `version`.
+NODE_DARWIN_ARM64 = dict([n for n in NODE_MACOS if n["version"] == NODE["version"]][0], name = "node_darwin_arm64")
 
 def _npm(name, version, url, sha256, size, integrity, license, deps = [], exe = None):
     return {

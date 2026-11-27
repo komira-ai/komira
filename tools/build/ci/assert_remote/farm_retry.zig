@@ -1,13 +1,14 @@
-//! The run again of a buck2 step whose only failure is a cut connection to the
-//! farm: `assert_remote run`, the first line of the buck2-farm action
-//! (.github/actions/buck2-farm/action.yml).
+//! The run again of a buck2 step whose only failures are the farm's (a cut
+//! connection to the farm, or a job the farm failed to start because an input
+//! was unavailable on its host): `assert_remote run`, the first line of the
+//! buck2-farm action (.github/actions/buck2-farm/action.yml).
 //!
 //!     assert_remote run --log <file> --summary <file> --farm-config <file> -- <buck2> <subcommand> [args...]
 //!
 //! It runs the command with its stdout and stderr merged, copied to this
 //! program's stdout (the job log) and to `--log` as they arrive, as
 //! `2>&1 | tee` would. A run that exits 0 ends here with 0. A failed run of
-//! `build`, `test` or `bxl` whose log `classify` calls a cut is run again,
+//! `build`, `test` or `bxl` whose log `classify` calls the farm's is run again,
 //! after a wait for the farm (farm_wait.zig): `--farm-config` is the machine
 //! buckconfig farm-connect wrote, which names the farm's address and the
 //! longest wait (`farm_wait_seconds`). The tool probes the farm's port until
@@ -20,9 +21,9 @@
 //!   * When the bound passes first, one line goes to the job summary saying
 //!     how long the farm was unreachable and that the step was not run again;
 //!     `--log` keeps the failed run's log, and the step fails with its code.
-//! A step runs at most `max_runs` (3) times: a third run that is cut too is
-//! final. The farm config is read only when a run is to be run again, so a
-//! step that passes, or fails for good, never needs it. The exit code is
+//! A step runs at most `max_runs` (3) times: a third run that fails on the
+//! farm too is final. The farm config is read only when a run is to be run
+//! again, so a step that passes, or fails for good, never needs it. The exit code is
 //! buck2's own, of the last run; 2 for a wrong command line, a log that cannot
 //! be written or read, a farm config that cannot be read or names no farm, or
 //! a job summary that cannot be written.
@@ -46,19 +47,30 @@
 //! `---- STDOUT ----` and `---- STDERR ----` markers; the run ends with
 //! `Tests finished: Pass N. Fail N. Timeout N. Fatal N. ...`.
 //!
-//! So a log is a cut, and only then, when:
+//! When the farm cannot start a job because an input the job named cannot be
+//! read on the host it was placed on, it fails the job `input-unavailable`
+//! and settles it as an infrastructure failure, for the client to run again.
+//! buck2 prints the same block with, in place of the channel error, the line
+//! (recorded in fixtures/build_input_unavailable.log, a release build):
+//!
+//!     [<time>] Error: (Error was returned on the stream by RE: the job failed to start: input-unavailable)
+//!
+//! A farm line is either of the two: buck2's own `Error:` line with
+//! `RE channel error: code: ` (a cut), or that `input-unavailable` line, word
+//! for word.
+//!
+//! So a log is the farm's, and only then, when:
 //!   * it has at least one failure block (`Action failed:` or a test's
 //!     `✗ Fail:`), and every failure block has, in its head (before the first
-//!     output marker), buck2's own `Error:` line with `RE channel error: code: `.
-//!     buck2's own lines carry its `[<time>] ` prefix; an action's output does
-//!     not, and a test's output comes after a marker, so the phrase quoted by
-//!     a compiler or a test never counts. The one exception is the output
+//!     output marker), a farm line. buck2's own lines carry its `[<time>] `
+//!     prefix; an action's output does not, and a test's output comes after a
+//!     marker, so the line quoted by a compiler or a test never counts. The one exception is the output
 //!     buck2 gives a test whose run on the farm was cut, which never ran
 //!     (fixtures/test_cut.log): an empty `---- STDOUT ----`, then
 //!     `---- STDERR ----` holding only buck2's
 //!     `Remote Execution Error on Execute with digest ...` line and, on the
-//!     next line, the cut line. A failed test with that output and nothing
-//!     else (empty lines before the first and after the second) is a cut;
+//!     next line, a farm line. A failed test with that output and nothing
+//!     else (empty lines before the first and after the second) is the farm's;
 //!     one more line of any kind makes it the test's own failure;
 //!   * no test timed out, was fatal, failed for the infrastructure or failed
 //!     to list (a block of that kind, or a nonzero count on `Tests finished:`);
@@ -69,24 +81,58 @@
 //!     `Action failed:` block, the test counts and the list of failed tests
 //!     after them (ended by `...and <N> more not shown...` when it is cut
 //!     short). Any other line (an analysis error, a bxl script's error, a
-//!     line of a shape not seen before) is a failure that is not a cut.
+//!     line of a shape not seen before) is a failure that is not the farm's.
 //! Anything else is final: a log that mixes one real failure with any number
-//! of cuts is never run again.
+//! of the farm's failures is never run again.
 
 const std = @import("std");
 const posix = std.posix;
 const farm_wait = @import("farm_wait.zig");
 
+/// The failure blocks of a run that failed only on the farm, by cause.
+pub const Farm = struct {
+    /// Blocks cut by a lost connection to the farm.
+    cut: usize = 0,
+    /// Blocks whose job the farm failed to start, an input unavailable on its host.
+    input_unavailable: usize = 0,
+
+    fn add(f: *Farm, cause: Cause) void {
+        switch (cause) {
+            .cut => f.cut += 1,
+            .input_unavailable => f.input_unavailable += 1,
+        }
+    }
+
+    /// Every block counted.
+    pub fn blocks(f: Farm) usize {
+        return f.cut + f.input_unavailable;
+    }
+
+    /// What failed the run, for the line after `the <ordinal> run `. A run
+    /// with only cuts reads as it always has.
+    pub fn writeWhat(f: Farm, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        if (f.input_unavailable == 0) {
+            try w.print("was cut by a lost connection to the farm (buck2's `RE channel error` in each of {d} failed block(s))", .{f.cut});
+        } else if (f.cut == 0) {
+            try w.print("had jobs the farm failed to start (the farm's `input-unavailable` in each of {d} failed block(s))", .{f.input_unavailable});
+        } else {
+            try w.print("was cut by a lost connection to the farm and had jobs the farm failed to start (buck2's `RE channel error` in {d} and the farm's `input-unavailable` in {d} failed block(s))", .{ f.cut, f.input_unavailable });
+        }
+    }
+};
+
 /// What a failed run's log shows.
 pub const Verdict = union(enum) {
-    /// Every failure is a cut connection to the farm: this many failure blocks.
-    cut: usize,
-    /// A failure block that is not a cut: its first line.
+    /// Every failure is the farm's: a cut connection to the farm, or a job the
+    /// farm failed to start because an input was unavailable on its host.
+    farm: Farm,
+    /// A failure block that is not the farm's: its first line.
     failure: []const u8,
-    /// A test result or count that is never a cut (a timeout, a fatal, an
+    /// A test result or count that is never the farm's (a timeout, a fatal, an
     /// infrastructure failure, a failed listing): the line.
     test_status: []const u8,
-    /// A line outside every block that buck2 does not print around a cut: the line.
+    /// A line outside every block that buck2 does not print around a failure
+    /// of the farm's: the line.
     unexplained: []const u8,
     /// A `Failed to build` line whose target has no `Action failed:` block: the line.
     unmatched_target: []const u8,
@@ -141,7 +187,7 @@ fn opens(c: []const u8) ?Kind {
     return null;
 }
 
-/// A test result that is never a cut.
+/// A test result that is never the farm's.
 fn finalTestResult(c: []const u8) bool {
     for ([_][]const u8{ "⚠ Fatal: ", "✉ Timeout: ", "🛠 Infra Failure: ", "? Unknown: ", "↻ Rerun: ", "⚠ Listing failed: " }) |p| {
         if (std.mem.startsWith(u8, c, p)) return true;
@@ -195,9 +241,28 @@ fn runEnd(l: []const u8) bool {
     return verdictLine(l) or std.mem.startsWith(u8, l, "Tests finished: ");
 }
 
-/// The cut line: buck2's `Error:` with the error of its channel to the farm.
-fn isCut(c: []const u8) bool {
-    return std.mem.startsWith(u8, c, "Error: ") and std.mem.indexOf(u8, c, "RE channel error: code: ") != null;
+/// Why the farm, not the action or test, failed a block: the cause its
+/// farm line names.
+pub const Cause = enum {
+    /// buck2's channel to the farm was cut (`RE channel error: code: `).
+    cut,
+    /// The farm could not start the job: an input the job named could not be
+    /// read on the host it was placed on. The farm settles it as an
+    /// infrastructure failure for the client to run again.
+    input_unavailable,
+};
+
+/// buck2's `Error:` line for a job the farm failed to start because an input
+/// was unavailable on its host, word for word (fixtures/build_input_unavailable.log).
+const input_unavailable_line = "Error: (Error was returned on the stream by RE: the job failed to start: input-unavailable)";
+
+/// The farm line: buck2's `Error:` with the error of its channel to the farm,
+/// or the farm's refusal to start a job whose input was unavailable on its
+/// host; null for any other line.
+fn farmCause(c: []const u8) ?Cause {
+    if (std.mem.startsWith(u8, c, "Error: ") and std.mem.indexOf(u8, c, "RE channel error: code: ") != null) return .cut;
+    if (std.mem.eql(u8, c, input_unavailable_line)) return .input_unavailable;
+    return null;
 }
 
 /// The count after `<label> ` on a `Tests finished:` line, or null when the label is not there.
@@ -215,8 +280,8 @@ fn count(line: []const u8, label: []const u8) ?u64 {
     return null;
 }
 
-/// True when a `Tests finished:` line counts only results a cut can explain:
-/// no timeout, fatal or infrastructure failure, no failed listing, and all
+/// True when a `Tests finished:` line counts only results a failure of the
+/// farm's can explain: no timeout, fatal or infrastructure failure, no failed listing, and all
 /// three counts there to be read.
 fn testCountsAllow(line: []const u8) bool {
     if (std.mem.indexOf(u8, line, "Listing") != null) return false;
@@ -256,7 +321,7 @@ fn testRunTail(l: []const u8) bool {
     return std.mem.eql(u8, rest, " TESTS FAILED") or std.mem.eql(u8, rest, " BUILDS FAILED");
 }
 
-/// An open block: where in it the reading is, and whether its head had the cut line.
+/// An open block: where in it the reading is, and whether its head had a farm line.
 const Block = struct {
     kind: Kind,
     /// The line that opened it.
@@ -271,14 +336,19 @@ const Block = struct {
         /// its first marker.
         output,
     } = .head,
-    cut: bool = false,
+    /// The cause of the farm line in the head, when it had one.
+    head_cause: ?Cause = null,
+    /// The cause of the farm line of the `unrun` shape, once it was read.
+    unrun_cause: ?Cause = null,
     /// For a failed test: how far its output is the output buck2 prints for a
-    /// test whose run on the farm was cut (fixtures/test_cut.log): an empty
-    /// `---- STDOUT ----`, then `---- STDERR ----` with buck2's
+    /// test whose run on the farm was cut, or never started
+    /// (fixtures/test_cut.log): an empty `---- STDOUT ----`, then
+    /// `---- STDERR ----` with buck2's
     /// `Remote Execution Error on Execute with digest ...` line and, on the
-    /// next line, its cut line; empty lines only before the first and after
+    /// next line, its farm line; empty lines only before the first and after
     /// the second. A test that printed exactly those two lines itself, with
-    /// nothing else, would read as a cut and run again; nothing else does.
+    /// nothing else, would read as the farm's failure and run again; nothing
+    /// else does.
     unrun: enum {
         /// Before the test's first output marker.
         start,
@@ -288,15 +358,18 @@ const Block = struct {
         stderr,
         /// After the `Remote Execution Error on Execute` line.
         execute,
-        /// After the cut line: the whole shape, if nothing follows.
-        cut,
-        /// Any other output: the test's own, never a cut.
+        /// After the farm line: the whole shape, if nothing follows.
+        farm,
+        /// Any other output: the test's own, never the farm's.
         other,
     } = .start,
 
-    /// True when every failure the block holds is a cut connection to the farm.
-    fn isCutBlock(b: Block) bool {
-        return b.cut or b.unrun == .cut;
+    /// The farm's cause when every failure the block holds is the farm's (a
+    /// farm line in its head, or a failed test's whole `unrun` shape); null
+    /// when the block failed on its own.
+    fn farmFailure(b: Block) ?Cause {
+        if (b.head_cause) |c| return c;
+        return if (b.unrun == .farm) b.unrun_cause else null;
     }
 
     /// For a failed test's output line: true when it is the next line of the
@@ -318,11 +391,12 @@ const Block = struct {
                     return true;
                 }
             },
-            .execute => if (isCut(s)) {
-                b.unrun = .cut;
+            .execute => if (farmCause(s)) |cause| {
+                b.unrun = .farm;
+                b.unrun_cause = cause;
                 return true;
             },
-            .cut => if (s.len == 0) return true,
+            .farm => if (s.len == 0) return true,
             .start, .other => {},
         }
         b.unrun = .other;
@@ -335,7 +409,7 @@ const Block = struct {
     fn takes(b: *Block, c: ?[]const u8, l: []const u8) bool {
         const s = c orelse {
             // A line without buck2's prefix in a test's block is the test's
-            // own: that test ran, so its output is not the cut-run shape.
+            // own: that test ran, so its output is not the unrun shape.
             if (std.mem.trim(u8, l, " ").len > 0) b.unrun = .other;
             return !runEnd(l);
         };
@@ -347,8 +421,8 @@ const Block = struct {
                         b.part = .stdout;
                     } else if (std.mem.startsWith(u8, s, "Stderr:")) {
                         b.part = .output;
-                    } else if (isCut(s)) {
-                        b.cut = true;
+                    } else if (farmCause(s)) |cause| {
+                        b.head_cause = cause;
                     }
                     return true;
                 },
@@ -368,16 +442,16 @@ const Block = struct {
                     } else if (std.mem.eql(u8, s, "---- STDERR ----")) {
                         b.part = .output;
                         b.unrun = .stderr;
-                    } else if (isCut(s)) {
-                        b.cut = true;
+                    } else if (farmCause(s)) |cause| {
+                        b.head_cause = cause;
                     }
                     return true;
                 },
                 // A test's output carries buck2's prefix, so buck2's own error
                 // after it cannot be told from the test's: an `Error` line
                 // ends the block and is judged outside it, never passed over,
-                // unless it is the cut line of the whole shape of a failed
-                // test's cut run (`unrun`).
+                // unless it is the farm line of the whole shape of a failed
+                // test that never ran (`unrun`).
                 .stdout, .output => {
                     if (b.kind == .test_fail and b.unrunTakes(s)) return true;
                     return !std.mem.startsWith(u8, s, "Error");
@@ -387,15 +461,16 @@ const Block = struct {
     }
 };
 
-/// What a failed run's log shows: whether every failure in it is a cut
-/// connection to the farm (the header says what counts). The slices of the
-/// verdict point into `log`. `a` holds one line at a time.
+/// What a failed run's log shows: whether every failure in it is the farm's,
+/// a cut connection or a job the farm could not start (the header says what
+/// counts). The slices of the verdict point into `log`. `a` holds one line at
+/// a time.
 pub fn classify(a: std.mem.Allocator, log: []const u8) !Verdict {
     var buf = std.ArrayList(u8).empty;
     defer buf.deinit(a);
 
     var block: ?Block = null;
-    var cuts: usize = 0;
+    var farm: Farm = .{};
 
     var lines = std.mem.splitScalar(u8, log, '\n');
     while (lines.next()) |raw_line| {
@@ -406,8 +481,7 @@ pub fn classify(a: std.mem.Allocator, log: []const u8) !Verdict {
         if (block) |*b| {
             if (b.takes(c, l)) continue;
             if (b.kind != .test_other) {
-                if (!b.isCutBlock()) return .{ .failure = b.first };
-                cuts += 1;
+                farm.add(b.farmFailure() orelse return .{ .failure = b.first });
             }
             block = null;
         }
@@ -438,17 +512,24 @@ pub fn classify(a: std.mem.Allocator, log: []const u8) !Verdict {
     }
     if (block) |b| {
         if (b.kind != .test_other) {
-            if (!b.isCutBlock()) return .{ .failure = b.first };
-            cuts += 1;
+            farm.add(b.farmFailure() orelse return .{ .failure = b.first });
         }
     }
-    return if (cuts == 0) .no_failure else .{ .cut = cuts };
+    return if (farm.blocks() == 0) .no_failure else .{ .farm = farm };
 }
 
 /// Why a failed run is not run again, for the job log.
 pub fn describe(v: Verdict, w: *std.Io.Writer) std.Io.Writer.Error!void {
     switch (v) {
-        .cut => |n| try w.print("every failure ({d} block(s)) is a cut connection to the farm (buck2's `RE channel error`)", .{n}),
+        .farm => |f| {
+            if (f.input_unavailable == 0) {
+                try w.print("every failure ({d} block(s)) is a cut connection to the farm (buck2's `RE channel error`)", .{f.cut});
+            } else if (f.cut == 0) {
+                try w.print("every failure ({d} block(s)) is a job the farm failed to start (the farm's `input-unavailable`)", .{f.input_unavailable});
+            } else {
+                try w.print("every failure ({d} block(s)) is the farm's: {d} a cut connection (buck2's `RE channel error`), {d} a job it failed to start (the farm's `input-unavailable`)", .{ f.blocks(), f.cut, f.input_unavailable });
+            }
+        },
         .failure => |l| try w.print("a failure that is not a cut connection: {s}", .{l}),
         .test_status => |l| try w.print("a test result a cut connection does not explain: {s}", .{l}),
         .unexplained => |l| try w.print("an error outside the failed actions and tests: {s}", .{l}),
@@ -457,8 +538,9 @@ pub fn describe(v: Verdict, w: *std.Io.Writer) std.Io.Writer.Error!void {
     }
 }
 
-/// The buck2 subcommands that run again after a cut: they only read the
-/// farm and write buck-out (and `--out`), so a second run repeats the first.
+/// The buck2 subcommands that run again after a failure of the farm's: they
+/// only read the farm and write buck-out (and `--out`), so a second run
+/// repeats the first.
 pub fn retriable(subcommand: []const u8) bool {
     return std.mem.eql(u8, subcommand, "build") or std.mem.eql(u8, subcommand, "test") or std.mem.eql(u8, subcommand, "bxl");
 }
@@ -581,7 +663,8 @@ fn parseArgs(args: []const [:0]const u8) ?Args {
 
 pub const usage = "usage: assert_remote run --log <file> --summary <file> --farm-config <file> -- <buck2> <subcommand> [args...]\n";
 
-/// The most runs of one step: the first, and two more after a cut each.
+/// The most runs of one step: the first, and two more after a failure of the
+/// farm's each.
 pub const max_runs = 3;
 
 /// The name of the n-th run (1-based), for the job log and the kept logs.
@@ -625,13 +708,15 @@ fn exitCode(end: End) u8 {
     };
 }
 
-/// The job summary line for a step whose `run`-th run was cut (`blocks`
-/// failure blocks) and whose wait for the farm ended as `waited`. `kept` is
-/// the base name of the kept log when the step runs again.
-pub fn summaryLine(a: std.mem.Allocator, subcommand: []const u8, run: usize, blocks: usize, waited: farm_wait.Waited, kept: []const u8) ![]u8 {
+/// The job summary line for a step whose `run`-th run failed only on the farm
+/// (`farm`, its failure blocks by cause) and whose wait for the farm ended as
+/// `waited`. `kept` is the base name of the kept log when the step runs again.
+pub fn summaryLine(a: std.mem.Allocator, subcommand: []const u8, run: usize, farm: Farm, waited: farm_wait.Waited, kept: []const u8) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(a);
     const w = &out.writer;
-    try w.print("buck2-farm: the {s} run of `{s}` was cut by a lost connection to the farm (buck2's `RE channel error` in each of {d} failed block(s)); ", .{ ordinal(run), subcommand, blocks });
+    try w.print("buck2-farm: the {s} run of `{s}` ", .{ ordinal(run), subcommand });
+    try farm.writeWhat(w);
+    try w.writeAll("; ");
     switch (waited) {
         .answered => |s| {
             if (s == 0) {
@@ -688,7 +773,7 @@ pub fn main(a: std.mem.Allocator, args: []const [:0]const u8, cap: usize, w: *st
         // `last` is the `run`-th run, which exited non-zero.
         const log = try readLog(ar, p.log, cap, w) orelse return 2;
         const v = try classify(ar, log);
-        if (v != .cut) {
+        if (v != .farm) {
             if (run == 1) {
                 try w.writeAll("buck2-farm: not run again: ");
             } else {
@@ -700,12 +785,20 @@ pub fn main(a: std.mem.Allocator, args: []const [:0]const u8, cap: usize, w: *st
             return exitCode(last);
         }
         if (run == max_runs) {
-            try w.print("buck2-farm: FAILED: the {s} run was cut too: the connection to the farm was cut in each of {d} runs (buck2's `RE channel error`); not run again\n", .{ ordinal(run), run });
+            if (v.farm.input_unavailable == 0) {
+                try w.print("buck2-farm: FAILED: the {s} run was cut too: the connection to the farm was cut in each of {d} runs (buck2's `RE channel error`); not run again\n", .{ ordinal(run), run });
+            } else {
+                try w.print("buck2-farm: FAILED: the {s} run failed on the farm too, as each of {d} runs did: it ", .{ ordinal(run), run });
+                try v.farm.writeWhat(w);
+                try w.writeAll("; not run again\n");
+            }
             try w.flush();
             return exitCode(last);
         }
         const farm = try readFarm(ar, p.farm_config, w) orelse return 2;
-        try w.print("buck2-farm: the {s} run was cut by a lost connection to the farm (buck2's `RE channel error` in each of {d} failed block(s)); waiting for the farm's port to answer, up to ", .{ ordinal(run), v.cut });
+        try w.print("buck2-farm: the {s} run ", .{ordinal(run)});
+        try v.farm.writeWhat(w);
+        try w.writeAll("; waiting for the farm's port to answer, up to ");
         try farm_wait.writeDuration(w, farm.wait_seconds);
         try w.writeAll("\n");
         try w.flush();
@@ -718,7 +811,7 @@ pub fn main(a: std.mem.Allocator, args: []const [:0]const u8, cap: usize, w: *st
         const waited = try farm_wait.waitForFarm(&clock, prober, farm.wait_seconds, w);
 
         const kept = try keptLogPath(ar, p.log, ordinal(run));
-        const note = try summaryLine(ar, subcommand, run, v.cut, waited, std.fs.path.basename(kept));
+        const note = try summaryLine(ar, subcommand, run, v.farm, waited, std.fs.path.basename(kept));
         if (waited == .answered) {
             std.fs.cwd().rename(p.log, kept) catch |e| {
                 try w.print("buck2-farm: cannot keep the {s} run's log as {s}: {s}\n", .{ ordinal(run), kept, @errorName(e) });

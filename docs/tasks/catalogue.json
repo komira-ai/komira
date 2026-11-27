@@ -263,7 +263,7 @@
     "slug": "read-parquet-csv-files-s3",
     "category": "Cloud storage",
     "question": "How do I read Parquet or CSV files from S3?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
       "komira-ai/komira#2337"
     ]
@@ -290,7 +290,10 @@
     "slug": "select-drop-columns",
     "category": "Transform",
     "question": "How do I select or drop columns?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2390"
+    ]
   },
   {
     "rank": 35,
@@ -311,21 +314,30 @@
     "slug": "run-sql-csv-parquet-file",
     "category": "Performance",
     "question": "How do I run SQL on a CSV or Parquet file (or a DataFrame)?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2391"
+    ]
   },
   {
     "rank": 38,
     "slug": "resample-time-series-daily-weekly-monthly",
     "category": "Time",
     "question": "How do I resample a time series to daily, weekly or monthly?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2392"
+    ]
   },
   {
     "rank": 39,
     "slug": "extract-year-month-weekday-date-column",
     "category": "Time",
     "question": "How do I extract year, month and weekday from a date column?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2393"
+    ]
   },
   {
     "rank": 40,
@@ -799,7 +811,7 @@
     "slug": "read-files-google-cloud-storage-azure",
     "category": "Cloud storage",
     "question": "How do I read files from Google Cloud Storage or Azure Blob?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
       "komira-ai/komira#2337"
     ]

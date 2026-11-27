@@ -61,6 +61,6 @@ Flo 100.0
 
 ## Related
 
-- How do I count rows per group? (rank 35, works; no page yet)
+- [How do I count rows per group?](../35-count-rows-per-group/page.md) (rank 35, works)
 - [How do I compute a running total per group?](../48-compute-running-total-per-group/page.md) (rank 48, works)
 - [How do I rank rows within a group?](../49-rank-rows-within-group/page.md) (rank 49, works)
