@@ -1631,7 +1631,8 @@ struct _Parser(Movable):
             var agg_alias: Optional[String] = None
             if self._is_kw("as"):
                 self._advance()
-                if self._kind() != TK_IDENT:
+                # `AS FOR`: the alias is missing, not named `for`.
+                if self._kind() != TK_IDENT or self._is_kw("for"):
                     raise Error("SQL syntax error: expected alias after AS")
                 agg_alias = String(self.tokens[self.pos].text)
                 self._advance()
