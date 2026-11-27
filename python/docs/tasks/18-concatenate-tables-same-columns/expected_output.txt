@@ -1,0 +1,4 @@
+[{'id': 1, 'name': 'Ana', 'amt': 9.5}, {'id': 2, 'name': 'Bo', 'amt': 7.0}, {'id': 3, 'name': 'Cy', 'amt': 4.25}, {'id': 4, 'name': 'Di', 'amt': None}]
+[{'month': 'jan', 'id': 1, 'name': 'Ana', 'amt': 9.5}, {'month': 'jan', 'id': 2, 'name': 'Bo', 'amt': 7.0}, {'month': 'feb', 'id': 3, 'name': 'Cy', 'amt': 4.25}, {'month': 'feb', 'id': 4, 'name': 'Di', 'amt': None}]
+[{'id': 1, 'name': 'Ana', 'amt': 9.5}, {'id': 2, 'name': 'Bo', 'amt': 7.0}, {'id': 3, 'name': 'Cy', 'amt': 4.25}, {'id': 4, 'name': 'Di', 'amt': None}]
+[{'id': 1, 'name': 'Ana', 'amt': 9.5}, {'id': 2, 'name': 'Bo', 'amt': 7.0}, {'id': 3, 'name': 'Cy', 'amt': 4.25}, {'id': 4, 'name': 'Di', 'amt': None}]

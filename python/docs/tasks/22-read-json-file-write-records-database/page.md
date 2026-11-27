@@ -83,7 +83,7 @@ with psycopg.connect("dbname=app") as conn:
 
 ## Related
 
-- How do I read a JSON file into a table? (rank 14, partial; no page yet)
+- [How do I read a JSON file into a table?](../14-read-json-file-table/page.md) (rank 14, partial)
 - How do I write a DataFrame to a database table? (rank 21, gap; no page yet)
 - How do I flatten nested JSON into columns? (rank 45, gap; no page yet)
 - How do I append rows to an existing database table? (rank 88, gap; no page yet)

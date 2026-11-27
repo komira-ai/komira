@@ -56,4 +56,4 @@ Output:
 - [How do I make a pivot table?](../51-make-pivot-table/page.md) (rank 51, partial)
 - [How do I reshape long data to wide?](../53-reshape-long-data-wide/page.md) (rank 53, partial)
 - [How do I cross-tabulate two columns?](../54-cross-tabulate-two-columns/page.md) (rank 54, partial)
-- How do I rename columns? (rank 16, works; no page yet)
+- [How do I rename columns?](../16-rename-columns/page.md) (rank 16, works)

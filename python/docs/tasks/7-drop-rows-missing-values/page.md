@@ -83,5 +83,5 @@ Output:
 
 - [How do I find and fill missing values?](../6-find-fill-missing-values/page.md) (rank 6, partial)
 - How do I replace specific values such as 'N/A' with null? (rank 55, works; no page yet)
-- How do I remove duplicate rows? (rank 13, works; no page yet)
+- [How do I remove duplicate rows?](../13-remove-duplicate-rows/page.md) (rank 13, partial)
 - How do I validate data: nulls, uniqueness, ranges? (rank 59, works; no page yet)
