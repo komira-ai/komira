@@ -11,6 +11,11 @@
 #   2. A wrong argument count, an argument of another type, an unknown name
 #      (listing the declared UDFs) and an aggregate call in a scalar position
 #      are refused by name.
+#   3. A catalog whose caller cannot declare a UDF (`no_declaration_door`
+#      set, as libkomira's session sets it) ends the refusal of an unknown
+#      name and of a refused name with its own sentence, never with
+#      `catalog.declare_udf`; a UDF declared on such a catalog still resolves,
+#      and an unknown name next to it still lists it.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -23,6 +28,7 @@ from sql.sql_bind_expr import _bind_scalar
 from sql.sql_bind_parquet import ParquetFacts
 from sql.sql_bind_scope import CteScope, _build_bind_scope
 from sql.sql_catalog import SqlCatalog
+from sql.sql_fn_table import sql_scalar_fn_spec
 from sql.sql_parser import parse_sql
 from sql.sql_token import tokenize
 
@@ -91,13 +97,18 @@ struct _Udf(DeclaredScalarUdf):
 
 
 def _got(sql: String) raises -> String:
-    """Parse `sql` (one SELECT over one table), bind every select item and
-    the WHERE predicate with `_bind_scalar` against the table's schema, and
-    return the Project / Filter / Scan text of the result, or `ERR: ` and the
-    binder's message."""
+    """`_got_in` over `_catalog()` with `affine` and `nextafter` declared."""
     var cat = _catalog()
     cat.declare_udf(_Udf(String("affine"), 7))
     cat.declare_udf(_Udf(String("nextafter"), 9))
+    return _got_in(cat, sql)
+
+
+def _got_in(cat: SqlCatalog, sql: String) raises -> String:
+    """Parse `sql` (one SELECT over one table), bind every select item and
+    the WHERE predicate with `_bind_scalar` against the table's schema in
+    `cat`, and return the Project / Filter / Scan text of the result, or
+    `ERR: ` and the binder's message."""
     try:
         var st = parse_sql(tokenize(sql))
         var scope = _build_bind_scope(
@@ -177,6 +188,55 @@ def test_udf_refusals() raises:
     _check(
         "SELECT sum(k) FROM t WHERE affine(k) > 1.0",
         "ERR: SQL bind error: aggregate function not allowed in this position",
+    )
+
+
+comptime _NO_DOOR = "this test's caller has no way to declare one"
+
+
+def _no_door_catalog() raises -> SqlCatalog:
+    """`_catalog()` with no UDF declared and `no_declaration_door` set."""
+    var cat = _catalog()
+    cat.udfs.no_declaration_door = String(_NO_DOOR)
+    return cat^
+
+
+def test_a_catalog_with_no_declaration_door_refuses_with_its_sentence() raises:
+    var cat = _no_door_catalog()
+    assert_equal(
+        _got_in(cat, "SELECT score(k, v) AS score FROM t"),
+        "ERR: SQL not supported: scalar function 'score'. No UDFs are declared"
+        " on this catalog either — this test's caller has no way to declare"
+        " one",
+    )
+    # A name the engine refuses to lower: its row's reason, then the
+    # catalog's sentence in place of the `catalog.declare_udf` remedy.
+    assert_equal(
+        _got_in(cat, "SELECT nextafter(v, 1.0) FROM t"),
+        "ERR: " + sql_scalar_fn_spec("nextafter").reason
+        + " This name is declarable as a UDF, but this test's caller has no"
+        " way to declare one.",
+    )
+    # A built-in's own refusal is unchanged.
+    assert_equal(
+        _got_in(cat, "SELECT upper(s, s) FROM t"),
+        "ERR: SQL bind error: upper() expects exactly 1 argument — got 2",
+    )
+
+
+def test_a_udf_declared_on_a_catalog_with_no_declaration_door_resolves() raises:
+    var cat = _no_door_catalog()
+    cat.declare_udf(_Udf(String("nextafter"), 9))
+    assert_equal(
+        _got_in(cat, "SELECT nextafter(k) FROM t"),
+        "Project(exprs=[UdfCall(name=nextafter, h=9, in=5, out=12, ColRef(k))])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n",
+    )
+    assert_equal(
+        _got_in(cat, "SELECT nosuch(k) FROM t"),
+        "ERR: SQL not supported: scalar function 'nosuch'. It is not a"
+        " built-in and no UDF is declared under that name. Declared UDFs:"
+        " nextafter",
     )
 
 

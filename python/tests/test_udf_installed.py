@@ -268,7 +268,7 @@ def main(argv):
             except komira.UnsupportedOperation as e:
                 want = (
                     "bind: SQL not supported: scalar function 'score'. No UDFs are declared on this catalog either "
-                    "\u2014 declare one with `catalog.declare_udf(f)`"
+                    "\u2014 a komira session cannot declare a function to SQL yet"
                 )
                 assert str(e) == want, "SQL naming the UDF is refused with {!r} ({}), not {!r}".format(str(e), type(e).__name__, want)
             else:

@@ -53,7 +53,7 @@ Output:
 - The pandas-shaped Series has arithmetic, comparisons, `astype`, `isin`, the `.str` and `.dt` accessors, and the cumulative and window verbs. The polars-shaped `Expr` has arithmetic, `abs`, `cast`, `fill_null`, `is_in`, `when/then/otherwise`, the `.str` namespace and the aggregate and window verbs.
 - A Python function of your own over each value is not available. `Series.apply`, `Series.map` and `DataFrame.apply` do not exist, and nor does a public `udf` decorator: komira-ai/komira#2332. `probe_series_apply.py` beside this page tries `df["price"].apply(...)` and must fail with the line in `probe_series_apply.error.txt`.
 - The polars-shaped `Expr.map_elements` does not exist either: komira-ai/komira#2384. `probe_polars_map_elements.py` must fail with the line in `probe_polars_map_elements.error.txt`.
-- SQL cannot call a Python function: komira-ai/komira#2330.
+- SQL cannot call a Python function: a `Session` has no way to declare one to SQL yet, and a call such as `SELECT score(a, b) FROM t` is refused with `bind: SQL not supported: scalar function 'score'. No UDFs are declared on this catalog either — a komira session cannot declare a function to SQL yet`: komira-ai/komira#2330.
 - Some everyday functions have no method or no form yet: `round(x, digits)` in SQL is refused (only `round(x)` runs), and `Series.round`, `Series.abs` and `Expr.round` do not exist: komira-ai/komira#2383.
 - The day a probe runs to the end, this page's check goes red, and the page and the catalogue status change with it.
 - The `.str` accessor of the pandas-shaped Series is newer than the PyPI release 0.1.1623.
