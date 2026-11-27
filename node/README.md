@@ -26,6 +26,7 @@ need no second build), with `apache-arrow ^21.2.0` as its peer dependency. The n
 |---|---|
 | [`package.json`](package.json) | the manifest npm reads: `exports` and `types` point at `dist/`, `engines`, the peer dependency, and the platform packages as optional dependencies at the package's own version. No `bin`, no scripts, no dependency of its own. Its `version` is `0.0.0` and it is `"private": true`: `:package` stamps it ([below](#the-npm-packages)) |
 | [`platforms/linux-x64-gnu/package.json`](platforms/linux-x64-gnu/package.json) | the manifest of the linux-x64 platform package, `@komira-ai/komira-linux-x64-gnu`: its `os`, `cpu` and `libc`, the wheel's licence expression, and the files it packs; stamped the same way by `:package_linux_x64` |
+| [`platforms/darwin-arm64/package.json`](platforms/darwin-arm64/package.json) | the same for the macOS arm64 platform package, `@komira-ai/komira-darwin-arm64` (`os` and `cpu`, no `libc`); stamped by `:package_macos_arm64` |
 | [`src/index.ts`](src/index.ts) | the one entry, and the public names: `Session`, `Result`, `registerParquet`, `sql`, `abiVersion`, `version`, `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError`, `UnsupportedOperation`, and the types `SessionOptions`, `CsvOptions`, `FilePath`, `KomiraErrorFields`, `Step` |
 | [`src/session.ts`](src/session.ts) | `Session`: `registerParquet(name, path)` (a path or a `file:` URL, a relative one resolved against the working directory when called), `registerCsv` and `registerNdjson` (their arguments checked, then refused with `UnsupportedOperation`: this package does not yet bind the call that registers those formats by name), `sql(query)`, which runs one statement through `komira_sql_stream` and resolves with its `Result`, `close()`, `closed`, `Symbol.dispose` and `Symbol.asyncDispose`; the options `threads` and `memoryLimit` (positive integers, checked before the library is loaded), passed to `komira_ctx_new_with_options` when either is given. The default session of the module-level `registerParquet` and `sql`, one per JavaScript environment |
 | [`src/errors.ts`](src/errors.ts) | `KomiraError` (`status`, `code`, `step`, each `null` unless the engine gave one: `code` is the engine's named code, `SQL_SYNTAX_ERROR`, ..., and `step` one of `parse`, `bind`, `optimize`, `lower`, `execute`) and its subclasses; the error table's rows that are an `UnsupportedOperation` (`errorClass`) and the step names (`stepOf`) |
@@ -211,18 +212,28 @@ call to return, then destroys the context.
 
 ## The npm packages
 
-`:package` (`@komira-ai/komira`: `dist/`, `LICENSE` and `NOTICE`) and `:package_linux_x64`
+`:package` (`@komira-ai/komira`: `dist/`, `LICENSE` and `NOTICE`), `:package_linux_x64`
 (`@komira-ai/komira-linux-x64-gnu`: the addon, `//src/so:libkomira[dist]` as it is at `native/`,
-and the wheel's licence files) are the tarballs `npm pack` would write, by `npm_tarball`
+and the wheel's licence files) and `:package_macos_arm64` (`@komira-ai/komira-darwin-arm64`: the
+same for macOS arm64, the Mach-O addon and libkomira's macOS directory, `libkomira.dylib` and the
+three Mojo runtime libraries) are the tarballs `npm pack` would write, by `npm_tarball`
 ([tools/build/package/README.md](../tools/build/package/README.md#the-npm-packages)): byte for byte
 reproducible, read back by their `[check]`, and refused when a file is not one the manifest's `files`
 names, when a native library needs what the platform does not give (a Mojo runtime library missing
 among them), or when the manifest's `repository.url` is not komira's. Each carries its manifest here
 stamped: unstamped, as in a pull request, it is `0.0.0` and stays private; the release stamp gives
-`0.1.<N>`, the wheel's version, on the package and on every optional dependency. Nothing publishes
-them yet: the release set `//release:npm_packages` takes them, and
-[`npm.yml`](../docs/ci.md#npmyml-publishing-the-npm-packages) builds and tests that set on every push
-to `main` and publishes it only once `release/npm_publish.txt` says `publish: on` (it says off).
+`0.1.<N>`, the wheel's version, on the package and on every optional dependency it names.
+`package.json` lists every platform package; a main package names only those published with it
+(`optional_dependencies`): `:package` the linux-x64 one, and `:package_with_macos_arm64` (the same
+files) the linux-x64 and the darwin-arm64 ones. Nothing publishes them yet: the release sets
+`//release:npm_packages` (`:package` and `:package_linux_x64`) and
+`//release:npm_packages_macos_arm64` (`:package_with_macos_arm64`, `:package_linux_x64` and
+`:package_macos_arm64`) take them, and
+[`npm.yml`](../docs/ci.md#npmyml-publishing-the-npm-packages) builds and tests them on every push
+to `main`, takes the second when the macOS install test passed and the first when it did not, and
+publishes it only once `release/npm_publish.txt` says `publish: on` (it says off).
+`:package_macos_arm64` is built for darwin-arm64 on the farm's macOS workers by npm.yml's macOS job
+alone, never by a pull request.
 
 `:install_test` installs them as a user does: the pinned npm 11.20.0
 ([third_party/node](../third_party/node/README.md)) runs `npm install --offline --ignore-scripts
@@ -235,9 +246,16 @@ marks as having an install script fails it. Then the files of [`install/`](insta
 project and import the package by its name. Each pinned Node.js line, 22.23.5, 24.21.0 and
 26.13.1, is its own action (`[node_22]`, `[node_24]`, `[node_26]`).
 
+`:install_test_macos_arm64` is the same test on macOS arm64, on a macOS worker, in npm.yml's macOS
+job only: npm installs `:package_with_macos_arm64`, resolves its platform package to
+`:package_macos_arm64` (the only one whose `os` and `cpu` match), and the same files run on the
+macOS Node.js of each line, run by the macOS build of `node_act`. The load of the ad-hoc-signed addon
+and `libkomira.dylib` from the files npm wrote is the check that npm left them no quarantine
+attribute for the loader to refuse.
+
 | file | what it proves |
 |---|---|
-| [`install/install.test.ts`](install/install.test.ts) | npm installed the main package, of its platform packages only `komira-linux-x64-gnu` (marked optional, with its `os`, `cpu` and `libc`), and `apache-arrow` 21.2.0 as the peer the project does not name; the package by its name is the one in `node_modules`, at its `package.json`'s version (`0.0.0` or `0.1.<N>`), as is its platform package; its public names exactly; the environment holds no Mojo or conda variable and its one library path is node's C++ runtime (`libgcc_s.so.1` and `libstdc++.so.6`, with `libatomic.so.1` on Node 26, nothing else); libkomira loads (ABI major 1), and the addon, `libkomira.so` and the three Mojo runtime libraries are mapped from the installed platform package and from nowhere else (`process.report`'s shared objects); `SELECT 1 AS n` is one INT32 row, a `Table` and `RecordBatch`es of the installed `apache-arrow` (`instanceof`); a `GROUP BY` over the Parquet, CSV and NDJSON fixtures ([`install/fixtures/`](install/fixtures/), the same eight rows) answers DuckDB's rows and BIGINT columns |
+| [`install/install.test.ts`](install/install.test.ts) | npm installed the main package, of its platform packages only the host's, `komira-linux-x64-gnu` or on macOS `komira-darwin-arm64` (marked optional, with its `os`, `cpu` and `libc`), and `apache-arrow` 21.2.0 as the peer the project does not name; the package by its name is the one in `node_modules`, at its `package.json`'s version (`0.0.0` or `0.1.<N>`), as is its platform package; its public names exactly; the environment holds no Mojo, conda or `DYLD_` variable and its one library path is node's C++ runtime (`libgcc_s.so.1` and `libstdc++.so.6`, with `libatomic.so.1` on Node 26, nothing else; on macOS a directory with no library); libkomira loads (ABI major 1), and the addon, `libkomira.so` (`libkomira.dylib`) and the three Mojo runtime libraries are mapped from the installed platform package and from nowhere else (`process.report`'s shared objects); `SELECT 1 AS n` is one INT32 row, a `Table` and `RecordBatch`es of the installed `apache-arrow` (`instanceof`); a `GROUP BY` over the Parquet, CSV and NDJSON fixtures ([`install/fixtures/`](install/fixtures/), the same eight rows) answers DuckDB's rows and BIGINT columns |
 | [`install/commonjs.test.cjs`](install/commonjs.test.cjs) | `require()` of the package by its name from a `.cjs` file gives its public names and its `package.json`'s version, and its `Session` answers `SELECT 1` |
 
 ## Tests

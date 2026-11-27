@@ -1,9 +1,11 @@
 # The publish of komira's npm packages (docs/ci.md, "npm.yml: publishing the npm packages"; the packages are
 # node/, docs/design/typescript_package.md, section 4): the main package @komira-ai/komira and its platform
-# package @komira-ai/komira-linux-x64-gnu, the set //release:npm_packages, whose names are
-# release/npm_names.txt.
+# packages @komira-ai/komira-linux-x64-gnu and @komira-ai/komira-darwin-arm64, the sets
+# //release:npm_packages (the main package and the linux-x64 package) and //release:npm_packages_macos_arm64
+# (the main package that names both platform packages, and both), whose names are release/npm_names.txt.
 #
-# EVERY PUSH TO MAIN THAT CHANGES CODE, four jobs (a job that fails stops every job that needs it):
+# EVERY PUSH TO MAIN THAT CHANGES CODE, five jobs (a job that fails stops every job that needs it, but for
+# the macOS job, which `publish` and `smoke` wait for and do not need to pass):
 #   `build`    on the farm: takes the stamp (`release_json stamp`), reads the publish gate
 #              (release/npm_publish.txt, `npm_smoke gate`), builds //release:npm_packages stamped (each
 #              package at 0.1.<N>, the wheel's version, with npm_set.json: each package's name, version,
@@ -15,27 +17,40 @@
 #              here from the same stamp (`npm_smoke verify --built`), then runs the install test of those
 #              tarballs on each pinned Node.js line (//node:install_test: 22, 24 and 26), stamped the same,
 #              so it installs the same bytes. No npm identity.
-#   `publish`  only when the gate says `publish: on`: holds the set's directory to npm_set.json again and
-#              publishes each platform package and then the main package, which names them, with
+#   `build-macos-arm64`
+#              on the farm, beside `test`, with the build job's stamp: builds the macOS package
+#              (//node:package_macos_arm64) for darwin-arm64 on the farm's macOS workers and runs its install
+#              test there on each pinned Node.js line (//node:install_test_macos_arm64: npm installs the main
+#              package that names it, and the tests load the ad-hoc-signed addon and libkomira from what npm
+#              wrote), then builds //release:npm_packages_macos_arm64 from the same stamp (its macOS package is
+#              the bytes the test installed), holds the directory to its set and keeps it as an artifact.
+#              Nothing is kept unless the install test passed. No npm identity.
+#   `publish`  only when the gate says `publish: on`, after `build` and `test` passed and the macOS job
+#              ended: takes the set with the macOS package when the macOS job succeeded and the set without
+#              it otherwise (a failed or timed-out macOS job, whose set was never kept), so the published main
+#              package names the macOS package only after its install test passed on a farm Mac and npm.yml
+#              publishes the Linux packages whatever the Macs did. Holds the set's directory to npm_set.json
+#              again and publishes each platform package and then the main package, which names them, with
 #              `npm publish <file> --access public` (`npm_smoke publish`; a version the registry holds with
 #              the set's integrity is not published again, and one it holds with other bytes stops the job).
-#   `smoke`    after the publish: installs @komira-ai/komira at exactly the set's version from the registry
-#              into an empty project, holds the integrity npm recorded for each package to npm_set.json and
-#              runs SELECT 1 through it (`npm_smoke smoke`). The one place a job reaches the network for a
-#              test, and it reaches only the npm registry.
+#   `smoke`    after the publish, with the set the publish took: installs @komira-ai/komira at exactly the
+#              set's version from the registry into an empty project, holds the integrity npm recorded for
+#              each package to npm_set.json and runs SELECT 1 through it (`npm_smoke smoke`). The one place a
+#              job reaches the network for a test, and it reaches only the npm registry.
 #
 # THE GATE. npm publishing starts on the owner's go (the design's D4). The go is a reviewed change of
 # release/npm_publish.txt from `publish: off` to `publish: on`; //release:npm_publish_gate_cases holds the
-# file to one of the two lines. While it says off, every push builds and tests the packages, and `publish` and
-# `smoke` are skipped (a skipped job is not a failure). //:npm_workflow_cases holds that `publish` and `smoke`
+# file to one of the two lines. While it says off, every push builds and tests the packages (the macOS one
+# too), and `publish` and `smoke` are skipped (a skipped job is not a failure). //:npm_workflow_cases holds that `publish` and `smoke`
 # run only when the gate's output is `true`.
 #
 # TRUSTED PUBLISHING. npm binds a package's trusted publisher to this file's name and the environment `npm`,
 # so the `publish` job alone runs in that environment, and it alone holds `id-token: write` for npm: npm
 # exchanges the job's OIDC token for the publish and adds the provenance itself. No NPM_TOKEN exists, and no
-# secret is read. `build` and `test` hold `id-token: write` for farm-connect alone, in the environment
-# `build`, which no registry trusts. `smoke` holds no permission. //:npm_workflow_cases holds every job's
-# environment and permissions.
+# secret is read. `build`, `test` and `build-macos-arm64` hold `id-token: write` for farm-connect alone, in the
+# environment `build`, which no registry trusts. `smoke` holds no permission. //:npm_workflow_cases holds every
+# job's environment and permissions, and that the publish takes the set with the macOS package exactly when the
+# macOS job succeeded.
 #
 # TRIGGERS AND CONCURRENCY. A push to main that changes more than documentation (`paths-ignore`, the list
 # pypi.yml and release.yml have); never a pull request, no schedule, no manual run. Every run is in the group
@@ -233,12 +248,90 @@ jobs:
         if: always()
         run: ./buck2 kill || true
 
+  # The macOS package, on the farm's macOS workers, with the build job's stamp, beside the test job (docs/ci.md,
+  # "The macOS package in npm.yml"): its install test, then the set with it, kept only when that test passed.
+  # The job holds `contents: read` and the `id-token: write` that the farm connection exchanges, in the
+  # environment `build`. No npm identity. Without the macOS worker set or hosts the first darwin build fails
+  # analysis, naming the `[komira_re]` key that is not set, and the publish takes the set without it.
+  build-macos-arm64:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-tools-${{ github.sha }}
+          path: ${{ runner.temp }}/npm/tools
+      - name: the tool is executable
+        run: chmod +x "$RUNNER_TEMP/npm/tools/npm_smoke"
+      # The farm connection with the macOS worker set and hosts, as pypi.yml's and release-macos.yml's macOS
+      # jobs pass them (docs/ci.md).
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          darwin-properties: ${{ vars.FARM_DARWIN_ARM64_PROPERTIES }}
+          darwin-macos-hosts: ${{ vars.FARM_DARWIN_MACOS_HOSTS }}
+          macos-library-dirs: ${{ vars.FARM_MACOS_LIBRARY_DIRS }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # the publish queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      # npm installs the main package that names the macOS package and that package, offline, with no install
+      # script, on the farm's macOS workers, and the package's tests import it by its name, once per pinned
+      # Node.js line (22, 24 and 26). `mac_tree` here as in the next step, so the two share one configuration.
+      - name: the install test of the macOS package on each pinned Node.js, on the farm's macOS workers
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 -c komira_release.mac_tree=true -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} //node:install_test_macos_arm64
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The set with the macOS package, from the same stamp: its transition configures that package as the
+      # step above did, so its tarball is the one the install test installed.
+      - name: build the npm packages with the macOS package
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira_release.mac_tree=true -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} //release:npm_packages_macos_arm64 --out ${{ runner.temp }}/npm/macos-set
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the directory holds the set with the macOS package, stamped
+        run: '"$RUNNER_TEMP/npm/tools/npm_smoke" verify --set "$RUNNER_TEMP/npm/macos-set/npm_set.json" --dir "$RUNNER_TEMP/npm/macos-set" --github-output "$GITHUB_OUTPUT"'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-set-macos-arm64-${{ github.sha }}
+          path: ${{ runner.temp }}/npm/macos-set
+          if-no-files-found: error
+          retention-days: 14
+          # a re-run of every job builds the same bytes again
+          overwrite: true
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
   # The publish, in the environment `npm` that the packages' trusted publishers name, only when the gate says
-  # on. The job holds `contents: read` and the `id-token: write` that npm exchanges for a publish, nothing
-  # else: no checkout, no farm, no build, no token.
+  # on, after the build and the install test passed and the macOS job ended (passed, failed or timed out; a
+  # cancelled run publishes nothing). It takes the set with the macOS package only when the macOS job
+  # succeeded. The job holds `contents: read` and the `id-token: write` that npm exchanges for a publish,
+  # nothing else: no checkout, no farm, no build, no token.
   publish:
-    needs: [build, test]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.build.outputs.publish == 'true'
+    needs: [build, test, build-macos-arm64]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.build.result == 'success' && needs.test.result == 'success' && needs.build.outputs.publish == 'true' }}
     runs-on: ubuntu-24.04
     environment: npm
     timeout-minutes: 30
@@ -247,9 +340,10 @@ jobs:
       # trusted publishing: the token npm exchanges for a publish and its provenance
       id-token: write
     steps:
+      # the set with the macOS package when its install test passed, the set without it otherwise
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: npm-set-${{ github.sha }}
+          name: ${{ needs.build-macos-arm64.result == 'success' && format('npm-set-macos-arm64-{0}', github.sha) || format('npm-set-{0}', github.sha) }}
           path: ${{ runner.temp }}/npm/set
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -260,17 +354,19 @@ jobs:
       - name: publish the platform packages, then the main package
         run: '"$RUNNER_TEMP/npm/tools/npm_smoke" publish --set "$RUNNER_TEMP/npm/set/npm_set.json" --dir "$RUNNER_TEMP/npm/set" --node "$RUNNER_TEMP/npm/tools/node/bin/node" --npm "$RUNNER_TEMP/npm/tools/npm" --work "$RUNNER_TEMP/npm/publish"'
 
-  # The smoke of what the registry serves, on a fresh runner: no checkout, no identity, no permission.
+  # The smoke of what the registry serves, on a fresh runner, with the set the publish took: no checkout, no
+  # identity, no permission.
   smoke:
-    needs: [build, publish]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.build.outputs.publish == 'true'
+    needs: [build, build-macos-arm64, publish]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.publish.result == 'success' && needs.build.outputs.publish == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions: {}
     steps:
+      # the set the publish took
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: npm-set-${{ github.sha }}
+          name: ${{ needs.build-macos-arm64.result == 'success' && format('npm-set-macos-arm64-{0}', github.sha) || format('npm-set-{0}', github.sha) }}
           path: ${{ runner.temp }}/npm/set
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

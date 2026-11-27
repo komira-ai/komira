@@ -6,9 +6,13 @@
 //! `"private": true`, and every optional dependency at `0.0.0`. Stamping it
 //! changes only those values: the version and every optional dependency become
 //! the stamp's version, and a stamped package drops `private` (an unstamped
-//! one keeps it, so npm refuses to publish it). Every other key keeps its
-//! value and its place; the text is written as `JSON.stringify(v, null, 2)`
-//! writes it, with a final newline.
+//! one keeps it, so npm refuses to publish it). Of the source's optional
+//! dependencies the package keeps exactly the rule's (`Want.optional`, each
+//! one the source lists), in the source's order, and drops the key when it
+//! keeps none: the source lists every platform package, and a main package
+//! names only those published with it. Every other key keeps its value and
+//! its place; the text is written as `JSON.stringify(v, null, 2)` writes it,
+//! with a final newline.
 //!
 //! Held, in the source and again in the package.json read back:
 //!   * `name` is the rule's name, and `license` the rule's licence;
@@ -16,6 +20,7 @@
 //!     trusted publishing requires the package to state;
 //!   * `os`, `cpu` and `libc` are exactly the platform's (one value each), or
 //!     absent for a package with no platform;
+//!   * the optional dependencies are exactly the rule's (read back);
 //!   * `files` is a list of paths and globs (`*` within a part, `**` for any
 //!     parts; no negation), so the tarball's members can be held to it;
 //!   * no install script (`preinstall`, `install`, `postinstall`): npm
@@ -49,6 +54,9 @@ pub const Want = struct {
     stamped: bool,
     license: []const u8,
     platform: Platform = .{},
+    /// The optional dependencies the package names: each one the source
+    /// manifest lists, none twice; the others are dropped.
+    optional: []const []const u8 = &.{},
 };
 
 /// The stamped manifest's text, and its `files` list.
@@ -148,6 +156,34 @@ fn optionalOf(alloc: Alloc, d: *Diag, obj: json.ObjectMap) Refused!?*json.Object
     return &p.object;
 }
 
+fn listed(names: []const []const u8, name: []const u8) bool {
+    for (names) |n| {
+        if (std.mem.eql(u8, n, name)) return true;
+    }
+    return false;
+}
+
+/// Keeps of `obj`'s optional dependencies exactly `keep`, in their order in
+/// `obj`; refused when `keep` names one twice or one `obj` does not list. With
+/// none kept, the key goes.
+fn keepOptional(alloc: Alloc, d: *Diag, obj: *json.ObjectMap, keep: []const []const u8) Refused!void {
+    for (keep, 0..) |k, i| {
+        if (listed(keep[0..i], k)) return refuse(d, alloc, "optional: the rule names the optional dependency {s} twice", .{k});
+    }
+    const opt = try optionalOf(alloc, d, obj.*);
+    for (keep) |k| {
+        const has = if (opt) |o| o.contains(k) else false;
+        if (!has) return refuse(d, alloc, "optional: the rule names the optional dependency {s}, which the source manifest does not list", .{k});
+    }
+    const o = opt orelse return;
+    var drop = std.ArrayList([]const u8).empty;
+    for (o.keys()) |k| {
+        if (!listed(keep, k)) try drop.append(alloc, k);
+    }
+    for (drop.items) |k| _ = o.orderedRemove(k);
+    if (keep.len == 0) _ = obj.orderedRemove("optionalDependencies");
+}
+
 /// The source manifest `source`, stamped for `want`.
 pub fn stamp(alloc: Alloc, d: *Diag, source: []const u8, want: Want) Refused!Stamped {
     var obj = try parse(alloc, d, "the source manifest", source);
@@ -163,6 +199,7 @@ pub fn stamp(alloc: Alloc, d: *Diag, source: []const u8, want: Want) Refused!Sta
             v.* = .{ .string = want.version };
         }
     }
+    try keepOptional(alloc, d, &obj, want.optional);
     try obj.put("version", .{ .string = want.version });
     if (want.stamped) _ = obj.orderedRemove("private");
     return .{ .bytes = try render(alloc, .{ .object = obj }), .files = files };
@@ -170,17 +207,25 @@ pub fn stamp(alloc: Alloc, d: *Diag, source: []const u8, want: Want) Refused!Sta
 
 /// The package.json read back from a tarball, held to `want`: the fields
 /// above, the stamp's version on the package and on every optional
-/// dependency, and `private` true exactly when unstamped. Its `files` list.
+/// dependency, exactly the rule's optional dependencies, and `private` true
+/// exactly when unstamped. Its `files` list.
 pub fn checkWritten(alloc: Alloc, d: *Diag, bytes: []const u8, want: Want) Refused![]const []const u8 {
     const obj = try parse(alloc, d, "the package's package.json", bytes);
     const files = try checkFields(alloc, d, obj, want);
     const ver = stringOf(obj, "version") orelse return refuse(d, alloc, "version: the package.json has no `version` string", .{});
     if (!std.mem.eql(u8, ver, want.version)) return refuse(d, alloc, "version: the package.json's version is {s}, not the stamp's {s}", .{ ver, want.version });
-    if (try optionalOf(alloc, d, obj)) |opt| {
-        for (opt.keys(), opt.values()) |k, v| {
+    const opt = try optionalOf(alloc, d, obj);
+    if (opt) |o| {
+        for (o.keys(), o.values()) |k, v| {
+            if (!listed(want.optional, k))
+                return refuse(d, alloc, "optional: the package.json names the optional dependency {s}, which the rule does not", .{k});
             if (v != .string or !std.mem.eql(u8, v.string, want.version))
                 return refuse(d, alloc, "version: the package.json's optional dependency {s} is not at the package's version {s}", .{ k, want.version });
         }
+    }
+    for (want.optional) |k| {
+        const has = if (opt) |o| o.contains(k) else false;
+        if (!has) return refuse(d, alloc, "optional: the package.json does not name the optional dependency {s}, which the rule does", .{k});
     }
     const private = obj.get("private");
     const is_private = private != null and private.? == .bool and private.?.bool;

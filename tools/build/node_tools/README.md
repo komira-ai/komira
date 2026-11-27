@@ -26,6 +26,9 @@ Test support: [`tartest.zig`](tartest.zig) builds tar and gzip archives in memor
 
 `node_act` is the second program of this directory: the actions of the `node_dist`, `npm_package`, `node_test`, `node_binding_test`, `npm_install_test` and `esbuild_bundle` rules
 ([`tools/build/node/defs.bzl`](../node/defs.bzl)), which but `npm_install_test`'s were busybox scripts. A Zig tool, built behind its unit tests; no shell.
+`:node_act_darwin` is the same sources built for macOS arm64 by the same zig on the linux execution
+platform; the macOS Node.js dists and the npm packages' macOS install test (their `act`) run it on a macOS
+worker, since they run the macOS `node`.
 
 ```
 node_act dist --archive <tgz> --out <dir> --top <dir> --version <v> --libs <dir>

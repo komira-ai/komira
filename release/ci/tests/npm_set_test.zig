@@ -132,6 +132,35 @@ test "a set is refused when a package is not the scope's, given twice, at anothe
     try expectBuildRefused(a, h.MAIN, &.{ try input(a, h.MAIN, "0.0.0"), try input(a, h.LINUX, "0.0.0") }, true, "the packages are unstamped (0.0.0): a release set is stamped");
 }
 
+fn expectOptionalRefused(a: std.mem.Allocator, s: set.Set, optional: []const u8, want: []const u8) !void {
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, set.checkOptional(a, &why, s, optional));
+    try t.expectEqualStrings(want, why);
+}
+
+test "the main package names exactly the set's platform packages: one the set does not hold, one it leaves out, and one named twice are refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var why: []const u8 = "";
+    const linux_only = try set.build(a, &why, h.MAIN, &.{ try input(a, h.MAIN, "0.1.7"), try input(a, h.LINUX, "0.1.7") }, true);
+    const with_darwin = try set.build(a, &why, h.MAIN, &.{ try input(a, h.MAIN, "0.1.7"), try input(a, h.LINUX, "0.1.7"), try input(a, h.DARWIN, "0.1.7") }, true);
+    const both = h.DARWIN ++ "," ++ h.LINUX;
+    try set.checkOptional(a, &why, linux_only, h.LINUX);
+    // in either order
+    try set.checkOptional(a, &why, with_darwin, both);
+    try set.checkOptional(a, &why, with_darwin, h.LINUX ++ "," ++ h.DARWIN);
+    // The set without the macOS package, whose install test did not pass: a main package naming it is refused.
+    try expectOptionalRefused(a, linux_only, both, "the main package @komira-ai/komira names @komira-ai/komira-darwin-arm64 as an optional dependency, which is no platform package of the set: npm would find nothing to install for it");
+    // The set with it, and a main package that leaves it out.
+    try expectOptionalRefused(a, with_darwin, h.LINUX, "the platform package @komira-ai/komira-darwin-arm64 is not an optional dependency of the main package @komira-ai/komira: npm would never install it");
+    try expectOptionalRefused(a, linux_only, "", "the platform package @komira-ai/komira-linux-x64-gnu is not an optional dependency of the main package @komira-ai/komira: npm would never install it");
+    try expectOptionalRefused(a, linux_only, h.LINUX ++ "," ++ h.LINUX, "the main package @komira-ai/komira names the optional dependency @komira-ai/komira-linux-x64-gnu twice");
+    // The main package itself, and an empty name, are no platform package.
+    try expectOptionalRefused(a, linux_only, h.LINUX ++ "," ++ h.MAIN, "the main package @komira-ai/komira names @komira-ai/komira as an optional dependency, which is no platform package of the set: npm would find nothing to install for it");
+    try expectOptionalRefused(a, linux_only, h.LINUX ++ ",", "the main package @komira-ai/komira names  as an optional dependency, which is no platform package of the set: npm would find nothing to install for it");
+}
+
 test "a written set is read back as itself, and a key a reader does not know is ignored" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();

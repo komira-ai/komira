@@ -154,9 +154,11 @@ Fixed before this design, and not reopened here:
     against `node` at load.
   - `node_dist` keeps only `bin/node`, `include/node` and `LICENSE` from the archive. npm, npx and
     corepack are left out; the one npm CLI is the pin of §4, which only `//node:install_test` runs.
-  - The "Limits" section of [tools/build/node/README.md](../../tools/build/node/README.md) lists
-    what macOS needs: a `darwin-arm64` pin, the macOS execution platform, and
-    `-undefined dynamic_lookup`. None of it exists yet. linux-arm64 has neither a
+  - **EXISTS** for macOS arm64: the `darwin-arm64` archives of the same three lines
+    (`:node_macos_arm64`, `:node_22_macos_arm64`, `:node_26_macos_arm64`), unpacked and run by the
+    macOS build of `node_act` on a macOS worker, for the macOS install test alone, and the addon
+    linked for the target platform's OS (`target_os`: Mach-O with `-undefined dynamic_lookup` on
+    macOS). linux-arm64 has neither a
     Node pin nor a registered build platform (`tools/build/platforms/table.bzl`,
     `komira-limit:linux-arm64-unregistered`).
 - **EXISTS** The Node rules also hold `npm_modules` (an offline `npm ci --ignore-scripts` from a
@@ -530,7 +532,8 @@ is under [D2](#d2-where-the-mojo-runtime-comes-from). What follows from the ruli
   ([tools/build/mojo/README.md](../../tools/build/mojo/README.md)).
 - npm writes files without the quarantine attribute, and Node's macOS binary allows libraries that
   are not signed by its own team. So `dlopen` of an ad-hoc-signed library works
-  *(inferred; the macOS install test checks it)*.
+  *(inferred; the macOS install test, `//node:install_test_macos_arm64`, checks it on the farm's
+  macOS workers in `npm.yml`)*.
 - No notarization is planned.
 
 ## 4. Release
@@ -585,9 +588,16 @@ top-level `pypi.yml` and the macOS arm64 wheel by `pypi-macos-arm64.yml`, each t
     `//release/ci:npm_smoke set` writes, the platform packages first and the main package last, and
     `//release:npm_names_cases`.
 - **The platforms.** linux-x86_64 is built on the farm's Linux workers. macos-arm64 is built by the
-  macOS leg (`release-macos.yml`'s farm macOS workers), never in a pull request (rule B9).
-  linux-arm64 waits for that platform to be registered.
-  - The main package lists only the platform packages that are published.
+  macOS leg, `npm.yml`'s job `build-macos-arm64` on the farm's macOS workers (as `pypi.yml`'s macOS
+  wheel is), never in a pull request (rule B9). **EXISTS**: `//node:package_macos_arm64` and
+  `//node:install_test_macos_arm64`. linux-arm64 waits for that platform to be registered.
+  - The main package lists only the platform packages that are published. **EXISTS**: `npm_tarball`'s
+    `optional_dependencies` keeps of `node/package.json`'s list only the names it gives, and the set
+    refuses a main package that does not name exactly its platform packages. `//node:package` names
+    the linux-x64 package (the set `//release:npm_packages`) and `//node:package_with_macos_arm64`
+    both (`//release:npm_packages_macos_arm64`); `npm.yml` publishes the second only when the macOS
+    install test passed, and the first otherwise, so a failed macOS build never holds the Linux
+    packages back.
   - A platform added later is a new optional dependency in a later version. That is additive, and
     a user of an older version is not affected.
 
@@ -645,7 +655,7 @@ How it holds the rules:
 **Owner steps outside the repository**, before the first publish:
 - confirm that the `komira-ai` scope on npm is the company's;
 - create each package of `release/npm_names.txt` (today the main package and the linux-x64 one; the
-  darwin-arm64 and linux-arm64 packages join the list when they are built) and its trusted publisher
+  darwin-arm64 package is on it, and the linux-arm64 one joins it when it is built) and its trusted publisher
   (workflow `npm.yml`, environment `npm`);
 - create the `npm` environment on GitHub, deployable from `main` only.
 
@@ -740,7 +750,9 @@ linux-x86_64.
   test runs the bytes that are published.
 - On macos-arm64 and linux-arm64 the same target runs in the release workflows only, never in a
   pull request (rule B9). The published package names a platform only after that platform's
-  install test passed.
+  install test passed. **EXISTS** for macos-arm64: `//node:install_test_macos_arm64`, in `npm.yml`'s
+  job `build-macos-arm64`, installs the main package that names the macOS package on the macOS
+  Node.js 22, 24 and 26.
 
 ### SQL conformance, reused
 
@@ -907,11 +919,10 @@ Whichever option is ruled, the go itself is one reviewed change: `release/npm_pu
   with it, are on `main`.
 - Tests in `.ts` run with type stripping on the pinned 24, and on a Node 22 pin only from 22.18,
   so the Node 22 pin is 22.18 or later.
-- linux-arm64 waits for its build platform. macos-arm64 waits for the macOS build of the addon;
-  `libkomira` itself builds and loads on macOS, and the macOS arm64 wheel carries
-  `libkomira.dylib` and the three runtime libraries. Both platforms also need a Node pin of their
-  own (the one pin is linux-x64, [third_party/node/pins.bzl](../../third_party/node/pins.bzl)).
-- Whether ad-hoc signing is enough on macOS is inferred, not tested.
+- linux-arm64 waits for its build platform and a Node pin of its own. macos-arm64's package, its
+  Node pins and its install test exist, and run on the farm's macOS workers in `npm.yml` only.
+- Whether ad-hoc signing is enough on macOS is inferred until `npm.yml`'s macOS job first runs on
+  `main`: `//node:install_test_macos_arm64` is the test of it, and no pull request runs it.
 - Whether a trusted publisher can be configured before its package exists is not stated by npm's
   documentation.
 - Electron, Deno and Bun are not claimed. Electron refuses external `ArrayBuffer`s.
@@ -926,7 +937,7 @@ Each part is its own change, with its tests:
 5. errors, session options, and CSV and NDJSON registration, each after its library change;
 6. the package rule and the release set, consuming the self-contained directory of the libkomira
    target (`//src/so:libkomira[dist]`, which the wheel already uses);
-7. the macOS and linux-arm64 builds;
+7. the macOS and linux-arm64 builds (the macOS one **EXISTS**);
 8. the install tests (the linux-x64 one **EXISTS**: `//node:install_test`);
 9. `npm.yml`;
 10. the SQL conformance runner.

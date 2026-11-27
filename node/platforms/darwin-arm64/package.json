@@ -1,0 +1,27 @@
+{
+  "name": "@komira-ai/komira-darwin-arm64",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The macOS arm64 native files of @komira-ai/komira: its Node addon and libkomira with the libraries it loads.",
+  "license": "Apache-2.0 AND LicenseRef-Modular-Proprietary",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/komira-ai/komira",
+    "directory": "node"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "komira_addon.node",
+    "native",
+    "NOTICE",
+    "AWS_LC_LICENSE",
+    "S2N_TLS_LICENSE",
+    "MODULAR_LICENSE",
+    "MODULAR_THIRD_PARTY_NOTICES"
+  ]
+}
