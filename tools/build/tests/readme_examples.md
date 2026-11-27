@@ -71,8 +71,26 @@ package with no README.md and for a `readme` that is not True or False; those
 refusals, and `owner_base` having no `[tests][readme]`, are the scenario
 [`analysis_refusals_readme`](../selftest/analysis_refusals_readme.zig).
 
+A source-first README (its library lists `readme_examples`; the design is
+[docs/design/documentation_tests.md](../../../docs/design/documentation_tests.md)):
+[`functional/readme_examples/source_first`](functional/readme_examples/source_first/BUCK)
+holds the README of `src/anomaly` as it was (`inline.md`) and as `migrate`
+makes it (`README.md` and `examples/example_1.mojo` to `example_4.mojo`).
+Its library depends on `komira//src/anomaly:anomaly`, so `[tests][readme]`
+is the freshness check of `README.md` against `examples/` and one welded test
+per file, each compiled against anomaly and run; it must build, and its
+marker is the check's line then one PASS line per file. `:changed_assert` is
+`example_1.mojo` with the assert of line 9 changed, compiled and run the same
+way: it builds only when that run fails with
+`functional/readme_examples/source_first/changed_assert/example_1.mojo:9:` in
+its output (`mojo_readme_example_failure`). The tool's unit tests read the
+same files: `migrate` of `inline.md` is `README.md` and `examples/` byte for
+byte, and `migrate --verify` proves it and refuses an edited one.
+
 ```sh
 ./buck2 build tests//functional/readme_examples/...
+./buck2 build 'tests//functional/readme_examples/source_first:source_first[tests][readme]'
+./buck2 build tests//functional/readme_examples/source_first:changed_assert   # builds: the run failed at example_1.mojo:9
 ./buck2 build tests//negative/readme_examples/unowned:unowned_base   # must fail: readme_unowned_base_6.mojo:7
 ./buck2 test //tools/build/selftest:analysis_refusals_readme
 ./buck2 build tests//negative/readme_examples/raises:raises   # must fail: GATED TEST FAILED: ...:README.md:13

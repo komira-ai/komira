@@ -51,8 +51,9 @@ pub const EXTENSIONS = [_]struct { ext: []const u8, word: []const u8 }{
 pub const SHOWN = [_][]const u8{ "example.py", "expected_output.txt" };
 
 /// The argument of the marker `word` that `line` is, whole, or null when
-/// it is not that marker.
-fn marker(line: []const u8, comptime word: []const u8) ?[]const u8 {
+/// it is not that marker. A README's includes read their markers with it too
+/// (include.zig).
+pub fn marker(line: []const u8, comptime word: []const u8) ?[]const u8 {
     const head = MARKERS.open ++ word;
     if (!std.mem.startsWith(u8, line, head) or !std.mem.endsWith(u8, line, MARKERS.close)) return null;
     if (line.len < head.len + MARKERS.close.len) return null;

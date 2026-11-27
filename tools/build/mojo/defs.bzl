@@ -241,16 +241,17 @@ def _library_impl(ctx):
     # which installs it at share/doc/<conda name>/README.md) refuses relative
     # links: the installed copy has no neighbours.
     ships = conda_name != None and conda_refusal == None
-    readme_marker = readme_gate(ctx, tc, import_name, ungated_tset, _link_tail(c_link), env_args, ships, _readme_test, owner = bool(native.c_direct), rerun = rerun_env(ctx))
-    if readme_marker != None:
+    readme = readme_gate(ctx, tc, import_name, ungated_tset, _link_tail(c_link), env_args, ships, _readme_test, owner = bool(native.c_direct), rerun = rerun_env(ctx))
+    if readme != None:
         if "readme" in test_subtargets:
             fail("{}: a test_srcs file is named `readme.mojo`; `[tests][readme]` is the README's examples".format(ctx.label))
         # [generated] and [file]: the programs and README.md the gate ran;
-        # [objects]: an owner's README programs as objects, for its shared library's README check (shared.bzl).
-        test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]], sub_targets = {"file": [DefaultInfo(default_output = ctx.attrs.readme)], "generated": [DefaultInfo(default_output = readme_marker[1])], "objects": [DefaultInfo(default_output = readme_marker[3])]})]
-        markers.append(readme_marker[0])
+        # [objects]: an owner's README programs as objects, for its shared library's README check (shared.bzl);
+        # a source-first README's [fill] and one per example file, an inline one's [migrated] (readme.bzl).
+        test_subtargets["readme"] = [DefaultInfo(default_output = readme.marker, other_outputs = [readme.generated], sub_targets = readme.sub_targets)]
+        markers.append(readme.marker)
         if cov_link:
-            coverage_readme(ctx, tc, _build_executable, readme_marker, ungated_tset, _link_tail(c_link), src_dir, import_name, root, env_args, cov_bins, cov_runs)
+            coverage_readme(ctx, tc, _build_executable, readme, ungated_tset, _link_tail(c_link), src_dir, import_name, root, env_args, cov_bins, cov_runs)
 
     # With coverage on, the README's run (above) and the gate (coverage.bzl);
     # only the conda package waits for them and the runs, never this package.
@@ -412,6 +413,9 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
+        # A source-first README's example files, `glob(["examples/*.mojo"])`:
+        # each a welded test of its own, the README held to them (readme.bzl).
+        "readme_examples": attrs.option(attrs.list(attrs.source()), default = None),
     } | COVERAGE_ATTRS | DLOPEN_ATTRS | MUTATION_ATTRS | NATIVE_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | HANG_LIMIT_ATTRS | RERUN_ATTRS | _TOOLCHAIN_ATTR,
 )
 
