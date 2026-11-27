@@ -31,9 +31,10 @@ NATIVE_OWNERS = [
 # in a `SecretStore` (`secret_store`) and bound for a reveal in a
 # `SecretBindings` table (`secret_registry`), and the SQL bindings
 # (`bindings.mojo`): a name bound to a `WireBoundSource`, a local path or
-# Parquet objects of an S3 bucket or an Azure container, read through the
-# object-store file systems of `store_fs.mojo` (objectstore_s3, azure_blob and
-# their closure are deps for them). The library is plain
+# Parquet objects of an S3 bucket, an Azure container or a GCS bucket, read
+# through the object-store file systems of `store_fs.mojo` and
+# `gcs_access.mojo` (objectstore_s3, azure_blob, objectstore_gcs and their
+# closure, gRPC's among it, are deps for them). The library is plain
 # Mojo with no pointer in it; `_c_abi.mojo`, the one file that holds pointers,
 # is not part of it but the source of the `libkomira` target below.
 #
@@ -76,6 +77,18 @@ NATIVE_OWNERS = [
 # replacing its table (register_parquet's too), every refusal word for word,
 # no secret in any refusal, one bucket read one way per session, and a
 # credential re-sealed as another kind refusing the statement at bind;
+# test_gcs_binding holds the same for gs:// (and gcs://), over a fake GCS
+# backend factory (objectstore_gcs's in-memory FakeGcsStorageBackend, which
+# answers only the token the test seals as right and serves a bucket only at
+# its own endpoint): equal to the local file, a glob, an endpoint of the
+# source's own, one statement over GCS and S3, the token sealed when the
+# statement runs, every gs:// refusal word for word, one bucket read one way,
+# and a name re-sealed as another kind (a BearerToken among them) refusing
+# the statement at bind; test_gcs_store_fs holds StoreFs's GCS arm over the
+# same fake (footers, sizes, ranges, listings, its refusals of writes, a
+# handle of another store), StoreScanFs's add_gcs, the endpoints
+# GcsAccess.at reads and refuses word for word, LazyGcsBackend building on
+# its first verb, and the production backend built without dialing;
 # test_store_fs holds StoreFs's delegation to an S3 bucket and an Azure
 # container (footers, sizes, ranges, listings, writes), a handle of the other
 # store refused, and StoreScanFs serving exactly the buckets it was given, each
@@ -104,6 +117,7 @@ mojo_library(
         "//src/column_format:column_format",
         "//src/column_kernels:column_kernels",
         "//src/compression:compression",
+        "//src/connect:connect",
         "//src/containers:containers",
         "//src/counters:counters",
         "//src/crypto:crypto",
@@ -116,11 +130,15 @@ mojo_library(
         "//src/expr:expr",
         "//src/fork_join:fork_join",
         "//src/fs:fs",
+        "//src/gcp_core:gcp_core",
+        "//src/gcp_storage:gcp_storage",
+        "//src/grpc:grpc",
         "//src/hashing:hashing",
         "//src/host_probe:host_probe",
         "//src/host_profile:host_profile",
         "//src/http_client:http_client",
         "//src/http_core:http_core",
+        "//src/http_server:http_server",
         "//src/iceberg_catalog:iceberg_catalog",
         "//src/iceberg_scan:iceberg_scan",
         "//src/join_assembly:join_assembly",
@@ -137,6 +155,7 @@ mojo_library(
         "//src/name_registry:name_registry",
         "//src/net:net",
         "//src/objectstore:objectstore",
+        "//src/objectstore_gcs:objectstore_gcs",
         "//src/objectstore_s3:objectstore_s3",
         "//src/op_agg_state:op_agg_state",
         "//src/op_join_probe:op_join_probe",
@@ -179,6 +198,7 @@ mojo_library(
         "//src/trace:trace",
         "//src/udf:udf",
         "//src/uuid:uuid",
+        "//src/wkt:wkt",
         "//src/xml:xml",
         "//src/zlib:zlib",
         "//tools/build/mojo/runtime_paths:runtime_paths",
@@ -187,6 +207,8 @@ mojo_library(
         "tests/test_add_sql_binding.mojo",
         "tests/test_credentials.mojo",
         "tests/test_credentials_reveal.mojo",
+        "tests/test_gcs_binding.mojo",
+        "tests/test_gcs_store_fs.mojo",
         "tests/test_plan_result.mojo",
         "tests/test_register_arrow.mojo",
         "tests/test_register_text.mojo",
@@ -222,9 +244,9 @@ mojo_library(
 # komira_register_arrow_stream goes the other way: it drains a caller's
 # Arrow C stream into a table the session holds, and releases it.
 # komira_add_sql_binding binds a table name to the bytes of a WireBoundSource:
-# a local Parquet path, or Parquet objects of an s3:// or az:// location read
-# with a credential sealed on the session; komira_sql_stream then reads them
-# through the object store.
+# a local Parquet path, or Parquet objects of an s3://, az:// or gs://
+# location read with a credential sealed on the session; komira_sql_stream
+# then reads them through the object store.
 # It is published only if every gate driver passes, each of which dlopens it
 # with RTLD_NOW and calls it as a foreign host would:
 #   gate_version       the version is 1010 (1.10);
@@ -274,8 +296,9 @@ mojo_library(
 #                      under the same name; NULL ctx -1, NULL name or source -2
 #                      with the named last error; source_len 64 MiB plus one
 #                      -5; scope 2, an empty name, a name that is not UTF-8, a
-#                      one-byte source, a zero-length source and a missing file
-#                      -3 with the named error, step bind and code; a good call
+#                      one-byte source, a zero-length source, a missing file
+#                      and a gs:// location naming no credential -3 with the
+#                      named error, step bind and code; a good call
 #                      afterwards leaves no error.
 #   gate_credentials  a credential added, set and sealed is 0 at each step;
 #                      one sealed without its secret, a field of another

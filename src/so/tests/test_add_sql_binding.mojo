@@ -77,6 +77,7 @@ from sdk_exec.run_control import RunControl
 
 from komira_test_fake_azure import FakeAzureConnector
 from komira_test_fake_s3 import FakeS3Connector
+from objectstore_gcs import FakeGcsStorageBackend
 from so import (
     KOMIRA_BIND_SESSION,
     KOMIRA_CRED_AWS_KEYS,
@@ -90,6 +91,7 @@ from so import (
     KOMIRA_FIELD_SAS,
     KOMIRA_FIELD_SECRET,
     KOMIRA_STEP_BIND,
+    GcsAccess,
     Session,
     StoreConnectors,
     add_sql_binding_with,
@@ -98,7 +100,7 @@ from so import (
 )
 
 comptime _Connectors = StoreConnectors[
-    FakeS3Connector, FakeAzureConnector, FixedClock
+    FakeS3Connector, FakeAzureConnector, FakeGcsStorageBackend, FixedClock
 ]
 
 comptime _RIGHT_KEY = "AKIDRIGHT"
@@ -171,8 +173,15 @@ def _mk_azure() raises -> FakeAzureConnector:
     return c^
 
 
+def _mk_gcs(access: GcsAccess) raises -> FakeGcsStorageBackend:
+    """An empty bucket: the gs:// binding is test_gcs_binding's."""
+    return FakeGcsStorageBackend()
+
+
 def _connectors() -> _Connectors:
-    return _Connectors(_mk_s3, _mk_s3, _mk_azure, _mk_azure, FixedClock(1790000000))
+    return _Connectors(
+        _mk_s3, _mk_s3, _mk_azure, _mk_azure, _mk_gcs, FixedClock(1790000000)
+    )
 
 
 # ---- the session -------------------------------------------------------------
@@ -453,14 +462,16 @@ def test_each_refusal_is_named_word_for_word() raises:
         "BIND_SOURCE_MALFORMED: add_sql_binding name=t: the source names no kind",
     )
     assert_equal(
-        _refused(s, "t", _source("gs://lake/t/a.parquet", "s3-etl")),
+        _refused(s, "t", _source("hdfs://lake/t/a.parquet", "s3-etl")),
         "STORAGE_URL_REFUSED: add_sql_binding name=t: no store of this library"
-        " reads 'gs://' locations; s3:// and az:// (abfs://, abfss://) are read",
+        " reads 'hdfs://' locations; s3://, gs:// and az:// (abfs://, abfss://)"
+        " are read",
     )
     assert_equal(
         _refused(s, "t", _source("https://example.com/a.parquet", "s3-etl")),
         "STORAGE_URL_REFUSED: add_sql_binding name=t: no store of this library"
-        " reads 'https://' locations; s3:// and az:// (abfs://, abfss://) are read",
+        " reads 'https://' locations; s3://, gs:// and az:// (abfs://, abfss://)"
+        " are read",
     )
     assert_equal(
         _refused(s, "t", _source("s3://lake/t/a.parquet?x=1", "s3-etl", "", "us-east-1")),

@@ -19,16 +19,23 @@
   the credential's NAME and the settings, never a value).
 - `bindings.mojo`: `add_sql_binding`, what `komira_add_sql_binding` does on
   values: a SQL name bound to a `komira.plan.v1.WireBoundSource` (a local
-  path, or Parquet objects of an `s3://` or `az://` location read with a
-  credential sealed on the session), replacing any table of that name, and
+  path, or Parquet objects of an `s3://`, `az://` or `gs://` location read
+  with a credential sealed on the session), replacing any table of that name, and
   its refusals (`BIND_*`, `STORAGE_*`, `CREDENTIAL*`); `add_sql_binding_with`
   is the same over a caller's connectors; `store_opener` builds the file
   systems a statement reads the bound stores through; `forget_table` drops a
   table and its traces.
-- `store_fs.mojo`: `StoreFs`, one object-store file system (an S3 bucket or
-  an Azure container), `StoreScanFs`, the opener a run reads every bound
-  bucket through, and `StoreConnectors`, the connector factories and clock
-  they dial and sign with (`kernel_store_connectors`: http_client's).
+- `store_fs.mojo`: `StoreFs`, one object-store file system (an S3 bucket,
+  an Azure container or a GCS bucket), `StoreScanFs`, the opener a run reads
+  every bound bucket through, and `StoreConnectors`, the connector factories,
+  GCS backend factory and clock they dial and sign with
+  (`kernel_store_connectors`: http_client's, and objectstore_gcs's gRPC
+  backend).
+- `gcs_access.mojo`: `GcsAccess`, how a GCS bucket is reached (the endpoint's
+  host and port and the access token; `GcsAccess.at` reads an endpoint, and
+  `gcs_endpoint_refusal` says why one is not read), `LazyGcsBackend`, the
+  backend a `StoreFs` builds on its first verb, and `kernel_gcs_backend`, the
+  production one (`KernelGcsBackend`).
 - `credentials.mojo`: `SessionCredentials`, a session's credentials by name:
   defined in three steps (`add`, `set`, `seal`), held in a
   `SessionSecretStore` (`credential_store.mojo`) and read back only through a
@@ -75,6 +82,13 @@ from .credentials import (
     CREDENTIALS_INVALID,
     CREDENTIAL_UNBOUND,
     SessionCredentials,
+)
+from .gcs_access import (
+    GcsAccess,
+    KernelGcsBackend,
+    LazyGcsBackend,
+    gcs_endpoint_refusal,
+    kernel_gcs_backend,
 )
 from .session import (
     Session,

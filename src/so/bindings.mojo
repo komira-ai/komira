@@ -8,14 +8,20 @@ the SQL name `name` on the session to it, replacing any table of that name
 - a local path (no scheme) binds as `register_parquet` does: the files are
   listed and their footers read at the call, through the engine's footer
   reader;
-- an `s3://` (or `s3a://`) location, and an `az://`, `abfs://` or `abfss://`
-  one, binds a Parquet object, or a glob of objects, of that store. The
-  footers are read at the call, through the store, with the credential the
-  source names; the table's source names the bucket by its descriptor, as a
-  plan does, and the session keeps the bucket's settings and the credential's
-  NAME (`BoundStore`). A statement on the session reads it through the file
-  systems `store_opener` builds, revealing the credential's values from the
-  session's secret store for that run only.
+- an `s3://` (or `s3a://`) location, an `az://`, `abfs://` or `abfss://`
+  one, and a `gs://` (or `gcs://`) one, binds a Parquet object, or a glob of
+  objects, of that store. The footers are read at the call, through the
+  store, with the credential the source names; the table's source names the
+  bucket by its descriptor, as a plan does, and the session keeps the
+  bucket's settings and the credential's NAME (`BoundStore`). A statement on
+  the session reads it through the file systems `store_opener` builds,
+  revealing the credential's values from the session's secret store for that
+  run only.
+
+A `gs://` source is read with a `GcpToken` (its OAuth access token is each
+call's bearer token), over gRPC on TLS at Google's endpoint or the
+`https://host[:port]` endpoint the source names; it takes no region and no
+addressing.
 
 The source carries a credential's name, never its value: the value is
 whatever was sealed under that name on the session (`komira_credential_seal`)
@@ -46,6 +52,7 @@ from azure_core import AzureSas, AzureSharedKey
 from compression.codec_libraries import probe_codec_libraries
 from fs.glob import glob_match_path, has_glob, split_static_prefix
 from http_core.transport.io_stream import Connector
+from objectstore_gcs import GcsStorageBackend
 from objectstore_s3 import (
     AddressingStyle,
     S3Config,
@@ -65,6 +72,7 @@ from parquet_footers.parquet_files import (
 )
 from plan_expr.fs_descriptor_pod import (
     FS_SCHEME_AZURE,
+    FS_SCHEME_GCS,
     FS_SCHEME_S3,
     FsDescriptorPod,
 )
@@ -83,7 +91,8 @@ from sql.sql_ast import HIVE_PARTITIONING_AUTO
 
 from .bound_store import BoundStore
 from .credential_store import SessionSecretStore
-from .credentials import SessionCredentials
+from .credentials import SessionCredentials, kind_label
+from .gcs_access import GcsAccess, gcs_endpoint_refusal
 from .session import Session
 from .status import (
     KOMIRA_BIND_SESSION,
@@ -91,12 +100,15 @@ from .status import (
     KOMIRA_CRED_AWS_PROFILE,
     KOMIRA_CRED_AZURE_KEY,
     KOMIRA_CRED_AZURE_SAS,
+    KOMIRA_CRED_GCP_SERVICE_ACCOUNT,
+    KOMIRA_CRED_GCP_TOKEN,
     KOMIRA_FIELD_ACCOUNT,
     KOMIRA_FIELD_KEY,
     KOMIRA_FIELD_KEY_ID,
     KOMIRA_FIELD_SAS,
     KOMIRA_FIELD_SECRET,
     KOMIRA_FIELD_SESSION_TOKEN,
+    KOMIRA_FIELD_TOKEN,
 )
 from .store_fs import (
     KernelStoreConnectors,
@@ -112,7 +124,8 @@ comptime BIND_SOURCE_MALFORMED = "BIND_SOURCE_MALFORMED"
 comptime BIND_SOURCE_UNSUPPORTED = "BIND_SOURCE_UNSUPPORTED"
 """Refusal: a source setting this library does not serve yet (Hive
 partitioning or a signing service on files, an endpoint or region on a local
-path, a region on Azure, `anonymous` or an `AwsProfile` on S3)."""
+path, a region on Azure, a region or addressing on GCS, `anonymous` or an
+`AwsProfile` on S3, `anonymous` or a `GcpServiceAccount` on GCS)."""
 comptime BIND_SCOPE_NOT_A_TABLE = "BIND_SCOPE_NOT_A_TABLE"
 """Refusal: a location ending in `/` (a scope) bound as a table."""
 comptime BIND_STORE_CONFLICT = "BIND_STORE_CONFLICT"
@@ -125,7 +138,8 @@ comptime STORAGE_REGION_UNKNOWN = "STORAGE_REGION_UNKNOWN"
 comptime CREDENTIALS_NOT_FOUND = "CREDENTIALS_NOT_FOUND"
 """Refusal: a remote source naming no credential, or `ambient`."""
 comptime CREDENTIAL_KIND_MISMATCH = "CREDENTIAL_KIND_MISMATCH"
-"""Refusal: a credential of a kind its store does not take."""
+"""Refusal: a credential of a kind its store does not take, at the binding
+or, for a name sealed again as another kind, when a statement reads it."""
 
 comptime _AMBIENT = "ambient"
 comptime _ANONYMOUS = "anonymous"
@@ -247,6 +261,27 @@ def _azure_credential(
     )
 
 
+def _gcs_token(c: SessionCredentials, store: BoundStore) raises -> String:
+    """The access token sealed under `store`'s credential name now, refused
+    when that name now holds another kind: a `BearerToken` also has a token,
+    and it is never sent to Cloud Storage."""
+    var kind = c.kind_of(store.credential)
+    if kind != KOMIRA_CRED_GCP_TOKEN:
+        raise Error(
+            String(CREDENTIAL_KIND_MISMATCH)
+            + ": credential="
+            + store.credential
+            + ": table '"
+            + store.table
+            + "' reads gs://"
+            + store.bucket
+            + " with a GcpToken, and the value sealed under the name now is"
+            + " of kind "
+            + kind_label(kind)
+        )
+    return _reveal(c, store.credential, KOMIRA_FIELD_TOKEN)
+
+
 def _s3_config(store: BoundStore) raises -> S3Config:
     var addressing = (
         AddressingStyle.path() if store.path_style else AddressingStyle.virtual_hosted()
@@ -260,9 +295,12 @@ def _s3_config(store: BoundStore) raises -> S3Config:
 
 
 def _add_store[
-    S3C: Connector, AZC: Connector, K: AwsClock & Copyable & Deinitable
+    S3C: Connector,
+    AZC: Connector,
+    G: GcsStorageBackend,
+    K: AwsClock & Copyable & Deinitable,
 ](
-    mut opener: StoreScanFs[S3C, AZC, K],
+    mut opener: StoreScanFs[S3C, AZC, G, K],
     c: SessionCredentials,
     store: BoundStore,
 ) raises:
@@ -270,6 +308,10 @@ def _add_store[
     credential's name now."""
     if store.scheme == FS_SCHEME_S3:
         opener.add_s3(store.bucket, _s3_config(store), _aws_credential(c, store.credential))
+    elif store.scheme == FS_SCHEME_GCS:
+        opener.add_gcs(
+            store.bucket, GcsAccess.at(store.endpoint, _gcs_token(c, store))
+        )
     else:
         opener.add_azure(
             store.bucket,
@@ -283,10 +325,13 @@ def _add_store[
 
 
 def store_opener[
-    S3C: Connector, AZC: Connector, K: AwsClock & Copyable & Deinitable
+    S3C: Connector,
+    AZC: Connector,
+    G: GcsStorageBackend,
+    K: AwsClock & Copyable & Deinitable,
 ](
-    session: Session, var connectors: StoreConnectors[S3C, AZC, K]
-) raises -> StoreScanFs[S3C, AZC, K]:
+    session: Session, var connectors: StoreConnectors[S3C, AZC, G, K]
+) raises -> StoreScanFs[S3C, AZC, G, K]:
     """The file systems one statement on `session` reads its bound object
     stores through: every bucket a bound table names, each with the values
     sealed under its credential's name when this is called. A scan of any
@@ -294,10 +339,12 @@ def store_opener[
 
     Raises:
         `CREDENTIAL_UNBOUND` or `CREDENTIALS_INVALID` when a credential a
-        bound table names cannot be read (`SessionCredentials`); the store's
-        own refusal of its settings.
+        bound table names cannot be read (`SessionCredentials`);
+        `CREDENTIAL_KIND_MISMATCH` when a `gs://` table's credential name now
+        holds a kind other than `GcpToken`; the store's own refusal of its
+        settings.
     """
-    var opener = StoreScanFs[S3C, AZC, K](connectors^)
+    var opener = StoreScanFs[S3C, AZC, G, K](connectors^)
     for i in range(len(session.bound_stores.stores)):
         ref store = session.bound_stores.stores[i]
         if not opener.serves(store.scheme, store.bucket):
@@ -355,11 +402,12 @@ def _remote_credential(
             " does not resolve; name a sealed credential",
         )
     if credential == _ANONYMOUS:
-        if scheme == FS_SCHEME_S3:
+        if scheme != FS_SCHEME_AZURE:
             raise _refuse(
                 BIND_SOURCE_UNSUPPORTED,
                 name,
-                "credential=anonymous: unsigned s3:// reads are not served",
+                "credential=anonymous: unsigned " + _store_url(scheme)
+                + " reads are not served",
             )
         return
     var kind = session.credentials.kind_of(credential)
@@ -373,14 +421,33 @@ def _remote_credential(
                 "credential=" + credential + ": an AwsProfile is not read by"
                 " this library; seal AwsKeys",
             )
+    elif scheme == FS_SCHEME_GCS:
+        if kind == KOMIRA_CRED_GCP_TOKEN:
+            return
+        if kind == KOMIRA_CRED_GCP_SERVICE_ACCOUNT:
+            raise _refuse(
+                BIND_SOURCE_UNSUPPORTED,
+                name,
+                "credential=" + credential + ": a GcpServiceAccount is not"
+                " read by this library; seal a GcpToken",
+            )
     elif kind == KOMIRA_CRED_AZURE_KEY or kind == KOMIRA_CRED_AZURE_SAS:
         return
-    var store = String("s3://") if scheme == FS_SCHEME_S3 else String("az://")
     raise _refuse(
         CREDENTIAL_KIND_MISMATCH,
         name,
-        "credential=" + credential + " does not fit a " + store + " source",
+        "credential=" + credential + " does not fit a " + _store_url(scheme)
+        + " source",
     )
+
+
+def _store_url(scheme: UInt8) -> String:
+    """The scheme a message names a store by: `s3://`, `gs://` or `az://`."""
+    if scheme == FS_SCHEME_S3:
+        return String("s3://")
+    if scheme == FS_SCHEME_GCS:
+        return String("gs://")
+    return String("az://")
 
 
 struct _Remote(Movable):
@@ -395,9 +462,25 @@ struct _Remote(Movable):
         self.key = key^
 
 
-def _s3_remote(
-    name: String, location: String, access: WireSourceAccess
-) raises -> _Remote:
+@fieldwise_init
+struct _BucketKey(Movable):
+    """The bucket of a `scheme://bucket/key` location and the key (or key
+    pattern) within it."""
+
+    var bucket: String
+    var key: String
+
+
+def _bucket_and_key(
+    name: String, location: String, kind: String
+) raises -> _BucketKey:
+    """The bucket and the key of `scheme://bucket/key`; `kind` names the
+    location in a refusal (`an s3:// location`).
+
+    Raises:
+        `STORAGE_URL_REFUSED` when the location names no bucket, and
+        `BIND_SCOPE_NOT_A_TABLE` when it names no key or ends in `/`.
+    """
     var sep = location.find("://")
     var rest = String(location[byte = sep + 3 : location.byte_length()])
     var slash = rest.find("/")
@@ -407,13 +490,22 @@ def _s3_remote(
         bucket = String(rest[byte=0:slash])
         key = String(rest[byte = slash + 1 : rest.byte_length()])
     if bucket.byte_length() == 0:
-        raise _refuse(STORAGE_URL_REFUSED, name, "an s3:// location names no bucket")
+        raise _refuse(
+            STORAGE_URL_REFUSED, name, kind + " names no bucket"
+        )
     if key.byte_length() == 0 or key.endswith("/"):
         raise _refuse(
             BIND_SCOPE_NOT_A_TABLE,
             name,
             location + " is a scope, not a table; name an object or a glob",
         )
+    return _BucketKey(bucket^, key^)
+
+
+def _s3_remote(
+    name: String, location: String, access: WireSourceAccess
+) raises -> _Remote:
+    var parts = _bucket_and_key(name, location, "an s3:// location")
     if access.region.byte_length() == 0:
         raise _refuse(
             STORAGE_REGION_UNKNOWN,
@@ -425,14 +517,45 @@ def _s3_remote(
     var store = BoundStore(
         table=name.lower(),
         scheme=FS_SCHEME_S3,
-        bucket=bucket^,
+        bucket=parts.bucket.copy(),
         credential=access.credential,
         endpoint=access.endpoint,
         region=access.region,
         path_style=_path_style(access),
         account=String(""),
     )
-    return _Remote(store^, key^)
+    return _Remote(store^, parts.key.copy())
+
+
+def _gcs_remote(
+    name: String, location: String, access: WireSourceAccess
+) raises -> _Remote:
+    var parts = _bucket_and_key(name, location, "a gs:// location")
+    if access.region.byte_length() > 0:
+        raise _refuse(
+            BIND_SOURCE_UNSUPPORTED, name, "a gs:// source takes no region"
+        )
+    if access.addressing.number() != 0:
+        raise _refuse(
+            BIND_SOURCE_UNSUPPORTED,
+            name,
+            "a gs:// source takes no addressing: each gRPC call names its"
+            " bucket",
+        )
+    var why = gcs_endpoint_refusal(access.endpoint)
+    if why.byte_length() > 0:
+        raise _refuse(STORAGE_URL_REFUSED, name, why)
+    var store = BoundStore(
+        table=name.lower(),
+        scheme=FS_SCHEME_GCS,
+        bucket=parts.bucket.copy(),
+        credential=access.credential,
+        endpoint=access.endpoint,
+        region=String(""),
+        path_style=False,
+        account=String(""),
+    )
+    return _Remote(store^, parts.key.copy())
 
 
 def _azure_remote(
@@ -536,17 +659,20 @@ def _sorted(var keys: List[String]) -> List[String]:
 
 
 def _remote_source[
-    S3C: Connector, AZC: Connector, K: AwsClock & Copyable & Deinitable
+    S3C: Connector,
+    AZC: Connector,
+    G: GcsStorageBackend,
+    K: AwsClock & Copyable & Deinitable,
 ](
     name: String,
     session: Session,
     remote: _Remote,
-    var connectors: StoreConnectors[S3C, AZC, K],
+    var connectors: StoreConnectors[S3C, AZC, G, K],
     node_id: Int,
 ) raises -> ParquetSource:
     """The keys `remote` names, listed now when it is a glob, and their
     footers read through the store: the catalog source of the table."""
-    var opener = StoreScanFs[S3C, AZC, K](connectors^)
+    var opener = StoreScanFs[S3C, AZC, G, K](connectors^)
     _add_store(opener, session.credentials, remote.store)
     var fs = opener.open_scan_fs(remote.store.scheme, remote.store.bucket)
     var prefix = FsDescriptorPod.cloud(
@@ -645,13 +771,16 @@ def _check_local_access(name: String, access: WireSourceAccess) raises:
 
 
 def add_sql_binding_with[
-    S3C: Connector, AZC: Connector, K: AwsClock & Copyable & Deinitable
+    S3C: Connector,
+    AZC: Connector,
+    G: GcsStorageBackend,
+    K: AwsClock & Copyable & Deinitable,
 ](
     mut session: Session,
     name: String,
     var source: List[UInt8],
     scope: Int32,
-    var connectors: StoreConnectors[S3C, AZC, K],
+    var connectors: StoreConnectors[S3C, AZC, G, K],
 ) raises:
     """`add_sql_binding`, reading a remote source's footers through the
     connectors and clock `connectors` gives (module header).
@@ -706,12 +835,14 @@ def add_sql_binding_with[
         store_scheme = FS_SCHEME_S3
     elif azure:
         store_scheme = FS_SCHEME_AZURE
+    elif scheme == "gs" or scheme == "gcs":
+        store_scheme = FS_SCHEME_GCS
     else:
         raise _refuse(
             STORAGE_URL_REFUSED,
             name,
             "no store of this library reads '" + scheme + "://' locations;"
-            " s3:// and az:// (abfs://, abfss://) are read",
+            " s3://, gs:// and az:// (abfs://, abfss://) are read",
         )
     if location.find("?") >= 0 or location.find("#") >= 0:
         raise _refuse(
@@ -723,6 +854,8 @@ def add_sql_binding_with[
     var remote: _Remote
     if store_scheme == FS_SCHEME_S3:
         remote = _s3_remote(name, location, access)
+    elif store_scheme == FS_SCHEME_GCS:
+        remote = _gcs_remote(name, location, access)
     else:
         remote = _azure_remote(name, session, location, access)
     _check_conflict(name, session, remote.store)

@@ -5,9 +5,11 @@
 # with the named last error; a source_len of 64 MiB plus one is -5 with the named last error (the
 # source is not read); a scope other than 1 is -3 BIND_SCOPE_UNSUPPORTED, an empty name -3
 # TABLE_NAME_EMPTY, a one-byte source (a tag with no length) -3 BIND_SOURCE_MALFORMED "is not a",
-# a zero-length source -3 BIND_SOURCE_MALFORMED "names no kind", a name that is not UTF-8 -3 and a
-# local file that is missing -3, each with its last error word for word, its step (2, bind) and,
-# where the text has one, its code; the good call after each refusal clears the error. What a bound
+# a zero-length source -3 BIND_SOURCE_MALFORMED "names no kind", a name that is not UTF-8 -3, a
+# local file that is missing -3 and a gs:// location that names no credential -3
+# CREDENTIALS_NOT_FOUND (the library routes gs:// to its GCS store, which refuses a source with no
+# credential before anything is dialed), each with its last error word for word, its step (2, bind)
+# and, where the text has one, its code; the good call after each refusal clears the error. What a bound
 # table answers is the C driver's rows (src/so/tests/c/abi_driver.c).
 #
 # A gate driver of //src/so:libkomira. It has no dependency: it opens the library with dlopen
@@ -268,6 +270,19 @@ def main() raises:
     _expect(
         lib.call["komira_last_error_step", Int32](ctx) == STEP_BIND,
         "a missing local file's step is not bind",
+    )
+
+    var gcs = _files_source(String("gs://lake/t/a.parquet"))
+    _expect(_bind_bytes(lib, ctx, name_c, gcs, one) == -3, "a gs:// source with no credential is not -3")
+    _expect_refusal(
+        lib,
+        ctx,
+        String(
+            "CREDENTIALS_NOT_FOUND: add_sql_binding name=two: the source names no credential, or"
+            " ambient, which this library does not resolve; name a sealed credential"
+        ),
+        String("CREDENTIALS_NOT_FOUND"),
+        "a gs:// source with no credential",
     )
 
     _expect(_bind_bytes(lib, ctx, name_c, good, one) == 0, "a good call after a refusal was refused")

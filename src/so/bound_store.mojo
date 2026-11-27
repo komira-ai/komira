@@ -1,8 +1,9 @@
 """The object stores a session's SQL bindings read, as plain values.
 
-A table bound to an `s3://` or `az://` location (`bindings.add_sql_binding`)
-is a Parquet source in the session's catalog whose descriptor names the store
-and the bucket (`FsDescriptorPod`), as a plan names it. What reaching that
+A table bound to an `s3://`, `az://` or `gs://` location
+(`bindings.add_sql_binding`) is a Parquet source in the session's catalog
+whose descriptor names the store and the bucket (`FsDescriptorPod`), as a
+plan names it. What reaching that
 bucket takes is kept here, one `BoundStore` per bound table: the store, the
 bucket (an Azure container), the NAME of the credential and the settings
 (endpoint, region, addressing). No credential value is ever held here; the
@@ -19,21 +20,22 @@ struct BoundStore(Copyable, Movable):
     """The SQL name the table is bound under, lower-cased as the catalog
     folds it."""
     var scheme: UInt8
-    """`plan_expr`'s `FS_SCHEME_S3` or `FS_SCHEME_AZURE`."""
+    """`plan_expr`'s `FS_SCHEME_S3`, `FS_SCHEME_AZURE` or `FS_SCHEME_GCS`."""
     var bucket: String
-    """The S3 bucket, or the Azure container."""
+    """The S3 or GCS bucket, or the Azure container."""
     var credential: String
     """The name of the sealed credential the store is read with, or
-    `anonymous`."""
+    `anonymous` (Azure only)."""
     var endpoint: String
     """The store's endpoint; "" for the provider's own."""
     var region: String
-    """The S3 region requests are signed for; "" for Azure."""
+    """The S3 region requests are signed for; "" for Azure and GCS."""
     var path_style: Bool
     """Whether the bucket (S3) or the account (Azure) is addressed in the
-    path rather than the host."""
+    path rather than the host; False for GCS, whose gRPC calls name the
+    bucket."""
     var account: String
-    """The Azure storage account; "" for S3."""
+    """The Azure storage account; "" for S3 and GCS."""
 
     def same_access(self, other: BoundStore) -> Bool:
         """Whether `other` reaches its bucket the same way: the same store,

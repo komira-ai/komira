@@ -54,6 +54,9 @@ The Apache License, Version 2.0 is at http://www.apache.org/licenses/LICENSE-2.0
 and in the LICENSE file of this repository. The generated files are modified
 forms of the inputs' definitions (their structure re-expressed as Mojo); they
 are distributed here under the same license as the rest of komira.
+libkomira, which the Python wheel carries, compiles in two of these clients,
+the S3 client (`aws_s3`, item 1) and the Cloud Storage client (`gcp_storage`,
+item 2), so the attribution above also covers their binary form there.
 
 Third-party code inside the native files
 ----------------------------------------

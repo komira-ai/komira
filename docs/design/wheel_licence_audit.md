@@ -56,19 +56,26 @@ there), Brotli `//third_party/brotli`, aws-lc `//third_party/aws-lc`, s2n-tls
   If one is absent, the first call of that codec aborts with
   `compression: cannot load <soname>`; other codecs and Parquet files that do
   not use it are unaffected.
-- **The AWS, Google and Azure clients**: not in the wheel. The Mojo closure of
-  the `so` package is `sdk_exec`'s (read from the `deps` of each `BUCK` file
-  from `so` down): it holds `http_client`, `http_core`, `net`, `objectstore`,
-  `iceberg_catalog` and `crypto`, and no `aws_*`, `gcp_*` or `azure_*`
-  package. aws-lc and s2n-tls are carried, in the crypto and http_core owner
-  libraries above (Linux; on macOS arm64 there are no owner libraries, and
-  libkomira.dylib links the same archives statically, under the same
-  notices). A
+- **The AWS, Google and Azure clients**: compiled into libkomira, as Mojo,
+  for the object stores a bound table reads. The Mojo closure of the `so`
+  package (read from the `deps` of each `BUCK` file from `so` down) is
+  `sdk_exec`'s, which holds `http_client`, `http_core`, `net`, `objectstore`,
+  `iceberg_catalog` and `crypto`, and the object stores of `so.store_fs`:
+  `objectstore_s3` (with `aws_core` and `aws_s3`), `azure_blob` (with
+  `azure_core`) and `objectstore_gcs` (with `gcp_core`, `gcp_storage` and
+  `grpc`). None of them owns a native library, so the native files of the
+  wheel are the same. aws-lc and s2n-tls are carried, in the crypto and
+  http_core owner libraries above (Linux; on macOS arm64 there are no owner
+  libraries, and libkomira.dylib links the same archives statically, under
+  the same notices). A
   change that adds a third-party library to the closure changes the table of
   `libkomira_elf_report` and must update this page and `NOTICE` in the same
   pull request.
-- **Generated clients** (`NOTICE`, "Generated clients"): not in libkomira's
-  closure, so no text derived from botocore or googleapis is in the wheel.
+- **Generated clients** (`NOTICE`, "Generated clients"): libkomira compiles
+  in the generated S3 client (`aws_s3`, from botocore's service model) and
+  Cloud Storage client (`gcp_storage`, from googleapis's `storage.proto`), so
+  text derived from botocore and googleapis is in the wheel in binary form,
+  under the Apache-2.0 attribution `NOTICE` gives it.
 
 ## Telemetry and network
 
@@ -84,9 +91,10 @@ Verified by reading, not by running anything on a developer machine:
   `net`, `http_core` (HTTP and TLS) and `http_client`, which the engine uses
   to read object stores and to call an Iceberg REST catalog. Two exports of the
   twenty-six reach it, and only for a table the caller bound to an object store:
-  `komira_add_sql_binding`, given an `s3://` or `az://` location, reads the
-  objects' footers from that store (and lists it for a glob), with the endpoint
-  the caller passed and a credential the caller sealed; and `komira_sql_stream`
+  `komira_add_sql_binding`, given an `s3://`, `az://` or `gs://` location,
+  reads the objects' footers from that store (and lists it for a glob; a
+  `gs://` store over gRPC on TLS), with the endpoint the caller passed and a
+  credential the caller sealed; and `komira_sql_stream`
   and `komira_sql_stream_run` read such a table's objects through the same
   store (`so.store_fs`). A table bound to a local path, and every other export,
   opens no connection: `komira_ctx_new` and `komira_ctx_new_with_options`
