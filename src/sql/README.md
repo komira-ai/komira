@@ -114,7 +114,13 @@ ordinal, alias or expression) and the plain projection. `sql_bind_window_order`
 binds window functions with their `PARTITION BY` and `ORDER BY` (each window
 order key may carry `NULLS FIRST` / `NULLS LAST`; an unwritten one is the
 derived default), and the statement-level `ORDER BY` (column, ordinal, output
-alias or expression, with explicit `NULLS FIRST` / `NULLS LAST`).
+alias or expression, with explicit `NULLS FIRST` / `NULLS LAST`). A window is
+a SELECT item, or sits inside a SELECT or ORDER BY expression
+(`v * 100.0 / sum(v) OVER (PARTITION BY g)`), where it is computed under a
+hidden column that `sql_window_text` names and the final projection drops;
+`*` and `q.*` beside it expand to the FROM's or the relation's columns. A
+window in WHERE, a join's ON, GROUP BY, HAVING or an aggregate's argument is
+refused with DuckDB's reason.
 
 `sql.sql_binder` turns a parsed statement into a plan:
 `bind_statement(stmt, catalog, footers)` returns a `BoundStatement` whose

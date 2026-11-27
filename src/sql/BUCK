@@ -86,6 +86,7 @@ mojo_library(
         "tests/test_sql_bind_subquery.mojo",
         "tests/test_sql_bind_union.mojo",
         "tests/test_sql_bind_udf_call_direct.mojo",
+        "tests/test_sql_bind_window_expr.mojo",
         "tests/test_sql_bind_window_order_direct.mojo",
         "tests/test_sql_binder_direct.mojo",
         "tests/test_sql_catalog_tables.mojo",

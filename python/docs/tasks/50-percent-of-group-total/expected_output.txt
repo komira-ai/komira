@@ -1,4 +1,5 @@
 [{'region': 'east', 'rep': 'Ana', 'amount': 120, 'pct': 60.0}, {'region': 'east', 'rep': 'Bo', 'amount': 80, 'pct': 40.0}, {'region': 'north', 'rep': 'Flo', 'amount': 200, 'pct': 100.0}, {'region': 'west', 'rep': 'Cy', 'amount': 50, 'pct': 16.7}, {'region': 'west', 'rep': 'Di', 'amount': 150, 'pct': 50.0}, {'region': 'west', 'rep': 'Ed', 'amount': 100, 'pct': 33.3}]
+[{'region': 'east', 'rep': 'Ana', 'amount': 120, 'total': 200}, {'region': 'east', 'rep': 'Bo', 'amount': 80, 'total': 200}, {'region': 'west', 'rep': 'Cy', 'amount': 50, 'total': 300}, {'region': 'west', 'rep': 'Di', 'amount': 150, 'total': 300}, {'region': 'west', 'rep': 'Ed', 'amount': 100, 'total': 300}, {'region': 'north', 'rep': 'Flo', 'amount': 200, 'total': 200}]
 Ana 60.0
 Bo 40.0
 Cy 16.7

@@ -11,14 +11,15 @@ from sql.sql_ast import (
     SXOP_MUL, SXOP_NE, SXOP_OR, SXOP_POW, SXOP_STARTS_WITH, SXOP_SUB, SXUN_ABS,
     SXUN_IS_NOT_NULL, SXUN_IS_NULL, SXUN_NEGATE, SX_AGG, SX_BINARY, SX_BOOL, SX_CALL,
     SX_CASE, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT, SX_LIKE, SX_NULL, SX_STAR, SX_STRING,
-    SX_INTERVAL, SX_SUBQUERY, SX_TIMESTAMP, SX_UNARY, SXIVL_DAY, SXIVL_MONTH, SXIVL_WEEK,
-    SelectStmt, SqlExpr, TSLIT_AWARE,
+    SX_INTERVAL, SX_SUBQUERY, SX_TIMESTAMP, SX_UNARY, SX_WINDOW, SXIVL_DAY, SXIVL_MONTH,
+    SXIVL_WEEK, SelectStmt, SqlExpr, TSLIT_AWARE,
 )
 from sql.sql_bind_ops import _sx_is_big_int
 from sql.sql_bind_scope import _schema_has_col
 from sql.sql_fn_table import (
     CAST_DESUGAR_NAME, POSITION_IN_DESUGAR_NAME, TRY_CAST_DESUGAR_NAME,
 )
+from sql.sql_window_text import window_duckdb_text
 
 
 @always_inline
@@ -240,6 +241,7 @@ def _duckdb_expr_text(sx: SqlExpr) raises -> String:
       * SX_CASE: DuckDB prints `CASE  WHEN ((c)) THEN (r) ELSE e END`; the
         form below is close but not claimed byte-exact.
       * SX_SUBQUERY: written as `(SELECT ...)`.
+      * SX_WINDOW: the spellings `sql_window_text` lists.
 
     In each of those the name is still deterministic and contains the
     expression."""
@@ -373,6 +375,9 @@ def _duckdb_expr_text(sx: SqlExpr) raises -> String:
         return kout^
     if sx.tag == SX_SUBQUERY:
         return String(_duckdb_const_text(_DK_SUBQUERY))
+    if sx.tag == SX_WINDOW:
+        # `sum(n) OVER (PARTITION BY g)`; see `sql_window_text`.
+        return window_duckdb_text(sx)
     # PostgreSQL's placeholder for an expression it will not name — a
     # deliberately RECOGNISABLE last resort, not a silent empty string.
     return String(_duckdb_const_text(_DK_UNNAMED))

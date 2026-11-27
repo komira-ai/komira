@@ -133,7 +133,7 @@ def _select(stmt: SelectStmt, cat: SqlCatalog, int32_literals: Bool = False) rai
     var order_expr_idx = List[Int]()
     var order_expr_names = List[String]()
     _classify_order_keys(
-        stmt, schema, has_window, order_kind, order_out_idx, order_expr_idx,
+        stmt, schema, scope, order_kind, order_out_idx, order_expr_idx,
         order_expr_names,
     )
     if has_window:
@@ -142,7 +142,10 @@ def _select(stmt: SelectStmt, cat: SqlCatalog, int32_literals: Bool = False) rai
                 "SQL not supported: a window function combined with GROUP BY /"
                 " aggregation in the same SELECT"
             )
-        plan = _bind_window_projection(stmt, schema, scope, plan^, cat, cte, prebound)
+        plan = _bind_window_projection(
+            stmt, schema, scope, plan^, cat, cte, prebound, order_names,
+            order_carry, order_expr_idx, order_expr_names,
+        )
     elif has_agg or grouped:
         plan = _bind_aggregate(
             stmt, schema, scope, plan^, cat, cte, prebound, order_names,
@@ -643,15 +646,15 @@ def test_an_item_reading_a_column_that_is_not_a_key_is_refused() raises:
         "SELECT CASE WHEN k > 0 THEN 0 ELSE g END AS c, count(*) FROM t GROUP BY k",
         "ERR: SQL bind error: SELECT column 'g' must appear in GROUP BY"
     )
-    # An unknown name is reported as itself, before GROUP BY is named, and so
-    # is a window nested in the item.
+    # An unknown name is reported as itself, before GROUP BY is named; a
+    # window nested in the item is a window beside aggregation.
     _check(
         "SELECT zz + 1, count(*) FROM t GROUP BY k",
         "ERR: SQL bind error: unknown column 'zz'"
     )
     _check(
         "SELECT k + rank() OVER (ORDER BY k) AS x, count(*) FROM t GROUP BY k",
-        "ERR: SQL not supported: a window function `f(...) OVER (...)` must be a top-level SELECT item (it cannot be nested inside an expression)"
+        "ERR: SQL not supported: a window function combined with GROUP BY / aggregation in the same SELECT"
     )
 
 

@@ -36,9 +36,10 @@ comptime _KEYS_MISS_COLUMN = 1
 """A column the expression reads is not a group key; `missing` names it."""
 comptime _KEYS_MISS_NODE = 2
 """The expression holds a subquery or a window below its top, which a grouped
-SELECT item does not take apart. A nested window is refused by `_bind_scalar`'s
-own message (the trial bind runs first); a nested subquery by
-`_NESTED_SUBQUERY_REFUSAL`."""
+SELECT item does not take apart. A nested subquery is refused by
+`_NESTED_SUBQUERY_REFUSAL`; a SELECT holding a window never reaches the
+aggregate binder (the statement binder refuses a window beside GROUP BY /
+aggregation first)."""
 comptime _KEYS_EXPR_KEY = 3
 """A subtree of the expression is a computed key (`k + 1` inside `(k + 1) * 2`
 over `GROUP BY k + 1`); refused by `_EXPR_KEY_ITEM_REFUSAL`."""
@@ -612,11 +613,16 @@ def _bind_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, var chi
     orders `SELECT v AS k FROM t ORDER BY k DESC` by the alias, not by the
     table column `k`, which the `_group_has(out_names, onm)` test keeps.
     """
-    # SELECT * -> pass the child through unchanged. Every input column is
-    # present, so no ORDER BY COLUMN key can be missing and nothing is carried.
+    # A lone unqualified SELECT * -> pass the child through unchanged. Every
+    # input column is present, so no ORDER BY COLUMN key can be missing and
+    # nothing is carried.
     # An ORDER BY EXPRESSION (`SELECT * FROM t ORDER BY -k`) is the one
     # thing a star still has to widen for: every column, then the hidden key.
-    if len(stmt.select_items) == 1 and stmt.select_items[0].is_star:
+    if (
+        len(stmt.select_items) == 1
+        and stmt.select_items[0].is_star
+        and stmt.select_items[0].expr.qualifier == ""
+    ):
         if len(order_expr_idx) == 0:
             return child^
         var sexprs = ExprArray()
@@ -632,7 +638,13 @@ def _bind_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, var chi
     for i in range(len(stmt.select_items)):
         ref item = stmt.select_items[i]
         if item.is_star:
-            raise Error("SQL not supported: '*' mixed with other SELECT items")
+            # `*` beside other items, or `q.*`: the columns in place, in FROM
+            # order (`BindScope.star_out_names`), as DuckDB expands them.
+            var cols = scope.star_out_names(item.expr.qualifier)
+            for c in range(len(cols)):
+                exprs.append(Expr.col_ref(cols[c]))
+                out_names.append(cols[c])
+            continue
         var narrowed = Optional[Expr](None)
         if result_int_literals:
             narrowed = _result_int_literal(item.expr)

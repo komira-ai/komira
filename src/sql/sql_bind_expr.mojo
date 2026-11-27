@@ -34,10 +34,11 @@ from sql.sql_bind_ops import (
     _null_comparison,
 )
 from sql.sql_bind_scope import (
-    CteScope, _date_to_days, BindScope, _resolve_col,
+    CteScope, _date_to_days, BindScope, _resolve_col, _schema_has_col,
 )
 from sql.sql_bind_timestamp import _timestamp_literal_micros
 from sql.sql_catalog import SqlCatalog
+from sql.sql_window_text import window_hidden_name
 
 
 @always_inline
@@ -318,12 +319,20 @@ def _bind_scalar(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCata
     if sx.tag == SX_AGG:
         raise Error("SQL bind error: aggregate function not allowed in this position")
     if sx.tag == SX_WINDOW:
-        # A window function is lowered only as a top-level SELECT item
-        # (the window projection builds the PARTITION BY node); one nested
-        # in a scalar expression (`RANK() OVER (...) + 1`) is refused.
+        # A window nested in an expression (`v / sum(v) OVER (...)`) was
+        # computed by the window projection under its hidden name, and
+        # `schema` holds that column (`_bind_window_projection`). Anywhere
+        # else no window has been computed. The WHERE, ON, GROUP BY and
+        # HAVING clauses refuse one before binding, with DuckDB's reason
+        # (`_refuse_misplaced_windows`), so this is the message of a
+        # position with no reason of its own.
+        var hidden = window_hidden_name(sx)
+        if _schema_has_col(schema, hidden):
+            return Expr.col_ref(hidden)
         raise Error(
-            "SQL not supported: a window function `f(...) OVER (...)` must be a"
-            + " top-level SELECT item (it cannot be nested inside an expression)"
+            "SQL not supported: a window function `f(...) OVER (...)` in this"
+            + " position (a window function may stand only in the SELECT list"
+            + " and in ORDER BY)"
         )
     if sx.tag == SX_STAR:
         raise Error("SQL bind error: '*' not allowed in this position")

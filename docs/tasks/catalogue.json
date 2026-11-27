@@ -434,7 +434,6 @@
     "question": "How do I compute each row's percent of its group total?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2379",
       "komira-ai/komira#2381"
     ]
   },

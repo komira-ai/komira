@@ -397,6 +397,53 @@ struct BindScope(Movable):
                 rels.append(self.rels[ri].copy())
         return BindScope(rels^, self.out_schema.copy())
 
+    def star_out_names(self, qualifier: String) raises -> List[String]:
+        """The OUTPUT columns a SELECT-list star expands to: every column of
+        the FROM in order for `*` (`qualifier` ""), the columns of the one
+        relation answering to `qualifier` for `q.*`. DuckDB v1.5.5:
+
+          `x.*` naming no relation      Referenced table "x" not found!
+          `z.*` over `mm AS z, kk AS z` Ambiguous reference to table "z"
+
+        A NATURAL / USING key of a later relation is refused: here it is the
+        one coalesced column, which carries the left side's value, while
+        DuckDB's `b.k` in `a LEFT JOIN b USING (k)` is b's own `k` (NULL on a
+        row only `a` has)."""
+        var out = List[String]()
+        if qualifier == "":
+            for j in range(self.out_schema.num_columns()):
+                out.append(String(self.out_schema.field_name(j)))
+            return out^
+        var q = qualifier.lower()
+        var hit = -1
+        for ri in range(len(self.rels)):
+            if _alias_in_list(self.rels[ri].aliases, q):
+                if hit >= 0:
+                    raise Error(
+                        "SQL bind error: Ambiguous reference to table \"" + qualifier
+                        + "\" (duplicate alias \"" + qualifier + "\", explicitly"
+                        " alias one of the tables using \"AS my_alias\")"
+                    )
+                hit = ri
+        if hit < 0:
+            raise Error(
+                "SQL bind error: Referenced table \"" + qualifier + "\" not found"
+            )
+        ref r = self.rels[hit]
+        for i in range(len(r.out)):
+            for rj in range(hit):
+                if _names_have_exact(self.rels[rj].out, r.out[i]):
+                    raise Error(
+                        "SQL not supported: `" + qualifier + ".*` over a NATURAL /"
+                        " USING join: its key `" + r.orig[i] + "` is the one"
+                        " coalesced column here, which holds the left side's"
+                        " value, and DuckDB gives `" + qualifier + "." + r.orig[i]
+                        + "` this relation's own value (NULL on a row it did not"
+                        " match). Name the columns, or join with ON."
+                    )
+            out.append(String(r.out[i]))
+        return out^
+
     def source_name_of_output(self, out_name: String) -> String:
         """The SOURCE spelling of join-output column `out_name` (`k_right` ->
         `k`), or `out_name` itself when no relation renamed it."""
@@ -604,14 +651,15 @@ def _dedupe_join_right(
 
 
 def _result_display_names(stmt: SelectStmt, scope: BindScope) raises -> List[String]:
-    """Per result column (a `*` expanded over the FROM scope), the name DuckDB
+    """Per result column (a `*` or `q.*` expanded over the FROM scope), the name DuckDB
     gives it — or "" where the plan's own name already is that name."""
     var out = List[String]()
     for i in range(len(stmt.select_items)):
         ref item = stmt.select_items[i]
         if item.is_star:
-            for j in range(scope.out_schema.num_columns()):
-                out.append(scope.source_name_of_output(String(scope.out_schema.field_name(j))))
+            var cols = scope.star_out_names(item.expr.qualifier)
+            for j in range(len(cols)):
+                out.append(scope.source_name_of_output(cols[j]))
         elif item.out_alias:
             out.append(String(""))
         elif item.expr.tag == SX_COLUMN and item.expr.qualifier != "":

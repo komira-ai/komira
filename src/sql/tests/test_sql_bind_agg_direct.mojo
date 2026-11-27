@@ -136,7 +136,7 @@ def _select(stmt: SelectStmt, cat: SqlCatalog) raises -> LogicalPlan:
     var order_expr_idx = List[Int]()
     var order_expr_names = List[String]()
     _classify_order_keys(
-        stmt, schema, has_window, order_kind, order_out_idx, order_expr_idx,
+        stmt, schema, scope, order_kind, order_out_idx, order_expr_idx,
         order_expr_names,
     )
     if has_window:
@@ -145,7 +145,10 @@ def _select(stmt: SelectStmt, cat: SqlCatalog) raises -> LogicalPlan:
                 "SQL not supported: a window function combined with GROUP BY /"
                 " aggregation in the same SELECT"
             )
-        plan = _bind_window_projection(stmt, schema, scope, plan^, cat, cte, prebound)
+        plan = _bind_window_projection(
+            stmt, schema, scope, plan^, cat, cte, prebound, order_names,
+            order_carry, order_expr_idx, order_expr_names,
+        )
     elif has_agg or grouped:
         plan = _bind_aggregate(
             stmt, schema, scope, plan^, cat, cte, prebound, order_names,
