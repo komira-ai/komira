@@ -525,6 +525,10 @@ class LazyFrame:
         `UnsupportedOperation`) with the engine's code and step."""
         return self._session._plan_stream(self._encode())
 
+    def _komira_rows(self) -> Result:
+        """The frame's rows, run now: what `Session.register` registers."""
+        return self.collect()
+
     def explain(self) -> str:
         """The engine's text of the plan, which is not run."""
         return self._session._plan_render(self._encode())

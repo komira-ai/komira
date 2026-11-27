@@ -837,6 +837,10 @@ class DataFrame:
         the plan again. A plan the engine refuses raises its error here."""
         return self._session._plan_stream(self._plan_bytes())
 
+    def _komira_rows(self) -> Result:
+        """The frame's rows, run now: what `Session.register` registers."""
+        return self.materialize()
+
     def to_parquet(self, path: str | os.PathLike[str], *, compression: str | None = "snappy") -> None:
         """Runs the frame's plan and writes all its rows to the Parquet file
         `path`, in the frame's order when it is ordered. `compression` is
