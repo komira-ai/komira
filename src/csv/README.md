@@ -18,6 +18,10 @@ CSV writer for the engine's sinks.
   `null` read as null, and `true`, `TRUE`, `T`, `1`, `yes`, `Y` (and `false`,
   `FALSE`, `F`, `0`, `no`, `N`) as booleans. Blank lines are skipped
   (in a one-column file a blank line is a null record).
+- **Skipping lines.** `options.skip = n` drops the first `n` raw lines of the
+  file before the header (or the first record when there is no header). Lines
+  end at LF, CRLF or a bare CR, a quote in a skipped line opens no field, and a
+  skip that leaves no line to read is refused with `CSV_SKIP_PAST_END`.
 - **Lower levels.** The byte scanners (`scan_csv_phase1` and SIMD variants
   `..._phase2_movemask`, `..._phase3_pclmulqdq`) return cell ranges without
   building columns; `is_null_cell`, `is_true_cell`, `is_false_cell` classify

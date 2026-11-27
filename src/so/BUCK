@@ -56,7 +56,8 @@ NATIVE_OWNERS = [
 # the session's engine, each CSV dialect argument equal to read_csv's (a
 # header-less table refused at lower as read_csv's is) and the JSON table
 # equal to read_json's, an unreadable file, an empty name and a
-# taken name refused with nothing registered;
+# taken name refused with nothing registered, and a CSV file read after its
+# first `skip` lines (a negative skip and one past the last line refused);
 # test_plan_result holds plan_result, komira_plan_stream's
 # answer on values: a plan built from SQL on one session, serialized and run
 # on a fresh session with no table, equals the SQL answer and parses no SQL
@@ -212,7 +213,7 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): twenty-six exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): twenty-eight exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). Every context it creates owns
 # an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
 # komira_sql_stream runs SQL on that engine and answers an Arrow C stream; the
@@ -228,9 +229,12 @@ mojo_library(
 # a local Parquet path, or Parquet objects of an s3:// or az:// location read
 # with a credential sealed on the session; komira_sql_stream then reads them
 # through the object store.
+# komira_csv_binding_with_skip and komira_register_csv_with_skip are the CSV
+# binding and registration of a file whose first lines are not data: the
+# first `skip` lines are skipped before the header.
 # It is published only if every gate driver passes, each of which dlopens it
 # with RTLD_NOW and calls it as a foreign host would:
-#   gate_version       the version is 1010 (1.10);
+#   gate_version       the version is 1011 (1.11);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op, and a context (with its
 #                      engine's workers) is created and freed again;
@@ -268,6 +272,13 @@ mojo_library(
 #                      empty file and a path that is not UTF-8 -3; a refused
 #                      name stays free and a good call afterwards leaves no
 #                      error.
+#   gate_register_csv_with_skip  a file with a note line above the header
+#                      is registered with skip 1; NULL ctx -1, NULL name or
+#                      path -2; a negative skip -3 with CSV_SKIP_NEGATIVE,
+#                      step bind, the name left free; a skip past the last
+#                      line -3 with CSV_SKIP_PAST_END; the binding of skip 0
+#                      is the bytes of komira_csv_binding, that of skip 1
+#                      names the skip param.
 #   gate_register_arrow_stream  a released stream (release NULL) is -3 with
 #                      the drain's refusal word for word, an empty name -3
 #                      with TABLE_NAME_EMPTY, a name that is not UTF-8 -3;
@@ -318,6 +329,8 @@ _LIBKOMIRA = dict(
         "komira_plan_stream",
         "komira_register_arrow_stream",
         "komira_add_sql_binding",
+        "komira_csv_binding_with_skip",
+        "komira_register_csv_with_skip",
     ],
     exports_exact = True,
     gate_srcs = [
@@ -335,6 +348,7 @@ _LIBKOMIRA = dict(
         "tests/gate/gate_plan_render.mojo",
         "tests/gate/gate_register_arrow_stream.mojo",
         "tests/gate/gate_register_csv.mojo",
+        "tests/gate/gate_register_csv_with_skip.mojo",
         "tests/gate/gate_register_json.mojo",
         "tests/gate/gate_register_parquet.mojo",
         "tests/gate/gate_two_call.mojo",

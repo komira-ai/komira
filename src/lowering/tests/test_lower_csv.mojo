@@ -13,7 +13,7 @@
 # DuckDB's.
 # =============================================================================
 
-from std.testing import TestSuite, assert_equal, assert_true
+from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from arrow.arrow_types import ArrowType
 from arrow.schema import Field, Schema, SchemaBuilder
@@ -68,6 +68,7 @@ def _csv_scan(
     has_header: Bool,
     var projection: Optional[List[String]] = None,
     var filter: Optional[Expr] = None,
+    skip: Int = 0,
 ) raises -> LogicalPlan:
     var cs = CsvSource(
         String("data/t.csv.gz"),
@@ -75,6 +76,7 @@ def _csv_scan(
         quote_style_tag=0,
         delimiter=delimiter,
         has_header=has_header,
+        skip=skip,
     )
     return LogicalPlan.scan_from_source(
         SourceVariant(cs^), _schema(), projection^, filter^
@@ -150,6 +152,33 @@ def test_the_csv_segment_renders_its_path_dialect_and_columns() raises:
         ),
         text,
     )
+
+
+def test_a_csv_scan_carries_the_lines_it_skips_into_its_spec() raises:
+    var lp = _lowered(_csv_scan(UInt8(ord(",")), True, skip=2))
+    assert_equal(lp.segments[0].source_spec.csv_spec.skip, 2)
+    var none = _lowered(_csv_scan(UInt8(ord(",")), True))
+    assert_equal(none.segments[0].source_spec.csv_spec.skip, 0)
+
+
+def test_the_csv_segment_renders_its_skip_only_when_it_skips() raises:
+    var skipping = render_lowered_plan(
+        _lowered(_csv_scan(UInt8(ord(";")), True, skip=2))
+    )
+    assert_true(" quote_style=0 skip=2 columns=[" in skipping, skipping)
+    var plain = render_lowered_plan(_lowered(_csv_scan(UInt8(ord(";")), True)))
+    assert_false("skip" in plain, plain)
+
+
+def test_a_csv_scan_with_no_header_row_is_refused_even_with_a_skip() raises:
+    var msg = String("")
+    try:
+        _ = _lowered(_csv_scan(UInt8(ord(",")), False, skip=1))
+    except e:
+        msg = String(e)
+    assert_true(msg.startswith(String(LOWERING_UNCUTTABLE_NODE) + ": "), msg)
+    assert_true("a CSV scan with header=false" in msg, msg)
+    assert_true("column0, column1" in msg, msg)
 
 
 def test_a_csv_scan_projection_and_filter_are_operators_over_the_full_schema() raises:

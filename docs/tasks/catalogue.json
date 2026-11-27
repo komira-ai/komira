@@ -877,8 +877,7 @@
     "question": "How do I read a CSV with an odd delimiter, no header or extra lines?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2364",
-      "komira-ai/komira#2365"
+      "komira-ai/komira#2364"
     ]
   }
 ]

@@ -17,8 +17,8 @@
 # declaration.
 #
 # Identity: FNV-1a-64 over the path + folded mtime + THREE folded dialect terms
-# (quote_style_tag, delimiter, has_header). Mirrors the JsonSource +
-# ParquetSource fingerprint shape with three extra terms.
+# (quote_style_tag, delimiter, has_header) + `skip` when it is not 0. Mirrors
+# the JsonSource + ParquetSource fingerprint shape with the extra terms.
 #
 # ⚠ THE `quote_style_tag` TERM IS LOAD-BEARING. It selects which
 # comptime-monomorphized scanner decodes the bytes, so two scans of one path
@@ -89,6 +89,9 @@ comptime CSV_DEFAULT_DELIMITER: UInt8 = UInt8(ord(","))
 comptime CSV_DEFAULT_HAS_HEADER: Bool = True
 """`CsvReadOptions.has_header`'s default."""
 
+comptime CSV_DEFAULT_SKIP: Int = 0
+"""`CsvReadOptions.skip`'s default: no line skipped."""
+
 
 # =============================================================================
 # CsvSource
@@ -99,7 +102,8 @@ struct CsvSource(SourceLike, Movable, Copyable, Deinitable):
     """Concrete SourceLike for a single CSV file on disk.
 
     Identity = FNV-1a-64 over path + folded mtime + the three folded dialect
-    terms (quote_style_tag, delimiter, has_header). ORIENTATION IS ROW — see
+    terms (quote_style_tag, delimiter, has_header), plus `skip` when it is not 0.
+    ORIENTATION IS ROW — see
     the module header.
 
     Fields:
@@ -132,6 +136,9 @@ struct CsvSource(SourceLike, Movable, Copyable, Deinitable):
     var has_header: Bool
     """Whether row 0 is a header line rather than data. Defaults True. Mirrors
     `CsvReadOptions.has_header`."""
+    var skip: Int
+    """The number of raw lines skipped at the start of the file, before the
+    header. Defaults 0. Mirrors `CsvReadOptions.skip`."""
 
     def __init__(
         out self,
@@ -141,6 +148,7 @@ struct CsvSource(SourceLike, Movable, Copyable, Deinitable):
         quote_style_tag: Int = 0,
         delimiter: UInt8 = CSV_DEFAULT_DELIMITER,
         has_header: Bool = CSV_DEFAULT_HAS_HEADER,
+        skip: Int = CSV_DEFAULT_SKIP,
     ):
         """Primary ctor — identity computed once.
 
@@ -151,6 +159,11 @@ struct CsvSource(SourceLike, Movable, Copyable, Deinitable):
         `delimiter` / `has_header`: the other two options that change what the
         BYTES MEAN. See the fold note below for why they are here and not only
         in `CsvReadOptions`.
+
+        `skip`: the number of lines dropped before the header. It decides
+        which bytes are the header and the rows, so it is folded too, but only
+        when it is not 0: a default source keeps the fingerprint it had before
+        the option existed.
         """
         var h: UInt64 = _fnv1a_offset_basis()
         h = _hash_combine(h, UInt64(path.byte_length()))
@@ -171,6 +184,8 @@ struct CsvSource(SourceLike, Movable, Copyable, Deinitable):
         # COUNT.
         h = _hash_combine(h, UInt64(delimiter))
         h = _hash_combine(h, UInt64(1) if has_header else UInt64(0))
+        if skip != CSV_DEFAULT_SKIP:
+            h = _hash_combine(h, UInt64(skip))
         self.path = path^
         self.schema_cached = schema^
         self._identity = h
@@ -178,6 +193,7 @@ struct CsvSource(SourceLike, Movable, Copyable, Deinitable):
         self.quote_style_tag = quote_style_tag
         self.delimiter = delimiter
         self.has_header = has_header
+        self.skip = skip
 
     def copy(self) -> Self:
         """Explicit deep clone — preserves _identity byte-for-byte."""
@@ -188,6 +204,7 @@ struct CsvSource(SourceLike, Movable, Copyable, Deinitable):
             self.quote_style_tag,
             self.delimiter,
             self.has_header,
+            self.skip,
         )
         return out^
 

@@ -104,6 +104,7 @@ from arrow.concat import _concat_columns
 from byte_buffer.heap_region import HeapRegion
 
 from .csv_options import CsvReadOptions, check_declared_column_types
+from .skip_lines import csv_skip_lines_end
 from .input_limits import check_csv_cell_budget, check_csv_column_count
 from .record_shape import check_csv_record_shape, skip_leading_blank_lines
 from .csv_scanner_phase1 import (
@@ -408,6 +409,11 @@ struct _CsvScanState[
     var bytes_len: Int
     var options_ptr: UnsafePointer[CsvReadOptions, Self.in_o]
     var timing_enabled: Bool
+    # Byte offset where the data starts after `options.skip` lines (0 without
+    # skip) and the file's line number there; record-shape refusals number
+    # records and lines from this point.
+    var skip_start: Int
+    var first_line: Int
     # OWNED read-only scan inputs — moved in from the driver frame, taken
     # back after the barrier. Workers read these; no worker mutates them.
     var los: Optional[List[Int]]
@@ -425,6 +431,8 @@ struct _CsvScanState[
         bytes_len: Int,
         options_ptr: UnsafePointer[CsvReadOptions, Self.in_o],
         timing_enabled: Bool,
+        skip_start: Int,
+        first_line: Int,
         var los: List[Int],
         var his: List[Int],
         var names: List[String],
@@ -437,6 +445,8 @@ struct _CsvScanState[
         self.bytes_len = bytes_len
         self.options_ptr = options_ptr
         self.timing_enabled = timing_enabled
+        self.skip_start = skip_start
+        self.first_line = first_line
         self.los = Optional[List[Int]](los^)
         self.his = Optional[List[Int]](his^)
         self.names = Optional[List[String]](names^)
@@ -510,18 +520,22 @@ struct _CsvScanTask[
             # RECORD SHAPE (komira-ai/komira#449), per worker: this slice is
             # all this worker sees. The whole input is passed so a refusal
             # can number the record from the start of the file.
+            # SAFETY: `skip_start <= bytes_len`, so the span stays inside the
+            # caller's buffer the state borrows.
             check_csv_record_shape[Self.Q](
                 Span[UInt8, Self.in_o](
-                    unsafe_ptr=sp[].bytes_base, length=sp[].bytes_len
+                    unsafe_ptr=sp[].bytes_base + sp[].skip_start,
+                    length=sp[].bytes_len - sp[].skip_start,
                 ),
-                lo,
-                0,
+                lo - sp[].skip_start,
+                sp[].skip_start,
                 cells_local,
                 data_skip,
                 sp[].names.value(),
                 sp[].options_ptr[].has_header,
                 sp[].options_ptr[].delimiter,
                 sp[].options_ptr[].quote,
+                first_line=sp[].first_line,
             )
             var num_rows_local = cells_local.num_rows() - data_skip
             if num_rows_local <= 0:
@@ -693,6 +707,11 @@ def read_csv_bytes_to_batch_parallel_impl[
         # empty-schema empty-batch case correctly).
         return read_csv_bytes_to_batch[Q, SCANNER_VARIANT_PHASE_3](bytes, options)
 
+    # `options.skip` raw lines are dropped before the header; the fallbacks
+    # below hand the FULL bytes and options to the single-thread reader,
+    # which applies the skip itself.
+    var skip_start = csv_skip_lines_end(bytes, options.skip)
+
     # Resolve effective worker count.
     var effective_workers = n_workers
     if effective_workers <= 0:
@@ -704,7 +723,7 @@ def read_csv_bytes_to_batch_parallel_impl[
 
     # Threshold gate: below 1 MiB the partition+concat overhead exceeds
     # the parallel scan win; defer to single-thread.
-    if n < _MIN_PARALLEL_BYTES or effective_workers == 1:
+    if n - skip_start < _MIN_PARALLEL_BYTES or effective_workers == 1:
         return read_csv_bytes_to_batch[Q, SCANNER_VARIANT_PHASE_3](bytes, options)
 
     # =====================================================================
@@ -734,8 +753,8 @@ def read_csv_bytes_to_batch_parallel_impl[
     var los = List[Int]()
     var his = List[Int]()
     compute_csv_quote_safe_row_ranges[Q](
-        bytes, 0, effective_workers, options.delimiter, options.quote,
-        los, his,
+        bytes, skip_start, effective_workers, options.delimiter,
+        options.quote, los, his,
     )
     var k = len(los)
     var _partition_us = (Int(perf_counter_ns() - _t_partition0) // 1000) if _timing else 0
@@ -972,6 +991,8 @@ def read_csv_bytes_to_batch_parallel_impl[
             n,
             options_p,
             _timing,
+            skip_start,
+            1 + options.skip,
             los^,
             his^,
             header_names^,
@@ -1031,8 +1052,10 @@ def read_csv_bytes_to_batch_parallel_impl[
                 # RECORD SHAPE -- see the twin in the dispatcher-backed
                 # worker above.
                 check_csv_record_shape[Q](
-                    bytes, lo, 0, cells_local, data_skip, header_names,
+                    bytes[skip_start:], lo - skip_start, skip_start,
+                    cells_local, data_skip, header_names,
                     options.has_header, options.delimiter, options.quote,
+                    first_line=1 + options.skip,
                 )
                 var num_rows_local = cells_local.num_rows() - data_skip
                 if num_rows_local <= 0:

@@ -12,6 +12,12 @@ back with Session.sql as pyarrow:
   column a string, and a table registered with `header=False` is refused when
   a query reads it, naming `header=false`: an UnsupportedOperation at step
   "lower" with code LOWERING_UNCUTTABLE_NODE;
+- `skip=1` reads people_noted.csv (a note line above the header) as the same
+  rows, schema and answer as people.csv and as `read_csv(..., skip=1)`, `skip=0`
+  is the file whole, a skip that leaves no line raises the engine's
+  CSV_SKIP_PAST_END at step "bind" and registers nothing, and a negative,
+  boolean or non-integer skip raises ValueError or TypeError before the
+  library is called;
 - a `pathlib.Path`, a relative path and a path under `~` are resolved when
   the call is made, so the table still answers after the working directory
   and HOME change back;
@@ -27,7 +33,7 @@ back with Session.sql as pyarrow:
     test_register_text.py --lib-dir <dir> --runtime-dir <dir>
 
 `<dir>/libkomira/` is `//src/so:libkomira[runnable]`; `<dir>/people.csv`,
-`<dir>/people_pipe.csv`, `<dir>/events.jsonl` and `<dir>/empty.txt` are the
+`<dir>/people_pipe.csv`, `<dir>/people_noted.csv`, `<dir>/events.jsonl` and `<dir>/empty.txt` are the
 fixtures of python/tests/fixtures, and `<dir>/two_columns.parquet` a Parquet
 file.
 """
@@ -97,9 +103,10 @@ def main(args):
     # action started.
     lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
     _native.load(os.path.join(lib_dir, "libkomira"))
-    assert komira.abi_version() >= 1005, komira.abi_version()
+    assert komira.abi_version() >= 1011, komira.abi_version()
     people = os.path.join(lib_dir, "people.csv")
     pipe = os.path.join(lib_dir, "people_pipe.csv")
+    noted = os.path.join(lib_dir, "people_noted.csv")
     events = os.path.join(lib_dir, "events.jsonl")
     empty = os.path.join(lib_dir, "empty.txt")
     parquet = os.path.join(lib_dir, "two_columns.parquet")
@@ -140,6 +147,25 @@ def main(args):
         t = s.sql("SELECT * FROM strings").to_arrow()
         assert t.schema.names == ["id", "name", "score"], t.schema
         assert all(is_text(f.type) for f in t.schema), t.schema
+        # A note line above the header: skip=1 reads the rows under the
+        # header, as people.csv and as read_csv(..., skip=1) do.
+        assert s.register_csv("noted", noted, skip=1) is None
+        got, schema = rows(s, "noted")
+        check_people_schema(schema)
+        assert got == PEOPLE, got
+        want = s.sql("SELECT * FROM read_csv('{}', skip=1) ORDER BY id".format(noted)).to_arrow()
+        assert fields(want.schema) == fields(schema), (want.schema, schema)
+        assert want.to_pylist() == got, want.to_pylist()
+        assert s.register_csv("not_skipped", people, skip=0) is None
+        got, _ = rows(s, "not_skipped")
+        assert got == PEOPLE, got
+        e = raised(lambda: s.register_csv("past_end", people, skip=4))
+        assert (e.status, e.step) == (-3, "bind"), repr(e)
+        want_text = (
+            "CSV_SKIP_PAST_END: skip=4 skips every line of the file, which has 4 lines; "
+            "no header or record is left to read"
+        )
+        assert str(e) == want_text, str(e)
         assert s.register_csv("headless", people, header=False) is None
         e = raised(lambda: s.sql("SELECT * FROM headless"))
         assert type(e) is komira.UnsupportedOperation and e.status == -3, repr(e)
@@ -233,6 +259,12 @@ def main(args):
         assert type(e) is TypeError and str(e) == "header must be a bool, not int", repr(e)
         e = raised(lambda: s.register_csv("t", people, all_varchar="yes"))
         assert type(e) is TypeError and str(e) == "all_varchar must be a bool, not str", repr(e)
+        e = raised(lambda: s.register_csv("t", people, skip=-1))
+        assert type(e) is ValueError and str(e) == "skip must be 0 or more, and fit in 64 bits, not -1", repr(e)
+        e = raised(lambda: s.register_csv("t", people, skip=True))
+        assert type(e) is TypeError and str(e) == "skip must be an int, not bool", repr(e)
+        e = raised(lambda: s.register_csv("t", people, skip="1"))
+        assert type(e) is TypeError and str(e) == "skip must be an int, not str", repr(e)
         e = raised(lambda: s.register_csv("t", people, ","))
         assert type(e) is TypeError, repr(e)
         # None of them registered "t".

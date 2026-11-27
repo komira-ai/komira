@@ -36,13 +36,15 @@ bound it at, or of a spec whose column names and types do not pair up."""
 
 
 def csv_read_options(ref spec: SourceSpecPod) -> CsvReadOptions:
-    """The reader's options for `spec`: its dialect and its bound column
+    """The reader's options for `spec`: its dialect (with the lines it
+    skips) and its bound column
     types, every other option at the reader's default (the binder inferred
     the schema under the same defaults)."""
     var o = CsvReadOptions()
     o.delimiter = spec.csv_spec.delimiter
     o.has_header = spec.csv_spec.has_header
     o.quote_style_tag = spec.csv_spec.quote_style_tag
+    o.skip = spec.csv_spec.skip
     o.declared_column_types = spec.csv_spec.column_types.copy()
     return o^
 

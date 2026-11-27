@@ -63,6 +63,7 @@ mojo_library(
         "tests/test_csv_simd_string_column.mojo",
         "tests/test_csv_simd_temporal_parsers.mojo",
         "tests/test_csv_sink_quoting.mojo",
+        "tests/test_csv_skip_lines.mojo",
         "tests/test_csv_temporal_range.mojo",
         "tests/test_csv_typed_column_builders.mojo",
         "tests/test_phase_4_stage_breakdown_default_off.mojo",

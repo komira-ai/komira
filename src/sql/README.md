@@ -80,8 +80,8 @@ replaces an earlier declaration of the same name.
 
 `sql.sql_tvf_bind` gives the `read_csv`, `read_json` and `read_avro`
 table functions their schema at bind time and builds their scan leaf. A CSV
-schema is inferred from a bounded prefix with the call's `delimiter` and
-`has_header` (`all_varchar` then types every column STRING); a JSONL schema is
+schema is inferred from a bounded prefix with the call's `delimiter`,
+`has_header` and `skip` (`all_varchar` then types every column STRING); a JSONL schema is
 inferred from a newline-snapped 256 KiB prefix; an Avro schema is read from the
 OCF container header. A `.gz`, `.zst` or `.lz4` CSV or JSONL file is
 decompressed whole first (`parquet_codec.text_decompress`). An inference

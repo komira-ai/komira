@@ -374,6 +374,26 @@ def test_a_csv_leaf_missing_the_dialect_params_dispatches_comma_and_header() rai
     assert_equal(o.quote_style_tag, Int(QUOTE_STYLE_TAG_RFC4180))
 
 
+def test_a_csv_leaf_that_skips_lines_dispatches_the_count() raises:
+    var plan = LogicalPlan.scan_from_source(
+        SourceVariant(CsvSource(String("p.csv"), _schema(), skip=3)),
+        _schema(),
+    )
+    assert_equal(_row_source_csv_options_for_dispatch(plan).skip, 3)
+
+
+def test_a_csv_leaf_with_no_skip_param_dispatches_no_skipped_line() raises:
+    assert_equal(
+        _row_source_csv_options_for_dispatch(_csv_scan_without_params()).skip, 0
+    )
+    assert_equal(
+        _row_source_csv_options_for_dispatch(
+            _csv_scan_with(UInt8(ord(",")), True, 0)
+        ).skip,
+        0,
+    )
+
+
 def test_a_leaf_without_a_csv_binding_takes_the_defaults() raises:
     """The legacy parquet-tag form and a JSON leaf carry no dialect.
     MUTANT: read the params of any binding and the JSON leaf raises."""

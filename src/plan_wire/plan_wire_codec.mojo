@@ -4667,11 +4667,11 @@ def binding_to_bytes(b: ScanBinding, variant_tag: UInt8) raises -> List[UInt8]:
 
       * `fingerprint` / `structural_id` are folds over a SPECIFIC field set —
         `CsvSource.__init__` folds path length, path bytes, mtime,
-        `quote_style_tag`, `delimiter`, `has_header`, in that order, with
-        FNV-1a-64 — and a frontend reimplementation of that would be a second
-        copy of an identity the source ctor already owns. A wrong value there
-        is not a decode error: it is a plan-cache identity that silently
-        collides or never hits.
+        `quote_style_tag`, `delimiter`, `has_header`, then `skip` when it is
+        not 0, in that order, with FNV-1a-64 — and a frontend reimplementation
+        of that would be a second copy of an identity the source ctor already
+        owns. A wrong value there is not a decode error: it is a plan-cache
+        identity that silently collides or never hits.
       * `kind_id` is `scan_kind_id(kind_name)`, an FNV-1a-32 the registry
         validates against.
       * `snapshot_policy` / `snapshot_token` / `orientation` are the kind's

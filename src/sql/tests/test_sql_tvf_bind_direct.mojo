@@ -225,6 +225,35 @@ def test_csv_has_header_false_reads_header_row_as_data() raises:
     )
 
 
+def test_csv_skip_passes_note_lines_before_the_header() raises:
+    var path = _write_text("t_skip.csv", "till export, run 7\n\"daily\" notes\n" + _CSV_TEXT)
+    var o = _semicolon_opts()
+    o.skip = 2
+    var s = csv_tvf_schema(path, o)
+    assert_equal(s.num_columns(), 2)
+    assert_equal(s.field_at_unchecked(0).name, "k")
+    assert_equal(s.field_at_unchecked(1).name, "name")
+    assert_true(s.field_at_unchecked(0).arrow_type == ArrowType.INT64, "k is int64")
+    assert_true(s.field_at_unchecked(1).arrow_type == ArrowType.STRING, "name is string")
+
+
+def test_csv_skip_past_the_last_line_raises_at_bind() raises:
+    var path = _write_text("t_skip_end.csv", _CSV_TEXT)
+    var o = _semicolon_opts()
+    o.skip = 99
+    var raised = False
+    try:
+        _ = csv_tvf_schema(path, o)
+    except e:
+        raised = True
+        assert_true(
+            "CSV_SKIP_PAST_END: skip=99 skips every line of the file, which has 4 lines"
+            in String(e),
+            String(e),
+        )
+    assert_true(raised, "skip past the end must raise")
+
+
 def test_csv_blank_file_raises_zero_columns() raises:
     var path = _write_text("t4.csv", "\n\n")
     var raised = False
@@ -359,6 +388,36 @@ def test_csv_scan_carries_dialect_and_mtime() raises:
     assert_true(
         source.fingerprint() != default_dialect.fingerprint(),
         "the default dialect is a different source",
+    )
+
+
+def test_csv_scan_carries_skip() raises:
+    var path = _write_text("t_skip_scan.csv", "note\n" + _CSV_TEXT)
+    var o = _semicolon_opts()
+    o.skip = 1
+    var schema = csv_tvf_schema(path, o)
+    var plan = tvf_relation_scan(FromRelation.tvf_of(path, TVF_CSV, o))
+    _assert_same_schema(plan.output_schema, schema, "csv skip scan schema")
+    ref source = plan.scan_data_ref().source
+    var mtime = _mtime(path)
+    var want = SourceVariant(
+        CsvSource(
+            String(path), schema.copy(), mtime_ns=mtime,
+            quote_style_tag=QUOTE_STYLE_TAG_RFC4180,
+            delimiter=UInt8(ord(";")), has_header=True, skip=1,
+        )
+    )
+    assert_equal(source.fingerprint(), want.fingerprint(), "skip is in the source")
+    var no_skip = SourceVariant(
+        CsvSource(
+            String(path), schema.copy(), mtime_ns=mtime,
+            quote_style_tag=QUOTE_STYLE_TAG_RFC4180,
+            delimiter=UInt8(ord(";")), has_header=True,
+        )
+    )
+    assert_true(
+        source.fingerprint() != no_skip.fingerprint(),
+        "a skipping scan is a different source",
     )
 
 

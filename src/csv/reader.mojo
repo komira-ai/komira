@@ -45,6 +45,7 @@ from arrow.schema import (
     SchemaBuilder,
 )
 
+from .skip_lines import csv_skip_lines_end
 from .csv_options import (
     CsvReadOptions,
     check_declared_column_types,
@@ -165,16 +166,24 @@ def read_csv_bytes_to_batch[
     Raises (among others) on a malformed record, under every dialect: a
     field count other than the header's, or a byte after a closing quote
     that is not the delimiter or a line end. The error names the record
-    number, line, byte offset and field (`record_shape`).
+    number, line, byte offset and field (`record_shape`). With `options.skip`
+    the record number counts from the header (or first record) after the
+    skipped lines, and the line and byte offset are the file's own.
     """
     if len(bytes) == 0:
+        if options.skip != 0:
+            _ = csv_skip_lines_end(bytes, options.skip)
         var sb_empty = SchemaBuilder()
         var schema_empty = sb_empty.build()
         var rbb_empty = RecordBatchBuilder()
         return rbb_empty.build(schema_empty^)
 
+    # `skip` drops raw lines from byte 0 (a BOM is part of line 1); without
+    # it only the BOM is dropped.
     var scan_start: Int = 0
-    if (
+    if options.skip != 0:
+        scan_start = csv_skip_lines_end(bytes, options.skip)
+    elif (
         options.strip_utf8_bom
         and len(bytes) >= 3
         and bytes[0] == UInt8(0xEF)
@@ -245,6 +254,7 @@ def read_csv_bytes_to_batch[
     check_csv_record_shape[Q](
         scan_bytes, 0, scan_start, cells, data_start, header_names,
         options.has_header, options.delimiter, options.quote,
+        first_line=1 + options.skip,
     )
     var num_rows = cells.num_rows() - data_start  # after blank-line removal
     # A header with no records (num_rows == 0) still has columns: it falls
@@ -380,10 +390,16 @@ def read_csv_bytes_to_schema[
     header above for the inference-equivalence contract."""
     var sb_out = SchemaBuilder()
     if len(bytes) == 0:
+        if options.skip != 0:
+            _ = csv_skip_lines_end(bytes, options.skip)
         return sb_out.build()
 
+    # `skip` drops raw lines from byte 0 (a BOM is part of line 1); without
+    # it only the BOM is dropped.
     var scan_start: Int = 0
-    if (
+    if options.skip != 0:
+        scan_start = csv_skip_lines_end(bytes, options.skip)
+    elif (
         options.strip_utf8_bom
         and len(bytes) >= 3
         and bytes[0] == UInt8(0xEF)
@@ -478,6 +494,7 @@ def read_csv_bytes_to_schema[
     check_csv_record_shape[Q](
         scan_bytes, 0, scan_start, cells, data_start, header_names,
         options.has_header, options.delimiter, options.quote,
+        first_line=1 + options.skip,
         check_last_row=(prefix_end == n),
     )
     var num_rows = cells.num_rows() - data_start  # after blank-line removal

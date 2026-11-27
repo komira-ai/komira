@@ -72,6 +72,7 @@ def check_csv_record_shape[
     delimiter: UInt8,
     quote: UInt8,
     check_last_row: Bool = True,
+    first_line: Int = 1,
 ) raises:
     """Raise on the first malformed record in `cells`, in file order, then
     drop the blank lines a file with two or more columns skips.
@@ -97,6 +98,9 @@ def check_csv_record_shape[
         quote: The quote byte (to re-scan the prefix on error).
         check_last_row: False when the caller cut the input at a byte budget
             and the last scanned row may be incomplete (schema sampling).
+        first_line: The file's line number of `input[0]` (1 + the skipped
+            lines when the reader dropped `skip` lines before `input`).
+            Record numbers count from `input`; line numbers are the file's.
 
     Raises:
         Error naming the record number, its line and byte offset, the field
@@ -124,13 +128,13 @@ def check_csv_record_shape[
                 continue
             _raise_field_count[Q](
                 input, chunk_lo, file_offset, cells, r, n, header_names,
-                has_header, delimiter, quote,
+                has_header, delimiter, quote, first_line,
             )
         r = r + 1
     if quote_row >= 0:
         _raise_quote_violation[Q](
             input, chunk_lo, file_offset, cells, data_start, header_names,
-            delimiter, quote,
+            delimiter, quote, first_line,
         )
     if skip_blank and (
         n_blank > 0 or (n_rows > data_start and cells.row_is_blank(n_rows - 1))
@@ -154,14 +158,15 @@ def _record_location[
     delimiter: UInt8,
     quote: UInt8,
     skip_blank: Bool,
+    first_line: Int,
 ) raises -> String:
     """`record N (line L, byte offset B)` for row `r` of `cells`.
 
     N counts records from the start of `input` (the header is record 1); a
     skipped blank line (`skip_blank`) is not a record. L is the physical line
     the record starts on: 1 + the line ends before it (LF, CRLF or a bare
-    CR), so a quoted newline in an earlier record or a skipped blank line
-    moves L but not N. B is a file offset.
+    CR), counted from `first_line`, so a quoted newline in an earlier record
+    or a skipped blank line moves L but not N. B is a file offset.
     """
     var first = cells.row_starts[r]
     var start = chunk_lo
@@ -184,7 +189,7 @@ def _record_location[
         for pr in range(r):
             if cells.row_is_blank(pr):
                 before = before - 1
-    var line = 1
+    var line = first_line
     var i = 0
     while i < start:
         var b = input[i]
@@ -218,6 +223,7 @@ def _raise_field_count[
     has_header: Bool,
     delimiter: UInt8,
     quote: UInt8,
+    first_line: Int,
 ) raises:
     var num_cols = len(header_names)
     var what: String
@@ -239,7 +245,7 @@ def _raise_field_count[
         String("CSV ")
         + _record_location[Q](
             input, chunk_lo, file_offset, cells, r, delimiter, quote,
-            len(header_names) >= 2,
+            len(header_names) >= 2, first_line,
         )
         + " has "
         + String(n)
@@ -276,6 +282,7 @@ def _raise_quote_violation[
     header_names: List[String],
     delimiter: UInt8,
     quote: UInt8,
+    first_line: Int,
 ) raises:
     var r = cells.quote_violation_row
     var f = cells.quote_violation_field
@@ -295,7 +302,7 @@ def _raise_quote_violation[
         String("CSV ")
         + _record_location[Q](
             input, chunk_lo, file_offset, cells, r, delimiter, quote,
-            len(header_names) >= 2,
+            len(header_names) >= 2, first_line,
         )
         + ", "
         + field

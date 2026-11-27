@@ -1121,7 +1121,7 @@ struct _Parser(Movable):
             # `_refuse_option_for_kind`.
             #
             # ⛔ AN OPTION THE KIND DOES NOT READ MUST NOT PARSE CLEAN. A key in
-            # `_parse_tvf_options`' allowlist (`header`, `delim`/`sep`,
+            # `_parse_tvf_options`' allowlist (`header`, `delim`/`sep`, `skip`,
             # `quote`, `escape`, `parallel`, `compression`, `auto_detect`)
             # that is accepted for ANY kind is recorded on a `TvfOptions` the
             # avro or parquet binder never reads, so
@@ -1292,7 +1292,7 @@ struct _Parser(Movable):
         one of them:
 
           1. SEMANTIC — it changes what the result IS (`all_varchar`, `header`,
-             `delim`, `hive_partitioning`, and for `iceberg_scan`
+             `delim`, `skip`, `hive_partitioning`, and for `iceberg_scan`
              `allow_moved_paths` and `snapshot_from_id`). Recorded on `TvfOptions`; the binder honors it.
           2. NEUTRAL-BY-VALUE — it changes only HOW the engine gets there
              (`parallel`, `auto_detect=true`), or it restates something our
@@ -1450,6 +1450,32 @@ struct _Parser(Movable):
                 opts.snapshot_from_id = Optional[Int64](
                     self._small_int_tok("snapshot_from_id")
                 )
+                self._advance()
+            elif key == "skip":
+                if kind != TVF_CSV:
+                    self._refuse_option_for_kind(fname, key, kind, "read_csv")
+                if self._kind() == TK_MINUS:
+                    self._advance()  # '-'
+                    if self._kind() == TK_INT:
+                        var digits = String(self.tokens[self.pos].int_val)
+                        if self.tokens[self.pos].text.byte_length() > 0:
+                            digits = String(self.tokens[self.pos].text)
+                        raise Error(
+                            "SQL not supported: " + fname + " skip=-" + digits
+                            + " — skip is the number of lines to skip at the"
+                            + " start of the file and must be 0 or more"
+                            + " (DuckDB refuses a negative skip too)"
+                        )
+                    raise Error(
+                        "SQL syntax error: " + fname + " option 'skip' expects"
+                        + " a whole number of lines (0 or more)"
+                    )
+                if self._kind() != TK_INT:
+                    raise Error(
+                        "SQL syntax error: " + fname + " option 'skip' expects"
+                        + " a whole number of lines (0 or more)"
+                    )
+                opts.skip = Int(self._small_int_tok("skip"))
                 self._advance()
             elif key == "format":
                 if kind != TVF_JSON:

@@ -22,9 +22,14 @@ _CSV_CASES = [
     "pipe_rows",
     "header_only_types",
     "header_only_count",
+    "skip_types",
+    "skip_rows",
+    "skip_agg",
+    "skip_pipe_rows",
+    "skip0_rows",
 ]
 
-_CSV_FILES = ["typed", "quoted", "nulls", "pipe", "header_only"]
+_CSV_FILES = ["typed", "quoted", "nulls", "pipe", "header_only", "skip", "skip_pipe"]
 
 sql_oracle(
     name = "csv_oracle",

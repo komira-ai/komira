@@ -242,6 +242,8 @@ def _segment_text(seg: SegmentDescPod) -> String:
         out += " delimiter=" + String(Int(s.csv_spec.delimiter))
         out += " header=" + String(s.csv_spec.has_header)
         out += " quote_style=" + String(s.csv_spec.quote_style_tag)
+        if s.csv_spec.skip != 0:
+            out += " skip=" + String(s.csv_spec.skip)
         out += " columns=["
         for i in range(len(s.csv_spec.column_names)):
             if i > 0:

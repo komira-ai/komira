@@ -246,6 +246,19 @@ def test_csv_binding() raises:
     assert_false(csv_binding_bytes(path, UInt8(ord(",")), True, True) == base)
 
 
+def test_csv_binding_of_skip_zero_is_the_binding_without_skip() raises:
+    var path = _write(String("skip0.csv"), String("a,b\n1,x\n2,y\n"))
+    var comma = UInt8(ord(","))
+    var base = csv_binding_bytes(path, comma, True, False)
+    assert_true(csv_binding_bytes(path, comma, True, False, 0) == base)
+    # A non-zero skip is part of the scan's identity.
+    var noted = _write(String("skip1.csv"), String("a note\na,b\n1,x\n"))
+    var skipped = csv_binding_bytes(noted, comma, True, False, 1)
+    assert_true(_contains(skipped, String("skip")))
+    assert_false(_contains(base, String("skip")))
+    assert_false(csv_binding_bytes(path, comma, True, False, 1) == base)
+
+
 def test_csv_binding_missing_file() raises:
     var raised = False
     try:
@@ -415,6 +428,7 @@ def main() raises:
     test_parquet_schema_bytes()
     test_csv_binding()
     test_csv_binding_missing_file()
+    test_csv_binding_of_skip_zero_is_the_binding_without_skip()
     test_json_binding()
     test_plan_render()
     test_plan_render_refuses_garbage()

@@ -279,7 +279,34 @@ def test_options_refused_by_name_and_kind() raises:
     _refuses("SELECT * FROM read_csv('f', autodetect = false)", "auto_detect=false requires an explicit columns={...} list")
     _refuses("SELECT * FROM read_csv('f', compression = 'brotli')", "compression='brotli' — this reader derives the codec")
     _refuses("SELECT * FROM read_json('f', format = 'array')", "read_json format='array' — this reader is newline-delimited")
-    _refuses("SELECT * FROM read_csv('f', skip = 1)", "read_csv option 'skip' is not implemented")
+    _refuses("SELECT * FROM read_csv('f', comment = '#')", "read_csv option 'comment' is not implemented")
+    _refuses("SELECT * FROM read_parquet('f', skip = 1)", "read_parquet option 'skip' is a read_csv option and means nothing here")
+    _refuses("SELECT * FROM read_json('f', skip = 1)", "read_json option 'skip' is a read_csv option and means nothing here")
+    _refuses("SELECT * FROM read_avro('f', skip = 1)", "read_avro option 'skip' is a read_csv option and means nothing here")
+    _refuses("SELECT * FROM iceberg_scan('f', skip = 1)", "iceberg_scan option 'skip' is a read_csv option and means nothing here")
+    _refuses(
+        "SELECT * FROM read_csv('f', skip = -1)",
+        "SQL not supported: read_csv skip=-1 — skip is the number of lines to skip at the start of the file and must be 0 or more (DuckDB refuses a negative skip too)",
+    )
+    _refuses(
+        "SELECT * FROM read_csv('f', skip = - 12)",
+        "SQL not supported: read_csv skip=-12 — skip is the number of lines",
+    )
+    var bad: List[String] = ["'x'", "true", "1.5", "-x", "-"]
+    for i in range(len(bad)):
+        _refuses(
+            "SELECT * FROM read_csv('f', skip = " + bad[i] + ")",
+            "SQL syntax error: read_csv option 'skip' expects a whole number of lines (0 or more)",
+        )
+
+
+def test_csv_skip_option_is_recorded() raises:
+    var two = _tvf("read_csv('f.csv', skip = 2)")
+    assert_equal(two.query.from_tables[0].tvf_opts.skip, 2)
+    var zero = _tvf("read_csv('f.csv', skip = 0, header = false)")
+    assert_equal(zero.query.from_tables[0].tvf_opts.skip, 0)
+    assert_false(zero.query.from_tables[0].tvf_opts.has_header)
+    assert_equal(_tvf("read_csv('f.csv')").query.from_tables[0].tvf_opts.skip, 0)
 
 
 def test_replacement_scans_by_extension() raises:

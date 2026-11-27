@@ -22,7 +22,7 @@ rows are compared with the rows worked out by hand:
 - the notebook display: a frame's is its names over their types (also for a
   file removed after the read), and a sorted frame's Result shows its six
   rows with NULLs and stays unread, so `to_arrow` reads them all after;
-- read_csv (`sep`, `header`) and read_json(lines=True), and a CSV read with
+- read_csv (`sep`, `header`, `skiprows`) and read_json(lines=True), and a CSV read with
   no header, which the engine refuses at the terminal with its step and code;
 - failures: a missing file and an empty directory raise at the reader with
   the engine's status, step and last error; a closed session raises
@@ -102,6 +102,7 @@ PEOPLE = [
     {"id": 3, "name": "cy", "score": None},
 ]
 CSV_TEXT = "id,name,score\n1,ann,10.5\n2,,20\n3,cy,\n"
+NOTED_TEXT = "exported by hand\n" + CSV_TEXT
 PIPE_TEXT = "id|name|score\n1|ann|10.5\n2||20\n3|cy|\n"
 JSONL_TEXT = (
     '{"id":1,"name":"ann","score":10.5}\n'
@@ -164,6 +165,7 @@ def write_files(work):
     for key, name, text in (
         ("csv", "people.csv", CSV_TEXT),
         ("pipe", "people_pipe.csv", PIPE_TEXT),
+        ("noted", "people_noted.csv", NOTED_TEXT),
         ("jsonl", "events.jsonl", JSONL_TEXT),
     ):
         out[key] = os.path.join(work, name)
@@ -795,6 +797,34 @@ def test_read_csv(lib_dir):
         assert p.csv in df.explain()
 
 
+def test_read_csv_skiprows_reads_the_rows_after_the_note_line(lib_dir):
+    """`skiprows=1` drops the note line above the header: the same columns, types and rows as the file without it."""
+    with workspace() as (s, p):
+        df = komira.read_csv(p.noted, skiprows=1, session=s)
+        assert df.columns == ["id", "name", "score"], df.columns
+        assert df.dtypes["id"] == "int64" and df.dtypes["score"] == "float64", df.dtypes
+        got = text_rows(df)
+        assert got is None or got == PEOPLE, got
+        got = text_rows(df[df["id"] >= 2])
+        assert got is None or got == PEOPLE[1:], got
+        # None and 0 skip nothing.
+        for skiprows in (None, 0):
+            df = komira.read_csv(p.csv, skiprows=skiprows, session=s)
+            assert df.columns == ["id", "name", "score"], df.columns
+
+
+def test_read_csv_skiprows_past_the_last_line_is_refused_by_the_engine(lib_dir):
+    """A skip that leaves no line of the file raises at the reader with the engine's named error."""
+    with workspace() as (s, p):
+        e = raised(lambda: komira.read_csv(p.csv, skiprows=4, session=s))
+        assert isinstance(e, KomiraError) and e.status == -3, repr(e)
+        want = (
+            "CSV_SKIP_PAST_END: skip=4 skips every line of the file, which has 4 lines; "
+            "no header or record is left to read"
+        )
+        assert str(e) == want, str(e)
+
+
 def test_read_csv_without_header_refused_by_engine(lib_dir):
     """A CSV read with `header=None` is built, and the engine refuses it at the terminal, at "lower"."""
     with workspace() as (s, p):
@@ -952,6 +982,8 @@ TESTS = [
     test_notebook_display,
     test_explain,
     test_read_csv,
+    test_read_csv_skiprows_reads_the_rows_after_the_note_line,
+    test_read_csv_skiprows_past_the_last_line_is_refused_by_the_engine,
     test_read_csv_without_header_refused_by_engine,
     test_read_json,
     test_reader_failures,

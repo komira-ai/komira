@@ -14,7 +14,10 @@
 # refused as TABLE_NAME_EMPTY; a name the session already holds (from either
 # call, from register_parquet, or in another case) is refused as
 # TABLE_ALREADY_REGISTERED word for word, and the table first registered
-# under it still answers with its own rows.
+# under it still answers with its own rows; a CSV file registered with skip 1
+# answers with the rows under the header that follows its note line, skip 0
+# is the file read whole, and a negative skip and one past the last line are
+# refused by name with nothing registered.
 from std.testing import assert_equal, assert_false, assert_true
 
 from arrow.arrow_types import ArrowType
@@ -219,6 +222,57 @@ def test_taken_name_is_refused_and_keeps_its_table() raises:
     assert_equal(_ints(sql_result(s, String("select count(*) from two")))[0], Int64(0))
 
 
+def test_csv_skip_reads_the_rows_after_the_note_line() raises:
+    var s = Session()
+    var path = _write(String("noted.csv"), String("exported by hand\nid,score\n1,10\n2,20\n"))
+    register_csv(s, String("noted"), path, COMMA, True, False, 1)
+    var result = sql_result(s, String("select id, score from noted order by id"))
+    assert_equal(result.schema.field_name(0), String("id"))
+    assert_equal(result.schema.field_name(1), String("score"))
+    var ids = _ints(result)
+    assert_equal(len(ids), 2)
+    assert_equal(ids[0], Int64(1))
+    assert_equal(ids[1], Int64(2))
+    _assert_same_answer(s, String("noted"), String("read_csv('") + path + "', skip=1)")
+
+
+def test_csv_skip_zero_reads_the_whole_file() raises:
+    var s = Session()
+    register_csv(s, String("whole"), _write(String("whole.csv"), String(PEOPLE)), COMMA, True, False, 0)
+    assert_equal(_ints(sql_result(s, String("select count(*) from whole")))[0], Int64(3))
+
+
+def test_csv_skip_refusals_register_nothing() raises:
+    var s = Session()
+    var path = _write(String("skip_refused.csv"), String("a note\nid\n1\n"))
+    var negative = String("")
+    try:
+        register_csv(s, String("neg"), path, COMMA, True, False, -2)
+    except e:
+        negative = String(e)
+    assert_equal(
+        negative,
+        String(
+            "CSV_SKIP_NEGATIVE: skip=-2 is negative; skip is the number of lines to skip at the start of the file"
+            " and must be 0 or more"
+        ),
+    )
+    var past = String("")
+    try:
+        register_csv(s, String("past"), path, COMMA, True, False, 3)
+    except e:
+        past = String(e)
+    assert_equal(
+        past,
+        String(
+            "CSV_SKIP_PAST_END: skip=3 skips every line of the file, which has 3 lines; no header or record is left"
+            " to read"
+        ),
+    )
+    assert_false(s.engine.catalog.has("neg"))
+    assert_false(s.engine.catalog.has("past"))
+
+
 def main() raises:
     test_registered_csv_answers_queries()
     test_csv_dialect_is_the_one_read_csv_reads()
@@ -226,4 +280,7 @@ def main() raises:
     test_unreadable_files_register_nothing()
     test_empty_name_is_refused()
     test_taken_name_is_refused_and_keeps_its_table()
+    test_csv_skip_reads_the_rows_after_the_note_line()
+    test_csv_skip_zero_reads_the_whole_file()
+    test_csv_skip_refusals_register_nothing()
     print("OK")

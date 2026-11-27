@@ -2,7 +2,7 @@
 
 `load` opens the library from a directory, once per process, checks that its
 ABI major version is the one this package was written for, and binds the
-calls of `_FUNCTIONS` (the newest from ABI 1.10); every failure is a `LibraryLoadError` that says which
+calls of `_FUNCTIONS` (the newest from ABI 1.11); every failure is a `LibraryLoadError` that says which
 library and why. `Native` holds the bound calls and turns their status codes
 into `KomiraError`, with the context's last error, read with the two-call
 protocol, as the message, and, from ABI 1.7, its code and step as the error's
@@ -61,7 +61,10 @@ under a handle that another thread cancels and reads the progress of, are what
 `_run.run_sql` makes; `has` says whether the library has a call.
 `add_sql_binding` (ABI 1.10) binds a SQL name to the bytes of a
 `WireBoundSource`, which `Session.add_sql_binding` makes of a `komira.files`
-source after it seals the source's credential.
+source after it seals the source's credential. `register_csv` and
+`csv_binding` take a `skip` of lines to skip at the start of the file: 0 calls
+the call of ABI 1.1 and 1.5, which every library has, and a positive one the
+`_with_skip` call of ABI 1.11.
 """
 
 from __future__ import annotations
@@ -172,6 +175,24 @@ _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
         10,
         ctypes.c_int32,
         [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint64, ctypes.c_int32],
+    ),
+    "komira_csv_binding_with_skip": (
+        11,
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint8, ctypes.c_int32, ctypes.c_int32, ctypes.c_int64] + _Out,
+    ),
+    "komira_register_csv_with_skip": (
+        11,
+        ctypes.c_int32,
+        [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.c_uint8,
+            ctypes.c_int32,
+            ctypes.c_int32,
+            ctypes.c_int64,
+        ],
     ),
 }
 
@@ -464,6 +485,15 @@ def _flag(what: str, value: object) -> int:
     return int(value)
 
 
+def _skip(value: object) -> int:
+    """A CSV skip argument: the number of lines to skip at the start of the file."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("skip must be an int, not {}".format(type(value).__name__))
+    if value < 0 or value > 2**63 - 1:
+        raise ValueError("skip must be 0 or more, and fit in 64 bits, not {}".format(value))
+    return int(value)
+
+
 class Native:
     """The calls of one loaded libkomira. `path` is the file it was loaded
     from and `abi_version` its komira_abi_version(). A context is the integer
@@ -561,16 +591,22 @@ class Native:
         delimiter: str,
         header: bool,
         all_varchar: bool,
+        skip: int = 0,
     ) -> None:
         """Registers the CSV file at `path` in the context as the table
         `name`, read with `delimiter` and, when `header`, its first line as
         the column names; `all_varchar` makes every column a string. The
-        library infers the schema now."""
-        op = "komira_register_csv"
+        library infers the schema now. The first `skip` lines of the file are
+        skipped before the header; a non-zero `skip` needs ABI 1.11."""
+        n = _skip(skip)
+        op = "komira_register_csv" if n == 0 else "komira_register_csv_with_skip"
         fn = self._fn(op)
         c_name, c_path = _c_string("name", name), _c_path(path)
         d, h, a = _delimiter(delimiter), _flag("header", header), _flag("all_varchar", all_varchar)
-        self._check(op, ctx, fn(ctx, c_name, c_path, d, h, a))
+        if n == 0:
+            self._check(op, ctx, fn(ctx, c_name, c_path, d, h, a))
+        else:
+            self._check(op, ctx, fn(ctx, c_name, c_path, d, h, a, n))
 
     def register_json(self, ctx: int, name: str, path: str | os.PathLike[str]) -> None:
         """Registers the newline-delimited JSON file at `path` in the context
@@ -585,12 +621,23 @@ class Native:
         return self._out("komira_parquet_schema", ctx, lambda fn, b, c, n: fn(ctx, c_path, b, c, n))
 
     def csv_binding(
-        self, ctx: int, path: str | os.PathLike[str], *, delimiter: str, has_header: bool, all_varchar: bool
+        self,
+        ctx: int,
+        path: str | os.PathLike[str],
+        *,
+        delimiter: str,
+        has_header: bool,
+        all_varchar: bool,
+        skip: int = 0,
     ) -> bytes:
-        """The `WireScanBinding` bytes of the CSV file at `path`."""
+        """The `WireScanBinding` bytes of the CSV file at `path`, read after
+        its first `skip` lines; a non-zero `skip` needs ABI 1.11."""
+        k = _skip(skip)
         c_path = _c_path(path)
         d, h, a = _delimiter(delimiter), _flag("has_header", has_header), _flag("all_varchar", all_varchar)
-        return self._out("komira_csv_binding", ctx, lambda fn, b, c, n: fn(ctx, c_path, d, h, a, b, c, n))
+        if k == 0:
+            return self._out("komira_csv_binding", ctx, lambda fn, b, c, n: fn(ctx, c_path, d, h, a, b, c, n))
+        return self._out("komira_csv_binding_with_skip", ctx, lambda fn, b, c, n: fn(ctx, c_path, d, h, a, k, b, c, n))
 
     def json_binding(self, ctx: int, path: str | os.PathLike[str]) -> bytes:
         """The `WireScanBinding` bytes of the newline-delimited JSON file at `path`."""

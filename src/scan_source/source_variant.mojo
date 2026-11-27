@@ -73,6 +73,7 @@ from scan_source.csv_source import (
     CsvSource,
     CSV_DEFAULT_DELIMITER,
     CSV_DEFAULT_HAS_HEADER,
+    CSV_DEFAULT_SKIP,
 )
 from scan_source.arrow_source import ArrowSource
 from scan_source.orc_source import OrcSource
@@ -512,6 +513,11 @@ def _csv_binding(var csv: CsvSource) -> ScanBinding:
         which is what makes them visible to the identity AUDIT and not only to
         the plan text — the audit's R2 compares `fingerprint`, so a param the
         fold cannot see is a corpus entry that cannot be added.
+      * `skip`           — the number of lines dropped before the header, as
+        an i64. Written ONLY when it is not 0, and folded the same way, so a
+        default scan's params and fingerprint are what they were before the
+        option existed, and a plan from a producer that never wrote it reads
+        as skip 0.
 
     WHAT IS DELIBERATELY *NOT* A PARAM:
       * `estimated_rows`. `CsvSource.estimate_rows()` returns -1 unconditionally
@@ -535,6 +541,8 @@ def _csv_binding(var csv: CsvSource) -> ScanBinding:
     params.put_i64(
         String("has_header"), Int64(1) if csv.has_header else Int64(0)
     )
+    if csv.skip != CSV_DEFAULT_SKIP:
+        params.put_i64(String("skip"), Int64(csv.skip))
     return ScanBinding(
         kind_id=scan_kind_id(String(SCAN_KIND_NAME_CSV)),
         kind_name=String(SCAN_KIND_NAME_CSV),
@@ -586,9 +594,10 @@ def csv_scan_identity_corpus() -> ScanIdentityCorpus:
     """The CSV kind's statement of what makes two of its scans different.
 
     ONE ENTRY PER INPUT `CsvSource.fingerprint()` FOLDS. `csv_source.mojo`'s
-    ctor folds exactly five things — the `path` (its LENGTH and its BYTES,
+    ctor folds exactly six things — the `path` (its LENGTH and its BYTES,
     which one entry covers, since no two paths of different length share their
-    bytes), `_mtime_ns`, `quote_style_tag`, `delimiter` and `has_header`. The
+    bytes), `_mtime_ns`, `quote_style_tag`, `delimiter`, `has_header` and
+    `skip` (only when not 0). The
     schema is NOT folded, so there is no schema entry: a corpus that varied
     something the fingerprint cannot see would be testing core against itself.
 
@@ -631,6 +640,12 @@ def csv_scan_identity_corpus() -> ScanIdentityCorpus:
             )
         ),
     )
+    c.add(
+        String("skip"),
+        _csv_binding(
+            _csv_corpus_source(String("/t/a.csv"), UInt64(0), 0, skip=1)
+        ),
+    )
     return c^
 
 
@@ -640,6 +655,7 @@ def _csv_corpus_source(
     quote_style_tag: Int,
     delimiter: UInt8 = CSV_DEFAULT_DELIMITER,
     has_header: Bool = CSV_DEFAULT_HAS_HEADER,
+    skip: Int = CSV_DEFAULT_SKIP,
 ) -> CsvSource:
     """Corpus fixture only. The SCHEMA is deliberately empty: `schema` is not an
     input `CsvSource.fingerprint()` folds, and a corpus that varied something the
@@ -651,6 +667,7 @@ def _csv_corpus_source(
         quote_style_tag=quote_style_tag,
         delimiter=delimiter,
         has_header=has_header,
+        skip=skip,
     )
 
 
