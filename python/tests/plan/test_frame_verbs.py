@@ -8,7 +8,7 @@ stand-in that records the plan bytes it is given. Checked:
   int64 or float64 and cast back for an int32 or float32 column, and boolean
   logic with no CASE for a bool column), the filter of `dropna` (any and all,
   subset), the projection of `rename`, `add_prefix` and `add_suffix`, the
-  casts of `astype`, and the TOPN by the reversed keys under the sort of
+  projection of the columns `drop` keeps, the casts of `astype`, and the TOPN by the reversed keys under the sort of
   `tail`;
 - how a float column's missing value is tested: not NULL and not NaN, built
   from comparisons with infinity, through a cast for float32;
@@ -454,6 +454,107 @@ def test_dropna_refuses_what_it_cannot_honour_by_its_full_message():
     refuses(lambda: df.dropna(subset=[1]), TypeError, "dropna subset takes column names, which are str, not int")
     refuses(lambda: df.dropna(ignore_index="x"), TypeError, "dropna ignore_index must be a bool, not str")
     assert df.dropna(thresh=None)._plan == df.dropna()._plan
+
+
+# --- drop ------------------------------------------------------------------------
+
+
+def test_drop_of_columns_is_one_projection_of_the_others_in_their_order():
+    df = Env().df
+    got = df.drop(columns=["x", "b"])
+    assert got._plan == _ops.Project(SCAN, tuple((n, ColRef(n)) for n in ("a", "n", "s", "ok")))
+    assert got.columns == ["a", "n", "s", "ok"]
+    assert got.dtypes == {"a": "int64", "n": "int32", "s": "string", "ok": "bool"}
+    assert df.drop(columns="x").columns == ["a", "b", "n", "s", "ok"]
+    assert df.drop(columns=("x", "b"))._plan == got._plan
+    assert df.drop(columns=["x", "x"]).columns == ["a", "b", "n", "s", "ok"]
+
+
+def test_drop_of_labels_with_axis_one_is_drop_of_columns():
+    df = Env().df
+    expected = df.drop(columns=["x", "b"])._plan
+    assert df.drop(["x", "b"], axis=1)._plan == expected
+    assert df.drop(["x", "b"], axis="columns")._plan == expected
+    assert df.drop("x", axis=1).columns == ["a", "b", "n", "s", "ok"]
+    # With columns= the axis is not read, as in pandas.
+    assert df.drop(columns=["x", "b"], axis=1)._plan == expected
+    assert df.drop(columns=["x", "b"], axis=0)._plan == expected
+
+
+def test_drop_of_a_name_the_frame_lacks_is_a_key_error_unless_errors_is_ignore():
+    df = Env().df
+    refuses(lambda: df.drop(columns=["x", "zz"]), KeyError, unknown("zz", COLS))
+    refuses(lambda: df.drop(["zz"], axis=1, errors="raise"), KeyError, unknown("zz", COLS))
+    assert df.drop(columns=["x", "zz"], errors="ignore")._plan == df.drop(columns="x")._plan
+    assert df.drop(columns="zz", errors="ignore")._plan == df._plan
+
+
+def test_drop_of_no_column_adds_no_node_and_of_every_column_is_refused():
+    df = Env().df
+    assert df.drop(columns=[])._plan == df._plan
+    every = "drop would leave the frame with no columns, which komira does not build: keep at least one column"
+    refuses(lambda: df.drop(columns=list(COLS)), UnsupportedOperation, every)
+    refuses(lambda: df.drop(columns=list(COLS) + ["zz"], errors="ignore"), UnsupportedOperation, every)
+
+
+def test_drop_keeps_a_sorted_frame_sorted_unless_it_drops_a_sort_key():
+    df = Env().df.sort_values("a")
+    keys = (SortKey("a"),)
+    kept = df.drop(columns=["x"])
+    assert kept._plan == _ops.Sort(
+        _ops.Project(SCAN, tuple((n, ColRef(n)) for n in COLS if n != "x")), keys
+    )
+    assert kept._order() == keys
+    lost = df.drop(columns=["a"])
+    assert lost._plan == _ops.Project(_ops.Sort(SCAN, keys), tuple((n, ColRef(n)) for n in COLS if n != "a"))
+    assert lost._order() is None
+
+
+def test_drop_refuses_rows_and_what_it_cannot_honour_by_its_full_message():
+    df = Env().df
+    refuses(
+        lambda: df.drop(columns=["x"], inplace=True),
+        UnsupportedOperation,
+        "drop(inplace=True) changes the frame in place, and komira frames do not change: use the frame drop returns",
+    )
+    refuses(
+        lambda: df.drop(columns=["x"], level=0),
+        UnsupportedOperation,
+        "drop(level=0) picks a level of a multi-level index, and komira frames have no index: "
+        "drop columns with drop(columns=[...])",
+    )
+    refuses(
+        lambda: df.drop(index=[0]),
+        UnsupportedOperation,
+        "drop(index=...) drops rows by index label, and komira frames have no index: keep the rows you want with df[cond]",
+    )
+    for axis in (0, "index"):
+        refuses(
+            lambda: df.drop(["x"], axis=axis),
+            UnsupportedOperation,
+            f"drop(labels, axis={axis!r}) drops rows by index label, and komira frames have no index: "
+            "drop columns with drop(columns=[...]) or drop(labels, axis=1)",
+        )
+    for other in ({"columns": ["b"]}, {"index": [0]}):
+        refuses(
+            lambda: df.drop(["x"], **other),
+            ValueError,
+            "Cannot specify both 'labels' and 'index'/'columns'",
+        )
+    refuses(lambda: df.drop(), ValueError, "Need to specify at least one of 'labels', 'index' or 'columns'")
+    for axis in (2, "rows", True):
+        refuses(lambda: df.drop(["x"], axis=axis), ValueError, f"No axis named {axis} for object type DataFrame")
+    refuses(
+        lambda: df.drop(columns=["x"], errors="warn"),
+        ValueError,
+        "drop errors must be 'ignore' or 'raise', not 'warn'",
+    )
+    refuses(
+        lambda: df.drop(columns={"x"}),
+        TypeError,
+        "drop takes a column name or a list of names, not a set",
+    )
+    refuses(lambda: df.drop(columns=["x", 1]), TypeError, "drop takes column names, which are str, not int")
 
 
 # --- rename, add_prefix, add_suffix ----------------------------------------------

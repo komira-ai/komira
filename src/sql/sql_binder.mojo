@@ -496,7 +496,7 @@ def _bind_select(
     var n_result = plan.output_schema.num_columns() - len(order_carry)
     var star_passthrough = (
         len(stmt.select_items) == 1
-        and stmt.select_items[0].is_star
+        and stmt.select_items[0].is_plain_star()
         and not has_agg
         and not group_present
         and not has_window

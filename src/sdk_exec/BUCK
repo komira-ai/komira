@@ -218,6 +218,41 @@ _EXPR_BESIDE_AGG_TEST_DATA = {
 
 _EXPR_BESIDE_AGG_TEST_DATA.update({c + ".tsv": ":expr_beside_agg_oracle[" + c + ".tsv]" for c in _EXPR_BESIDE_AGG_CASES})
 
+# DuckDB's tables and answers for test_run_sql_star_exclude:
+# tests/star_exclude/data.sql writes orders.parquet and customers.parquet, and
+# each line of tests/star_exclude/cases.sql runs one SELECT of a star with an
+# EXCLUDE list or a table-qualified star and writes its answer.
+_STAR_EXCLUDE_CASES = [
+    "exclude_one",
+    "exclude_two_any_case",
+    "exclude_bare_name",
+    "exclude_under_where",
+    "exclude_order_by_dropped",
+    "exclude_distinct",
+    "exclude_in_cte",
+    "exclude_join_key",
+    "qualified_left_exclude",
+    "qualified_right",
+    "qualified_right_of_left_join",
+]
+
+sql_oracle(
+    name = "star_exclude_oracle",
+    srcs = [
+        "tests/star_exclude/data.sql",
+        "tests/star_exclude/cases.sql",
+    ],
+    outputs = ["orders.parquet", "customers.parquet"] + [c + ".tsv" for c in _STAR_EXCLUDE_CASES],
+)
+
+_STAR_EXCLUDE_TEST_DATA = {
+    "cases.sql": "tests/star_exclude/cases.sql",
+    "customers.parquet": ":star_exclude_oracle[customers.parquet]",
+    "orders.parquet": ":star_exclude_oracle[orders.parquet]",
+}
+
+_STAR_EXCLUDE_TEST_DATA.update({c + ".tsv": ":star_exclude_oracle[" + c + ".tsv]" for c in _STAR_EXCLUDE_CASES})
+
 # The cases of komira_sql_conformance's order_by_limit corpus with a LIMIT or an
 # OFFSET: test_run_sql_topn runs each SELECT and holds it to DuckDB's answer.
 _TOPN_CASES = [
@@ -832,6 +867,7 @@ mojo_library(
         "tests/test_run_sql_join_kinds.mojo": _JOIN_KINDS_TEST_DATA,
         "tests/test_run_sql_subquery.mojo": _SUBQUERY_TEST_DATA,
         "tests/test_run_sql_set_ops.mojo": _SET_OPS_TEST_DATA,
+        "tests/test_run_sql_star_exclude.mojo": _STAR_EXCLUDE_TEST_DATA,
     },
     visibility = ["PUBLIC"],
 )

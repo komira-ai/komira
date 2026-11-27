@@ -15,7 +15,7 @@ from plan_ir.logical_plan import (
 from scan_source.source_variant import SourceVariant
 from sql.sql_ast import (
     FROM_LESS_RELATION, FromRelation, JK_ANTI, JK_SEMI, JoinClause, SX_COLUMN,
-    SelectStmt, SqlExpr, TVF_ICEBERG,
+    SelectItem, SelectStmt, SqlExpr, TVF_ICEBERG,
 )
 from sql.sql_bind_names import (
     _group_has, _group_spelling,
@@ -584,6 +584,121 @@ def _dedupe_join_right(
 
 
 # =============================================================================
+# The columns a star expands to
+# =============================================================================
+#
+# A plain `*` is every column of the FROM scope, in order. Two forms narrow
+# it, as DuckDB does (the messages quoted are DuckDB's; the oracle test
+# sdk_exec/tests/test_run_sql_star_exclude.mojo holds the answers to the
+# pinned DuckDB):
+#
+#   `q.*`               the columns of the one relation `q` names, in its
+#                       order. A relation `q` cannot name: `Referenced table
+#                       "q" not found`.
+#   `[q.]* EXCLUDE (a)` the star's columns but those named, compared
+#                       case-insensitively with each column's source name, so
+#                       over a join `* EXCLUDE (k)` drops every `k` (the
+#                       left's and the right's). A name the star does not
+#                       expand to is refused (`Column "zz" in EXCLUDE list not
+#                       found in FROM clause`), and so is a list that leaves no
+#                       column (`SELECT list is empty after resolving *
+#                       expressions!`).
+#
+# One `q.*` is refused by name: over a relation joined by NATURAL or USING.
+# The scope maps such a relation's key onto the left's coalesced column, while
+# DuckDB answers the relation's own key there (NULL on a row a LEFT join pads),
+# so expanding it from the scope would be a wrong answer.
+
+
+def _out_name_taken_before(scope: BindScope, rel: Int, name: String) -> Bool:
+    """Whether a relation before `rel` in the scope has output column
+    `name`: a key `rel` was coalesced onto by NATURAL or USING."""
+    for ri in range(rel):
+        ref r = scope.rels[ri]
+        for i in range(len(r.out)):
+            if r.out[i] == name:
+                return True
+    return False
+
+
+def _qualified_star_rel(scope: BindScope, qualifier: String) raises -> Int:
+    """The index in `scope.rels` of the one relation `qualifier` names."""
+    var q = qualifier.lower()
+    var hit = -1
+    for ri in range(len(scope.rels)):
+        if _alias_in_list(scope.rels[ri].aliases, q):
+            if hit >= 0:
+                raise Error(
+                    "SQL bind error: ambiguous reference to table `" + qualifier
+                    + "` in `" + qualifier + ".*`: more than one relation"
+                    " answers to `" + qualifier + "`. Give one of them a"
+                    " distinct alias (`AS my_alias`)."
+                )
+            hit = ri
+    if hit < 0:
+        raise Error(
+            "SQL bind error: referenced table `" + qualifier + "` not found"
+            " (in `" + qualifier + ".*`)"
+        )
+    return hit
+
+
+def _star_out_names(item: SelectItem, scope: BindScope) raises -> List[String]:
+    """The output names, in `scope.out_schema` spelling and order, of the
+    columns the star `item` expands to (see the header)."""
+    var cand = List[String]()  # output names of the star's columns
+    var src = List[String]()  # each one's name in its own relation
+    if item.star_qualifier.byte_length() == 0:
+        for j in range(scope.out_schema.num_columns()):
+            var o = String(scope.out_schema.field_name(j))
+            src.append(scope.source_name_of_output(o))
+            cand.append(o^)
+    else:
+        var ri = _qualified_star_rel(scope, item.star_qualifier)
+        ref r = scope.rels[ri]
+        for i in range(len(r.out)):
+            if _out_name_taken_before(scope, ri, r.out[i]):
+                raise Error(
+                    "SQL not supported: `" + item.star_qualifier + ".*` over a"
+                    " relation joined by NATURAL or USING. Its key `" + r.orig[i]
+                    + "` is coalesced with the left's, and DuckDB answers the"
+                    " relation's own key there. Select its columns by name."
+                )
+            cand.append(String(r.out[i]))
+            src.append(String(r.orig[i]))
+    if len(item.star_exclude) == 0:
+        return cand^
+    var found = List[Bool]()
+    for _ in range(len(item.star_exclude)):
+        found.append(False)
+    var out = List[String]()
+    for c in range(len(cand)):
+        var sl = src[c].lower()
+        var dropped = False
+        for e in range(len(item.star_exclude)):
+            if item.star_exclude[e].lower() == sl:
+                dropped = True
+                found[e] = True
+        if not dropped:
+            out.append(String(cand[c]))
+    for e in range(len(item.star_exclude)):
+        if not found[e]:
+            var where = String("FROM clause")
+            if item.star_qualifier.byte_length() > 0:
+                where = "`" + item.star_qualifier + "`"
+            raise Error(
+                "SQL bind error: column \"" + item.star_exclude[e]
+                + "\" in EXCLUDE list not found in " + where
+            )
+    if len(out) == 0:
+        raise Error(
+            "SQL bind error: SELECT list is empty after resolving * expressions"
+            " (the EXCLUDE list names every column the star expands to)"
+        )
+    return out^
+
+
+# =============================================================================
 # The names a result carries
 # =============================================================================
 # The join node's `_right` rename is an engine name: it keeps column references
@@ -610,8 +725,9 @@ def _result_display_names(stmt: SelectStmt, scope: BindScope) raises -> List[Str
     for i in range(len(stmt.select_items)):
         ref item = stmt.select_items[i]
         if item.is_star:
-            for j in range(scope.out_schema.num_columns()):
-                out.append(scope.source_name_of_output(String(scope.out_schema.field_name(j))))
+            var names = _star_out_names(item, scope)
+            for j in range(len(names)):
+                out.append(scope.source_name_of_output(names[j]))
         elif item.out_alias:
             out.append(String(""))
         elif item.expr.tag == SX_COLUMN and item.expr.qualifier != "":

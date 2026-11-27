@@ -428,7 +428,9 @@ def test_calls_aggregates_and_columns() raises:
     var q = _e("t.a")
     _is_col(q, "a")
     assert_equal(q.qualifier, "t")
-    _refuses("t.*", "expected column after '.'")
+    # `t.*` is a star only as a SELECT item (test_sql_bind_star); inside an
+    # expression it is still refused.
+    _refuses("1 + t.*", "expected column after '.'")
 
 
 def test_case_expressions() raises:

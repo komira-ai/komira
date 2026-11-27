@@ -60,7 +60,7 @@ Output:
 
 ## Related
 
-- [How do I select or drop columns?](../34-select-drop-columns/page.md) (rank 34, partial)
+- [How do I select or drop columns?](../34-select-drop-columns/page.md) (rank 34, works)
 - [How do I rename columns?](../16-rename-columns/page.md) (rank 16, works)
 - [How do I sort rows by one or more columns?](../8-sort-rows-by-columns/page.md) (rank 8, works)
 - How do I turn a table into a list of dicts? (rank 67, works)

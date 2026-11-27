@@ -47,7 +47,7 @@ marked **not built** is designed, but the skin does not define it yet: calling i
 | `scan_gs` | a reader given a `gs://` path, not built: the readers take a local path | the same | SCAN with the `gcs` scheme | cut, and read through `GcsScanFs` only when a Mojo caller hands `run_sql_with` or `run_plan_with` the opener; not wired from libkomira: its plan entry refuses the scan as for `scan_s3`, and `komira_add_sql_binding` refuses a `gs://` location (`STORAGE_URL_REFUSED`) |
 | `scan_az` | a reader given an `az://` path, not built: the readers take a local path | the same | SCAN with the `azure` scheme | as `scan_s3`: SQL over a bound name reads through the session's `StoreScanFs`, and a Mojo caller can hand over an `AzureScanFs`; the plan entry refuses the scan |
 | `filter` | `df[pred]`, where `pred` is a boolean `Series` of `df` | `lf.filter(pred)` | FILTER | cut |
-| `project` | `df[["a", "b"]]`, `df.rename(columns=...)`, `add_prefix`, `add_suffix` | `lf.select("a", "b")`, `lf.select(kpl.col("a").alias("b"))`, `lf.rename(...)` | PROJECT of column references and aliases | cut |
+| `project` | `df[["a", "b"]]`, `df.drop(columns=[...])`, `df.rename(columns=...)`, `add_prefix`, `add_suffix` | `lf.select("a", "b")`, `lf.drop("a")`, `lf.select(kpl.col("a").alias("b"))`, `lf.rename(...)` | PROJECT of column references and aliases | cut |
 | `computed_column` | `df.assign(x=...)`, `df["x"] = ...`; operators `+ - * /`, unary `-`, comparisons, `& \| ~`; `df.fillna`; not built: `// % **`, `abs()`, `round()`, `isna`, `notna` | `lf.with_columns(expr)`, `lf.select(expr)`; operators `+ - * / // %`, unary `-`, comparisons, `& \| ~`; `kpl.lit`, `abs`, `fill_null`, `is_null`, `is_not_null`; not built: `**`, `round`, `fill_nan`, `is_nan` | PROJECT of literals, binary and unary ops (`build_with_columns_plan`) | cut |
 | `cast` | `df.astype(dtype or {col: dtype})`, `s.astype(dtype)` | `expr.cast(dtype)` | `EXPR_CAST` | in its node |
 | `case_when` | `s.case_when(caselist)`, `s.where(cond, other)`, `s.mask(cond, other)`; `other` required; not built | `kpl.when(c).then(v).otherwise(w)`; `otherwise` required | `EXPR_WHEN` | in its node |
@@ -115,6 +115,7 @@ These verbs have no capability of their own. Each one builds the plan of the row
 | verb | pandas-shaped | polars-shaped | row |
 |---|---|---|---|
 | frame rename | `rename(columns=)`, `add_prefix`, `add_suffix` | `rename(mapping)` | `project` |
+| drop columns | `drop(columns=[...])`, `drop([...], axis=1)`; `errors="ignore"` skips a name the frame lacks | `drop("a", "b")`; `strict=False` skips one | `project` of the columns kept |
 | drop rows with a missing value | `dropna(subset=None, how="any")` | `drop_nulls(subset=None)` | `filter` (`drop_nulls_predicate`) |
 | fill missing values | `fillna(v)` or `fillna({col: v})` | `fill_null(v)`; `fill_nan(v)` not built | `computed_column` |
 | count values per key | `df.groupby(c).size().sort_values("size", ascending=False)`: `s.value_counts()` is refused by name, since pandas gives a `Series` indexed by value and a komira `Series` has no index (rules section 8, ruling 1) | `lf.group_by(c).len()` | `group_by`, `sort` |
