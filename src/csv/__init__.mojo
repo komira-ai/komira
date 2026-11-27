@@ -11,6 +11,8 @@ sdk `ctx.read_csv`):
   - read_csv_to_batch, read_csv_to_batch_with_options,
     read_csv_bytes_to_batch: high-level entry points (slurp +
     materialize -> RecordBatch).
+  - header_free_column_name: the names of a file read without a header
+    line, DuckDB's column0, column1, ...
 """
 
 from .quote_styles import QuoteStyle, Rfc4180, Excel, Posix
@@ -112,6 +114,7 @@ from .temporal_parsers import (
     _try_parse_duration_ns,
 )
 from .type_inference import infer_column_types, infer_column_types_wide
+from .column_names import header_free_column_name
 from .reader import (
     read_csv_to_batch,
     read_csv_to_batch_with_options,

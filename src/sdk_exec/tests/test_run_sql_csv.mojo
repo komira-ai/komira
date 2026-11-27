@@ -6,8 +6,9 @@
 # :csv_oracle action in BUCK) for every case of tests/csv/cases.sql: the
 # inferred types and the rows of typed, quoted, NULL-bearing and |-delimited
 # files and of a header with no row, filters, grouped and ungrouped aggregates
-# and all_varchar, each over the committed file and over a gzip copy; every
-# case is run; a missing file is refused at bind and header=false at lowering.
+# and all_varchar, each over the committed file and over a gzip copy; files
+# with no header line, whose columns are named column0, column1, ... as
+# DuckDB names them; every case is run; a missing file is refused at bind.
 #
 # The cases are the lines of tests/csv/cases.sql: the pinned DuckDB runs each
 # query over the committed CSV files as a build action (`sql_oracle`) and
@@ -36,16 +37,23 @@
 #                                       a `|` delimiter with a comma inside a
 #                                       cell; a header with no row is no row
 #                                       of VARCHAR columns.
+#   test_no_header_csv_equals_duckdb    header = false: the names column0,
+#                                       column1, ... and the types, the rows
+#                                       (every line is one, a quoted comma and
+#                                       doubled quotes included), a filter on
+#                                       the names, all_varchar, a header line
+#                                       read as data, and eleven columns
+#                                       named column00 .. column10.
 #   test_gzip_csv_equals_duckdb         every case above over gzip copies.
 #   test_every_case_is_run              each case of cases.sql belongs to one
 #                                       of the tests above, so none is skipped.
 #   test_a_missing_csv_is_refused_at_bind
 #                                       a path with no file is refused before
 #                                       anything runs.
-#   test_a_csv_with_no_header_row_is_refused_at_lower
-#                                       header=false is refused by name, not
-#                                       answered with column names DuckDB
-#                                       does not give.
+#   test_a_csv_with_no_header_row_names_its_columns_column0_column1
+#                                       header = false runs, every line is a
+#                                       row, and the columns are column0,
+#                                       column1, column2.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -63,7 +71,7 @@ from komira_plan_harness import (
 from runtime_paths import data_path, read_data, test_tmpdir
 from sdk_exec.engine_context import EngineContext
 from sdk_exec.engine_options import EngineOptions
-from sdk_exec.engine_sql import STEP_BIND, STEP_LOWER, run_sql
+from sdk_exec.engine_sql import STEP_BIND, run_sql
 
 
 def _files() -> List[String]:
@@ -73,6 +81,8 @@ def _files() -> List[String]:
     out.append("nulls.csv")
     out.append("pipe.csv")
     out.append("header_only.csv")
+    out.append("no_header.csv")
+    out.append("no_header_wide.csv")
     return out^
 
 
@@ -83,6 +93,7 @@ def _prefixes() -> List[String]:
     out.append("nulls_")
     out.append("pipe_")
     out.append("header_only_")
+    out.append("no_header_")
     return out^
 
 comptime _DESCRIBE = "SELECT column_name, column_type FROM (DESCRIBE "
@@ -259,6 +270,10 @@ def test_dialect_and_header_only_csv_equal_duckdb() raises:
     _check_prefix("header_only_", False)
 
 
+def test_no_header_csv_equals_duckdb() raises:
+    _check_prefix("no_header_", False)
+
+
 def test_gzip_csv_equals_duckdb() raises:
     var prefixes = _prefixes()
     for i in range(len(prefixes)):
@@ -287,23 +302,25 @@ def test_a_missing_csv_is_refused_at_bind() raises:
     assert_equal(len(out.batches), 0)
 
 
-def test_a_csv_with_no_header_row_is_refused_at_lower() raises:
+def test_a_csv_with_no_header_row_names_its_columns_column0_column1() raises:
     var ctx = EngineContext(EngineOptions(worker_count=1))
     var out = run_sql(
         ctx,
         "SELECT * FROM read_csv('" + data_path("pipe.csv")
         + "', delim = '|', header = false)",
     )
-    assert_true(Bool(out.refusal))
-    assert_equal(out.refusal.value().step, String(STEP_LOWER))
     assert_true(
-        "LOWERING_UNCUTTABLE_NODE" in out.refusal.value().reason,
-        out.refusal.value().reason,
+        not out.refusal,
+        out.refusal.value().reason if out.refusal else String(""),
     )
-    assert_true(
-        "header=false" in out.refusal.value().reason,
-        out.refusal.value().reason,
-    )
+    assert_equal(len(out.batches), 1)
+    ref batch = out.batches[0]
+    assert_equal(batch.schema.num_columns(), 3)
+    assert_equal(batch.schema.field_name(0), "column0")
+    assert_equal(batch.schema.field_name(1), "column1")
+    assert_equal(batch.schema.field_name(2), "column2")
+    # The header line of pipe.csv is the first of four rows.
+    assert_equal(batch.num_rows(), 4)
 
 
 def main() raises:

@@ -196,7 +196,7 @@ def test_the_spec_dialect_is_the_one_the_file_is_read_with() raises:
     types.append(ArrowType.INT64)
     types.append(ArrowType.STRING)
     var spec = SourceSpecPod.csv(CsvSourceSpec(
-        path, UInt8(ord("|")), False, 0, _names("col_0", "col_1"), types^
+        path, UInt8(ord("|")), False, 0, _names("column0", "column1"), types^
     ))
     var batch = read_csv_spec(spec)
     # Without a header row the first line is data.

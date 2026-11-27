@@ -628,7 +628,7 @@ package design). D4 to D18 are this design's own.
   (counted from the verbs document's table).
 - The early engine refuses at `lower` some of what the skins can build:
   a distinct over an explicit column list, a source other than Parquet, in memory, CSV, JSON Lines or an
-  Iceberg table, and a CSV scan with `header=false` ([src/lowering/README.md](../../src/lowering/README.md)); a whole-row distinct runs only
+  Iceberg table ([src/lowering/README.md](../../src/lowering/README.md)); a whole-row distinct runs only
   over one fixed-width or string column, or several dictionary-encoded string columns. These plans raise at the terminal with the engine's code
   until the engine runs them.
 

@@ -45,6 +45,12 @@ equal (`frame_duckdb_test`, CPython 3.13, the real libkomira).
   no other row equals);
 - a frame that is not ordered (no sort, or a verb that dropped a sort key)
   answers as a multiset of rows;
+- a CSV file with no header line, read by read_csv(header=None),
+  register_csv(header=False) with and without all_varchar and SQL's
+  read_csv(header = false), answers as DuckDB's read_csv(header = false):
+  the names column0, column1, ... (padded to two digits, column00 ..
+  column10, over eleven columns), the types, a quoted comma, doubled quotes
+  and empty cells as NULL;
 - columns are equal by name and order; ints, strings and bools exactly; floats
   to a relative 1e-12; NULL equals NULL; Arrow type names equal for every
   column but an int literal assigned as a column, which komira types int64
@@ -1158,6 +1164,61 @@ def test_compare_holds_floats_to_a_relative_tolerance_of_1e_12():
     assert differences(far, want) == "row 1 is (1.000000001,), expected (1.0,)"
 
 
+# ---- a CSV file with no header line -----------------------------------------
+
+# No header line: an int, a text with a quoted comma, doubled quotes and an
+# empty cell, and a float column with an empty cell.
+NO_HEADER_CSV = '1,plain,10.5\n2,"comma, inside",20\n3,"say ""hi""",\n4,,0.25\n'
+# Eleven columns, so the last index has two digits and DuckDB pads every name
+# to two: column00 .. column10.
+NO_HEADER_WIDE_CSV = "0,1,2,3,4,5,6,7,8,9,10\n11,12,13,14,15,16,17,18,19,20,21\n"
+
+
+def test_a_csv_with_no_header_line_equals_duckdb_read_csv(work):
+    """read_csv(header=None), register_csv(header=False) with and without
+    all_varchar, and SQL's read_csv(header = false) answer with DuckDB's
+    read_csv(header = false): the names column0, column1, ..., the types and
+    every line as a row."""
+    import duckdb
+
+    narrow = os.path.join(work, "no_header.csv")
+    wide = os.path.join(work, "no_header_wide.csv")
+    for path, text in ((narrow, NO_HEADER_CSV), (wide, NO_HEADER_WIDE_CSV)):
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+    con = duckdb.connect()
+    with komira.Session() as session:
+        for path in (narrow, wide):
+            quoted = path.replace("'", "''")
+            want = duckdb_answer(con, "SELECT * FROM read_csv('{}', header = false)".format(quoted))
+            want_text = duckdb_answer(
+                con, "SELECT * FROM read_csv('{}', header = false, all_varchar = true)".format(quoted)
+            )
+            assert want[0][0] == ("column00" if path == wide else "column0"), want[0]
+            name = os.path.basename(path)[: -len(".csv")]
+            session.register_csv(name, path, header=False)
+            session.register_csv(name + "_text", path, header=False, all_varchar=True)
+            answers = [
+                ("read_csv(header=None)", komira.read_csv(path, header=None, session=session).materialize().to_arrow(), want),
+                ("register_csv(header=False)", session.sql("SELECT * FROM " + name).to_arrow(), want),
+                (
+                    "register_csv(header=False, all_varchar=True)",
+                    session.sql("SELECT * FROM " + name + "_text").to_arrow(),
+                    want_text,
+                ),
+                (
+                    "SQL read_csv(header = false)",
+                    session.sql("SELECT * FROM read_csv('{}', header = false)".format(quoted)).to_arrow(),
+                    want,
+                ),
+            ]
+            for label, table, expected in answers:
+                found = differences(answer_of(table), expected)
+                assert found is None, "{} of {}: komira's answer is not DuckDB's ({}); komira {}, DuckDB {}".format(
+                    label, name, found, answer_of(table), expected
+                )
+
+
 # ---- main --------------------------------------------------------------------
 
 WITH_FILE = [
@@ -1197,6 +1258,7 @@ def main(args):
         path = write_data(os.path.join(work, "frame.parquet"))
         for test in WITH_FILE:
             test(path)
+        test_a_csv_with_no_header_line_equals_duckdb_read_csv(work)
     print("frame duckdb: {} programs equal DuckDB's answer over libkomira {}".format(
         sum(len(c) for c in (FILTERS, ASSIGNS, SORTS, HEADS, EMPTIES, GROUPS, REDUCTIONS, DISTINCTS)), komira.abi_version()))
 

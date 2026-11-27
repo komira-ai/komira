@@ -1,1 +1,0 @@
-UnsupportedOperation: lower: LOWERING_UNCUTTABLE_NODE: Scan (a CSV scan with header=false (its columns would be named col_0, col_1, ..., not DuckDB's column0, column1, ...)) is not cut

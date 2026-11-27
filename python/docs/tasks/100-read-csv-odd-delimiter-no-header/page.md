@@ -1,6 +1,6 @@
 # How do I read a CSV with an odd delimiter, no header or extra lines?
 
-Name the delimiter, `register_csv(..., delimiter="|")` in SQL or `komira.read_csv(..., sep=";")` on the pandas-shaped frame; a file with no header line, or with lines to skip above the header, is not read yet.
+Name the delimiter, `register_csv(..., delimiter="|")` in SQL or `komira.read_csv(..., sep=";")` on the pandas-shaped frame; read a file with no header line with `register_csv(..., header=False)` or `komira.read_csv(..., header=None)`. Lines to skip above the header are not read yet.
 
 <!-- include example.py -->
 ```python
@@ -20,6 +20,17 @@ with komira.Session() as s:
 # pandas-shaped: sep= is the delimiter, as in pandas.
 eu = komira.read_csv("orders_eu.csv", sep=";")
 print(eu.sort_values("id").materialize().to_arrow().to_pylist())
+
+# No header line: every line is a row, and the columns are named column0,
+# column1, ... as DuckDB names them.
+Path("scores.csv").write_text('1,Ana,3\n2,"Bo, Jr.",5\n')
+
+with komira.Session() as s:
+    s.register_csv("scores", "scores.csv", header=False)
+    print(s.sql("SELECT * FROM scores ORDER BY column0").to_arrow().to_pylist())
+
+bare = komira.read_csv("scores.csv", header=None)
+print(bare.sort_values("column0").materialize().to_arrow().to_pylist())
 ```
 
 Output:
@@ -28,14 +39,16 @@ Output:
 ```text
 [{'id': 1, 'name': 'Ana', 'qty': 3}, {'id': 2, 'name': 'Bo', 'qty': 5}]
 [{'id': 3, 'name': 'Cy', 'qty': 7}, {'id': 4, 'name': 'Di', 'qty': 2}]
+[{'column0': 1, 'column1': 'Ana', 'column2': 3}, {'column0': 2, 'column1': 'Bo, Jr.', 'column2': 5}]
+[{'column0': 1, 'column1': 'Ana', 'column2': 3}, {'column0': 2, 'column1': 'Bo, Jr.', 'column2': 5}]
 ```
 
 ## Notes
 
 - A delimiter is one ASCII character: `|`, `;`, a tab, or any other single ASCII character. `read_csv` takes it as `sep=`, `register_csv` as `delimiter=`, and SQL's `read_csv('file', delim = ';')` as `delim`.
-- The first line must hold the column names. A file with no header line is not read yet: a table registered with `header=False` is refused when a query reads it, because the engine would name the columns `col_0`, `col_1`, ... where DuckDB names them `column0`, `column1`, ... `probe_no_header.py` beside this page tries it and must fail with the line in `probe_no_header.error.txt`. komira-ai/komira#2364 tracks it.
+- A file with no header line: `register_csv(..., header=False)`, `komira.read_csv(..., header=None)` or SQL's `read_csv('file', header = false)` read every line as a row, and name the columns `column0`, `column1`, ... as DuckDB does (with eleven or more columns the index is padded to the same width: `column00`, `column01`, ..., `column10`). pandas would label them `0`, `1`, `2`; komira follows DuckDB's names, so the same SQL gives the same answer in both.
 - Skipping lines above the header (DuckDB's `skip`, pandas' `skiprows`) is not read yet: SQL's `read_csv` refuses the `skip` option by name rather than ignore it, and `komira.read_csv` has no `skiprows`. `probe_skip_lines.py` tries it and must fail with the line in `probe_skip_lines.error.txt`. komira-ai/komira#2365 tracks it.
-- The day a probe runs to the end, this page's check goes red, and the page and the catalogue status change with it.
+- The day the probe runs to the end, this page's check goes red, and the page and the catalogue status change with it.
 
 ## Related
 

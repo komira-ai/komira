@@ -103,6 +103,7 @@ from arrow.streaming_concat import (
 from arrow.concat import _concat_columns
 from byte_buffer.heap_region import HeapRegion
 
+from .column_names import header_free_column_name
 from .csv_options import CsvReadOptions, check_declared_column_types
 from .input_limits import check_csv_cell_budget, check_csv_column_count
 from .record_shape import check_csv_record_shape, skip_leading_blank_lines
@@ -822,10 +823,8 @@ def read_csv_bytes_to_batch_parallel_impl[
         data_start_offset_in_worker0 = 1
     else:
         var ncols_first = worker0_cells_prefix.num_cells_in_row(0)
-        var i = 0
-        while i < ncols_first:
-            header_names.append(String("col_") + String(i))
-            i = i + 1
+        for i in range(ncols_first):
+            header_names.append(header_free_column_name(i, ncols_first))
 
     var num_cols = len(header_names)
     # HOSTILE-INPUT CEILING (holds with assertions compiled out). Same bound as

@@ -33,9 +33,7 @@
 # store other than the local file system, S3, GCS and Azure (a scheme code
 # that names none of them), or with an explicit local binding
 # (LOWERING_SCAN_NOT_TOTAL); a scan
-# beyond the inputs' count (LOWERING_INPUTS_SCAN_COUNT); a CSV scan with
-# header=false, whose columns the reader would not name as DuckDB does, and
-# any other source
+# beyond the inputs' count (LOWERING_INPUTS_SCAN_COUNT); any other source
 # (LOWERING_UNCUTTABLE_NODE); an Iceberg scan whose files the inputs do not
 # carry (LOWERING_SCAN_NOT_TOTAL).
 # =============================================================================
@@ -178,15 +176,6 @@ def _open_scan(
     if sd.source.tag == SOURCE_VARIANT_CSV:
         var full = sd.source.schema()
         var spec = _csv_spec(sd.source, full)
-        if not spec.csv_spec.has_header:
-            # The reader names such a file's columns col_0, col_1, ...;
-            # DuckDB names them column0, column1, ..., so the answer would
-            # not be DuckDB's. Refused until the names agree.
-            raise _uncuttable(
-                node,
-                "a CSV scan with header=false (its columns would be named"
-                " col_0, col_1, ..., not DuckDB's column0, column1, ...)",
-            )
         var pipe = _Pipe(SOURCE_CSV, spec^, full.copy(), idx)
         _scan_ops(pipe, node, pushed^, proj^)
         return pipe^

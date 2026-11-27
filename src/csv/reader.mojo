@@ -45,6 +45,7 @@ from arrow.schema import (
     SchemaBuilder,
 )
 
+from .column_names import header_free_column_name
 from .csv_options import (
     CsvReadOptions,
     check_declared_column_types,
@@ -225,10 +226,8 @@ def read_csv_bytes_to_batch[
         data_start = 1
     else:
         var ncols_first = cells.num_cells_in_row(0)
-        var i = 0
-        while i < ncols_first:
-            header_names.append(String("col_") + String(i))
-            i = i + 1
+        for i in range(ncols_first):
+            header_names.append(header_free_column_name(i, ncols_first))
         data_start = 0
 
     var num_cols = len(header_names)
@@ -458,10 +457,8 @@ def read_csv_bytes_to_schema[
         data_start = 1
     else:
         var ncols_first = cells.num_cells_in_row(0)
-        var i = 0
-        while i < ncols_first:
-            header_names.append(String("col_") + String(i))
-            i = i + 1
+        for i in range(ncols_first):
+            header_names.append(header_free_column_name(i, ncols_first))
         data_start = 0
 
     var num_cols = len(header_names)

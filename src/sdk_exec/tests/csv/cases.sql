@@ -13,6 +13,10 @@
 -- nulls.csv   an empty cell (NULL) in every column but id, a row of NULLs
 -- pipe.csv    `|` between cells, a comma inside a cell
 -- header_only.csv  a header and no row
+-- no_header.csv    no header line: an integer, a text and a double column,
+--                  a quoted comma and doubled quotes
+-- no_header_wide.csv  no header line, eleven columns, so DuckDB pads the
+--                  names to two digits (column00 .. column10)
 COPY (SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_csv('typed.csv'))) TO 'typed_types.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT id, qty, price, name FROM read_csv('typed.csv')) TO 'typed_rows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT name, qty FROM read_csv('typed.csv') WHERE day >= DATE '2026-11-01' AND price > 2) TO 'typed_filter.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
@@ -30,3 +34,11 @@ COPY (SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_csv('pip
 COPY (SELECT * FROM read_csv('pipe.csv', delim = '|')) TO 'pipe_rows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_csv('header_only.csv', header = true))) TO 'header_only_types.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT count(*) AS n FROM read_csv('header_only.csv', header = true)) TO 'header_only_count.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_csv('no_header.csv', header = false))) TO 'no_header_types.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT * FROM read_csv('no_header.csv', header = false)) TO 'no_header_rows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT column1, column2 FROM read_csv('no_header.csv', header = false) WHERE column0 >= 2) TO 'no_header_filter.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT * FROM read_csv('no_header.csv', header = false, all_varchar = true)) TO 'no_header_varchar.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_csv('pipe.csv', delim = '|', header = false))) TO 'no_header_pipe_types.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT * FROM read_csv('pipe.csv', delim = '|', header = false)) TO 'no_header_pipe_rows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_csv('no_header_wide.csv', header = false))) TO 'no_header_wide_types.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT * FROM read_csv('no_header_wide.csv', header = false)) TO 'no_header_wide_rows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

@@ -9,8 +9,7 @@
 # `read_csv` does (`scan_from_source` over a `CsvSource`) or the way the
 # positional factory does (`LogicalPlan.scan(path, SOURCE_CSV, schema)`), lowers
 # it under the reference host profile and asserts the segment. A scan with no
-# header row is refused by name: the reader's column names would not be
-# DuckDB's.
+# header row is cut the same way, its spec saying the first line is data.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -22,7 +21,6 @@ from lowering.lower import lower
 from lowering.lowered_plan import (
     LoweredPlan,
     LoweringInputs,
-    LOWERING_UNCUTTABLE_NODE,
 )
 from lowering.render import render_lowered_plan
 from lowering.sink_capability import triple_name
@@ -123,17 +121,25 @@ def test_a_csv_scan_is_a_csv_source_with_its_dialect_and_bound_columns() raises:
     assert_equal(seg.card_estimate_rows, 0)
 
 
-def test_a_csv_scan_with_no_header_row_is_refused_by_name() raises:
-    # The reader would name the columns col_0, col_1, ...; DuckDB names them
-    # column0, column1, ..., so the scan is refused rather than answered.
-    var msg = String("")
-    try:
-        _ = _lowered(_csv_scan(UInt8(ord(",")), False))
-    except e:
-        msg = String(e)
-    assert_true(msg.startswith(String(LOWERING_UNCUTTABLE_NODE) + ": "), msg)
-    assert_true("a CSV scan with header=false" in msg, msg)
-    assert_true("column0, column1" in msg, msg)
+def test_a_csv_scan_with_no_header_row_is_a_csv_source_reading_every_line() raises:
+    # The reader names such a file's columns column0, column1, ..., as DuckDB
+    # does, so the scan is cut like any other: the spec says the first line
+    # is data and carries the bound columns under the names the binder gave.
+    var lp = _lowered(_csv_scan(UInt8(ord(",")), False))
+    assert_equal(len(lp.segments), 1)
+    ref seg = lp.segments[0]
+    assert_equal(seg.source_kind, SEG_SOURCE_CSV)
+    ref s = seg.source_spec
+    assert_equal(s.csv_spec.path, "data/t.csv.gz")
+    assert_equal(Int(s.csv_spec.delimiter), ord(","))
+    assert_true(not s.csv_spec.has_header)
+    assert_equal(len(s.csv_spec.column_names), 4)
+    assert_equal(s.csv_spec.column_names[0], "id")
+    assert_equal(s.csv_spec.column_names[3], "name")
+    assert_equal(len(seg.ops), 0)
+    assert_equal(seg.sink_kind, SINK_COLLECT)
+    var text = render_lowered_plan(lp)
+    assert_true("delimiter=44 header=False" in text, text)
 
 
 def test_the_csv_segment_renders_its_path_dialect_and_columns() raises:

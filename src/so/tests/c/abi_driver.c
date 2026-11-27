@@ -671,16 +671,13 @@ static void text_source_cases(void) {
         CHECK(a.n_fields == 2 && strcmp(a.names[1], "name") == 0 && strcmp(a.formats[1], "u") == 0);
         CHECK(a.rows == 2 && a.n_values == 2 && a.values[0] == 4 && a.values[1] == 5);
     }
-    /* No header: the table registers, and a query on it is refused by name
-       at lower (as read_csv(..., header=false) is), *out left as written. */
+    /* No header: every line is a row, and the columns are named column0,
+       column1 as DuckDB names them. */
     CHECK(p_komira_register_csv(ctx, "bare", bare, ',', 0, 0) == KOMIRA_OK);
-    {
-        struct ArrowArrayStream untouched;
-        memset(&untouched, 0, sizeof untouched);
-        CHECK(p_komira_sql_stream(ctx, "SELECT count(*) AS n FROM bare", &untouched) == KOMIRA_ERR_ENGINE);
-        CHECK(untouched.release == NULL);
-        const char *why = last_error_text(ctx, text, sizeof text);
-        CHECK(starts_with(why, "lower: ") && strstr(why, "header=false") != NULL);
+    if (query(ctx, "SELECT column1, column0 FROM bare ORDER BY column1", &a) == 0) {
+        CHECK(a.n_fields == 2 && strcmp(a.names[0], "column1") == 0 && strcmp(a.names[1], "column0") == 0);
+        CHECK(strcmp(a.formats[0], "l") == 0 && strcmp(a.formats[1], "l") == 0);
+        CHECK(a.rows == 2 && a.n_values == 2 && a.values[0] == 8 && a.values[1] == 10);
     }
     CHECK(p_komira_register_csv(ctx, "people_text", people, ',', 1, 1) == KOMIRA_OK);
     if (query(ctx, "SELECT id, score FROM people_text", &a) == 0) {

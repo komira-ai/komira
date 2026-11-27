@@ -23,7 +23,7 @@ rows are compared with the rows worked out by hand:
   file removed after the read), and a sorted frame's Result shows its six
   rows with NULLs and stays unread, so `to_arrow` reads them all after;
 - read_csv (`sep`, `header`) and read_json(lines=True), and a CSV read with
-  no header, which the engine refuses at the terminal with its step and code;
+  no header, whose columns are column0, column1, ... as DuckDB names them;
 - failures: a missing file and an empty directory raise at the reader with
   the engine's status, step and last error; a closed session raises
   KomiraError "the session is closed" at each reader and at the terminal of a
@@ -795,18 +795,32 @@ def test_read_csv(lib_dir):
         assert p.csv in df.explain()
 
 
-def test_read_csv_without_header_refused_by_engine(lib_dir):
-    """A CSV read with `header=None` is built, and the engine refuses it at the terminal, at "lower"."""
+def test_read_csv_without_header_names_columns_column0_column1(lib_dir):
+    """`header=None`: every line is a row and the columns are column0,
+    column1, ... as DuckDB names them, with their inferred types; a header
+    line read this way is a row of text like the others."""
     with workspace() as (s, p):
-        df = komira.read_csv(p.csv, header=None, session=s)
-        assert type(df) is komira.DataFrame
-        e = raised(df.materialize)
-        assert isinstance(e, KomiraError), repr(e)
-        assert (e.status, e.step) == (-3, "lower"), (e.status, e.step)
-        assert e.code is not None and str(e).startswith("lower: "), (e.code, str(e))
-        # The refusal leaves the session answering.
-        ok = komira.read_parquet(p.parquet, session=s)
-        assert by_id(rows_of(ok)) == ROWS
+        path = os.path.join(p.work, "people_no_header.csv")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(CSV_TEXT.split("\n", 1)[1])
+        df = komira.read_csv(path, header=None, session=s)
+        assert df.columns == ["column0", "column1", "column2"], df.columns
+        got = sorted(rows_of(df), key=lambda r: r["column0"])
+        want = [{"column0": r["id"], "column1": r["name"], "column2": r["score"]} for r in PEOPLE]
+        assert got == want, got
+        t = df.materialize().to_arrow()
+        assert t.schema.field("column0").type == pa.int64(), t.schema
+        assert t.schema.field("column2").type == pa.float64(), t.schema
+        filtered = rows_of(df[df["column0"] >= 2][["column1"]])
+        assert sorted(filtered, key=lambda r: r["column1"] or "") == [{"column1": None}, {"column1": "cy"}], filtered
+        # The SQL door reads the same file to the same rows.
+        sql = s.sql("SELECT * FROM read_csv('{}', header = false)".format(path)).to_arrow().to_pylist()
+        assert sorted(sql, key=lambda r: r["column0"]) == want, sql
+        # people.csv read with header=None: its header line is the first row.
+        headed = komira.read_csv(p.csv, header=None, session=s)
+        assert headed.columns == ["column0", "column1", "column2"], headed.columns
+        rows = rows_of(headed)
+        assert len(rows) == 4 and {"column0": "id", "column1": "name", "column2": "score"} in rows, rows
 
 
 def test_read_json(lib_dir):
@@ -952,7 +966,7 @@ TESTS = [
     test_notebook_display,
     test_explain,
     test_read_csv,
-    test_read_csv_without_header_refused_by_engine,
+    test_read_csv_without_header_names_columns_column0_column1,
     test_read_json,
     test_reader_failures,
     test_closed_session,

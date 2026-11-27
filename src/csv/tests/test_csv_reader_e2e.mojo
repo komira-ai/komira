@@ -12,7 +12,8 @@
 #   T4  read_csv_bytes_to_batch: RFC-4180 doubled-quote escape unescape.
 #   T5  read_csv_bytes_to_batch: pandas-default nulls produce Arrow nulls.
 #   T6  read_csv_bytes_to_batch: empty CSV produces empty batch.
-#   T7  read_csv_bytes_to_batch: header=False generates col_N names.
+#   T7  read_csv_bytes_to_batch: header=False names the columns column0,
+#       column1, ... as DuckDB does.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -136,17 +137,17 @@ def test_empty_csv() raises:
     assert_equal(rb.num_rows(), 0)
 
 
-def test_no_header_generates_col_n_names() raises:
-    """T7: has_header=False -> auto-generated col_N names."""
+def test_no_header_names_columns_as_duckdb_does() raises:
+    """T7: has_header=False -> the names column0, column1, column2."""
     var opts = CsvReadOptions()
     opts.has_header = False
     var buf = _bytes(String("1,2,3\n4,5,6\n"))
     var rb = read_csv_bytes_to_batch[Rfc4180](Span(buf), opts)
     assert_equal(rb.num_columns(), 3)
     assert_equal(rb.num_rows(), 2, "no header -> both rows are data")
-    assert_equal(String(rb.schema.field_at(0).name), String("col_0"))
-    assert_equal(String(rb.schema.field_at(1).name), String("col_1"))
-    assert_equal(String(rb.schema.field_at(2).name), String("col_2"))
+    assert_equal(String(rb.schema.field_at(0).name), String("column0"))
+    assert_equal(String(rb.schema.field_at(1).name), String("column1"))
+    assert_equal(String(rb.schema.field_at(2).name), String("column2"))
 
 
 def main() raises:
@@ -156,5 +157,5 @@ def main() raises:
     test_rfc4180_doubled_quote_unescape()
     test_null_detection_pandas_defaults()
     test_empty_csv()
-    test_no_header_generates_col_n_names()
+    test_no_header_names_columns_as_duckdb_does()
     print("test_csv_reader_e2e: 7/7 PASS")

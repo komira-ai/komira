@@ -407,10 +407,9 @@ refused over the budget as before: a GROUP BY with COUNT(DISTINCT) (its
 refusal says so), a GROUP BY over a string or a mixed string key, the sort
 (ORDER BY), and the output rows of every partition, which must fit the budget
 together, since the result is returned whole. `run_sql` serves the plans `lowering` cuts: Parquet scans (one file or several; through `run_sql_with`, objects of an S3 or GCS bucket or an Azure container too, from a catalog table whose source names the bucket: no SQL text names an object-store URL yet, the context's footers read local files only, and the session holds no store settings or credentials), `read_csv`
-scans of one local file with a header row (decoded whole before the first
-morsel; `header=false` is refused at lowering, because the reader would name
-the columns `col_0`, `col_1`, ... where DuckDB names them `column0`,
-`column1`, ...), the one-row relation a SELECT with no FROM reads (an integer
+scans of one local file (decoded whole before the first morsel; with
+`header=false` every line is a row and the columns are named `column0`,
+`column1`, ... as DuckDB names them), the one-row relation a SELECT with no FROM reads (an integer
 literal of the result's SELECT list or of a UNION ALL branch's is INT32 when it fits, as in DuckDB; an
 integer literal anywhere else, `1 + 1` included, is still INT64), filter,
 projection, limit (with or without an offset), aggregation, distinct, sort and
