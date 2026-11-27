@@ -352,6 +352,7 @@ by `import komira`.
   a URL written in the SQL text (`FROM 's3://...'`), the DataFrame readers
   on a URL, `COPY ... TO` a URL, the process's own identity (`AMBIENT`), and
   `ANONYMOUS` or `AwsProfile` on `s3://` (komira-ai/komira#2337).
+- Python user functions: no verb takes one and no query runs one yet.
 
 The DataFrame verbs not built yet come in later releases of this same package.
 
