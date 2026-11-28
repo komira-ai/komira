@@ -1,5 +1,6 @@
 """The argument handling and literals of the pandas-shaped frame's `fillna`,
-`add_prefix`, `add_suffix` and `komira.concat` (komira/_frame.py calls these).
+`add_prefix`, `add_suffix`, `drop` and `komira.concat` (komira/_frame.py calls
+these).
 
 - `fillna` puts a value of the column's own type where a value is missing:
   an int for an int32 or int64 column, an int or a float for a float32 or
@@ -27,7 +28,7 @@ from ._series import Series, _fits
 if TYPE_CHECKING:
     from ._frame import DataFrame
 
-__all__ = ["check_label_axis", "concat_frames", "fill_column", "fill_literal", "no_series_fill"]
+__all__ = ["check_label_axis", "concat_frames", "drop_names", "fill_column", "fill_literal", "no_series_fill"]
 
 # What `fillna` fills, and with what: a literal of the column's own type.
 _FILL_TYPES = "int32, int64, float32, float64, bool and string"
@@ -126,6 +127,52 @@ def check_label_axis(axis: object, verb: str) -> None:
         raise UnsupportedOperation(
             f"{verb}(axis={axis!r}) changes row labels, and komira frames have no index: use axis=1, or leave it out"
         )
+
+
+def drop_names(
+    labels: object, axis: object, index: object, columns: object, level: object, inplace: object, errors: object
+) -> tuple[str, ...]:
+    """The column names `DataFrame.drop` is given, from `columns=` or from
+    `labels` with `axis=1`, as pandas reads them; what would drop rows by
+    index label, change the frame in place or pick an index level is refused,
+    since a frame has no index and does not change."""
+    if inplace is not False:
+        raise UnsupportedOperation(
+            "drop(inplace=True) changes the frame in place, and komira frames do not change: "
+            "use the frame drop returns"
+        )
+    if errors not in ("ignore", "raise"):
+        raise ValueError(f"drop errors must be 'ignore' or 'raise', not {errors!r}")
+    if level is not None:
+        raise UnsupportedOperation(
+            f"drop(level={level!r}) picks a level of a multi-level index, and komira frames have no index: "
+            "drop columns with drop(columns=[...])"
+        )
+    if labels is not None and (index is not None or columns is not None):
+        raise ValueError("Cannot specify both 'labels' and 'index'/'columns'")
+    if isinstance(axis, bool) or axis not in (0, 1, "index", "columns"):
+        raise ValueError(f"No axis named {axis} for object type DataFrame")
+    if index is not None:
+        raise UnsupportedOperation(
+            "drop(index=...) drops rows by index label, and komira frames have no index: "
+            "keep the rows you want with df[cond]"
+        )
+    if labels is not None:
+        if axis in (0, "index"):
+            raise UnsupportedOperation(
+                f"drop(labels, axis={axis!r}) drops rows by index label, and komira frames have no index: "
+                "drop columns with drop(columns=[...]) or drop(labels, axis=1)"
+            )
+        columns = labels
+    if columns is None:
+        raise ValueError("Need to specify at least one of 'labels', 'index' or 'columns'")
+    names = (columns,) if isinstance(columns, str) else columns
+    if not isinstance(names, (list, tuple)):
+        raise TypeError(f"drop takes a column name or a list of names, not a {type(columns).__name__}")
+    for name in names:
+        if not isinstance(name, str):
+            raise TypeError(f"drop takes column names, which are str, not {type(name).__name__}")
+    return tuple(names)
 
 
 def _label(i: int) -> str:

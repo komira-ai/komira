@@ -53,4 +53,4 @@ Output:
 - How do I loop over the rows of a table? (rank 68, works)
 - How do I take the first or last N rows? (rank 65, works)
 - How do I reorder columns? (rank 66, works)
-- [How do I select or drop columns?](../34-select-drop-columns/page.md) (rank 34, partial)
+- [How do I select or drop columns?](../34-select-drop-columns/page.md) (rank 34, works)

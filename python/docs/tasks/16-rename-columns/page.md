@@ -59,7 +59,7 @@ Output:
 - `rename` takes a dict of old to new names or a function of each name (`str.upper`, `str.lower`, a lambda), and returns a new frame: frames do not change in place, so `rename(inplace=True)` and `df.columns = [...]` are refused with a message naming what to write instead.
 - A name the frame lacks is skipped, as pandas does; pass `errors="raise"` to the pandas-shaped `rename`, or leave the polars-shaped `strict=True` default, to have it refused. Two columns given the same name are refused.
 - `rename(index=...)` renames row labels, and komira frames have no index, so it is refused by name.
-- Not built: `set_axis`, a Series `rename`, `pl.all().name.prefix(...)` and the other `name` namespace methods, and DuckDB's `SELECT * RENAME (...)`, `SELECT * EXCLUDE (...)`, the column list of an alias (`FROM t AS x(a, b)`) and `ALTER TABLE ... RENAME COLUMN`. Rename in `SELECT ... AS ...` or with the frame's `rename` instead.
+- Not built: `set_axis`, a Series `rename`, `pl.all().name.prefix(...)` and the other `name` namespace methods, and DuckDB's `SELECT * RENAME (...)` (refused by name), the column list of an alias (`FROM t AS x(a, b)`) and `ALTER TABLE ... RENAME COLUMN`. Rename in `SELECT ... AS ...` or with the frame's `rename` instead.
 - A SQL alias is a plain name: a double-quoted identifier such as `AS "Total Amount"` is refused with a syntax error (komira-ai/komira#2382). Give such a name on the frame (`rename(columns={"amount": "Total Amount"})`).
 - `DataFrame.rename` and `add_prefix` are newer than the PyPI release 0.1.1623.
 
@@ -67,5 +67,5 @@ Output:
 
 - [How do I change a column's data type?](../12-change-column-data-type/page.md) (rank 12, works)
 - [How do I apply a function to every value in a column?](../17-apply-function-value-column/page.md) (rank 17, partial)
-- [How do I select or drop columns?](../34-select-drop-columns/page.md) (rank 34, partial)
+- [How do I select or drop columns?](../34-select-drop-columns/page.md) (rank 34, works)
 - How do I lowercase, trim and replace text in a column? (rank 42, works; no page yet)

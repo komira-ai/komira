@@ -648,6 +648,34 @@ class DataFrame:
         plan = _ops.rename(self._plan, mapping)
         return self._ordered(plan, lambda keys: all(mapping.get(k.column, k.column) == k.column for k in keys))
 
+    def drop(
+        self,
+        labels: str | list[str] | tuple[str, ...] | None = None,
+        *,
+        axis: int | str = 0,
+        index: object = None,
+        columns: str | list[str] | tuple[str, ...] | None = None,
+        level: object = None,
+        inplace: bool = False,
+        errors: str = "raise",
+    ) -> DataFrame:
+        """A frame without the named columns, the others kept in their order:
+        `columns` is a name or a list of names, and `labels` with `axis=1` is
+        the same. A name the frame lacks is a `KeyError`, pandas' default, and
+        is skipped with `errors="ignore"`. A frame has no row labels to drop,
+        and one with no column left is refused. Builds one projection, none
+        when no column is dropped."""
+        names = _verbs.drop_names(labels, axis, index, columns, level, inplace, errors)
+        existing = self._plan.columns
+        if errors == "raise":
+            _ops.require_columns(names, existing)
+        kept = [name for name in existing if name not in names]
+        if not kept:
+            raise UnsupportedOperation(
+                "drop would leave the frame with no columns, which komira does not build: keep at least one column"
+            )
+        return self._select(kept)
+
     def add_prefix(self, prefix: str, axis: int | str | None = None) -> DataFrame:
         """A frame with `prefix` put before every column name."""
         _verbs.check_label_axis(axis, "add_prefix")

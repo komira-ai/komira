@@ -282,10 +282,7 @@
     "slug": "select-drop-columns",
     "category": "Transform",
     "question": "How do I select or drop columns?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2390"
-    ]
+    "status": "works"
   },
   {
     "rank": 35,

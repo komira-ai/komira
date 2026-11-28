@@ -48,6 +48,16 @@ the same FROM is therefore refused by name (`INNER_ON_BEFORE_OUTER_REFUSAL`),
 because the folded predicate would drop the rows that join pads with NULL. A
 LEFT, SEMI or ANTI join after it keeps the same answer and is parsed.
 
+A SELECT list may be one star: `*`, a table-qualified `q.*`, either with an
+EXCLUDE list (`* EXCLUDE (a, b)`, or `* EXCLUDE a`), as DuckDB reads them
+(`sql.sql_parse_star`). The binder expands it over the FROM scope
+(`_star_out_names` in `sql.sql_bind_scope`): the excluded names match each
+column's source name in any case, so over a join `* EXCLUDE (k)` drops both
+sides' `k`; a name the star does not have, a list that leaves no column, a
+qualifier no relation (or more than one) answers to, and `q.*` of a relation
+joined by NATURAL or USING are refused by name, and so are a qualified name in
+the list and DuckDB's `* REPLACE (...)` and `* RENAME (...)`.
+
 `SUBSTRING(s FROM start [FOR length])`, the standard form TPC-H Q22 writes,
 parses as the call `substring(s, start[, length])`, as DuckDB reads it.
 
@@ -349,6 +359,25 @@ assert_equal(st.query.from_tables[0].rel_alias, "o")
 assert_equal(Int(st.query.joins[0].kind), Int(JK_LEFT))
 assert_true(Bool(st.query.joins[0].on_pred))
 assert_equal(st.query.limit.value(), 10)
+```
+
+A star with an EXCLUDE list, and a table-qualified one:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_false -->
+```mojo
+from sql.sql_token import tokenize
+from sql.sql_parser import parse_sql
+
+var st = parse_sql(tokenize("SELECT * EXCLUDE (Region, note) FROM orders"))
+assert_true(st.query.select_items[0].is_star)
+assert_false(st.query.select_items[0].is_plain_star())
+assert_equal(st.query.select_items[0].star_qualifier, "")
+assert_equal(st.query.select_items[0].star_exclude[0], "region")  # lower-folded
+assert_equal(st.query.select_items[0].star_exclude[1], "note")
+var q = parse_sql(tokenize("SELECT o.* FROM orders AS o"))
+assert_equal(q.query.select_items[0].star_qualifier, "o")
+var plain = parse_sql(tokenize("SELECT * FROM orders"))
+assert_true(plain.query.select_items[0].is_plain_star())
 ```
 
 Registering a table and resolving it:

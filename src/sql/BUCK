@@ -7,7 +7,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the aggregate, window and ORDER BY binders (sql_bind_agg_expr, sql_bind_aggregate, sql_bind_window_order),
 # and the join, subquery and set-operation binders with the statement entry (sql_bind_join, sql_bind_subquery, sql_bind_union, sql_bind_set_op, sql_binder),
 # the format and codec a COPY ... TO takes from its destination's extension (sql_copy_format),
-# the parser's limit on nesting (sql_nesting),
+# the parser's limit on nesting (sql_nesting) and the EXCLUDE list after a star (sql_parse_star),
 # the line and column where a text stopped parsing (sql_position, a plain value) and the parse that finds it (sql_parse_text),
 # and the text entry over all three (sql_frontend: statement_from_sql, plan_from_sql).
 mojo_library(
@@ -83,6 +83,7 @@ mojo_library(
         "tests/test_sql_bind_qualifiers.mojo",
         "tests/test_sql_bind_scope_direct.mojo",
         "tests/test_sql_bind_set_op.mojo",
+        "tests/test_sql_bind_star.mojo",
         "tests/test_sql_bind_subquery.mojo",
         "tests/test_sql_bind_union.mojo",
         "tests/test_sql_bind_udf_call_direct.mojo",

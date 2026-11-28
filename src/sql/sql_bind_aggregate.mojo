@@ -25,7 +25,7 @@ from sql.sql_bind_names import (
 )
 from sql.sql_bind_ops import _sx_is_big_int
 from sql.sql_bind_scope import (
-    CteScope, _schema_has_col, BindScope, _resolve_col,
+    CteScope, _schema_has_col, BindScope, _resolve_col, _star_out_names,
 )
 from sql.sql_catalog import SqlCatalog
 
@@ -616,7 +616,9 @@ def _bind_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, var chi
     # present, so no ORDER BY COLUMN key can be missing and nothing is carried.
     # An ORDER BY EXPRESSION (`SELECT * FROM t ORDER BY -k`) is the one
     # thing a star still has to widen for: every column, then the hidden key.
-    if len(stmt.select_items) == 1 and stmt.select_items[0].is_star:
+    # A `q.*` or an EXCLUDE list projects its columns in the loop below,
+    # which carries an ORDER BY column the star left out.
+    if len(stmt.select_items) == 1 and stmt.select_items[0].is_plain_star():
         if len(order_expr_idx) == 0:
             return child^
         var sexprs = ExprArray()
@@ -632,7 +634,13 @@ def _bind_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, var chi
     for i in range(len(stmt.select_items)):
         ref item = stmt.select_items[i]
         if item.is_star:
-            raise Error("SQL not supported: '*' mixed with other SELECT items")
+            if len(stmt.select_items) != 1:
+                raise Error("SQL not supported: '*' mixed with other SELECT items")
+            var star_names = _star_out_names(item, scope)
+            for j in range(len(star_names)):
+                exprs.append(Expr.col_ref(star_names[j]))
+                out_names.append(String(star_names[j]))
+            continue
         var narrowed = Optional[Expr](None)
         if result_int_literals:
             narrowed = _result_int_literal(item.expr)

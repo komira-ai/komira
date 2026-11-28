@@ -29,6 +29,7 @@ from containers.slab import Slab
 from .sql_copy_format import copy_codec_from_path, copy_format_from_path
 from .sql_interval_parse import interval_literal_starts, parse_interval_literal
 from .sql_nesting import enter_sql_nesting, primary_opens_a_level
+from .sql_parse_star import _parse_star_tail
 from .sql_token import (
     Token,
     TK_EOF, TK_IDENT, TK_INT, TK_FLOAT, TK_STRING, TK_LPAREN, TK_RPAREN,
@@ -1592,7 +1593,17 @@ struct _Parser(Movable):
         while True:
             if self._kind() == TK_STAR:
                 self._advance()
-                items.append(SelectItem(SqlExpr.star(), Optional[String](), True))
+                items.append(self._star_item(String("")))
+            elif (
+                self._kind() == TK_IDENT
+                and self.pos + 2 < len(self.tokens)
+                and self.tokens[self.pos + 1].kind == TK_DOT
+                and self.tokens[self.pos + 2].kind == TK_STAR
+            ):
+                # `q.*`: the star of one FROM relation (`_star_out_names`).
+                var q = String(self.tokens[self.pos].text)
+                self.pos += 3
+                items.append(self._star_item(q^))
             else:
                 var e = self._parse_expr()
                 var out_alias: Optional[String] = None
@@ -1619,6 +1630,16 @@ struct _Parser(Movable):
                 continue
             break
         return items^
+
+    def _star_item(mut self, var qualifier: String) raises -> SelectItem:
+        """The star item after its `*`: its EXCLUDE list, if any
+        (`sql_parse_star`)."""
+        var at = self.pos
+        var exclude = _parse_star_tail(self.tokens, at)
+        self.pos = at
+        return SelectItem(
+            SqlExpr.star(), Optional[String](), True, qualifier^, exclude^
+        )
 
     def _refuse_unserved_operator_word(self, after: String = String("")) raises:
         """⛔ Refuse, BY NAME, a word DuckDB reads as an OPERATOR on the

@@ -24,7 +24,7 @@ SQL), and returns a `Result`, read once as above. Every call runs the plan
 again. The install test runs this program on the installed wheel.
 
 - [Readers](readers.md): `read_parquet`, `read_csv`, `read_json`.
-- [Verbs](verbs.md): subscripts, `assign`, `sort_values`, `head`, `copy`.
+- [Verbs](verbs.md): subscripts, `assign`, `sort_values`, `head`, `copy`, `drop` (newer than 0.1.1623).
 - [Missing values](missing_values.md): `fillna`, `dropna`, `isna`, `notna` (newer than 0.1.1623).
 - [Names and types](names_and_types.md): `rename`, `add_prefix`, `add_suffix`, `astype` (newer than 0.1.1623).
 - [tail and concat](tail_and_concat.md) (newer than 0.1.1623).

@@ -400,7 +400,7 @@ The package's layout and API are designed in
 | `komira/_display.py` | the HTML of the notebook display (`_repr_html_`): a frame's column names over their types, and the first ten rows a result read (`python/docs/dataframe/display.md`). It reads no stream and calls no library |
 | `komira/_series.py` | `Series`: an expression node over its frame's columns and the field the engine derives for it, bound to the frame and its generation |
 | `komira/_groupby.py` | `GroupBy` and the frame's reductions: each builds one `Aggregate` node, and `drop_duplicates` a `Distinct` or an `Aggregate` (over a `subset` of fewer columns, the window of `komira/_windows.py`); it writes no SQL text |
-| `komira/_verbs.py` | the bodies of `fillna`'s fill literals, the label-axis check of `rename`, `add_prefix` and `add_suffix`, and `concat` (the session, column-set, type and nullability checks, the projection that reorders a later frame's columns, and the `Union` node) |
+| `komira/_verbs.py` | the bodies of `fillna`'s fill literals, the label-axis check of `rename`, `add_prefix` and `add_suffix`, the arguments of `drop`, and `concat` (the session, column-set, type and nullability checks, the projection that reorders a later frame's columns, and the `Union` node) |
 | `komira/_missing.py` | pandas' "missing" as plan nodes: `IS NOT NULL`, and for a float column also not NaN, built from comparisons with infinity since the plan has no NaN test |
 | `komira/_cast.py` | the dtype names `astype` takes (the design's table, pandas' spellings, Python's types and pyarrow types) and the `Cast` node of each |
 | `komira/_accessors.py` | `s.str` and `s.dt`: each method one expression node (`StringFn`, `StringOp`, `StringFnN`, `Substring`, `Regexp`, `Extract`) over the Series' node |

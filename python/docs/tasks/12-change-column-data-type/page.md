@@ -74,5 +74,5 @@ int64
 
 - [How do I parse strings into dates?](../23-parse-strings-dates/page.md) (rank 23, partial)
 - [How do I rename columns?](../16-rename-columns/page.md) (rank 16, works)
-- [How do I select or drop columns?](../34-select-drop-columns/page.md) (rank 34, partial)
+- [How do I select or drop columns?](../34-select-drop-columns/page.md) (rank 34, works)
 - [How do I apply a function to every value in a column?](../17-apply-function-value-column/page.md) (rank 17, partial)

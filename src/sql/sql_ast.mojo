@@ -1368,16 +1368,42 @@ struct FromRelation(Copyable, Movable):
 
 
 struct SelectItem(Movable):
-    """One item in the SELECT list: `expr [AS out_alias]`, or `*`."""
+    """One item in the SELECT list: `expr [AS out_alias]`, or a star,
+    `[q.]* [EXCLUDE (a, b, ...)]`.
+
+    A star's `star_qualifier` is the relation `q` it is limited to ("" for a
+    bare `*`), and `star_exclude` the column names its EXCLUDE list drops
+    (empty without one), both as the tokenizer spells them (lower-folded). Both are empty on an
+    item that is not a star. A star with neither is the plain `*`."""
 
     var expr: SqlExpr
     var out_alias: Optional[String]
     var is_star: Bool
+    var star_qualifier: String
+    var star_exclude: List[String]
 
-    def __init__(out self, var expr: SqlExpr, var out_alias: Optional[String], is_star: Bool):
+    def __init__(
+        out self,
+        var expr: SqlExpr,
+        var out_alias: Optional[String],
+        is_star: Bool,
+        var star_qualifier: String = String(""),
+        var star_exclude: List[String] = List[String](),
+    ):
         self.expr = expr^
         self.out_alias = out_alias^
         self.is_star = is_star
+        self.star_qualifier = star_qualifier^
+        self.star_exclude = star_exclude^
+
+    def is_plain_star(self) -> Bool:
+        """Whether this item is a bare `*` with no EXCLUDE list: every column
+        of the FROM scope, in order."""
+        return (
+            self.is_star
+            and self.star_qualifier.byte_length() == 0
+            and len(self.star_exclude) == 0
+        )
 
 
 struct OrderKey(Movable):
