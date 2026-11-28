@@ -87,6 +87,9 @@ _STRING_FN_N_ARITY = {
     "jaro": 2,
     "jaro_winkler": 2,
     "jaccard": 2,
+    "trim": 2,
+    "ltrim": 2,
+    "rtrim": 2,
 }
 
 

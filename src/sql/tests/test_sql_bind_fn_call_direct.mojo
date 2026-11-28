@@ -174,10 +174,6 @@ def test_arity_refused_and_unknown_functions() raises:
         "ERR: SQL bind error: round() takes exactly 1 argument here — got 2. DuckDB also has a 2-argument round(x, digits) / trunc(x, digits); this engine lowers the 1-argument form onto a UNARY node that has no slot for a digit count, so the 2-argument form is REFUSED rather than rounded to zero digits."
     )
     _check(
-        "SELECT trim(s, 'x') FROM t",
-        "ERR: SQL bind error: trim() expects exactly 1 argument — got 2"
-    )
-    _check(
         "SELECT median(v) FROM t WHERE upper(median(v)) = 'x'",
         "ERR: SQL bind error: aggregate function 'median' is not allowed in this position"
     )
@@ -196,6 +192,29 @@ def test_string_fn_n_family() raises:
     _check(
         "SELECT concat() FROM t",
         "ERR: SQL bind error: concat() expects at least 1 arguments — got 0"
+    )
+
+
+def test_trim_family_lowers_by_argument_count() raises:
+    """One argument stays on the space-only `STRFN_*` op; two arguments are
+    DuckDB's `trim(s, characters)` on `STRFNN_*` (engine 14, 15, 16)."""
+    _check(
+        "SELECT trim(s) AS a, ltrim(s) AS b, rtrim(s) AS c FROM t",
+        "Project(exprs=[Alias(StringFn(op=2, ColRef(s)), \"a\"), Alias(StringFn(op=3, ColRef(s)), \"b\"), Alias(StringFn(op=4, ColRef(s)), \"c\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT trim(s, 'xy') AS a, ltrim(s, 'xy') AS b, rtrim(s, s) AS c FROM t",
+        "Project(exprs=[Alias(StringFnN(op=14, n=2, ColRef(s), Literal(ScalarValue(utf8, \"xy\"))), \"a\"), Alias(StringFnN(op=15, n=2, ColRef(s), Literal(ScalarValue(utf8, \"xy\"))), \"b\"), Alias(StringFnN(op=16, n=2, ColRef(s), ColRef(s)), \"c\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT trim(s, 'a', 'b') FROM t",
+        "ERR: SQL bind error: trim() expects 1 or 2 arguments — got 3"
+    )
+    _check(
+        "SELECT ltrim() FROM t",
+        "ERR: SQL bind error: ltrim() expects 1 or 2 arguments — got 0"
     )
 
 

@@ -2375,6 +2375,29 @@ WRONG IS RIGHT ON THE TEXTBOOK EXAMPLES:
 
 ⚠ THE PREFIX IS COUNTED IN BYTES, like the matching."""
 
+comptime STRFNN_TRIM: UInt8 = 14
+"""`trim(s, characters)` — EXACTLY 2 args, Utf8 -> Utf8. Removes every leading
+and trailing CHARACTER of `s` that is a member of `characters`, which is a SET
+of code points (order and repeats do not matter). DuckDB's documented
+two-argument form; the ONE-argument `trim(s)` is the separate `STRFN_TRIM`,
+which strips ASCII spaces only, and is unchanged.
+
+⛔ CHARACTER-BASED, like `STRFNN_TRANSLATE`: the set and the edge are read as
+whole UTF-8 code points, so `U+00A0` (C2 A0) and `U+3000` match as one unit
+and a set member can never match the lead byte of a different code point
+(`rtrim('èé', 'é')` is 'è', never a lone C3).
+
+An empty `characters` returns `s` unchanged; a `s` made only of set members
+returns ''. NULL in either operand -> NULL out."""
+
+comptime STRFNN_LTRIM: UInt8 = 15
+"""`ltrim(s, characters)` — EXACTLY 2 args, Utf8 -> Utf8. `STRFNN_TRIM`
+restricted to the LEFT edge: set members at the right edge are kept."""
+
+comptime STRFNN_RTRIM: UInt8 = 16
+"""`rtrim(s, characters)` — EXACTLY 2 args, Utf8 -> Utf8. `STRFNN_TRIM`
+restricted to the RIGHT edge: set members at the left edge are kept."""
+
 comptime STRFNN_JACCARD: UInt8 = 13
 """`jaccard(a, b)` — EXACTLY 2 args, Utf8 -> FLOAT64. The Jaccard index of the
 two operands' BYTE SETS: `|A ∩ B| / |A ∪ B|`.
@@ -2534,6 +2557,13 @@ def string_fn_n_arity(op: UInt8) -> Int:
         return 2
     if op == STRFNN_JACCARD:
         return 2
+    # Exactly two: `trim(s, characters)`; the one-argument form is `STRFN_TRIM`.
+    if op == STRFNN_TRIM:
+        return 2
+    if op == STRFNN_LTRIM:
+        return 2
+    if op == STRFNN_RTRIM:
+        return 2
     return 0
 
 
@@ -2590,6 +2620,12 @@ def string_fn_n_name(op: UInt8) -> String:
         return String("jaro_winkler_similarity")
     if op == STRFNN_JACCARD:
         return String("jaccard")
+    if op == STRFNN_TRIM:
+        return String("trim")
+    if op == STRFNN_LTRIM:
+        return String("ltrim")
+    if op == STRFNN_RTRIM:
+        return String("rtrim")
     return String("strfnn#") + String(Int(op))
 
 

@@ -7,7 +7,8 @@
 from arrow.schema import Schema
 from plan_expr.expr import (
     BIN_ADD, BIN_DIV, BIN_SUB, EXPR_LITERAL, Expr, REGEXP_EXTRACT, REGEXP_EXTRACT_ALL,
-    REGEXP_REPLACE, UN_NEGATE, string_fn_n_arity, string_fn_n_arity_ok,
+    REGEXP_REPLACE, STRFN_LTRIM, STRFN_RTRIM, STRFNN_LTRIM, STRFNN_RTRIM,
+    STRFNN_TRIM, UN_NEGATE, string_fn_n_arity, string_fn_n_arity_ok,
 )
 from plan_expr.expr_walk import (
     PlanColRefFields, walk_expr_field,
@@ -43,7 +44,7 @@ from sql.sql_fn_table import (
     DSG_PI, DSG_RIGHT, DSG_STRING_SPLIT, DSG_STRUCT_EXTRACT, DSG_STRUCT_EXTRACT_AT,
     DSG_SUBSTRING, DSG_TRY_CAST, FNK_BINARY_OP, FNK_CONST, FNK_DESUGAR, FNK_EXTRACT_FIELD,
     FNK_MATH_FN, FNK_MATH_FN2, FNK_REFUSED, FNK_REGEXP, FNK_STRING_FN, FNK_STRING_FN_N,
-    FNK_STRING_PRED, FNK_UNARY_NUM, sql_scalar_fn_spec,
+    FN_ARITY_OWN, FNK_STRING_PRED, FNK_UNARY_NUM, sql_scalar_fn_spec,
 )
 from sql.sql_udf_catalog import SqlUdfEntry
 
@@ -197,9 +198,7 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
     var n = len(args)
     if spec.min_args >= 0:
         if n < spec.min_args or (spec.max_args >= 0 and n > spec.max_args):
-            # Refused, not truncated: DuckDB's `trim(s, chars)` is a different
-            # function with an explicit strip set, and binding it to the
-            # one-argument op would ignore `chars`.
+            # Refused, not truncated: an extra argument is never dropped.
             raise Error(_fn_arity_msg(sx.text, spec.kind, n))
 
     if spec.kind == FNK_CONST:
@@ -234,6 +233,27 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
             + ", which `_bind_scalar_call` has no constant for"
         )
 
+    if spec.kind == FNK_STRING_FN and spec.min_args == FN_ARITY_OWN:
+        # `trim` / `ltrim` / `rtrim`: one argument is the space-only
+        # `STRFN_*` op, two is DuckDB's `trim(s, characters)` on `STRFNN_*`.
+        if n != 1 and n != 2:
+            raise Error(
+                "SQL bind error: " + sx.text + "() expects 1 or 2 arguments"
+                " — got " + String(n)
+            )
+        var t_str = _bind_scalar(args[0], schema, scope, catalog, cte_scope, prebound)
+        if n == 1:
+            return Expr.string_fn(spec.op, t_str^)
+        var t_chars = _bind_scalar(args[1], schema, scope, catalog, cte_scope, prebound)
+        var t_op = STRFNN_TRIM
+        if spec.op == STRFN_LTRIM:
+            t_op = STRFNN_LTRIM
+        elif spec.op == STRFN_RTRIM:
+            t_op = STRFNN_RTRIM
+        var t_args = List[Expr]()
+        t_args.append(t_str^)
+        t_args.append(t_chars^)
+        return Expr.string_fn_n(t_op, t_args^)
     if spec.kind == FNK_STRING_FN:
         return Expr.string_fn(
             spec.op,

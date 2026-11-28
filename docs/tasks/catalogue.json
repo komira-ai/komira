@@ -358,10 +358,7 @@
     "slug": "lowercase-trim-replace-text-column",
     "category": "Strings",
     "question": "How do I lowercase, trim and replace text in a column?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2371"
-    ]
+    "status": "works"
   },
   {
     "rank": 43,

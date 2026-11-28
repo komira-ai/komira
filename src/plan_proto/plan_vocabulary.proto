@@ -464,6 +464,9 @@ enum StringFnN {
   STRFNN_JARO = 12;
   STRFNN_JARO_WINKLER = 13;
   STRFNN_JACCARD = 14;
+  STRFNN_TRIM = 15;
+  STRFNN_LTRIM = 16;
+  STRFNN_RTRIM = 17;
 }
 
 // ----------------------------------------------------------------------

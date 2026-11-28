@@ -11,6 +11,9 @@ regexp_extract does, where pandas gives NaN).
 `.str` builds, with the pandas defaults kept:
 
 - `lower`, `upper`, `len` (characters, int64);
+- `strip`, `lstrip` and `rstrip`, of the whitespace Python's `str.strip()`
+  removes (tab, newline, a non-breaking space and the other Unicode spaces)
+  or of the set of characters `to_strip`, as the engine's `trim(s, chars)`;
 - `startswith`, `endswith` and `contains(regex=False)` as string tests, and
   `contains`, `match` and `fullmatch` as regular-expression tests (`match` is
   `contains` anchored at the start, `fullmatch` anchored at both ends);
@@ -38,7 +41,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from . import _ops, _refusals
+from . import _ops, _refusals, _text
 from ._errors import UnsupportedOperation
 
 if TYPE_CHECKING:
@@ -160,6 +163,28 @@ class StringMethods(_Accessor):
     def len(self) -> Series:
         """The number of characters of each string, an int64 Series."""
         return self._derive(_ops.StringFn("length", self._child()))
+
+    def _strip(self, side: str, verb: str, to_strip: str | None) -> Series:
+        child = self._child()
+        if to_strip is not None:
+            _check_text(to_strip, "to_strip", f"{verb}()")
+        chars = _text.PYTHON_WHITESPACE if to_strip is None else to_strip
+        return self._derive(_text.trim(child, chars, side))
+
+    def strip(self, to_strip: str | None = None) -> Series:
+        """Each string without the characters of `to_strip` at either end: a
+        set of characters, not a prefix. `None` removes the whitespace
+        Python's `str.strip()` does, a tab, a newline and a non-breaking space
+        among it."""
+        return self._strip("both", "str.strip", to_strip)
+
+    def lstrip(self, to_strip: str | None = None) -> Series:
+        """Each string without the characters of `to_strip` at its start, as `strip`."""
+        return self._strip("left", "str.lstrip", to_strip)
+
+    def rstrip(self, to_strip: str | None = None) -> Series:
+        """Each string without the characters of `to_strip` at its end, as `strip`."""
+        return self._strip("right", "str.rstrip", to_strip)
 
     def _affix(self, op: str, verb: str, pat: object, na: object) -> Series:
         child = self._child()

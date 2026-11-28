@@ -48,10 +48,12 @@ from komira._ops import (
     Lit,
     MathFn,
     Project,
+    Regexp,
     Scan,
     Sort,
     SortKey,
     StringFn,
+    StringFnN,
     StringOp,
     TopN,
     Unary,
@@ -449,6 +451,87 @@ def test_strings():
     assert lowered(kpl.col("g").str.starts_with("a")) == StringOp("starts_with", c("g"), "a")
     assert lowered(kpl.col("g").str.ends_with("a")) == StringOp("ends_with", c("g"), "a")
     assert lowered(kpl.col("g").str.contains("a", literal=True)) == StringOp("contains", c("g"), "a")
+
+
+# The characters with the Unicode White_Space property, which polars' strip_chars()
+# removes with no argument (Rust's char::is_whitespace): Python's whitespace
+# without U+001C to U+001F.
+WHITE_SPACE = "\t\n\v\f\r \x85\xa0\u1680" + "".join(chr(c) for c in range(0x2000, 0x200B)) + "\u2028\u2029\u202f\u205f\u3000"
+
+
+def test_strip_chars_and_its_sides_trim_a_set_of_characters_or_the_unicode_white_space():
+    g = c("g")
+    for verb, op in (("strip_chars", "trim"), ("strip_chars_start", "ltrim"), ("strip_chars_end", "rtrim")):
+        method = getattr(kpl.col("g").str, verb)
+        assert lowered(method("xy")) == StringFnN(op, (g, Lit("xy"))), verb
+        assert lowered(method(characters="")) == StringFnN(op, (g, Lit(""))), verb
+        node = lowered(method())
+        assert node == lowered(method(None)), verb
+        assert node.op == op and node.args[0] == g, verb
+        assert sorted(node.args[1].value) == sorted(WHITE_SPACE) and len(WHITE_SPACE) == 25, verb
+        assert frame().select(method().alias("t")).schema == {"t": pa.string()}, verb
+    for cp in (0x1C, 0x1D, 0x1E, 0x1F):
+        assert chr(cp).isspace() and chr(cp) not in lowered(kpl.col("g").str.strip_chars()).args[1].value
+    assert frame().select(kpl.col("g").str.strip_chars()).columns == ["g"]
+
+
+def test_replace_is_the_first_match_and_replace_all_every_match():
+    g = c("g")
+    assert lowered(kpl.col("g").str.replace("a+", "b")) == Regexp("replace", g, "a+", replacement="b", flags="")
+    assert lowered(kpl.col("g").str.replace("a+", "b", n=1)) == Regexp("replace", g, "a+", replacement="b", flags="")
+    assert lowered(kpl.col("g").str.replace_all("a+", "b")) == Regexp("replace", g, "a+", replacement="b", flags="g")
+    # $n and ${n} are groups, $$ a dollar, a backslash itself
+    assert lowered(kpl.col("g").str.replace(r"(a)(b)", "${2}$1$$\\")) == Regexp(
+        "replace", g, r"(a)(b)", replacement="\\2\\1$\\\\", flags=""
+    )
+    # literal=True reads neither the pattern nor the value
+    assert lowered(kpl.col("g").str.replace("a.b", "$1\\", literal=True)) == Regexp(
+        "replace", g, r"a\.b", replacement="$1\\\\", flags=""
+    )
+    assert lowered(kpl.col("g").str.replace_all("a.b", "$1", literal=True)) == StringFnN(
+        "replace", (g, Lit("a.b"), Lit("$1"))
+    )
+    assert frame().select(kpl.col("g").str.replace_all("a", "b")).columns == ["g"]
+
+
+def test_replace_refusals_by_message():
+    refused(
+        lambda: kpl.col("g").str.replace("a", "b", n=2),
+        UnsupportedOperation,
+        "str.replace(n=2) replaces the first n matches, and the engine replaces the first or every one: "
+        "use n=1, or str.replace_all for every match",
+    )
+    refused(
+        lambda: kpl.col("g").str.replace("a", "b", n=-1),
+        UnsupportedOperation,
+        "str.replace(n=-1) replaces the first n matches, and the engine replaces the first or every one: "
+        "use n=1, or str.replace_all for every match",
+    )
+    refused(lambda: kpl.col("g").str.replace("a", "b", n=True), TypeError, "str.replace: n must be an int, not bool")
+    refused(lambda: kpl.col("g").str.replace("a", "b", n=1.0), TypeError, "str.replace: n must be an int, not float")
+    for verb in ("replace", "replace_all"):
+        method = getattr(kpl.col("g").str, verb)
+        refused(
+            lambda: method("", "b"),
+            UnsupportedOperation,
+            f"str.{verb}: an empty pattern matches between every two characters, which the engine counts in "
+            "bytes and polars in characters: give a pattern with a character in it",
+        )
+        refused(lambda: method(kpl.col("g"), "b"), TypeError, f"str.{verb}: pattern must be a str, not Expr")
+        refused(lambda: method("a", 1), TypeError, f"str.{verb}: value must be a str, not int")
+        refused(lambda: method("a", "b", literal=1), TypeError, f"str.{verb}: literal must be a bool, not int")
+        refused(
+            lambda: method("(?P<x>a)", "${x}"),
+            UnsupportedOperation,
+            f"str.{verb}: the value refers to the group named 'x', and the engine refers to a group by its "
+            "number only: write $1 for the first group",
+        )
+    for verb in ("strip_chars", "strip_chars_start", "strip_chars_end"):
+        refused(
+            lambda: getattr(kpl.col("g").str, verb)(kpl.lit("x")),
+            TypeError,
+            f"str.{verb}: characters must be a str, not Expr",
+        )
 
 
 def test_when_then_otherwise_is_named_after_the_first_then():

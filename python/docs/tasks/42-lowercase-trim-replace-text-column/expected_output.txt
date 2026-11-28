@@ -1,2 +1,3 @@
-[{'id': 1, 'name': 'ana smith'}, {'id': 2, 'name': 'bo jones'}, {'id': 3, 'name': 'cy   lee'}]
-[{'id': 1, 'name': '  ana smith '}, {'id': 2, 'name': 'bo jones'}, {'id': 3, 'name': ' cy   lee'}]
+[{'id': 1, 'name': 'ana smith'}, {'id': 2, 'name': 'bo jones'}, {'id': 3, 'name': 'cy   lee'}, {'id': 4, 'name': '\tdi ray\xa0'}]
+[{'id': 1, 'name': 'ana smith'}, {'id': 2, 'name': 'bo jones'}, {'id': 3, 'name': 'cy   lee'}, {'id': 4, 'name': 'di ray'}]
+[{'id': 1, 'name': 'ana smith'}, {'id': 2, 'name': 'bo jones'}, {'id': 3, 'name': 'cy   lee'}, {'id': 4, 'name': 'di ray'}]

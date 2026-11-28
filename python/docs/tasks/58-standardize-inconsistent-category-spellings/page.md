@@ -49,9 +49,9 @@ with komira.Session() as s:
         .to_pylist()
     )
 
-# pandas-shaped: a regex strips the whitespace, .str.lower() fixes the case.
+# pandas-shaped: .str.strip() removes the whitespace, .str.lower() fixes the case.
 df = komira.read_csv("sales.csv")
-df["category"] = df["category"].str.replace(r"^\s+|\s+$", "", regex=True).str.lower()
+df["category"] = df["category"].str.strip().str.lower()
 totals = df.groupby("category", as_index=False)["amount"].sum().sort_values("category")
 print(totals.materialize().to_arrow().to_pylist())
 ```
@@ -69,12 +69,12 @@ Output:
 
 - `trim()` removes spaces and `lower()` fixes case, so `Books`, `  books` and `BOOKS ` become `books` and group together.
 - A lookup table (`fixes.csv`, joined with `LEFT JOIN` and `coalesce`) turns known misspellings into the right value and leaves every other value as cleaned; a `CASE` does the same for a few fixes.
-- On the pandas-shaped frame `.str.strip()` is not supported yet (the engine trims spaces only, and pandas trims all whitespace), so the example strips with `.str.replace(r"^\s+|\s+$", "", regex=True)` and then `.str.lower()` (komira-ai/komira#2371). That frame has no `Series.map` (komira-ai/komira#2370) or `replace` (komira-ai/komira#2401), so the misspelling `tys` stays a separate group in its output: map it in SQL.
-- The polars-shaped frame has `str.to_lowercase()` but no `strip_chars()` or `replace()` yet (komira-ai/komira#2371), so the example does not use it.
+- On the pandas-shaped frame `.str.strip()` removes all whitespace, as Python's `str.strip()` does, and `.str.lower()` fixes case. That frame has no `Series.map` (komira-ai/komira#2370) or `replace` (komira-ai/komira#2401), so the misspelling `tys` stays a separate group in its output: map it in SQL.
+- The polars-shaped frame cleans the same way with `str.strip_chars()` and `str.to_lowercase()`; its `str.replace()` rewrites text by a pattern, not a value by a lookup, so the misspellings are mapped in SQL here too.
 
 ## Related
 
-- [How do I lowercase, trim and replace text in a column?](../42-lowercase-trim-replace-text-column/page.md) (rank 42, partial)
+- [How do I lowercase, trim and replace text in a column?](../42-lowercase-trim-replace-text-column/page.md) (rank 42, works)
 - How do I add a column with if/else (case when) logic? (rank 30, works; no page yet)
 - [How do I find (not drop) duplicate rows?](../57-find-duplicate-rows/page.md) (rank 57, works)
 - [How do I replace specific values such as 'N/A' with null?](../55-replace-values-with-null/page.md) (rank 55, partial)

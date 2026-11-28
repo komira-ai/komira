@@ -725,7 +725,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 ## 8. Result types
 
-The type of every result column is in [the result-type table](query_semantics_types.md), items §8.1 to §8.31. It is part of this document: its items are counted below, and its rulings and gaps are in the rulings file.
+The type of every result column is in [the result-type table](query_semantics_types.md), items §8.1 to §8.32. It is part of this document: its items are counted below, and its rulings and gaps are in the rulings file.
 
 ## 9. Window functions
 
@@ -881,7 +881,7 @@ Excel semantics are not part of the plan; they belong to the Excel surface, whic
 
 ## Counts
 
-MATCHES 134, REPRESENTATION DEPARTURE 4, PARITY GAP 10, EXTENSION 2: 150 marks, across this file, [the result-type table](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 42 rows of "Rulings" ([rulings, parity gaps and code status](query_semantics_rulings.md)) are the items settled under the governing rule: 26 MATCHES, 4 REPRESENTATION DEPARTURE, 10 PARITY GAP and 2 EXTENSION. The parity-gap table there has 14 rows: the 10 PARITY GAP items and 4 refused cases inside items that otherwise MATCH (§7.1, §8.15, §9.8, §13.5).
+MATCHES 135, REPRESENTATION DEPARTURE 4, PARITY GAP 10, EXTENSION 2: 151 marks, across this file, [the result-type table](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 42 rows of "Rulings" ([rulings, parity gaps and code status](query_semantics_rulings.md)) are the items settled under the governing rule: 26 MATCHES, 4 REPRESENTATION DEPARTURE, 10 PARITY GAP and 2 EXTENSION. The parity-gap table there has 14 rows: the 10 PARITY GAP items and 4 refused cases inside items that otherwise MATCH (§7.1, §8.15, §9.8, §13.5).
 
 ## What are its limits and open questions?
 

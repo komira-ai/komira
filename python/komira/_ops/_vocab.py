@@ -69,6 +69,9 @@ STRING_FNS_N = frozenset(
         "jaro",
         "jaro_winkler",
         "jaccard",
+        "trim",
+        "ltrim",
+        "rtrim",
     }
 )
 REGEXP_OPS = frozenset(

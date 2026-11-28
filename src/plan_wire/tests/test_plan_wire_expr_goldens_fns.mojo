@@ -132,6 +132,9 @@ from plan_expr.expr import (
     STRFNN_DAMERAU_LEVENSHTEIN,
     STRFNN_HAMMING,
     STRFNN_JACCARD,
+    STRFNN_TRIM,
+    STRFNN_LTRIM,
+    STRFNN_RTRIM,
     STRFNN_JARO,
     STRFNN_JARO_WINKLER,
     STRFNN_LEVENSHTEIN,
@@ -555,6 +558,7 @@ def _expr_strings() raises -> LogicalPlan:
     lpad.append(_int(5))
     lpad.append(_str("*"))
     xs.append(_sn("lpad", STRFNN_LPAD, lpad^))
+    xs.append(_s_abc(STRFNN_LTRIM, "ltrim"))
 
     var repeat = List[Expr]()
     repeat.append(_col("s"))
@@ -572,6 +576,7 @@ def _expr_strings() raises -> LogicalPlan:
     rpad.append(_int(5))
     rpad.append(_str("*"))
     xs.append(_sn("rpad", STRFNN_RPAD, rpad^))
+    xs.append(_s_abc(STRFNN_RTRIM, "rtrim"))
 
     var strpos = List[Expr]()
     strpos.append(_col("s"))
@@ -583,6 +588,7 @@ def _expr_strings() raises -> LogicalPlan:
     translate.append(_str("ab"))
     translate.append(_str("xy"))
     xs.append(_sn("translate", STRFNN_TRANSLATE, translate^))
+    xs.append(_s_abc(STRFNN_TRIM, "trim"))
 
     xs.append(_named("sub_len", Expr.substring(_col("s"), 2, 4)))
     xs.append(_named("sub_open", Expr.substring(_col("s"), -3)))

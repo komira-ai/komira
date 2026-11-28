@@ -364,6 +364,41 @@ def test_match_is_anchored_at_the_start_and_fullmatch_at_both_ends():
     )
 
 
+def test_strip_lstrip_and_rstrip_with_no_argument_trim_every_character_python_counts_as_whitespace():
+    # str.strip() with no argument removes what str.isspace() is true of: a tab,
+    # a newline, a non-breaking space and every other Unicode space.
+    whitespace = "".join(sorted(chr(c) for c in range(sys.maxunicode + 1) if chr(c).isspace()))
+    assert len(whitespace) == 29 and "\t" in whitespace and "\n" in whitespace and "\xa0" in whitespace
+    s = series("s")
+    for verb, op in (("strip", "trim"), ("lstrip", "ltrim"), ("rstrip", "rtrim")):
+        result = getattr(s.str, verb)()
+        assert isinstance(result._node, StringFnN) and result._node.op == op, (verb, result._node)
+        child, chars = result._node.args
+        assert child == S and type(chars) is Lit, (verb, result._node)
+        assert "".join(sorted(chars.value)) == whitespace, verb
+        assert result.dtype == "string"
+        assert getattr(s.str, verb)(None)._node == result._node, verb
+        assert getattr(s.str, verb)(to_strip=None)._node == result._node, verb
+
+
+def test_strip_lstrip_and_rstrip_of_to_strip_trim_that_set_of_characters_on_their_side():
+    s = series("s")
+    check(s.str.strip("xy"), StringFnN("trim", (S, Lit("xy"))), "string")
+    check(s.str.lstrip("xy"), StringFnN("ltrim", (S, Lit("xy"))), "string")
+    check(s.str.rstrip(to_strip="xy"), StringFnN("rtrim", (S, Lit("xy"))), "string")
+    check(s.str.strip("é\u3000"), StringFnN("trim", (S, Lit("é\u3000"))), "string")
+    # an empty set removes nothing, as "abc".strip("") is "abc"
+    check(s.str.strip(""), StringFnN("trim", (S, Lit(""))), "string")
+    check(s.str.lower().str.strip(" "), StringFnN("trim", (StringFn("lower", S), Lit(" "))), "string")
+
+
+def test_strip_refuses_a_to_strip_that_is_not_a_str():
+    s = series("s")
+    refuses(lambda: s.str.strip(1), TypeError, "str.strip(): to_strip must be a str, not int")
+    refuses(lambda: s.str.lstrip(["x"]), TypeError, "str.lstrip(): to_strip must be a str, not list")
+    refuses(lambda: s.str.rstrip(b"x"), TypeError, "str.rstrip(): to_strip must be a str, not bytes")
+
+
 def test_replace_of_text_replaces_every_occurrence_and_a_regex_replace_has_the_global_flag():
     s = series("s")
     check(s.str.replace("a", "b"), StringFnN("replace", (S, Lit("a"), Lit("b"))), "string")
@@ -667,9 +702,8 @@ def test_every_row_of_the_string_and_datetime_tables_raises_its_message():
             assert type(e) is AttributeError and e.args[0] == message.format(name=name), (name, repr(e))
             assert e.name == name
             assert not hasattr(accessor, name), name
-    assert _refusals.refused(_refusals.STRING, "strip") == (
-        ".str.strip() is not supported yet: the engine trims spaces only, and pandas trims all whitespace"
-    )
+    for name in ("strip", "lstrip", "rstrip"):
+        assert _refusals.refused(_refusals.STRING, name) is None, name
     assert _refusals.refused(_refusals.STRING, "split") == ".str.split() is not supported yet: the plan has no node for it"
     assert _refusals.refused(_refusals.DATETIME, "strftime") == (
         ".dt.strftime() is not supported yet: the engine does not format a timestamp as text"
@@ -711,7 +745,10 @@ def test_an_accessor_refuses_every_attribute_assignment_and_construction():
 def test_dir_lists_only_the_defined_members_of_each_accessor():
     s, t = series("s"), series("t")
     assert dir(s.str) == sorted(
-        ["contains", "endswith", "extract", "fullmatch", "len", "lower", "match", "pad", "replace", "slice", "startswith", "upper"]
+        [
+            "contains", "endswith", "extract", "fullmatch", "len", "lower", "lstrip", "match",
+            "pad", "replace", "rstrip", "slice", "startswith", "strip", "upper",
+        ]
     )
     assert dir(t.dt) == sorted(
         [
