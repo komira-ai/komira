@@ -12,8 +12,10 @@ from lowering.sink_capability import triple_name
 from physical_plan.iceberg_scan_spec import IcebergScanSpec
 from physical_plan.udf_call_spec import UdfCallSpec
 from plan_expr.null_order_policy import derived_nulls_first
+from plan_ir.logical_plan import ASOF_BACKWARD, ASOF_FORWARD
 from plan_ir.udf_ref import udf_ref_kind_name
 from physical_plan.physical_plan import (
+    AsofJoinSinkData,
     SegmentDescPod,
     MorselOp,
     SOURCE_PARQUET,
@@ -304,11 +306,45 @@ def _segment_text(seg: SegmentDescPod) -> String:
     return out^
 
 
+def _asof_strategy_name(strategy: UInt8) -> String:
+    if strategy == ASOF_BACKWARD:
+        return "backward"
+    if strategy == ASOF_FORWARD:
+        return "forward"
+    return "nearest"
+
+
+def _asof_line(i: Int, a: AsofJoinSinkData) -> String:
+    """One `asof` row: the key pairs, the ASOF column pair, the strategy, the
+    storage the walker reads, the tolerance, which sides the plan calls
+    sorted, and the segment of the right side."""
+    var out = String("  asof ") + String(i) + ": keys=["
+    for k in range(len(a.left_keys)):
+        if k > 0:
+            out += ", "
+        out += a.left_keys[k] + "=" + a.right_keys[k]
+    out += "] on=" + a.left_asof + "~" + a.right_asof
+    out += " strategy=" + _asof_strategy_name(a.strategy)
+    out += " dtype=" + String(a.asof_dtype)
+    if a.tolerance.is_int64():
+        out += " tolerance=" + String(a.tolerance.int_val)
+    elif a.tolerance.is_float64():
+        out += " tolerance=" + String(a.tolerance.float_val)
+    else:
+        out += " tolerance=none"
+    if len(a.left_sort_keys) > 0:
+        out += " left_sorted"
+    if len(a.right_sort_keys) > 0:
+        out += " right_sorted"
+    out += " right_seg=" + String(a.right_seg_id) + "\n"
+    return out^
+
+
 def render_lowered_plan(plan: LoweredPlan) -> String:
     """The text of `plan`: its segments, its parameter table (a `params:`
-    header counting the agg, sort, top-n and batch rows, then a line for each
-    aggregation, sort and top-n and a `udf` line for each `UdfRef`) and its
-    result."""
+    header counting the agg, sort, top-n, window and batch rows, then a line
+    for each aggregation, sort, top-n, window and as-of join and a `udf` line
+    for each `UdfRef`) and its result."""
     var out = String("ir_version ") + String(plan.segments[0].ir_version) + "\n"
     for i in range(len(plan.segments)):
         out += _segment_text(plan.segments[i])
@@ -379,6 +415,8 @@ def render_lowered_plan(plan: LoweredPlan) -> String:
                 out += ", "
             out += String(w.partition_exprs[k])
         out += "]\n"
+    for i in range(len(p.asof)):
+        out += _asof_line(i, p.asof[i])
     for i in range(len(p.udfs)):
         ref u = p.udfs[i]
         out += (

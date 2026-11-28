@@ -67,6 +67,11 @@
 #                                 window expression
 #            SINK_HASH_BUILD,     `CollectSink`: the build side's rows, which the
 #            key NONE             probe segment takes and indexes
+#            SINK_ASOF_JOIN,      `AsofSink` (`sink_asof_join`), from the
+#            key NONE             `AsofJoinSinkData` the descriptor's
+#                                 `sink_param_id` names: the segment's rows
+#                                 as-of joined with the rows of the right
+#                                 segment that data names
 #
 # Anything else (the other sinks) is refused by name, because no member
 # serves it yet.
@@ -90,7 +95,10 @@
 # OP_JOIN_PROBE of the segment, because it is the one call that sees the
 # published outputs: it takes the build segment's rows (the build segment must
 # be among the segment's dependencies) and indexes them once, before any
-# worker starts (`op_hash_probe.HashProbeShared`).
+# worker starts (`op_hash_probe.HashProbeShared`). For a SINK_ASOF_JOIN
+# segment it takes the rows of the right segment its sink data names (which
+# must be among the segment's dependencies too) and keeps them for the sink
+# `build_sink` makes next.
 #
 # `op_tail` gives a RIGHT or FULL join probe's tail: the build rows its
 # workers marked as matched by no probe row, in batches of the segment's
@@ -151,8 +159,10 @@ from physical_plan.physical_plan import (
     OP_PROJECT,
     ORDER_ROW_RANGE,
     AggSinkData,
+    AsofJoinSinkData,
     SegmentDescPod,
     SINK_AGG,
+    SINK_ASOF_JOIN,
     SINK_COLLECT,
     SINK_HASH_BUILD,
     SINK_PARTITION_BY,
@@ -185,6 +195,7 @@ from .published_outputs import PublishedOutputs
 from .segment_builder import SegmentBuilder
 from .segment_pool import SegmentPool
 from .sink_agg import AggSink
+from .sink_asof_join import AsofSink
 from .sink_agg_any import AnyAggSink
 from .sink_collect import CollectSink
 from .sink_group_agg import GroupAggSink
@@ -234,6 +245,21 @@ def _nullable_union(ref batches: Slab[RecordBatch]) raises -> Schema:
     return builder.build()
 
 
+struct _AsofRight(Movable):
+    """The right rows a SINK_ASOF_JOIN segment's source took, until its sink
+    is built."""
+
+    var seg_id: Int
+    var rows: RecordBatch
+
+    def __init__(out self, seg_id: Int, var rows: RecordBatch):
+        self.seg_id = seg_id
+        self.rows = rows^
+
+    def take_rows(deinit self) -> RecordBatch:
+        return self.rows^
+
+
 struct _OpParts(Movable):
     """The parts the per-worker instances of one operator share."""
 
@@ -262,7 +288,7 @@ struct RealBuilder[
     """Builds the real members of a segment: Parquet (local, or on the store
     `R` opens), batch, sink-output, CSV, concatenation and JSONL sources;
     filter, project, limit and join probe operators; the collect, aggregation,
-    sort, window and hash build sinks."""
+    sort, window, as-of join and hash build sinks."""
 
     comptime ParquetArm = SourceVariant[
         LocalParquetSource[Self.cache_o, Self.pool_o, Self.filter_o],
@@ -278,7 +304,7 @@ struct RealBuilder[
     ]
     comptime Op = OpVariant[FilterOp, MapOp, LimitOp, HashProbeOp]
     comptime Sink = PipelineSink[
-        CollectSink, AnyAggSink, SortSink, WindowSink
+        CollectSink, AnyAggSink, SortSink, WindowSink, AsofSink
     ]
 
     # The borrowed cache and pool, kept as pointers (private) because a struct
@@ -292,6 +318,8 @@ struct RealBuilder[
     var _sort_sinks: List[SortSinkData]
     var _topn_sinks: List[TopNSinkData]
     var _window_sinks: List[PartitionBySinkData]
+    var _asof_sinks: List[AsofJoinSinkData]
+    var _asof_right: Optional[_AsofRight]
     var _segment_pool: SegmentPool
     var _opener: Optional[Self.R]
     var _spill_dir: String
@@ -310,6 +338,8 @@ struct RealBuilder[
         self._sort_sinks = List[SortSinkData]()
         self._topn_sinks = List[TopNSinkData]()
         self._window_sinks = List[PartitionBySinkData]()
+        self._asof_sinks = List[AsofJoinSinkData]()
+        self._asof_right = None
         self._segment_pool = SegmentPool()
         self._opener = None
         self._spill_dir = String("")
@@ -347,6 +377,49 @@ struct RealBuilder[
         `sink_param_id` names."""
         self._window_sinks.append(data^)
         return len(self._window_sinks) - 1
+
+    def add_asof_sink(mut self, var data: AsofJoinSinkData) -> Int:
+        """Keep `data` for SINK_ASOF_JOIN segments; returns the id their
+        `sink_param_id` names."""
+        self._asof_sinks.append(data^)
+        return len(self._asof_sinks) - 1
+
+    def _asof_data_index(self, ref desc: SegmentDescPod) raises -> Int:
+        """The index of the as-of join sink data `desc` names."""
+        var id = desc.sink_param_id
+        if id < 0 or id >= len(self._asof_sinks):
+            raise Error(
+                "pipeline_exec: segment "
+                + String(desc.seg_id)
+                + " names as-of join sink data "
+                + String(id)
+                + ", and the builder holds "
+                + String(len(self._asof_sinks))
+            )
+        return id
+
+    def _take_asof_right(
+        mut self, ref desc: SegmentDescPod, mut published: PublishedOutputs
+    ) raises:
+        """Drop right rows a segment run that failed left and, for a
+        SINK_ASOF_JOIN segment, take the rows of its right segment (which must
+        be among its dependencies) for its sink."""
+        self._asof_right = None
+        if desc.sink_kind != SINK_ASOF_JOIN:
+            return
+        var at = self._asof_data_index(desc)
+        var right_seg = self._asof_sinks[at].right_seg_id
+        if not _is_dep(desc, right_seg):
+            raise Error(
+                "pipeline_exec: the as-of join of segment "
+                + String(desc.seg_id)
+                + " reads its right side from segment "
+                + String(right_seg)
+                + ", which is not among its dependencies"
+            )
+        self._asof_right = Optional(
+            _AsofRight(desc.seg_id, published.take(right_seg))
+        )
 
     def set_memory_budget(mut self, bytes: Int):
         """Bound the memory the sinks of later segment runs may draw, in
@@ -451,6 +524,7 @@ struct RealBuilder[
         # this segment shared (a limit's spent row budget) is not theirs.
         self._drop_parts_of(desc.seg_id)
         self._make_probe_parts(desc, published)
+        self._take_asof_right(desc, published)
         ref spec = desc.source_spec
         var morsel_rows = desc.morsel_rows
         if desc.source_kind == SOURCE_PARQUET:
@@ -724,6 +798,26 @@ struct RealBuilder[
                         rows_schema^,
                     )
                 )
+            if desc.sink_kind == SINK_ASOF_JOIN and key == KEY_DTYPE_NONE:
+                var id = self._asof_data_index(desc)
+                if (
+                    not self._asof_right
+                    or self._asof_right.value().seg_id != desc.seg_id
+                ):
+                    raise Error(
+                        "pipeline_exec: the as-of join sink of segment "
+                        + String(desc.seg_id)
+                        + " was built before its source took the right rows"
+                    )
+                var right = self._asof_right.take()
+                var left_schema = self._result_schema(desc, source_schema)
+                return Self.Sink.fifth(
+                    AsofSink(
+                        self._asof_sinks[id],
+                        right^.take_rows(),
+                        left_schema^,
+                    )
+                )
             if desc.sink_kind == SINK_PARTITION_BY and key == KEY_DTYPE_NONE:
                 var id = desc.sink_param_id
                 if id < 0 or id >= len(self._window_sinks):
@@ -753,7 +847,8 @@ struct RealBuilder[
             " (SINK_AGG, KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR),"
             " (SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR),"
             " (SINK_TOPN, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR),"
-            " (SINK_PARTITION_BY, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) and"
+            " (SINK_PARTITION_BY, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR),"
+            " (SINK_ASOF_JOIN, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) and"
             " (SINK_HASH_BUILD, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
         )
 

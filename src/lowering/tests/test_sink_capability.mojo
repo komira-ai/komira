@@ -30,6 +30,7 @@ from physical_plan.physical_plan import (
     SINK_PARTITION_TOPN,
     SINK_COLLECT,
     SINK_HASH_BUILD,
+    SINK_ASOF_JOIN,
     SINK_PARTITION_TOPN,
     SINK_ORIENT_COLUMNAR,
     SINK_ORIENT_DICT_ENCODED,
@@ -83,6 +84,7 @@ def test_the_table_holds_exactly_these_rows_in_this_order() raises:
     expected += "(SINK_PARTITION_BY, NONE, COLUMNAR)\n"
     expected += "(SINK_COLLECT, NONE, COLUMNAR)\n"
     expected += "(SINK_HASH_BUILD, NONE, COLUMNAR)\n"
+    expected += "(SINK_ASOF_JOIN, NONE, COLUMNAR)\n"
     assert_equal(got, expected)
 
 
@@ -107,6 +109,8 @@ def test_every_row_is_served_and_nearby_triples_are_not() raises:
     assert_false(is_sink_served(SINK_TOPN, KEY_DTYPE_I64, SINK_ORIENT_COLUMNAR))
     assert_false(is_sink_served(SINK_TOPN, KEY_DTYPE_NONE, SINK_ORIENT_DICT_ENCODED))
     assert_false(is_sink_served(SINK_HASH_BUILD, KEY_DTYPE_I64, SINK_ORIENT_COLUMNAR))
+    assert_false(is_sink_served(SINK_ASOF_JOIN, KEY_DTYPE_I64, SINK_ORIENT_COLUMNAR))
+    assert_false(is_sink_served(SINK_ASOF_JOIN, KEY_DTYPE_NONE, SINK_ORIENT_DICT_ENCODED))
     assert_false(is_sink_served(SINK_AGG, KEY_DTYPE_I64, SINK_ORIENT_DICT_ENCODED))
     assert_false(is_sink_served(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_DICT_ENCODED))
     assert_false(is_sink_served(SINK_COLLECT, KEY_DTYPE_I64, SINK_ORIENT_COLUMNAR))

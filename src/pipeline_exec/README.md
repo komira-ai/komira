@@ -61,9 +61,10 @@ Import each module by name; the package root exports nothing.
   output when no morsel reaches it needs it).
 - `source_variant`, `op_variant`, `pipeline_sink`: the closed variants. Each
   holds one of its member types, fixed where the variant is named (three for a
-  source, four for an operator and for a sink: the fourth slot defaults to
+  source, four for an operator, five for a sink: the fourth slot defaults to
   `NoOperator` or `NoSink` and is read as `fourth()` under `OP_TAG_FOURTH` or
-  `SINK_TAG_FOURTH`), and a tag;
+  `SINK_TAG_FOURTH`, and a sink's fifth defaults to `NoSink` and is read as
+  `fifth()` under `SINK_TAG_FIFTH`), and a tag;
   its trait methods test the tag and call the member. `unused_members` fills
   the slots a list leaves empty with members that refuse to run.
 - `source_parquet`, `source_batch`, `source_sink_output`, `source_csv`,
@@ -375,6 +376,19 @@ Import each module by name; the package root exports nothing.
   taken. A denied draw fails by name, its message beginning with the code `MEMORY_BUDGET_EXCEEDED: `; there is no spill. Refused when built: a
   direction list that does not match the order keys, an output schema with
   fewer columns than expressions. A kernel refusal surfaces from `combine`.
+- `sink_asof_join`: the as-of join `(SINK_ASOF_JOIN, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)`, from an `AsofJoinSinkData` (key pairs, ASOF columns
+  and the storage they are read at, direction, tolerance, sides the plan
+  calls sorted, the node's output schema, and the right segment). The segment's
+  rows, the left side, go to a `CollectSink` (morsels in source position
+  order); the builder hands the sink the right segment's rows. `combine` runs
+  `op_asof`'s `AsofJoinSink` over the two: both sides sorted on (keys..., ASOF
+  column) by a stable sort, then walked, every left row once with the right
+  columns of its match or NULL. So among right rows tied on the matched value
+  the first in the right side's order is taken, on every worker count. No
+  left row gives a batch of no rows under the node's output schema. The join
+  runs on the calling thread in `combine` and draws nothing from the segment
+  pool.
 - `spike/intern_spike.mojo` (target `intern_spike`, not part of the library): the
   dictionary-interning spike of the string group-by. A standalone program that times
   interned dictionary codes, hashing every row, the fragment merge and the string-table
@@ -400,10 +414,13 @@ Import each module by name; the package root exports nothing.
   `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED)`, `(SINK_AGG, KEY_DTYPE_STRING,
   SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR)`,
   `(SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`, `(SINK_TOPN, KEY_DTYPE_NONE,
-  SINK_ORIENT_COLUMNAR)` and `(SINK_PARTITION_BY, KEY_DTYPE_NONE,
-  SINK_ORIENT_COLUMNAR)` (a `WindowSink`), and refuses every other kind by name. It keeps the
+  SINK_ORIENT_COLUMNAR)`, `(SINK_PARTITION_BY, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)` (a `WindowSink`) and `(SINK_ASOF_JOIN, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)` (an `AsofSink`, whose right rows `build_source` takes
+  from the segment its data names; a right segment that is not among the
+  segment's dependencies is refused), and refuses every other kind by name. It keeps the
   resident batches (`add_resident`), the aggregation sink data a descriptor's
-  `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`), the top-N data (`add_topn_sink`), the window sink data (`add_window_sink`) and the segment pool
+  `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`), the top-N data (`add_topn_sink`), the window sink data (`add_window_sink`), the as-of join sink data (`add_asof_sink`) and the segment pool
   (`set_memory_budget`, unbounded until set) and the spill directory of the
   fixed-width grouped sinks (`set_spill_directory`, none until set), shares one set of operator parts among the
   workers of a segment run, and derives the empty-output schema by running the

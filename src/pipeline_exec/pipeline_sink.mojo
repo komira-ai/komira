@@ -2,12 +2,12 @@
 # PipelineSink -- a closed set of sinks behind one runtime tag
 # =============================================================================
 #
-# The sink counterpart of `SourceVariant`: one of four sink types, fixed where
+# The sink counterpart of `SourceVariant`: one of five sink types, fixed where
 # the variant is named, and a tag saying which. Every method of the sink trait
 # tests the tag and calls the member. `consume` takes `self`, as the trait
 # does, so workers call it through one shared borrow; a member keeps its
-# per-worker state in slots indexed by worker id. The fourth slot is `NoSink`
-# unless the name fills it.
+# per-worker state in slots indexed by worker id. The fourth and fifth slots
+# are `NoSink` unless the name fills them.
 
 from arrow.schema import RecordBatch
 from morsel.morsel import Morsel
@@ -20,6 +20,7 @@ comptime SINK_TAG_FIRST: UInt8 = 0
 comptime SINK_TAG_SECOND: UInt8 = 1
 comptime SINK_TAG_THIRD: UInt8 = 2
 comptime SINK_TAG_FOURTH: UInt8 = 3
+comptime SINK_TAG_FIFTH: UInt8 = 4
 
 
 struct PipelineSink[
@@ -27,15 +28,17 @@ struct PipelineSink[
     B: MorselSinkImpl,
     C: MorselSinkImpl,
     D: MorselSinkImpl = NoSink,
+    E: MorselSinkImpl = NoSink,
 ](MorselSinkImpl):
-    """One sink out of the closed list `A`, `B`, `C`, `D`. Fill unused slots
-    with `NoSink`."""
+    """One sink out of the closed list `A`, `B`, `C`, `D`, `E`. Fill unused
+    slots with `NoSink`."""
 
     var _tag: UInt8
     var _a: Optional[Self.A]
     var _b: Optional[Self.B]
     var _c: Optional[Self.C]
     var _d: Optional[Self.D]
+    var _e: Optional[Self.E]
 
     def __init__(out self, tag: UInt8):
         self._tag = tag
@@ -43,6 +46,7 @@ struct PipelineSink[
         self._b = Optional[Self.B]()
         self._c = Optional[Self.C]()
         self._d = Optional[Self.D]()
+        self._e = Optional[Self.E]()
 
     @staticmethod
     def first(var member: Self.A) -> Self:
@@ -72,6 +76,13 @@ struct PipelineSink[
         v._d = Optional[Self.D](member^)
         return v^
 
+    @staticmethod
+    def fifth(var member: Self.E) -> Self:
+        """A variant holding `member` in the fifth slot."""
+        var v = Self(SINK_TAG_FIFTH)
+        v._e = Optional[Self.E](member^)
+        return v^
+
     def tag(self) -> UInt8:
         """Which slot holds the member."""
         return self._tag
@@ -83,6 +94,8 @@ struct PipelineSink[
             self._b.value().consume(worker_id, morsel^)
         elif self._tag == SINK_TAG_THIRD:
             self._c.value().consume(worker_id, morsel^)
+        elif self._tag == SINK_TAG_FIFTH:
+            self._e.value().consume(worker_id, morsel^)
         else:
             self._d.value().consume(worker_id, morsel^)
 
@@ -93,6 +106,8 @@ struct PipelineSink[
             self._b.value().finalize()
         elif self._tag == SINK_TAG_THIRD:
             self._c.value().finalize()
+        elif self._tag == SINK_TAG_FIFTH:
+            self._e.value().finalize()
         else:
             self._d.value().finalize()
 
@@ -103,6 +118,8 @@ struct PipelineSink[
             self._b.value().resize_worker_state(num_workers)
         elif self._tag == SINK_TAG_THIRD:
             self._c.value().resize_worker_state(num_workers)
+        elif self._tag == SINK_TAG_FIFTH:
+            self._e.value().resize_worker_state(num_workers)
         else:
             self._d.value().resize_worker_state(num_workers)
 
@@ -113,6 +130,8 @@ struct PipelineSink[
             self._b.value().combine(pipeline)
         elif self._tag == SINK_TAG_THIRD:
             self._c.value().combine(pipeline)
+        elif self._tag == SINK_TAG_FIFTH:
+            self._e.value().combine(pipeline)
         else:
             self._d.value().combine(pipeline)
 
@@ -123,4 +142,6 @@ struct PipelineSink[
             return self._b.value().take_output()
         if self._tag == SINK_TAG_THIRD:
             return self._c.value().take_output()
+        if self._tag == SINK_TAG_FIFTH:
+            return self._e.value().take_output()
         return self._d.value().take_output()

@@ -969,22 +969,21 @@ struct _Parser(Movable):
 
         ⚠ THE TWO REFUSALS ARE NOT THE SAME CLAIM. POSITIONAL has no operator
         anywhere in this engine. ASOF has a NODE — `PLAN_ASOF_JOIN`, a LEFT
-        as-of join with an executor, built by the Mojo
-        `PlanCarrier.asof_join` — and no SQL LOWERING (ON -> equi-keys + one
-        inequality -> strategy; an INNER `ASOF JOIN` -> the LEFT node plus a
-        matched-row filter). ⛔ DO NOT READ THAT AS "only the lowering is
-        missing": `PlanCarrier.asof_join` is MEASURED raising
-        at BOTH terminals over row-streaming (CSV) leaves, and which leaf
-        shapes the node executes over is not established here. The message
-        names the node and the missing lowering and claims nothing more.
+        as-of join (`LogicalPlan.asof_join`) that `run_plan` lowers
+        (`lowering.cut_asof`) and runs over CSV and Parquet leaves, held to
+        DuckDB's ASOF LEFT JOIN by `sdk_exec`'s `test_run_plan_asof` — and
+        no SQL LOWERING (ON -> equi-keys + one inequality -> strategy; an
+        INNER `ASOF JOIN` -> the LEFT node plus a matched-row filter). The
+        message names the node and the missing lowering and claims nothing
+        more.
         """
         if self._is_kw("asof"):
             raise Error(
                 "SQL not supported: ASOF JOIN at the SQL door. An as-of join"
                 " pairs each left row with the NEAREST right row satisfying its"
                 " inequality (e.g. the latest price at or before each trade)."
-                " The engine's as-of node (PLAN_ASOF_JOIN, built by the Mojo"
-                " PlanCarrier.asof_join) has no SQL lowering yet, and binding"
+                " The engine's as-of node (PLAN_ASOF_JOIN, built by"
+                " LogicalPlan.asof_join) has no SQL lowering yet, and binding"
                 " the query as an ordinary join would return EVERY matching"
                 " right row instead of the nearest one, under the same column"
                 " names. It is refused rather than approximated."

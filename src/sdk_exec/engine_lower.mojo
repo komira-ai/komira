@@ -15,7 +15,8 @@
 # engine runs it. A join is descended
 # into left child first, then right, as the cutter walks it whichever side
 # builds; every join is, the ones the cutter then refuses included, so the
-# facts of a refused join's scans are read before the refusal. A window
+# facts of a refused join's scans are read before the refusal. An as-of join
+# is descended the same way, left child first, then right. A window
 # (PARTITION_BY) node is descended into its child. Any other node
 # the cutter does not cut is not descended into: the cutter refuses it by name
 # before it asks for any scan below, so no facts are read for a plan that
@@ -45,6 +46,7 @@ from parquet_footers.lowering_facts import (
 from plan_ir.logical_plan import (
     LogicalPlan,
     PLAN_AGGREGATE,
+    PLAN_ASOF_JOIN,
     PLAN_DISTINCT,
     PLAN_FILTER,
     PLAN_JOIN,
@@ -136,6 +138,9 @@ def _collect(
     elif tag == PLAN_JOIN:
         _collect(inputs, node.join_data_ref().left[], ctx)
         _collect(inputs, node.join_data_ref().right[], ctx)
+    elif tag == PLAN_ASOF_JOIN:
+        _collect(inputs, node.asof_join_data_ref().left[], ctx)
+        _collect(inputs, node.asof_join_data_ref().right[], ctx)
     elif tag == PLAN_UNION:
         # Branch order is the cutter's order.
         ref ud = node.union_data_ref()

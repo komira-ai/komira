@@ -13,8 +13,8 @@ and no environment variable and touches no global, so equal arguments give a
 - `lowered_plan`: `LoweringInputs` (one `ScanFacts` per scan in scan
   pre-order: the footers' statistics and the columns every row group stores
   dictionary encoded, and for an Iceberg table scan the files the host planned
-  (`add_iceberg_scan`); and the plan's `UdfRef` list), `ParamTable` (`agg`, `sort`, `topn`, `window`, `batches`, and the
-  `UdfRef` list whole, as `udfs`), `LoweredPlan` and the eight refusal
+  (`add_iceberg_scan`); and the plan's `UdfRef` list), `ParamTable` (`agg`, `sort`, `topn`, `window`, `asof`, `batches`, and the
+  `UdfRef` list whole, as `udfs`), `LoweredPlan` and the nine refusal
   tokens.
 - `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, whose
   spec lists the files when there are several; `SOURCE_BATCH` for an in-memory
@@ -52,7 +52,14 @@ and no environment variable and touches no global, so equal arguments give a
   the union fuses onto or closes that pipeline. A join
   (`cut_join`: INNER, LEFT, RIGHT, FULL, SEMI, ANTI and CROSS) ends its build
   child in a `SINK_HASH_BUILD` segment and fuses an `OP_JOIN_PROBE` into the
-  probe child's pipeline, with an `E3` edge to the build segment. A window (`cut_window`, one node
+  probe child's pipeline, with an `E3` edge to the build segment. An as-of
+  join (`cut_asof`, `PLAN_ASOF_JOIN`) ends its right child in a
+  `SINK_COLLECT` segment of its own and its left child in a `SINK_ASOF_JOIN`
+  segment whose `sink_param_id` indexes `ParamTable.asof` (the row names the
+  right segment as `right_seg_id`, the key pairs, the ASOF columns and the
+  storage the walker reads them at, the direction and the tolerance), with an
+  `E3` edge to the right segment, and opens a pipeline that reads the node's
+  rows: the left columns, then the right ones made nullable. A window (`cut_window`, one node
   with every function of one `OVER` clause) ends its child in a
   `SINK_PARTITION_BY` segment whose `sink_param_id` indexes
   `ParamTable.window`, opens a pipeline that reads it, and marks that
@@ -62,7 +69,7 @@ and no environment variable and touches no global, so equal arguments give a
   subplans around it (below); each arm is its own module (`cut_scan` and
   its JSON arm `cut_scan_jsonl`, `cut_filter`, `cut_project`, `cut_limit`,
   `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_topn`, `cut_window`,
-  `cut_union`, `cut_join`,
+  `cut_union`, `cut_join`, `cut_asof`,
   `cut_shared`), and `cut_state` holds
   what they share: the open pipeline, the cutter's segments and ParamTable,
   the shared subplans cut so far, and the close and reopen of a breaker. A new
@@ -73,10 +80,10 @@ and no environment variable and touches no global, so equal arguments give a
   producer runs: `sdk_exec.engine_plan.optimize_for_run` for `run_sql` and `run_plan`). The
   canonical subtree is the first node of that hash the walk reaches (a node
   before its children, a union's branches in order, and in a plan that holds
-  a reference a join's right child before its left, the producer's order; the
-  scan count is set for each child of the join, so the scans keep their
-  pre-order indices). One that holds an aggregation, a distinct, a sort, a
-  window, a limit or a join is cut once: it ends in a segment of its own, as
+  a reference a join's or an as-of join's right child before its left, the
+  producer's order; the scan count is set for each child, so the scans keep
+  their pre-order indices). One that holds an aggregation, a distinct, a
+  sort, a window, a limit, a join or an as-of join is cut once: it ends in a segment of its own, as
   a union branch does, and the canonical position and every reference read
   that segment over an `E3` edge (a union that holds two references names the
   segment twice in its `SOURCE_CONCAT`); the engine hands each reader the
@@ -101,7 +108,8 @@ and no environment variable and touches no global, so equal arguments give a
   `(SINK_HASH_BUILD, NONE, COLUMNAR)`, a join's build segment; it indexes no
   ParamTable row, so its `sink_param_id` is -1. `(SINK_PARTITION_BY, NONE,
   COLUMNAR)`, after the sort row, is a window's segment; it indexes
-  `ParamTable.window`.
+  `ParamTable.window`. `(SINK_ASOF_JOIN, NONE, COLUMNAR)`, after the hash
+  build row, is an as-of join's segment; it indexes `ParamTable.asof`.
 - `udf_check`: what a user-function call is held to before it is cut (see
   User functions).
 - `render`: the deterministic text of a `LoweredPlan`.
@@ -200,6 +208,14 @@ shape:
   types the probe does not compare (INT64 and INT32 in any pairing, FLOAT64
   with FLOAT64, STRING with STRING), and a join whose output names one column
   twice.
+- `LOWERING_ASOF_UNSERVED`, naming the reason, raised before either child of
+  the as-of join is walked: a strategy the plan IR does not define, key lists
+  of different lengths, a key or ASOF column that is not a column of its
+  side, a key pair the walker does not compare (INT32, INT64 and FLOAT64 with
+  the same type, STRING or DICTIONARY with STRING or DICTIONARY), ASOF
+  columns of two types or of a type other than INT32, INT64, FLOAT64 and the
+  TIMESTAMP units, a tolerance of the other family than the ASOF column, and
+  an output that names one column twice.
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key with a
   column of a type with no row (an 8- or 16-bit integer, a timestamp, a
   binary, ...), alone or beside served columns, or a segment whose triple has

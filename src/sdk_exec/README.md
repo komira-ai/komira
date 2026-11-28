@@ -291,12 +291,14 @@ subquery being a CROSS join against its one-row aggregate; a join with a
 residual predicate, a SEMI or ANTI join that builds its left side and a join
 on keys the probe does not compare are `LOWERING_JOIN_UNSERVED` at `lower`;
 a window function of a kind, type or frame the window sink does not serve is
-`LOWERING_WINDOW_UNSERVED` at `lower`).
+`LOWERING_WINDOW_UNSERVED` at `lower`; an as-of join node, which no SQL builds
+yet, is served by `run_plan`, and one whose keys, ASOF columns or tolerance
+the as-of sink does not serve is `LOWERING_ASOF_UNSERVED` at `lower`).
 Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
 `lowering_inputs` descends only scan, filter, project, limit, aggregate,
-distinct, sort, window (PARTITION_BY), union and join nodes (a union's branches in order; a join's
-left child, then its right, for every join, so a join the cutter refuses has
+distinct, sort, window (PARTITION_BY), union, join and as-of join nodes (a union's branches in order; a join's
+or an as-of join's left child, then its right, for every join, so a join the cutter refuses has
 its scans' facts read first) and gives a facts entry per scan it reaches; the
 cutter refuses any other node by name before it asks for the scans below it.
 `worker_count` and

@@ -4,7 +4,8 @@
 #
 # The bounds with and without a hint, `_find_best_asof` for every strategy on
 # INT32, INT64 and FLOAT64, the tolerance (inclusive), the NEAREST tie rule,
-# and the float order and distance (NaN equal to NaN and above +inf, NaN never
+# the first of several right rows tied on the matched value for every
+# strategy (DuckDB's choice), and the float order and distance (NaN equal to NaN and above +inf, NaN never
 # nearer than a number) and the INT64 distance past Int64's range.
 # =============================================================================
 
@@ -297,7 +298,8 @@ def test_find_best_forward_multi_right_same_ts() raises:
 
 
 def test_find_best_backward_multi_right_same_ts() raises:
-    # Right group: [20, 20, 20, 30]. BACKWARD @ 20 -> last 20 = idx 2.
+    # Right group: [20, 20, 20, 30]. BACKWARD @ 20 -> the first 20 = idx 0,
+    # the tied row DuckDB v1.5.6 returns.
     var a = _arr_i64([20, 20, 20, 30])
     ref p = a
     var tol = AsofTolerance.none()
@@ -306,7 +308,7 @@ def test_find_best_backward_multi_right_same_ts() raises:
     _find_best_asof[ASOF_BACKWARD, DType.int64](
         Int64(20), p, 4, tol, lo_hint, best,
     )
-    assert_equal(best, 2, "backward @ duplicated 20 -> last (idx 2)")
+    assert_equal(best, 0, "backward @ duplicated 20 -> first (idx 0)")
     _ = a^
 
 
@@ -686,6 +688,106 @@ def test_equi_keys_equal_int64_extremes() raises:
     var r: List[Int64] = [Int64.MAX, Int64.MIN]
     assert_true(equi_keys_equal_int64(l, 0, r, 1))
     assert_false(equi_keys_equal_int64(l, 0, r, 0))
+
+
+# =============================================================================
+# _find_best_asof -- right rows tied on the ASOF value
+# =============================================================================
+
+
+def test_find_best_backward_takes_the_first_of_tied_rows() raises:
+    # Group [10, 15, 15, 15, 40]: the three 15s are three right rows in input
+    # order. BACKWARD from 15, 20 and 39 matches the first of them (idx 1),
+    # as DuckDB v1.5.6 pairs a left row with the first tied right row; 10
+    # (not repeated) and 40 (the last value) match themselves.
+    var a = _arr_i64([10, 15, 15, 15, 40])
+    ref p = a
+    var tol = AsofTolerance.none()
+    var lo_hint = 0
+    var best = 0
+    var lefts: List[Int64] = [10, 15, 20, 39, 40, 90]
+    var want: List[Int] = [0, 1, 1, 1, 4, 4]
+    for i in range(len(lefts)):
+        _find_best_asof[ASOF_BACKWARD, DType.int64](
+            lefts[i], p, 5, tol, lo_hint, best,
+        )
+        assert_equal(best, want[i], "backward " + String(lefts[i]))
+    _ = a^
+
+
+def test_find_best_backward_tie_run_at_the_start_of_the_group() raises:
+    # Group [7, 7, 9] on INT32: a run that starts at index 0.
+    var a = _arr_i32([7, 7, 9])
+    ref p = a
+    var tol = AsofTolerance.none()
+    var lo_hint = 0
+    var best = 0
+    _find_best_asof[ASOF_BACKWARD, DType.int32](
+        Int32(8), p, 3, tol, lo_hint, best,
+    )
+    assert_equal(best, 0, "backward 8 -> the first 7")
+    _ = a^
+
+
+def test_find_best_forward_takes_the_first_of_tied_rows() raises:
+    # FORWARD from 12 over [10, 15, 15, 15, 40] matches the first 15.
+    var a = _arr_i64([10, 15, 15, 15, 40])
+    ref p = a
+    var tol = AsofTolerance.none()
+    var lo_hint = 0
+    var best = 0
+    _find_best_asof[ASOF_FORWARD, DType.int64](
+        Int64(12), p, 5, tol, lo_hint, best,
+    )
+    assert_equal(best, 1, "forward 12 -> the first 15")
+    _ = a^
+
+
+def test_find_best_nearest_takes_the_first_of_tied_backward_rows() raises:
+    # NEAREST over [10, 15, 15, 40]: 16 is nearer the 15s than 40; 27 is 12
+    # from the 15s and 13 from 40, so the backward run wins. Over [10, 40, 40]
+    # 50 is past every value. Each backward match is the first of its run.
+    var a = _arr_f64([10.0, 15.0, 15.0, 40.0])
+    ref p = a
+    var tol = AsofTolerance.none()
+    var lo_hint = 0
+    var best = 0
+    _find_best_asof[ASOF_NEAREST, DType.float64](
+        Float64(16.0), p, 4, tol, lo_hint, best,
+    )
+    assert_equal(best, 1, "nearest 16 -> the first 15")
+    _find_best_asof[ASOF_NEAREST, DType.float64](
+        Float64(27.0), p, 4, tol, lo_hint, best,
+    )
+    assert_equal(best, 1, "nearest 27 -> the first 15")
+    var b = _arr_f64([10.0, 40.0, 40.0])
+    ref q = b
+    lo_hint = 0
+    _find_best_asof[ASOF_NEAREST, DType.float64](
+        Float64(50.0), q, 3, tol, lo_hint, best,
+    )
+    assert_equal(best, 1, "nearest 50 -> the first 40")
+    _ = a^
+    _ = b^
+
+
+def test_find_best_backward_tie_run_keeps_the_tolerance() raises:
+    # The tolerance is measured to the tied value: BACKWARD 18 over
+    # [15, 15] within 3 matches the first 15; within 2 nothing.
+    var a = _arr_i64([15, 15])
+    ref p = a
+    var lo_hint = 0
+    var best = 0
+    _find_best_asof[ASOF_BACKWARD, DType.int64](
+        Int64(18), p, 2, AsofTolerance.int64(3), lo_hint, best,
+    )
+    assert_equal(best, 0, "backward 18 within 3 -> the first 15")
+    lo_hint = 0
+    _find_best_asof[ASOF_BACKWARD, DType.int64](
+        Int64(18), p, 2, AsofTolerance.int64(2), lo_hint, best,
+    )
+    assert_equal(best, -1, "backward 18 within 2 -> none")
+    _ = a^
 
 
 def main() raises:

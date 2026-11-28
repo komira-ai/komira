@@ -32,8 +32,9 @@
 # every non-NULL left key, so the search loop also steps over it.
 #
 # Equal (key, asof) pairs on the right keep their input order (the sort is
-# stable): BACKWARD takes the last of them and FORWARD the first. DuckDB
-# leaves the choice among exact duplicates unspecified.
+# stable), and every strategy takes the first of them (`asof_kernel`): the
+# row DuckDB v1.5.6 returns, measured; its documentation leaves the choice
+# among exact duplicates unspecified.
 # =============================================================================
 
 from arrow.arrow_types import ArrowType

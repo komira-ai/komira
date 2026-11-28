@@ -17,6 +17,7 @@ from physical_plan.physical_plan import (
     SortSinkData,
     TopNSinkData,
     PartitionBySinkData,
+    AsofJoinSinkData,
 )
 from containers.slab import Slab
 from plan_ir.udf_ref import UdfRef
@@ -40,6 +41,10 @@ comptime LOWERING_JOIN_UNSERVED = "LOWERING_JOIN_UNSERVED"
 """Refusal: a join the hash join does not serve (a join type the IR does not
 define, a SEMI or ANTI join that builds its left side, a CROSS join with a key,
 its keys, key types, residual, algorithm hint, build side or output names)."""
+
+comptime LOWERING_ASOF_UNSERVED = "LOWERING_ASOF_UNSERVED"
+"""Refusal: an as-of join the ASOF sink does not serve (a strategy the IR does
+not define, its keys, key or ASOF column types, tolerance or output names)."""
 
 comptime LOWERING_WINDOW_UNSERVED = "LOWERING_WINDOW_UNSERVED"
 """Refusal: a window node the window sink does not serve (a key or argument
@@ -128,7 +133,9 @@ struct ParamTable(Movable):
 
     `SINK_AGG` segments index `agg` by `sink_param_id`, `SINK_SORT` segments
     index `sort`, `SINK_TOPN` segments index `topn`, `SINK_PARTITION_BY`
-    segments index `window`; a `SINK_COLLECT` or `SINK_HASH_BUILD` segment
+    segments index `window`, `SINK_ASOF_JOIN` segments index `asof` (whose
+    row names the segment of the join's right side); a `SINK_COLLECT` or
+    `SINK_HASH_BUILD` segment
     indexes nothing (`sink_param_id` is -1): a join's keys are on its
     OP_JOIN_PROBE. `SOURCE_BATCH` segments index `batches` by
     `source_spec.batch_handle_id`. Every user-function call (an
@@ -140,6 +147,7 @@ struct ParamTable(Movable):
     var sort: List[SortSinkData]
     var topn: List[TopNSinkData]
     var window: List[PartitionBySinkData]
+    var asof: List[AsofJoinSinkData]
     var batches: List[InMemorySource]
     var udfs: Slab[UdfRef]
 
@@ -148,6 +156,7 @@ struct ParamTable(Movable):
         self.sort = List[SortSinkData]()
         self.topn = List[TopNSinkData]()
         self.window = List[PartitionBySinkData]()
+        self.asof = List[AsofJoinSinkData]()
         self.batches = List[InMemorySource]()
         self.udfs = Slab[UdfRef]()
 
