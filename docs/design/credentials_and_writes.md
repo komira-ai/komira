@@ -900,7 +900,7 @@ komira_last_error_step	Int32	Handle	1.7
 `komira_sql_stream` and `komira_plan_stream` are built. The pandas-shaped write terminals `to_parquet`,
 `to_csv` and `to_json` are **EXISTS**: each sends the plan through `komira_plan_stream` with
 `write_target` set and returns `None`. The polars-shaped `sink_parquet`, `sink_csv` and `sink_ndjson`
-of `komira.pl` are not built yet. `write_table` and the catalog statements are **PROPOSED**.
+of `komira.pl` are **EXISTS** the same way. `write_table` and the catalog statements are **PROPOSED**.
 
 **One spelling per door.** The SQL door writes with `COPY` and, into a bound catalog, with
 `CREATE TABLE ... AS` and `INSERT`. The DataFrame door writes with the write terminals and, into a
@@ -924,10 +924,12 @@ catalog, with `write_table`. There is no
     `OVERWRITE`, `OVERWRITE_OR_IGNORE`, `APPEND`, `FILE_SIZE_BYTES`, `PER_THREAD_OUTPUT`,
     `USE_TMP_FILE`, `RETURN_FILES`, `DELIMITER`, `HEADER false` and `ARRAY true`. Each can later become
     an optional field of `WireWriteTarget` (rule B8).
-  - The Python write terminals take one keyword, `compression=`. A value they cannot honour raises
-    `UnsupportedOperation` by the DataFrame design's policy
-    ([dataframe_surface.md §6](dataframe_surface.md#6-how-a-skin-refuses)). A keyword they do not have
-    is Python's `TypeError`.
+  - The Python write terminals take `compression=`, and the CSV terminals also the keywords of the
+    options the CSV writer has one value of (`to_csv`'s `sep` and `header`; `sink_csv`'s `separator`,
+    `include_header`, `quote_char`, `null_value`, `line_terminator` and `include_bom`), at that value.
+    A value they cannot honour raises `UnsupportedOperation` naming the keyword, by the DataFrame
+    design's policy ([dataframe_surface.md §6](dataframe_surface.md#6-how-a-skin-refuses)). A keyword
+    they do not have is Python's `TypeError`.
 - **Format and codec follow DuckDB, or the write is refused.**
   - With no `FORMAT`, the format comes from the extension after one compression suffix is removed:
     `.parquet` is Parquet; `.csv` is CSV; `.json`, `.jsonl` and `.ndjson` are JSON.
@@ -1070,7 +1072,7 @@ var result = session.sql("SELECT * FROM sales_catalog.sales.orders LIMIT 10")
 | bindings | `komira_add_sql_binding`, `Session.add_sql_binding`, `sql` with call bindings and the unnamed source, `komira.files` for local files and frames, `BIND_NAME_UNBOUND`. `register_parquet` becomes `add_sql_binding` underneath, which fixes its re-registration defect |
 | object stores | credentials and their ABI calls; `WireSourceAccess` on the wire; the S3 read arm with `ambient`; `https://` reads; the S3 write arm; GCS and Azure reads |
 | catalogs | `komira.iceberg` and the Iceberg statements ([the Iceberg design](#reconciling-with-the-iceberg-design)) |
-| DataFrame surface | built: the pandas-shaped write terminals (`to_parquet`, `to_csv`, `to_json`) with `compression=`, through `komira_plan_stream`, which no longer refuses a write target. To come: the polars-shaped `sink_*` with `komira.pl`, `write_table`, and readers taking `komira.files` sources |
+| DataFrame surface | built: the pandas-shaped write terminals (`to_parquet`, `to_csv`, `to_json`) with `compression=`, through `komira_plan_stream`, which no longer refuses a write target. Built too: the polars-shaped `sink_parquet`, `sink_csv` and `sink_ndjson` of `komira.pl`. To come: `write_table`, and readers taking `komira.files` sources |
 | job manager | the resolver interface of decision 5, with its header check, kind check and endpoint allow-list; `DeclaredNeeds.credentials`; `PLAN_URL_QUERY_REFUSED` |
 
 Every step is additive:
