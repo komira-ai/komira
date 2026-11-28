@@ -47,6 +47,7 @@ from arrow.column import Column
 from arrow.primitive_array import PrimitiveArray
 from arrow.schema import Field, RecordBatch, RecordBatchBuilder, SchemaBuilder
 from batch_eval.eval_column import _eval_column_expr
+from byte_buffer.heap_region import HeapRegion
 from batch_eval.temporal_names import calendar_name_column
 from column_kernels.compiler_helpers import field_for_expr
 from plan_expr.col_expr import date_to_days
@@ -117,11 +118,11 @@ def _no_nulls(n: Int) -> List[Bool]:
     return out^
 
 
-def _names(unit: UInt8, ref batch: RecordBatch, col: String) raises -> Column:
+def _names(unit: UInt8, ref batch: RecordBatch, col: String) raises -> Column[HeapRegion]:
     return _eval_column_expr(Expr.extract(unit, Expr.col_ref(col)), batch)
 
 
-def _assert_names(ref c: Column, want: List[String], what: String) raises:
+def _assert_names(ref c: Column[HeapRegion], want: List[String], what: String) raises:
     assert_true(c.arrow_type == ArrowType.STRING, what + ": not a STRING column")
     assert_equal(c.length(), len(want), what + ": row count")
     var sa = c.as_string()
