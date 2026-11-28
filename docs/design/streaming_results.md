@@ -30,16 +30,18 @@ These words are used throughout:
 - **The result sink** collects a round's output in position order and hands it to the stream's queue
   through **the hand-out step**, the one place every batch passes before a reader can take it (§5.12).
 
-The slices are named by what they change: the rounds slice (rounds in the executor), the source limits
-slice (the read-ahead limit in the sources), the open-call slice (the new C calls), the bindings slice,
-the plan-door slice, the CSV slice, the writes slice, the read-ahead slice and the old calls slice (§10).
+The slices are named by what they change: the engine-core slice (one pool and one lock per context), the
+rounds slice (rounds in the executor), the source limits slice (the read-ahead limit in the sources), the
+streamed-run slice (the run a driver thread holds), the open-call slice (the new C calls), the bindings
+slice, the plan-door slice, the CSV slice, the writes slice, the read-ahead slice and the old calls slice
+(§10).
 
 ## 1. Summary
 
 | item | design |
 |---|---|
 | the model | **rounds pulled by the reader** (§5). The breakers below the last pipeline run as today. The last pipeline is built once and runs in rounds, each one ordinary parallel dispatch in which workers take claims while the read-ahead limit allows. A round therefore stops by itself, and the reader's `get_next` asks for the next round when nothing is left to hand out. Each open stream has a driver thread whose frame holds the run, and which runs a round only when asked. No worker and no lock ever waits on a reader |
-| the bound | what is held for the reader: no more claims than the claim limit (twice the workers) and no more bytes than the byte limit (64 MiB or more) taken and not yet handed out, counting the claims still being worked on, with the excess §5.3 states. Besides that, a stream holds what its source holds today (a table in memory is copied and cut into morsels; a breaker's output is held whole), which is not charged to the pool today. §5.3 gives the peak for each kind of source. The bytes of all open streams of a context come from the context's one memory budget |
+| the bound | what is held for the reader: no more claims than the claim limit, taken and not yet handed out, counting the claims still being worked on. That is one claim per worker for the first round and two per worker after, so a Parquet stream holds up to twice the workers' decoded row groups, within a byte limit of at most half the memory budget (35% of available memory by default). Besides that, a stream holds what its source holds today (a table in memory is copied and cut into morsels; a breaker's output is held whole). §5.3 gives the peak for each kind of source. A stream's held batches are not charged to the context's pool, as today's answer is not, so an unread `Result` never makes another query fail. When the run is over, the stream holds only its queue (§5.2) |
 | what streams | the last pipeline over a Parquet file set, a table in memory, a breaker's output, a `UNION ALL` or a whole-decoded CSV, JSONL or Iceberg file, through filters, projections and limits. A join probe in the last pipeline, and a Parquet file set whose files disagree on a column, run as today inside the first `get_next`, their limits kept, and are handed out from memory; they work the same and only do not stream yet. A statement with effects (`COPY ... TO`, a write) runs to completion inside the open call, so it never depends on the stream being read (§5.11) |
 | order | a streamed result comes out in the order the materialised result has today: file order for a scan, the sort's order for `ORDER BY`. A final `LIMIT` without `ORDER BY` is applied as rows are handed out, so it returns the first rows in that order (§5.4, §5.5) |
 | what cannot stream | a sort, an aggregate, a window, a distinct and a join's build side finish before their output exists. The first `get_next` waits for them; progress and cancel work meanwhile (§5.6) |
@@ -50,7 +52,7 @@ the plan-door slice, the CSV slice, the writes slice, the read-ahead slice and t
 | ABI version | the next minor for each call, as it lands (§6.6) |
 | SDKs | Python's `sql()` pulls the first batch, so an error before it still raises there; every terminal reads on the helper thread, so Ctrl-C cancels. `read_csv(chunksize=n)` needs a CSV source that streams first. Node's async iterator reads batch by batch. The Mojo SDK gets a stream form beside its `Result` (§7) |
 | writes | `COPY ... TO` and the SDK writers do not stream today. They move onto the same streamed run, with a writer appending to a temporary file renamed at the end (§8) |
-| first slice | three pull requests that together stream one SQL query over Parquet end to end through `komira_sql_open`, proven by the engine tests and the C driver (§10) |
+| first slice | five pull requests that together stream one SQL query over Parquet end to end through `komira_sql_open`, proven by the engine tests and the C driver; only C callers can stream until the bindings slice (§10) |
 
 ## 2. What the earlier engine did
 
@@ -402,22 +404,42 @@ for it. It is left until a measurement shows the idle time matters (§5.3, §12,
    unmatched rows of a RIGHT or FULL join, `run_segment`'s `_push_tails`). Then `finalize` runs, and the
    run checks that its share of the pool is returned (`EXECUTE_POOL_NOT_RELEASED`, as today). A round that
    ended at the limit pushes no tails.
+7. **When the run is over, the frame goes.** The run is over when the source is exhausted and the end is
+   queued, when a limit is reached, when it fails, when it is cancelled, or when a run materialised
+   inside the stream has queued its whole answer. At that moment the driver returns from its frame and its
+   thread ends. That frees:
+   - the builder and the operators' shared parts, a join's build rows and index included
+     (`HashProbeShared` in the builder's parts, `real_builder.mojo:438-441`);
+   - the source with its copies and morsels, its open files and mappings, and its prefetch buffers;
+   - the published outputs, the footer cache and the expression pool;
+   - the lowered plan.
+
+   What is left is the queue of batches not yet handed out, and the error or the end. None of those
+   batches refers to a mapping (§5.12, step 5). They do keep alive the buffers they are views of: a
+   decoded row group's columns, or the source's copy of a resident table. That is at most the stream's own
+   bound (§5.3), which the retained-bytes function measures. So a finished stream left unread, such as a
+   Python `Result` kept in a notebook, holds the batches of its answer the reader has not taken and the
+   buffers they keep alive, within that bound: no run state, no thread and no file. Today's `Result` holds
+   its whole answer. Release then frees the queue.
 
 **`get_next`**, on the reader's thread, written out:
 
 ```text
 loop:
     if the end has been returned once:     return 0 and a released array (the end, every time)
-    if the stream's token is cancelled:    mark the run cancelled, return ECANCELED (every time)
+    if an error has been returned once:    return its errno (every time)
+    if the stream's token is cancelled:    mark the run cancelled; if the driver is parked, tell it to stop
+                                           and join it (it is parked, so this does not wait); return
+                                           ECANCELED (every time)
     if the queue holds a batch:            pop it, return 0 and the batch
-    if the run has failed:                 return its errno (every time)
+    if the run has failed:                 return its errno, and remember that it was returned
     if the run is finished:                return 0 and a released array, and remember that the end was
                                            returned
     ask the driver for more, and wait for its answer
 ```
 
-- **The end stays the end.** Once the end has been returned, it is returned every time, even if a cancel
-  arrives afterwards.
+- **The end stays the end, and an error stays the error.** Once either has been returned, it is returned
+  every time, even if a cancel arrives afterwards.
 - **A cancel hands out nothing more.** A cancel that arrives before the reader has seen the end returns
   `ECANCELED`, even with batches still queued, as §5.7 says. That includes a cancel after the last batch
   was queued.
@@ -441,7 +463,11 @@ else:
                                        operator list, through the same builder (§5.11)
     run one round (and, when the source is exhausted, a trailing limit's count is reached, or a
     non-trailing limit's budget is spent: the tails and finalize, then mark finished)
-answer the request, and wait for the next one, or for release
+answer the request
+if the run is over (the end queued, a limit reached, failed, cancelled, or a materialised answer queued):
+    return from the frame, freeing it, and end the thread (step 7)
+else:
+    wait for the next request, or for release
 ```
 
 So one `get_next` may cause several rounds: a round whose filter rejects every row it read yields no
@@ -449,12 +475,16 @@ batch, and the loop asks again. A cancel is seen between rounds and, inside a ro
 morsel the workers check (§5.8).
 
 **What the first batch costs.** The first `get_next` costs the breakers below, if any, then the build of
-the last stage, then one whole round of up to the claim limit's number of claims. A round cannot hand
-out a batch before it ends, because the result sink orders the round's chunks only then. So the
-first-batch bound of §9.1 holds for a scan that yields output per claim. A filter that rejects a whole
-round makes the first `get_next` run another round. A smaller first round (one claim per worker) would
-hand out the first batch sooner, at the cost of a second rule for the limit. It is not taken, because the
-claim limit, twice the workers, already makes the first round at most two claims per worker.
+the last stage, then one whole round. A round cannot hand out a batch before it ends, because the result
+sink orders the round's chunks only then.
+- **The first round takes one claim per worker.** The claim limit is the worker count for the first round
+  and twice it after (§5.3). Today a `LIMIT` query's workers each stop at about their first claim, when
+  their limit operator reports `FINISHED` (`op_limit.mojo:97-118`, `segment_task.mojo:124-125`), and
+  Python's `sql()` pulls the first batch (§7.1). A first round of two claims per worker would make every
+  `sql()` decode and hold about twice the row groups today's `LIMIT` does before its first batch. With one
+  claim per worker it costs what today's run costs up to its first morsel.
+- So the first-batch bound of §9.1 holds for a scan that yields output per claim. A filter that rejects a
+  whole round makes the first `get_next` run another round.
 
 No worker and no lock ever waits on a reader. The reader waits only on engine work (a breaker segment, the
 build of the last stage, or one round), and the driver thread waits for the reader holding nothing that
@@ -465,11 +495,15 @@ back into the same engine.
 
 **The two limits.** The read-ahead limit has two parts, both fixed by the engine (§12, decision 3):
 
-- **the claim limit**, a number of claims: twice the number of workers;
+- **the claim limit**, a number of claims: the number of workers for the first round, and twice the
+  number of workers after it (§5.2, "What the first batch costs");
 - **the byte limit**, a number of bytes: the larger of 64 MiB and twice the number of workers times the
-  scan's largest claim estimate, and at most half the context's memory budget when one is set. The second
-  term keeps every worker busy when row groups are large. The budget cap keeps one stream from taking the
-  context's whole budget.
+  scan's largest claim estimate, and at most half the context's memory budget. Every context has a
+  budget: when none is given it is 70% of the available memory (`detect_host_profile`,
+  `host_profile/host_detect.mojo:36-41`; `default_memory_budget`, `host_profile/hardware.mojo:259-261`),
+  and every run is given it (`engine_execute.mojo:122`). So by default the byte limit is at most 35% of
+  the available memory. The second term keeps every worker busy when row groups are large. The budget cap
+  keeps one stream from holding more than half the budget.
 
 **The rule, stated once.** A claim is *outstanding* from the moment a worker takes it until every batch
 it produced has been handed out to the reader, or discarded. That covers claims being worked on, claims
@@ -483,42 +517,45 @@ outstanding claims ≤ the claim limit   and   outstanding bytes ≤ the byte li
 When nothing is outstanding, one claim is always allowed, so a claim larger than the byte limit still
 makes progress, as DuckDB's buffer admits one unit when empty.
 
-**What a claim is charged.** A claim's outstanding bytes are:
+**What a claim counts.** The outstanding counts are the stream's own: one 64-bit atomic word per stream
+(claims in the low 16 bits, bytes in KiB above them), which the limit reads. It is not the context's
+memory pool (below). A claim's bytes in that word are:
 
 - before its output exists, its estimate: the source's own size for it, known before it is taken.
-  - For Parquet it is the row group's `total_byte_size` from the footer
-    (`parquet_api/src/parquet_api/metadata.mojo:439`, which komira's writer sets,
-    `parquet_writer/file_assembly.mojo:85`). Other writers may write 0, and then it is the sum of the
-    row group's columns' `total_uncompressed_size`. The reader has no accessor for it today, so the
-    source limits slice adds one.
+  - For Parquet it is the sum of `total_uncompressed_size` over the column chunks the scan projects, in
+    that row group, from the footer. A row group's `total_byte_size`
+    (`parquet_api/src/parquet_api/metadata.mojo:439`) counts every column, so a narrow projection over a
+    wide file would be counted many times its real size. The reader has no accessor for the per-chunk
+    sizes of a projection today, so the source limits slice adds one.
   - For a source over a table in memory it is the morsel's size, from a per-slot size array the source
     fills when it cuts the table. A slot's morsel cannot be read at the claim, because the winning worker
-    swaps it out at the same time;
-- once its output reaches the result sink, the bytes of every buffer that output keeps alive. For a
-  Parquet claim that includes the whole decoded row group, because a morsel's columns are views of the
-  decoded row group's buffers: non-nullable fixed-width columns by a zero-copy slice, and strings by a
-  window on their payload (`src/morsel/morsel.mojo:838-863`). So one held morsel keeps the whole buffer
-  alive. It also includes any buffer the operators made, such as a cast of an integer
-  column to text or a computed column, which can be larger than the column it came from. For a source
-  over a table in memory, a morsel's buffers belong to the source (below), so a claim is charged only for
-  what the operators and the hand-out step made;
+    swaps it out at the same time.
+- once its output reaches the result sink, the bytes of every buffer that output keeps alive, which
+  replace the estimate in the word. For a Parquet claim that includes the whole decoded row group, because
+  a morsel's columns are views of the decoded row group's buffers: non-nullable fixed-width columns by a
+  zero-copy slice, and strings by a window on their payload (`src/morsel/morsel.mojo:838-863`). So one
+  held morsel keeps the whole buffer alive. It also includes any buffer the operators made, such as a cast
+  of an integer column to text or a computed column, which can be larger than the column it came from.
+  For a source over a table in memory, a morsel's buffers belong to the source (below), so a claim counts
+  only what the operators and the hand-out step made.
 - measured by a new function, which the rounds slice adds to `arrow`: the bytes a set of batches keeps
   alive, with every shared buffer counted once. Today a column holds its buffers as `SharedAlignedBuffer`s,
   and nothing sums what a column keeps alive or tells two views of one buffer apart (`src/arrow/column.mojo`).
   The function counts each underlying buffer once by its identity: the whole region behind a
   `SharedAlignedBuffer`, not the view's length, identified by the region's shared pointer. So the many
-  morsels of one decoded row group are charged once, at the first that reaches the sink. A buffer that
-  borrows a file mapping counts as zero bytes: it is page cache, not the process's memory. The conversion
-  and split copies of the hand-out step (§6.3) are buffers like any other, so they are counted the same
-  way;
-- charged at the sink in place of the estimate (the estimate's reservation is returned as the real bytes
-  are charged), through the pool's atomic `try_acquire`, which any thread may call
-  (`segment_pool.mojo:68-87`; the per-worker `WorkerReservation` is not used here). If the pool refuses
-  the real bytes of a claim that was allowed on its estimate, the stream fails with
-  `MEMORY_BUDGET_EXCEEDED`, as an error at that claim's position (§5.7). The budget is never exceeded by
-  the excess;
+  morsels of one decoded row group are counted once, at the first that reaches the sink. A column whose
+  buffers borrow a file mapping counts its window (its rows, not the whole column chunk the buffer covers),
+  which is what the hand-out step's copy of it will hold (§5.12, step 5). The copies of the hand-out step (§5.12, §6.3) are buffers like any other, so they are
+  counted the same way.
 - released when the claim's last batch is handed out. A claim that yields nothing (a row group pruned,
   skipped or filtered empty) releases its reservation when its worker moves on.
+
+The sink learns which claim a chunk belongs to from the chunk's position. For Parquet a position is the
+claimed row group times `SUB_SLOT_STRIDE` plus the sub-slot (`parquet_source_options.mojo`,
+`parquet_source_grain.mojo` header), so the claim is the position divided by the stride. For the in-memory
+source the position is the claimed slot itself (`batch_morsel_source.mojo:782`, `partition_id = c`). Each
+source states that mapping (`claim_of(position)`) in the rounds slice's source trait change, and the
+generated source follows the Parquet encoding, so the rounds slice's tests exercise the real one.
 
 **Taking a claim is one step.** The claim index is known only once the cursor has moved, so the check
 and the cursor's move are done together, in a compare-and-swap loop:
@@ -527,22 +564,28 @@ and the cursor's move are done together, in a compare-and-swap loop:
 loop:
     next_claim = cursor.load();  if next_claim >= end: return EXHAUSTED
     claim_bytes = estimate(next_claim)
-    if not limit.try_reserve(1 claim, claim_bytes): return REFUSED   # one atomic word holds both counts
+    if not limit.try_reserve(1 claim, claim_bytes): return REFUSED   # the stream's one atomic word
     if cursor.compare_exchange(next_claim, next_claim + 1): return next_claim
     limit.release(1 claim, claim_bytes)              # another worker took that claim; try again
 ```
 
-The two counts share one 64-bit atomic word (claims in the low 16 bits, bytes in KiB above them), so the
-reservation is all or nothing.
+**What that bounds.** Unless the budget cap is lower, the byte limit is never smaller than twice the
+workers times the largest claim estimate. So on estimates alone every claim the claim limit allows also
+fits under the byte limit, and the claim limit is the bound that binds. Where the cap is lower, as in a
+small container whose budget is 70% of little memory, the byte limit binds instead and fewer claims run
+at once; one claim is still always allowed when nothing is outstanding. A Parquet stream holds at most:
 
-**What that bounds.** At any moment the outstanding claims are at most the claim limit, and the
-outstanding bytes are at most the larger of the byte limit and one claim's estimate, plus what the claims
-being worked on hold beyond their estimates. Only a claim a worker is working on can exceed its estimate,
-so that excess is at most one claim's excess per worker. A claim's excess has two sources: a decoded row
-group larger than the footer's uncompressed size (dictionary or run-length encoded columns), and
-operators whose output is larger than their input (a cast to text, a computed column). Nothing caps a
-morsel's output today (`op_project`, `sink_collect`), so the excess is bounded per claim, not by a
-constant.
+- **the claim limit's number of decoded row groups:** the workers for the first round, twice the workers
+  after. For example, 16 workers over 128 MiB row groups hold up to 2 GiB for the first round, and up to
+  4 GiB after it;
+- **within the byte limit, which the outstanding bytes reach only through excess:** what the claims
+  being worked on hold beyond their estimates. Only a claim a worker is working on can exceed its estimate,
+  so that excess is at most one claim's excess per worker. A claim's excess has two sources: a decoded row
+  group larger than the footer's uncompressed sizes (dictionary or run-length encoded columns), and
+  operators whose output is larger than their input (a cast to text, a computed column). Nothing caps a
+  morsel's output today (`op_project`, `sink_collect`), so the excess is bounded per claim, not by a
+  constant. Once the excess has pushed the outstanding bytes over the byte limit, no claim is taken until
+  the reader drains them below it.
 
 **What the engine really holds, by the kind of source the last stage reads.** The limit bounds what is
 held for the reader. Each kind of last stage also holds what its source and the breakers below hold. None
@@ -550,7 +593,7 @@ of that is new with streaming, and most of it is not charged to the pool today:
 
 | last stage reads | what it holds besides the outstanding claims | charged to the pool today |
 |---|---|---|
-| a Parquet file set | per worker, the claim it is decoding, which is inside the bound above | yes, through the bound |
+| a Parquet file set | per worker, the claim it is decoding, which is inside the bound above | no |
 | a resident table (`SOURCE_BATCH`) | two copies of the table and a cut. `run_lowered_plan_with` first concatenates the plan's batches into the builder's resident batch, which copies even a single batch (`_resident_batch`, `engine_execute.mojo:66-72`, `:125-127`; `concat_record_batches_nway_ref`, `arrow/concat.mojo:1301`). The builder keeps that for the whole run. `build_source` then copies it again (`real_builder.mojo:520`, `copy_batch` "copies all column data"), and the source cuts the copy at once into morsels (`batch_morsel_source.mojo:440`, `split_record_batch`). The cut shares the non-nullable fixed-width columns and the string payloads, rebuilds string offsets and validity, and copies nullable fixed-width and boolean columns (`morsel.mojo:838-870`, `:975`). It refuses list, map, struct, union, large string and large binary columns (they fall to `check_fixed_width_dispatch`, `arrow/varlen_width_guard.mojo:377-398`, which raises), so a table with such a column fails in a materialised run today, and the same in a stream. So the table's size twice, plus up to the table's size again for nullable columns | no |
 | a breaker's published output (`SOURCE_SINK_OUTPUT`) | the output, moved into the source when this is its last reader (`published.take`, `real_builder.mojo:541`; earlier readers get a copy, `published_outputs.mojo:89-100`), and its cut into morsels, as above | no |
 | a `UNION ALL` (`SOURCE_CONCAT`) | one concatenation of every branch's output (`real_builder.mojo:561`), and its cut into morsels; the branches' own outputs are freed once concatenated | no |
@@ -558,12 +601,16 @@ of that is new with streaming, and most of it is not charged to the pool today:
 
 Batches a reader has taken from a source over a table in memory are views of the source's buffers.
 After release they keep those buffers alive for as long as the reader holds them, as today's arrays keep
-today's answer alive.
+today's answer alive. When the run is over the frame goes (§5.2, step 7), so the copies a reader does not
+hold are freed then, not at release.
 
 The source limits slice removes one of the two copies of a resident table: a resident batch read by
-exactly one segment is moved into its source instead of copied. The builder counts each handle's readers
-when it is given the plan, as `PublishedOutputs` counts its readers. The copy exists today because a plan
-may read a resident batch twice (`source_batch.mojo` header). The change applies to materialised runs too.
+exactly one segment is moved into its source instead of copied. The builder does not see the plan when
+the resident batches are added today (`add_resident` runs before `run_plan` builds its published outputs,
+`engine_execute.mojo:125-128`, `run_plan.mojo:65`), so the slice adds a call the driver makes before any
+segment runs, which counts each handle's readers over the plan's segments, as `PublishedOutputs` counts
+its readers. The copy exists today because a plan may read a resident batch twice (`source_batch.mojo`
+header). The change applies to materialised runs too.
 
 Below the last stage, a breaker holds its own state while it runs: a sort holds its input chunks, their
 concatenation, the sorted copy and scratch, all charged to the pool until `take_output`
@@ -580,64 +627,66 @@ So the peak of a streamed query is:
 
 Streaming lowers today's peak by the collect sink's copies (its chunks and their concatenation, "about
 twice its output", §3). It does not lower what the sources and breakers hold. The tests that check these
-peaks measure the process's resident memory, so they see what the pool does not (§9.2).
+peaks measure the process's anonymous resident memory, so they see what no counter does (§9.2).
 
-**One budget per context.** Today each run builds its own segment pool, sized by the context's memory
-budget (`real_builder.mojo`, `set_memory_budget`). With one run at a time per context, that was one
-budget per context. With open streams it would not be, so the engine core (§5.10) holds one pool for the
-context:
+**The context's pool, and what it does not hold.**
 
-- Every run, materialised or streamed, draws from that pool.
-- Each run counts its own grants for the end-of-run check (`EXECUTE_POOL_NOT_RELEASED`).
-- A stream's outstanding bytes are charged to the pool, so all open streams of a context, and every
-  query beside them, share the one budget.
-- **A stream's own state is charged too.**
-  - At open the run charges a fixed amount for its driver thread's stack, and the size of its lowered
-    plan as a new function in `lowering` measures it: its segments and parameters, without the payload
-    of its resident batches, which the plan shares with the session's registered tables and which the
-    session already holds.
-  - The driver charges its expression pool, and its footer cache as the cache grows (each footer is
-    charged when it is parsed).
-  - A stream whose state cannot be charged fails with `MEMORY_BUDGET_EXCEEDED`: at open, or at the read
-    that parses the footer.
-  - So the charged part of all open streams is bounded by the budget, with no separate cap on their count.
-    The uncharged part is not: what each stream's last stage holds (the table above) is held for as long
-    as the stream is open. Abandoned streams over resident tables hold copies of those tables that no
-    budget sees, until a finalizer releases them. Charging those copies is the later work below.
-- A charge the pool refuses for a claim counts as a refusal by the limit (the stream waits for its own
-  queue to drain). The exception is when nothing of that stream is outstanding: then the pool's refusal
-  fails the stream with `MEMORY_BUDGET_EXCEEDED: execute: the open results of this session hold <n>
-  bytes`. The reader frees memory by reading or releasing the other results.
-- What the table above lists as not charged stays uncharged in the first slices, as it is today.
-  Charging a source's copy and cut, and a join's build side, is later work that applies to materialised
-  runs as much as to streams.
+- **Operators draw from one pool per context.** Today each run builds its own segment pool
+  (`set_memory_budget` "replaces the pool", `real_builder.mojo:351-355`), sized by the context's budget.
+  With one run at a time per context, that was one budget per context. With open streams, two runs can be
+  open at once, so the engine core (§5.10) holds one pool for the context, and every run's builder draws
+  its operators' reservations from it.
+- **Each run keeps its own tally.** A pool's handles share one counter today (`SegmentPool.share()`,
+  `segment_pool.mojo:52-58`), so the end-of-run check that the run returned what it took
+  (`EXECUTE_POOL_NOT_RELEASED`, which reads `builder.pool_granted()`, `engine_execute.mojo:172-178`) would
+  see the other runs' grants. The engine-core slice adds a per-run tally layered over the shared counter:
+  every grant and return of a run's handles updates both, and the end-of-run check reads the run's tally.
+- **Operators of two runs never hold the pool at once in a way today's engine could not.** Every segment
+  and every round runs under the context's dispatch lock (§5.9), so the operators of two runs are never
+  running together. A breaker returns its reservations when it finishes, and its published output is not
+  charged, as today. So a sort that runs under the budget today still runs, whatever streams are open.
+- **What a stream holds for its reader is not charged to the pool,** and neither is its own state, as
+  today's answer and today's `Result` are not (the collect sink's chunks and concatenation are not
+  charged, §3). So an unread `Result`, or several, can never make another query's sort or window fail with
+  `MEMORY_BUDGET_EXCEEDED`. A stream's held bytes are bounded by its own two limits instead, and when its
+  run is over it holds only its queue (§5.2, step 7).
+- **What that means for a caller holding several streams.** Each open stream that is still running holds
+  at most its own bound, plus what its source holds (the table above). A finished stream holds the batches
+  the reader has not taken, no more than today's `Result` holds. As today, the number of open results is
+  not bounded, and each holds memory outside the pool. Unlike today, an unfinished stream holds a part of
+  its answer and not all of it.
 
-An open stream that is not being read holds its outstanding bytes and its own state (both charged), what
-its last stage holds (the table above), its open files, and its parked driver thread. Building a last
-stage over a Parquet file set opens every file of the set and reads its footer
-(`parquet_source.mojo:245-267`). Each file stays open and mapped for the stream's life.
+An open stream whose run is not over holds its outstanding bytes, what its last stage holds (the table
+above), its open files and mappings, and its parked driver thread. Building a last stage over a Parquet
+file set opens every file of the set and reads its footer (`parquet_source.mojo:245-267`). Each file
+stays open and mapped until the run is over (§5.2, step 7).
 
 **The kernel's read-ahead.** A mapping asks the kernel, by default, to read the whole file ahead
 (`madvise(MADV_WILLNEED)` over the whole mapping, `byte_buffer/src/byte_buffer/mmap_region.mojo:235`,
 `:341`). The Parquet scan already maps its files without that hint (`advise_whole_file=False`,
 `parquet/file_reader.mojo:386`, and `parquet/runtime_footer_cache.mojo:328` for the pinned mapping). So
-what remains outside the limits is the scan's own per-claim range hint (§5.8): page cache, not the
-process's memory, but it counts in a container's memory limit, and release does not undo it. An abandoned stream
-holds those until it is released, by the caller or by a binding's finalizer. When no memory budget is
-set, the pool counts without a cap, as it does today, and the limits above still bound each stream.
+what remains outside the limits is the scan's own per-claim range hint (§5.8). It is page cache, not the
+process's memory, but it counts in a container's memory limit, and release does not undo it.
 
 **The throughput check.** The open-call slice measures a streamed full scan against the materialised run
 of the same Parquet file, at 1 and at 16 workers, and reports both in its pull request. It is a
 measurement, not a test (tests never assert time), and no build fails on it. It is the reviewer's gate
 for that slice: the streamed scan must reach at least 90% of the materialised run's rows per second at
-each worker count. If it does not, the byte limit's default is doubled and the measurement repeated, up
-to the budget cap. If it still does not reach 90%, the slice does not land until the cause is fixed
-within it: the stride-1 claims, or the idle time between rounds. If the cause is the idle time, the
-read-ahead of §5.1 is built inside the open-call slice, and the read-ahead slice is folded into it. A
-second measurement does the same over a 64-file glob and over a resident table, so the build of the last
-stage and the in-memory source are measured as well.
+each worker count.
+- If it does not, the byte limit's default is doubled and the measurement repeated, up to the budget cap.
+- If it still does not reach 90%, the slice does not land until the cause is fixed within it: the
+  stride-1 claims, or the idle time between rounds. If the cause is the idle time, the read-ahead of §5.1
+  is built inside the open-call slice, and the read-ahead slice is folded into it.
 
-No queue in this design is unbounded, and nothing watches memory at run time: the limit is the bound.
+The same measurement is made over a 64-file glob, and over a resident table, so that the build of the last
+stage and the in-memory source are measured as well. It is also made for `SELECT * FROM big LIMIT 5`
+against today's run of it, counting the row groups decoded and the peak anonymous memory: with one claim
+per worker in the first round, both should be today's.
+
+For the shapes that stream, no queue in this design is unbounded, and nothing watches memory at run time:
+the limit is the bound. A run materialised inside the stream (§5.11) queues its whole answer, a root
+breaker hands out its whole output, and one morsel's operator output is uncapped; each is bounded only as
+today's run is.
 
 ### 5.4 Order, and what each source must change
 
@@ -676,7 +725,7 @@ between rounds: each keeps its own cursor, as it does within one run today.
   - A streamed run builds the source with stride 1 (`forced_cursor_stride`, one claim per cursor move).
     When that option is set the claim order is ignored and the per-worker range cache stays empty
     (`parquet_source.mojo:423-425`). The real builder passes the source no options today, so the slice
-    adds a parameter to `build_parquet_source_on` for it. The claim order (`claim_order`) and parked-morsel
+    adds a parameter to both `build_parquet_source` (local) and `build_parquet_source_on` for it. The claim order (`claim_order`) and parked-morsel
     sharing (`share_parked`) are not used by the real builder today.
   - `next_morsel` returns `None` on a refusal without ending the worker, and the source answers
     `is_exhausted()`.
@@ -731,9 +780,9 @@ In a streamed run:
     (its last arm calls `element_size`, `compiler_helpers.mojo:3242-3265`). Today's limit operator meets
     the same raise whenever a limit crosses a morsel of such a column, so a stream fails exactly where
     today's run does.
-  - It then finishes the run: no further round runs, and the driver runs `finalize` and parks. It cancels
-    no token, so the batches already queued stay readable, the reader then gets the end, and the driver's
-    frame is freed at release (§5.8). So that `LIMIT` returns the first rows in file order, which DuckDB
+  - It then finishes the run: no further round runs, and the driver runs `finalize`, returns from its
+    frame and ends (§5.2, step 7). It cancels no token, so the batches already queued stay readable, and
+    the reader then gets the end. So that `LIMIT` returns the first rows in file order, which DuckDB
     returns too, and reads no more than one round past them.
   - `LIMIT 0` builds the last stage, takes the empty answer's schema (§6.3), takes no claim, and ends.
 - **A run that runs materialised keeps every limit of the plan.** It runs the plan's own lowered plan,
@@ -847,12 +896,14 @@ using any of it, which is what `to_arrow()` does (§7.1).
     given this control, now or later" (`src/sdk_exec/run_control.mojo:11-12`, `:54-62`). So an early
     release, or a limit's end, leaves the caller's handle, every other stream opened with it, and every
     later call given it, as they were;
-  - tells the driver to stop. The driver returns from its frame, which frees what the frame holds: the last
-    stage (the source with its cursor, its copies and morsels, its open files and mappings, its prefetch
-    buffers, and the operators' shared parts), the result sink and its queue, the published outputs not
-    yet consumed, the builder, the footer cache, the expression pool and the lowered plan. Every pool
-    charge they held is returned;
-  - joins the driver thread, so when release returns the thread has ended and every one of those is freed;
+  - if the run is not yet over, tells the driver to stop. The driver returns from its frame, which frees
+    what the frame holds (§5.2, step 7): the last stage (the source with its cursor, its copies and morsels,
+    its open files and mappings, its prefetch buffers, and the operators' shared parts), the published
+    outputs not yet consumed, the builder, the footer cache, the expression pool and the lowered plan.
+    Release joins the driver thread, so when it returns the thread has ended and every one of those is
+    freed. If the run is already over, the frame went and the thread ended then, and there is nothing to
+    stop;
+  - frees the queue of batches the reader did not take, and the error or the end;
   - drops the stream's share of the run handle's control and of the engine core (§5.10).
 - **After release the source is read no more.** No round can start, and the driver has ended. The Parquet
   source gives the operating system an advisory read-ahead hint for the next row group at the end of each
@@ -889,8 +940,19 @@ a materialised query, may each want the dispatcher, so a lock serialises them.
   - around each round of a streamed run, and around its tails and `finalize`, on its driver thread.
 - **Who takes it.** Only driver threads and callers' threads take it, never a worker. A worker blocking on
   its own runtime is the hazard [async_runtime.md](async_runtime.md) rules out.
-- **Waiting for it.** The wait watches the stream's token, so a run waiting for the lock still ends with
-  `ECANCELED` on a cancel.
+- **Waiting for it.** Today's locks block on a futex word and no cancel wakes them (`async_rt/sync`,
+  `async_mutex.mojo`: "`lock()` blocks the calling thread on `wait_on_address`"), and a cancellation
+  token is an atomic flag with no waker (`token.mojo:134-170`). So the dispatch lock is waited on with
+  `wait_on_address`'s timeout (`async_rt/runtime/wake_primitives.mojo:170-173`, `timeout_ns`) in 1 ms
+  slices, re-reading the stream's token between slices. That is how the dispatch barrier already waits
+  (1 ms waits, [async_runtime.md](async_runtime.md)). A run waiting for the lock ends with `ECANCELED`
+  within one slice of a cancel. The wait watches a cancel flag, not memory, so it is no watchdog.
+- **The runtime goes inside the lock.** `dispatcher()` takes `mut self`
+  (`async_rt/runtime/runtime.mojo:887`), so the worker runtime moves into the engine core behind the
+  dispatch lock, and a run reaches the dispatcher only by taking the lock. Its one call site in the engine,
+  `run_lowered_plan_with`'s `ctx.runtime.dispatcher()` (`engine_execute.mojo:159`), changes to take the
+  lock. So do the tests that reach `EngineContext.runtime` directly; the engine-core slice's pull request
+  lists each one it changes.
 - **What a waiter waits for.** A run that wants the dispatcher waits for the round or segment in progress.
   That is engine work, never a reader.
 
@@ -901,13 +963,53 @@ Consequences:
 - **A run reads no mutable context state after open** (§5.2). So registering a table, adding a binding or
   starting another query while a stream is open does not change what the open stream reads. It reads the
   catalog as it was when it opened.
-- **A file changed while a stream is open.** The Parquet source reads each file's footer and schema when
-  the last stage is built, and its row groups as it claims them, from the file set it mapped or opened
-  then. A local file replaced by a rename while the stream is open is still read through the mapping the
-  source holds *(inferred from `LocalFs` mapping a file on its first read, `async_runtime.md`, "How does
-  the runtime read files?")*. A file written in place, or a remote object replaced, is read as it is at the
-  read. Today the scan already reads footers again after lowering (komira-ai/komira#2024), and a stream
-  widens that window from one run to the stream's whole life. The stream does not detect such a change.
+- **A file changed while a stream is open.** Today a run reads its files while it runs, and its answer
+  is a concatenated copy that no longer refers to them. A stream reads its files across many rounds, while
+  the caller reads, so the window in which a file can change under it is the run's whole life. What a
+  reader would see without a rule:
+  - **A local file truncated or rewritten in place.** Local scans read a private, read-only mapping of
+    the file (`parquet/file_reader.mojo:375-392`, `:525-545`; `borrow_mmap_erased` hands out buffers that
+    borrow it). Reading a page of a mapping past the file's new end raises `SIGBUS`, which ends the
+    process: not an error, a crash. pandas' and pyarrow's `to_parquet` rewrite a file in place.
+  - **A local file replaced by a rename,** as writers that write a temporary file and rename it do. The
+    source still reads the old file through the mapping it holds, so the stream answers from the old file.
+    That is safe and consistent, and today's run of the same query would finish too.
+  - **A remote object replaced.** Later row groups are read at the offsets of the old footer from the new
+    object: wrong rows, or a decode error.
+
+  The rule makes each case safe, in three parts:
+  - **Handed-out batches never refer to a mapping.** The hand-out step copies the window of any column
+    whose buffers still borrow a file mapping into heap memory before the batch is queued (§5.12, step 5).
+    A buffer can tell whether it borrows a mapping (`SharedAlignedBuffer.is_mmap_backed()`,
+    `byte_buffer/src/byte_buffer/shared_aligned_buffer.mojo:1029`). So once a batch is in the reader's
+    hands, nothing the file does can reach it, as today's concatenated answer is unreachable.
+  - **Each claim checks its local file first, by inode.** When the last stage is built, the source records
+    each local file's device, inode, size and modification time. That needs a `stat` the local file
+    system does not offer today: it has only `file_size` (`fs/local_fs.mojo:1019`), and the mapping closes
+    its descriptor once mapped (`mmap_region.mojo:327-331`). So the source limits slice adds a stat call to
+    the file system's C shim. Before it decodes a claim, the source stats the path:
+    - the same inode with a different size or modification time means the file was rewritten in place,
+      and the stream fails by name, as an error at that claim's position
+      (`STREAM_SOURCE_CHANGED: <path>`);
+    - a different inode, or no file at the path, means the file was replaced or removed. The old inode is
+      intact under the held mapping, so the stream keeps reading it, as above.
+
+    The check is made only in a streamed run. A materialised run does not make it, so nothing changes for
+    the old calls.
+  - **Each claim reads a remote object only if it is still the object whose footer was read.** Today the
+    file system's reads return only the bytes (`fs/file_system.mojo:386`, `:423`), and no store's file
+    system carries an entity tag. So the source limits slice adds, as a defaulted method on the
+    `FileSystem` trait, a conditional ranged read: S3's and Azure's `If-Match` on the entity tag from the
+    footer's read, and GCS's generation match. Each of the S3, Azure and GCS file systems implements it.
+    A read whose condition fails fails the stream by name at that claim (`STREAM_SOURCE_CHANGED: <url>`).
+  - **What is left.** A truncation in place that lands after a claim's check, before the round's batches
+    are copied at hand-out, can still fault, exactly as it can today while a materialised run reads the
+    file. The mapping-backed buffers are read by the operators and held in the result sink until the round
+    ends, so that window is one round. Today it is the whole run, and without the rule it would be the
+    stream's whole life.
+
+  Today the scan already reads footers again after lowering (komira-ai/komira#2024). A stream reads them
+  once, when the last stage is built, and the check above compares each claim with what that read saw.
 - **A stream fed back into the engine** (`komira_register_arrow_stream` given a komira stream, or Python's
   `register(name, result)`) is drained whole by the registering call into the registered table, as any
   registered stream is (`src/so/sources.mojo`). Its `get_next` calls ask its driver for rounds, and the
@@ -924,10 +1026,13 @@ of [libkomira_run_abi.md](libkomira_run_abi.md) requires the stream to hold an `
 needs that `komira_ctx_free` tears down. A streamed run needs the worker runtime with its dispatcher, the
 dispatch lock and the context's pool. These move into an engine core held by `ArcPointer`:
 
-- The context holds one share, and each open stream holds one.
+- The context holds one share, and each stream whose run is still going holds one. The driver drops the
+  stream's share when the run is over (§5.2, step 7), because a finished stream's queue needs no engine.
 - `komira_ctx_free` drops the context's share.
-- The core, and with it the worker threads, stops when the last share is dropped: by the context, or by
-  the release of the last stream.
+- The core, and with it the worker threads, stops when the last share is dropped: by the context, by the
+  end of the last running stream's run, or by its release. So closing a session (`komira_ctx_free`,
+  Python's `Session.close`) no longer stops the worker threads at once while a stream's run is still
+  going: they stop when that run is over or released. A finished `Result` keeps no worker alive.
 - The thread that drops the last share joins the worker threads, which are idle between rounds. That
   thread is never a worker. It may be a garbage collector's: pyarrow releases an imported stream when the
   reader is collected, with the GIL held. No worker and no driver thread ever needs the GIL, so that join
@@ -939,6 +1044,11 @@ dispatch lock and the context's pool. These move into an engine core held by `Ar
     ([udf_python_worker.md](udf_python_worker.md)), so that stays true when plans carry them.
 - The Node addon's finalizer hands the release to the session's native thread, rather than running it on
   the event loop.
+- **Credentials.** A stream reads a remote store with the credentials resolved at open, for as long as its
+  run lasts. Whether the opener refreshes an expiring credential cannot be told from the code
+  *(inferred: it does not)*. If it does not, a stream whose credentials expire mid-read fails at the claim
+  that meets the expiry, with the store's error, at that claim's position. A materialised run of the same
+  length would fail the same way.
 
 **The driver thread.** The last stage must live for the whole stream, for two reasons the code gives:
 
@@ -954,7 +1064,7 @@ dispatch lock and the context's pool. These move into an engine core held by `Ar
   `engine_execute.mojo:116-121`). The Parquet source borrows them the same way (`build_parquet_source_on`
   takes `ref [cache_o] cache` and `ref [pool_o] pool`, `src/pipeline_exec/source_parquet.mojo`).
 
-So the stream keeps one frame alive for its whole life: the frame of its driver thread. That frame holds
+So the stream keeps one frame alive for its run's life: the frame of its driver thread. That frame holds
 the cache, the pool, the builder, the published outputs and the last stage, exactly as
 `run_lowered_plan_with`'s frame holds them for one call today. Nothing is rebuilt, nothing refers to
 itself, and no pointer type appears in any public signature.
@@ -969,7 +1079,11 @@ itself, and no pointer type appears in any public signature.
   pointer.
 - **What it does between rounds.** It parks on a wake word, holding no lock and no dispatch. A request
   from `get_next` or `get_schema`, or a stop from release, wakes it.
-- **What it costs.** One parked thread per open stream, and its stack, charged to the pool (§5.3).
+- **When it ends.** When the run is over (the end queued, a limit reached, an error, a cancel, or a run
+  materialised inside the stream done), it returns from its frame and ends, without waiting for release
+  (§5.2, step 7). So only a stream whose run is still going has a thread.
+- **What it costs.** One parked thread per stream whose run is still going, and its stack. It is not
+  charged to the pool (§5.3).
 - **What it is not.** It is not a read-ahead driver: it runs a round only when a reader asks (§5.1).
 
 Not chosen: owning the built last stage in the `StreamedRun` value itself, rebuilt or not. A struct that
@@ -1010,8 +1124,7 @@ Writes are the one kind of statement whose open call does not return before the 
   computed whole, as it does today.
 
 **When the choice is made.** Every reason to run materialised that the plan shows is decided at open,
-before anything runs: a join probe in the last pipeline, and a source kind the first slices do not
-stream. One reason can show only when the last stage is built: a Parquet file set whose files disagree
+before anything runs. In the first slices that is one reason: a join probe in the last pipeline. One reason can show only when the last stage is built: a Parquet file set whose files disagree
 on a column (§6.3). A Parquet last stage has nothing below it but join builds: the optimizer turns
 subqueries into joins, an `IN` over a subquery becomes a semi-join probe, and a shared subplan cut as a
 breaker is read through `SOURCE_SINK_OUTPUT`, not Parquet. A probe is decided at open, so in that case
@@ -1044,7 +1157,7 @@ covers"). The shapes below are the ones that do not stream fully in the first sl
 | a JSONL or Iceberg source in the last pipeline | the same | a later slice |
 | `UNION ALL` | each branch is its own segment, run whole and published, then concatenated into one batch when the last stage is built (`cut_union.mojo`, `real_builder.mojo:552-566`); the hand-out then runs in rounds | a later slice, when branches stream into the union |
 | a join probe in the last pipeline | runs materialised inside the stream, its limits kept: one claim's output is not bounded (§5.3) | a later slice |
-| a Parquet file set whose files disagree on a column's decimal precision or scale, timestamp unit or zone, width hint, or presence | runs materialised inside the stream, decided when the last stage is built (§6.3) | not planned: the files themselves disagree |
+| a Parquet file set whose files disagree on a projected column's decimal precision or scale, timestamp unit or zone, width hint, presence, list item name, struct field order, or nested child type | runs materialised inside the stream, decided when the last stage is built (§6.3) | not planned: the files themselves disagree |
 
 The test of each materialised row asserts that the answer equals the materialised one, and that the
 source's claims before the first batch are all of them, which is what "materialised" means. The test of
@@ -1082,8 +1195,22 @@ Every batch a stream hands out passes through one step in the result sink, in th
      the same split and so refuses those columns today, in a materialised run as in a stream.
    - The exporter exports fixed-width and dictionary-index columns at their offset
      (`src/arrow_ipc/c_data_stream.mojo:1448`). So a column at a non-zero offset of any other type, at any
-     depth, is not expected. Should one appear, the step copies it to offset 0 and charges the copy before
+     depth, is not expected. Should one appear, the step copies it to offset 0 and counts the copy before
      it is made, so the bound covers it.
+   - **A column whose buffers borrow a file mapping has its window copied.** A local Parquet read hands
+     out buffers that borrow the file's mapping (`borrow_mmap_erased`, `parquet/file_reader.mojo:538-542`).
+     Whether a decoded column can still alias such a buffer cannot be read from the decoder's code alone.
+     So the step does not depend on the answer:
+     - for each column whose data, offsets, validity or dictionary buffer borrows a mapping
+       (`is_mmap_backed()`), the step copies the column's window, its `offset` to `offset + length`, into
+       fresh buffers at offset 0, rebasing string offsets and validity, and recursing into children;
+     - a buffer shared whole, such as a dictionary's values, is copied once per distinct buffer, not once
+       per morsel.
+
+     A morsel's column is a slice that shares the whole buffer (`Column.slice`,
+     `src/arrow/column.mojo:662-716`), so copying the buffer instead of the window would copy the whole
+     column chunk once per morsel. The copy is counted (§5.3). The file-change rule (§5.9) depends on this,
+     and a test plants a mapping-backed column to show the copy is made.
 6. **Export check.** The batch is checked as `check_record_batch_stream` checks every batch of a
    materialised answer today (`src/arrow_ipc/c_data_stream_check.mojo:47-110`):
    - Every array is built and released, and every dictionary column is checked against its field
@@ -1198,8 +1325,7 @@ The order of checks is `komira_sql_stream_run`'s:
    `komira_sql_stream_run` runs it today (§5.11). Its refusal or failure is the call's status, and `*out`
    is untouched. On success `*out` is a stream of its one `Count` row.
 7. Any other statement is marked streamed or materialised (§5.11), and its driver thread is started
-   (§5.10). A stream whose own state cannot be charged to the pool returns -3 with
-   `MEMORY_BUDGET_EXCEEDED` (§5.3).
+   (§5.10).
 8. `*out` is filled, and the call returns `KOMIRA_OK`. **For a query, no file has been opened.**
 
 Today's calls refuse, before `*out` is written, a result column whose type the exporter cannot carry,
@@ -1247,9 +1373,16 @@ segment's id). A streamed run keeps today's rule, with one change:
   - for a root aggregate or window, the output schema the plan declares in the sink's data
     (`sink_agg.mojo:273`, `sink_window.mojo:88-99`).
 
-  Where today's engine cannot build that schema (`_result_schema` returns none through a bare `except`,
-  and `CollectSink` raises when there are no rows and no schema), the stream fails the same way, and an
-  empty nested result is refused for want of a sample batch, as today (`c_data_stream.mojo:2880-2903`).
+  It is turned into the Arrow schema exactly as today's: today an empty answer is one batch of no rows
+  (`so/sources.mojo`, `sql_result`), which the sink builds with `empty_batch_like_schema`
+  (`CollectSink.take_output`, `sink_collect.mojo:136-141`; `sink_window.mojo:252`;
+  `column_kernels/compiler_helpers.mojo:1227`), and the export builds the schema from that batch as its
+  sample (`c_data_stream.mojo:2885-2903`). The stream builds the same batch of no rows and passes it to
+  the same schema builder, without handing it out. So an empty answer with a nested column gets whatever
+  schema today's gives it, or the refusal today's gives it, and never a different one. A test runs an
+  empty nested result through the old and the new path and asserts the two agree. Where today's engine
+  cannot build the derived schema at all (`_result_schema` returns none through a bare `except`, and
+  `CollectSink` raises when there are no rows and no schema), the stream fails the same way.
 - **A root breaker** (a final sort or aggregate, handed out as one batch, §5.6) follows the same rule:
   its schema is its one batch's, with every field nullable, or its sink's schema when it is empty.
 - **Every later batch must agree with it.** The type, the string and binary width, the decimal precision
@@ -1260,7 +1393,7 @@ segment's id). A streamed run keeps today's rule, with one change:
     back, and split into batches that each fit a 32-bit offset when its data does not. A plain later
     batch under a schema the first batch made large is widened. `RecordBatchBuilder.build` widens a
     schema to match a wide column and refuses the reverse (`arrow/record_batch.mojo:261-320`). So both
-    conversions, and the split, are new code, listed in the rounds slice. The copies they make are charged
+    conversions, and the split, are new code, listed in the rounds slice. The copies they make are counted
     as the batch's bytes (§5.3);
   - needs nothing for nullability, since every field is nullable;
   - refuses any other difference by name at that batch (`STREAM_BATCH_TYPE_DIVERGED: <column>: <what
@@ -1271,11 +1404,17 @@ segment's id). A streamed run keeps today's rule, with one change:
   (`parquet_source.mojo:596-628`). It checks only the Arrow type's tag across files
   (`parquet/parquet_source_helpers.mojo:279-322`), while the decimal precision and scale and the
   timestamp zone are properties of the field (`arrow/schema.mojo:1010-1022`). It builds a missing column's
-  nulls from the tag alone (`parquet_source_helpers.mojo:410-415`). So a batch from file k could disagree
-  with the schema from file 1 after earlier batches were handed out. The source has every file's footer
-  when the last stage is built (§5.3). So the build compares each column's properties across all files.
-  Any difference in a column's decimal precision or scale, timestamp unit or zone, width hint, or presence
-  makes the run fall back to materialised before any claim (§5.11).
+  nulls from the tag alone (`parquet_source_helpers.mojo:388-389`, `_build_typed_all_null_column`). A
+  nested column's list item name, its struct field order and its child types are properties of the field
+  too, and files written by different writers differ on exactly these (a list's item called `item` in one
+  and `element` in another). So a batch from file k could disagree with the schema from file 1 after
+  earlier batches were handed out. The source has every file's footer when the last stage is built (§5.3).
+  So the build compares each projected column's properties across all files (a column the query does not
+  read cannot reach a batch, so a difference there does not matter): decimal precision and scale, timestamp
+  unit and zone, width hint, presence, and for a nested column its item names, its field order and its
+  child types, at every depth. Any difference makes the run fall back to materialised before any claim
+  (§5.11). Today's run concatenates such files under the first file's schema, and the fall-back is that
+  run.
 - **What the promise covers.** This is the one place the promise is stated; §5.11, §10 and §12 refer to
   it. No query that works today fails because it streams: the first batch defines the schema, the files
   are compared before any claim, and width differences are converted in both directions. The
@@ -1284,10 +1423,19 @@ segment's id). A streamed run keeps today's rule, with one change:
   queries: a Mojo runner in `src/sdk_exec/tests` reads every case of the SQL conformance corpus
   (`src/tests/conformance/komira_sql_conformance/cases/`). It registers each case's tables twice: from
   Parquet files, as the corpus's existing runner does, and as resident tables in memory, so that both
-  kinds of source are swept. It runs every query streamed and materialised, and asserts that every
-  streamed batch agrees with the stream's schema and that the two answers are equal. The existing runner
-  belongs to the TypeScript package and cannot stream before the bindings slice. A case the sweep finds
-  disagreeing is either fixed in the engine or made a reason to run materialised, before the slice lands.
+  kinds of source are swept. The corpus's tables are small, so most answers would be one morsel and the
+  check of later batches would be thin. The runner therefore forces the smallest morsel size the sizing
+  policy allows (1,024 rows) and, through a test hook, a claim limit of one, so every case with more than 1,024 rows yields
+  several batches over several rounds. It runs every query streamed and materialised, and asserts that
+  every streamed batch agrees with the stream's schema and that the two answers are equal. The existing
+  runner belongs to the TypeScript package and cannot stream before the bindings slice. A case the sweep
+  finds disagreeing is either fixed in the engine or made a reason to run materialised, before the slice
+  lands.
+- **What the sweep cannot cover.** It cannot cover data the corpus does not have: file sets from several
+  writers (which the build's comparison covers instead), answers of fewer than 1,024 rows (which are one
+  batch, so cannot disagree with themselves), and engine paths no corpus case reaches. A later batch that
+  disagrees on such a path is the residual of the promise: it fails by name at that batch, after the
+  batches before it were handed out.
 
 **Export refusals.** Today `check_record_batch_stream` builds every array of every batch before the call
 returns, so `get_next` never fails while building one (`c_data_stream_check.mojo:47-110`). A streamed run
@@ -1338,7 +1486,8 @@ queued batch has passed the export check, so `get_next` never fails while buildi
   at any time, also while a `get_next` is running. That was already true of the run call.
 - **`get_next` blocks** while the driver runs a round or a breaker for it. While it waits it holds no lock
   of the context.
-- **Each open stream has one driver thread** (§5.10), parked between requests, and joined by release.
+- **Each stream whose run is still going has one driver thread** (§5.10), parked between requests. It
+  ends when the run is over; release joins it if the run is not.
 - **The context.** `komira_ctx_free` may run before the stream is read or released (§5.10).
 - **The library stays loaded** while a stream is live, as today: the callbacks are its code.
 
@@ -1401,6 +1550,11 @@ invisible except that:
 - **The run handle lives as long as the `Result`.** Today `_Call.finish` frees it before the `Result`
   exists (`_run.py:110-120`). A streamed `Result` keeps it, for Ctrl-C, for `Result.cancel()` (below),
   and for the late error's code and step.
+- **The schema a `Result` reports changes.** A streamed result's schema marks every field nullable
+  (§6.3). A Parquet file with required columns used to answer `int64 not null`, and now answers `int64`.
+  That is visible in `Result.to_reader().schema`, in `to_arrow()`'s table schema, and in anything that
+  compares schemas. The bindings slice says so in its changelog entry and updates the binding tests that
+  compare schemas.
 - **`Result.to_reader()`** returns a `pyarrow.RecordBatchReader` that streams. To keep komira's error type,
   it is `pa.RecordBatchReader.from_batches(schema, gen)`, whose generator reads the next batch on the
   helper thread. It turns pyarrow's exception into `KomiraError`, with the code and step read from the run
@@ -1460,6 +1614,12 @@ Python. It then keeps the stream, instead of draining it.
   ([typescript_package.md](typescript_package.md), "Cancellation"). An abort while reading rejects the
   pending `next()` with the cancelled `KomiraError`.
 - **A collected `Result`** is released on the session's native thread (§5.10).
+- **A late error.** The Node `Result` keeps the run handle the addon made for the query, beside the
+  stream. When a `get_next` on the session's native thread returns `EIO`, `ENOMEM` or `ECANCELED`, the
+  addon reads `komira_run_error_code` and `komira_run_error_step` from that handle on the same thread, and
+  rejects the pending `next()` with a `KomiraError` carrying the code, the step and `get_last_error`'s text.
+- **The schema** of a streamed `Result` marks every field nullable, as in Python, and the TypeScript
+  package's goldens that hold schemas change with the bindings slice.
 
 ### 7.3 Mojo
 
@@ -1549,17 +1709,17 @@ Four test-only parts make the counts possible:
 ### 9.1 The four tests that prove the promise
 
 - `first_batch_arrives_before_the_scan_ends`. A streamed run over the 10 GiB generated source, with four
-  workers, a claim limit of 8 and a byte limit of 8 MiB, set through a test hook. When `get_next` returns
-  batch 1, the source has taken at most 8 claims and made at most 8 MiB, of the 10,240 claims there are.
-  Its estimates are exact and its columns need no copy, so there is no excess. The same over a Parquet
-  file of 64 row groups written to scratch by the test: at the first batch the counting opener has read
-  the footer and at most 8 row groups.
+  workers. When `get_next` returns batch 1, the source has taken at most 4 claims, one per worker in the
+  first round, of the 10,240 claims there are. Its estimates are exact and its columns need no copy, so
+  there is no excess. The same over a Parquet file of 64 row groups written by a build step: at the first
+  batch the counting file system has read the footer and at most 4 row groups. Later rounds take at most
+  8 claims each.
 - `a_streamed_scans_resident_memory_is_its_bound_not_its_file`. A Parquet file of 128 MiB in 64 row groups,
-  written by a build step, read to its end through a stream with a byte limit of 4 MiB, one batch per
+  written by a build step, read to its end through a stream with a byte limit of 4 MiB (set through a test hook), one batch per
   `get_next`, through the counting file system. The largest sample of anonymous resident memory rises by
   under 32 MiB over the read: the bound, one decoded row group per worker, and a margin. The control,
-  reading the same file through the materialised run, rises by over 128 MiB. The pool's own high-water mark of
-  outstanding bytes is checked too, and is at most 4 MiB plus one row group per worker.
+  reading the same file through the materialised run, rises by over 128 MiB. The stream's own counter's high-water
+  mark of outstanding bytes is checked too, and is at most 4 MiB plus one row group per worker.
 - `early_release_stops_reading_the_source`. Read 3 batches, record the claims and the bytes read, then
   release. When release returns, the stream's driver thread has ended. There is no further claim and no
   further byte read, every file the opener opened is closed, the pool's granted bytes are 0, and an array
@@ -1621,14 +1781,21 @@ Four test-only parts make the counts possible:
   list, a struct and a large string column (from a Parquet file with the large-string hint). The stream
   hands out its output as one batch, every child starts at offset 0, and the answer equals the
   materialised one.
+- `a_mapping_backed_column_has_its_window_copied_at_hand_out`: a test hook makes the sink receive, from
+  eight morsels of one row group, a column whose buffer borrows the file's mapping. Each batch handed out
+  holds a heap copy of its own rows only (the bytes copied are its window's, not the chunk's), and no
+  queued batch has a mapping-backed buffer.
 - `a_column_left_at_an_offset_is_copied_before_it_is_queued`: a test hook hands the step a string column
-  and a list child at a non-zero offset. Both are copied to offset 0, the copy is charged before it is
+  and a list child at a non-zero offset. Both are copied to offset 0, the copy is counted before it is
   made, and the batch exports.
 - `a_trailing_limit_cuts_as_the_limit_operator_does`: a trailing `LIMIT` over a Parquet file with a large
-  string, a dictionary and an integer column, in row groups of fewer than 1,024 rows (below the morsel
-  sizing policy's floor, so they reach the sink uncut on every host). The batch that crosses the count is
-  cut by `_slice_batch_first_n`, every column of it starts at offset 0, it exports, and the answer equals
-  today's. The same with a list column fails with the error today's run of the same query fails with.
+  string and an integer column, in row groups of fewer than 1,024 rows (below the morsel sizing policy's
+  floor, so they reach the sink uncut on every host), and the same over a resident table with a dictionary
+  column. (A Parquet scan decodes a dictionary column to strings unless a string-keyed aggregate asks it
+  not to, `real_builder.mojo:462-465`, so the dictionary case needs a table in memory.) The batch that
+  crosses the count is cut by `_slice_batch_first_n`, every column of it starts at offset 0, it exports,
+  and the answer equals today's. The same with a list column fails with the error today's run of the same
+  query fails with.
 - `limit_zero_ends_after_the_schema`: `LIMIT 0` returns its schema and the end, and the source has taken
   no claim.
 - `a_materialised_join_with_a_limit_stops_early`: a join of two 64-row-group files with `LIMIT 10`, which
@@ -1637,17 +1804,24 @@ Four test-only parts make the counts possible:
   64.
 - `a_growing_projection_stays_within_the_bound`: a projection that casts an integer column to text over
   the generated source, so each claim's output is larger than its estimate. After every `get_next`, the
-  charged bytes outstanding are at most the byte limit plus one claim's real output per worker, and the
-  real bytes, measured by the retained-bytes function, are what was charged.
-- `a_refused_real_charge_fails_at_its_claim`: a pool with room for a claim's estimate but not its real
-  output. The stream hands out the batches of the claims before it, then fails with
-  `MEMORY_BUDGET_EXCEEDED` at that claim, and the budget is never exceeded.
+  stream's outstanding bytes are at most the byte limit plus one claim's real output per worker, and they
+  equal what the retained-bytes function measures over the held batches.
+- `the_first_round_takes_one_claim_per_worker`: with four workers, the first round takes at most four
+  claims and every later round at most eight.
 - `the_retained_bytes_function_counts_a_shared_buffer_once`: eight morsels cut from one decoded row group
-  are charged that row group's buffers once.
+  are counted with that row group's buffers once.
 - `a_decode_error_is_ordered_by_its_claim`: the generated source raises inside `next_morsel` while
   decoding claim 12. The stream hands out the batches of claims 1 to 11, then that error.
-- `the_end_stays_the_end_after_a_cancel`: after `get_next` returned the end, a cancel of the run handle
-  changes nothing: the next `get_next` returns the end again.
+- `the_end_stays_the_end_after_a_cancel` and `a_returned_error_stays_after_a_cancel`: after `get_next`
+  returned the end, or an error, a cancel of the run handle changes nothing: the next `get_next` returns
+  the same again.
+- `a_finished_stream_holds_only_its_queue`: for each way a run can be over (the end queued, a trailing
+  limit reached, an error, a cancel, and a join run materialised inside the stream), with batches still
+  queued and the stream not released. A test hook reports that the driver's frame is gone: no builder, no
+  source, no published output, no footer cache, no expression pool, no open file or mapping (the
+  counting file system's open count is 0), the driver thread has ended, and the engine core's share is
+  dropped. The anonymous resident memory, less the queued batches' bytes, is back to what it was before
+  the query, within a margin.
 - `an_export_refusal_is_the_error_of_its_batch`: a table in memory whose third morsel holds a dictionary
   column with numeric values. Batches 1 and 2 are handed out. The third `get_next` returns `EIO` with the
   exporter's message for it, and no batch with that column is ever handed out.
@@ -1656,6 +1830,14 @@ Four test-only parts make the counts possible:
 They drive the rounds slice's three calls (build the segment, run a round, finish) directly from the
 test, over real sources, so "a stream" in them means those calls:
 
+- `a_parquet_decode_error_is_ordered_by_its_claim`: a Parquet file whose row group 12 is corrupt. The
+  source reports the claim it was decoding, and the stream hands out the batches of row groups 1 to 11,
+  then the decode error.
+- `claim_of_maps_positions_to_claims_for_each_source`: for the Parquet source (row group times
+  `SUB_SLOT_STRIDE` plus sub-slot) and for the in-memory source (the slot), every position the source
+  stamps maps back to the claim that produced it.
+- `a_resident_batch_read_once_is_moved_not_copied`: a plan that reads a resident table once builds its
+  source without a copy, and a plan that reads it twice still copies it for each reader.
 - `a_row_group_larger_than_a_morsel_keeps_its_order`: a Parquet file whose row groups are four morsels
   each, with a claim limit small enough that the limit refuses claims in the middle of the file. The rows
   come out in file order, and no round ends with a worker holding a parked sub-morsel.
@@ -1681,7 +1863,8 @@ test, over real sources, so "a stream" in them means those calls:
 - `a_sliced_nullable_array_imports_with_its_nulls`: a pyarrow slice of an integer column with nulls,
   registered into komira, keeps every value and every null at its row.
 
-**The schema** (the open-call slice):
+**The schema** (the streamed-run slice, in Mojo against `StreamedRun`; each is run again through the C
+stream in the open-call slice, where `get_schema` and `get_next` exist):
 
 - `get_schema_waits_for_the_first_batch`: a `get_schema` before any `get_next` returns the first batch's
   schema with every field nullable, after at most one round of claims. The first `get_next` then returns
@@ -1697,9 +1880,14 @@ test, over real sources, so "a stream" in them means those calls:
 - `an_empty_answers_schema_is_todays_empty_schema`: an empty answer from a collect root and from a root
   aggregate. The stream's schema is the one the engine derives for an empty answer today (the collect
   sink's, and the aggregate's declared output schema), with every field nullable.
-- `a_file_set_that_disagrees_runs_materialised`: four globs whose files disagree on a decimal's scale, on a
-  timestamp's zone, on the presence of a column, and on the large-string hint. Each runs materialised, as
-  decided when the stage is built, before any claim, and each answer equals today's.
+- `a_file_set_that_disagrees_runs_materialised`: globs whose files disagree on a decimal's scale, on a
+  timestamp's zone, on the presence of a column, on the large-string hint, on a list's item name (`item`
+  in one file and `element` in the other), on a struct's field order, and on a nested child's type. Each
+  runs materialised, as decided when the stage is built, before any claim, and each answer equals
+  today's.
+- `an_empty_nested_result_agrees_with_the_old_path`: a query that answers zero rows with a list and a
+  struct column, through `komira_sql_stream` and through `komira_sql_open`. Both give the same schema, or
+  both refuse with the same error.
 - `the_conformance_corpus_streams_with_todays_answers`: the Mojo runner of §6.3 reads every case of the
   SQL conformance corpus, registers its tables from Parquet and again as resident tables, and runs every
   query streamed and materialised. Every streamed batch agrees with the stream's schema, and the answers
@@ -1729,7 +1917,8 @@ test, over real sources, so "a stream" in them means those calls:
   type the exporter refuses. The open call succeeds, and the first `get_schema` returns `EIO` naming the
   column.
 
-**The run, memory and the C interface** (the open-call slice):
+**The run, memory and the C interface** (the streamed-run slice in Mojo, and the open-call slice through
+the C stream; the C-interface tests are the open-call slice's alone):
 
 - `an_integer_keyed_sorted_stream_registered_into_its_own_context` and
   `a_string_keyed_sorted_stream_registered_into_its_own_context`: `komira_register_arrow_stream` given a
@@ -1748,21 +1937,34 @@ test, over real sources, so "a stream" in them means those calls:
   stream's round runs on another. Both answers equal their materialised answers.
 - `two_streams_and_a_query_share_one_context`: two open streams read alternately, and a third query runs
   between their rounds. Each answer equals its materialised answer.
-- `open_streams_share_the_contexts_budget`: two open streams that each hold 8 MiB, in a context whose
-  budget leaves no room for a third stream's first claim. That stream's first `get_next` fails with
-  exactly `MEMORY_BUDGET_EXCEEDED: execute: the open results of this session hold 16777216 bytes`.
-  Releasing one of the two lets a new stream read.
-- `a_streams_own_state_is_charged`: opening a stream raises the pool's granted bytes by the driver
-  thread's charge and its plan, building the last stage by its expression pool and each footer it reads,
-  and release returns all of it.
+- `an_unread_stream_does_not_make_a_later_sort_fail`: a context whose budget fits one sort of a test
+  table, and three open streams over large files, each read once and left. The sort runs and answers as
+  it does with no stream open. The pool's granted bytes, with the three streams open and between rounds,
+  are 0.
+- `each_run_checks_its_own_pool_tally` (the engine-core slice): two materialised runs on one context's
+  pool, one after the other under the dispatch lock, the first with a sink planted to keep a reservation.
+  The first run's end-of-run check fails with `EXECUTE_POOL_NOT_RELEASED`, and the second run's passes.
+  In the streamed-run slice the same test is repeated with a stream's round and a materialised query.
+- `a_file_truncated_in_place_fails_by_name`: a stream over a 64-row-group local file. The test reads until
+  the queue is empty, then truncates the file in place. The `get_next` that needs the next round returns
+  `EIO` with exactly `STREAM_SOURCE_CHANGED: <path>`, the process does not fault, and the batches already
+  taken still read their values.
+- `a_file_replaced_by_a_rename_is_read_as_it_was`: the same, but the file is replaced by writing another
+  file and renaming it over the path. The stream reads to its end from the old file and answers as
+  today's run did.
+- `a_replaced_remote_object_fails_by_name`: the same against the test scheme's store, whose object is
+  replaced with a new entity tag between rounds.
+- `closing_the_session_waits_only_for_running_streams`: closing a session with one finished `Result` and
+  one running stream stops the worker threads when the running stream is released, and a finished
+  `Result` keeps no worker alive.
 - `an_in_memory_roots_resident_memory_is_its_copies_plus_the_bound`: a resident table of 64 MiB with
-  nullable columns, read by one segment, streamed with a byte limit of 4 MiB. The largest sample of
+  nullable columns, read by one segment, streamed with a byte limit of 4 MiB (a test hook). The largest sample of
   anonymous resident memory rises by at least the table's size, so the source's copy is seen. It rises by
   at most the copies, the cut into morsels, the bound and a margin, as §5.3's table states (one copy once
   the source limits slice moves a once-read batch into its source). The control reads the same table through
   the materialised run, and rises by more, by the collect sink's copies.
 - `a_sorted_roots_resident_memory_is_the_sorts_peak_then_its_output_plus_the_bound`: an `ORDER BY` with
-  a string column over 64 MiB of Parquet, streamed with a byte limit of 4 MiB. During the sort the largest
+  a string column over 64 MiB of Parquet, streamed with a byte limit of 4 MiB (a test hook). During the sort the largest
   sample is the sort's own peak (its pool high-water mark plus its uncharged input). Over the read after
   it, the samples stay at most its output plus the bound, as §5.3 and §5.6 state: the output is handed out
   uncut through the hand-out step. The concatenated
@@ -1834,11 +2036,16 @@ test, over real sources, so "a stream" in them means those calls:
 Each promise of §5 and §6 has a test that fails when the promise breaks:
 
 - **The bound:**
-  - the claim count, the always-allowed claim and the one-step reservation;
-  - the first batch, the shared budget and the stream's own state;
-  - a growing projection, a refused real charge, and a shared buffer counted once;
+  - the claim count, one claim per worker in the first round, the always-allowed claim and the one-step
+    reservation;
+  - the first batch, a growing projection, and a shared buffer counted once;
   - resident memory for a scan, a table in memory and a sorted root, each with a control that shows the
     measurement sees the memory;
+- **What a stream holds:** a finished stream holding only its queue, for every way a run can be over; an
+  unread stream that does not make a later sort fail; each run's own pool tally; and a session closed
+  with streams open.
+- **The file window:** a file truncated in place, a remote object replaced, and a mapping-backed column
+  copied at hand-out.
 - **Rounds:** the last stage built once, a refused source asked again, a published output taken once, a
   union concatenated once, footers read once, a limit counted across rounds, and a spent limit ending the
   stream.
@@ -1846,8 +2053,9 @@ Each promise of §5 and §6 has a test that fails when the promise breaks:
   stopping early.
 - **Early stop:** release (with its thread joined, and the handle and its other streams left alive), the
   trailing `LIMIT`, and `break`.
-- **Late errors:** the 37th call, the lower position, a decode error at its claim, the failing claim's own
-  chunks, stickiness, the code and step from the handle, and an export refusal at its batch.
+- **Late errors:** the 37th call, the lower position, a decode error at its claim (generated and Parquet),
+  the failing claim's own chunks, an error that stays after a cancel, the code and step from the handle,
+  and an export refusal at its batch.
 - **Cancel:** from another thread, while waiting for the dispatch lock, during a breaker, inside a `COPY`
   in open, through Ctrl-C on each terminal, and through `Result.cancel()`. Also the end staying the end
   after a cancel.
@@ -1862,7 +2070,8 @@ Each promise of §5 and §6 has a test that fails when the promise breaks:
 - **Schema:**
   - `get_schema` waiting for the first batch, every field nullable, a file with the large-string hint, a
     nested result, and the empty answer's schema;
-  - a file set that disagrees, the conformance sweep, a converted width and a split batch;
+  - a file set that disagrees, nested properties included; an empty nested result through both paths; the
+    conformance sweep; a converted width and a split batch;
   - one planted divergence per compared property, and an unexportable type.
 - **Effects:** a `COPY` opened and never read (in C, Python and Node), a plan with a write target opened
   and never read, a `COPY` that fails at open, and a `COPY` cancelled inside open.
@@ -1876,72 +2085,98 @@ and a release before the first `get_next`.
 
 ## 10. Slices
 
-The first slice is three pull requests, each tested alone, in this order. Each lists every part the
-mechanism needs from the engine in it.
+The first slice is five pull requests, each tested alone and each leaving the tree working, in this
+order. Each lists every part of the mechanism it needs from the engine, and the libraries it changes.
 
-- **The rounds slice, in `pipeline_exec`, `arrow` and `column_kernels`.**
-  - `run_plan` split so a driver can run everything below the root with today's plan check, ready set
-    and progress, then hold the root (§5.2).
+- **The engine-core slice, in `sdk_exec`, `pipeline_exec` and `async_rt`.** No streaming yet.
+  - The engine core: the worker runtime moved behind the dispatch lock, the context's one pool, and the
+    core held by `ArcPointer` (§5.9, §5.10).
+  - The builder drawing its operators' reservations from the context's pool, with a per-run tally layered
+    over the pool's shared counter, and the end-of-run check reading that tally (§5.3). Today
+    `set_memory_budget` replaces the pool (`real_builder.mojo:351-355`).
+  - The dispatch lock taken around each `run_segment` call, waited on in 1 ms slices that re-read a token
+    (§5.9). The one call site of `ctx.runtime.dispatcher()` and the tests that reach `EngineContext.runtime`
+    change with it.
+
+  Tested by today's tests, unchanged, and `each_run_checks_its_own_pool_tally`. A user sees nothing.
+- **The rounds slice, in `pipeline_exec`, `arrow`, `column_kernels` and `arrow_ipc`.**
+  - `run_plan` split so a driver can run everything below the root with today's plan check, ready set and
+    progress, then hold the root (§5.2).
   - `run_segment` split into three calls that keep today's order: build the segment, run one round, finish
     it (tails, `combine` or `finalize`, the pool check). Today's `run_segment` becomes the three in a row.
+    The build call takes an operator count, so a trailing limit can be left out of the built operators
+    (§5.5).
   - The result sink, with its per-round drain and its forwarder in `PipelineSink`, and its hand-out step
     (§5.12): position order, selection, the trailing-limit cut with `_slice_batch_first_n`, the schema
     check, the narrowing, widening and split of a string or binary column's width (new code, §6.3), the
-    offset fallback, the dropping of empty batches, and a per-batch export check split out of
-    `check_record_batch_stream`.
+    offset fallback, the copy of mapping-backed buffers, the dropping of empty batches, and a per-batch
+    export check split out of `check_record_batch_stream` in `arrow_ipc`.
   - The function in `arrow` that measures the bytes a set of batches keeps alive, each shared buffer
-    counted once, and the charge at the sink with its refusal (§5.3).
-  - The read-ahead limit and its one-step reservation, applied to the generated source.
-  - `is_exhausted()` on the source trait and its forwarders.
-  - The position of a failing claim: the morsel's position kept across `_push`, and the claim each worker
-    is decoding exposed by the source. Also the lowest-position error slot and the streamed variant of
-    `SegmentRun.fail` (§5.2, §5.7).
-  - An accessor for a limit's spent budget, and the check after each round that ends the stream once a
+    counted once by its region, and the stream's own counter that the limit reads (§5.3).
+  - The read-ahead limit and its one-step reservation, with one claim per worker in the first round,
+    applied to the generated source.
+  - On the source trait: `is_exhausted()`, `claim_of(position)`, and the claim each worker is decoding,
+    with their forwarders. The generated source follows the Parquet position encoding.
+  - The position of a failing claim kept across `_push`, the lowest-position error slot, and the
+    streamed variant of `SegmentRun.fail` (§5.2, §5.7).
+  - An accessor for a limit's spent budget, and the check after each round that ends the run once a
     non-trailing limit's budget is spent (§5.5).
 
   Tested with the fake dispatcher, the generated source and the counting builder (§9.2, the rounds and
-  hand-out groups), with no file, no C call and no change to a real source.
-- **The source limits slice, in `parquet_scan`, `op_sources`, `byte_buffer` or `fs`, `pipeline_exec` and
-  `arrow_ipc`.**
+  hand-out groups), with no file and no C call. A user sees nothing.
+- **The source limits slice, in `parquet_scan`, `parquet`, `parquet_api`, `op_sources`, `pipeline_exec`,
+  `arrow_ipc`, `fs` and the S3, Azure and GCS file systems.**
   - The limit at the Parquet cursor (`_claim`), with stride 1 and no row-range split for a streamed run,
-    passed through a new parameter of `build_parquet_source_on`.
+    passed through a new parameter of both `build_parquet_source` (local) and `build_parquet_source_on`.
   - The limit at `BatchMorselSource`'s slot claim, with a new stride option on `BatchMorselOptions`.
-  - For both, `None` on a refusal that leaves the source askable next round, and `is_exhausted()`.
-  - The row-group size accessor and the in-memory source's per-slot size array, for the claims'
-    estimates (§5.3).
-  - The comparison of a file set's columns across files when the source is built (§6.3).
-  - A resident batch read by one segment moved into its source, not copied (§5.3).
+  - For both: `None` on a refusal that leaves the source askable next round, `is_exhausted()`,
+    `claim_of(position)`, and the claim each worker is decoding.
+  - The per-chunk size accessor for a projection's column chunks, and the in-memory source's per-slot size
+    array, for the claims' estimates (§5.3).
+  - The comparison of a file set's columns across files when the source is built, nested properties
+    included (§6.3).
+  - The check of each file before each claim, in streamed runs only: a stat call added to the file
+    system's C shim, comparing a local file's device, inode, size and modification time; and a conditional
+    ranged read added to the `FileSystem` trait as a defaulted method, implemented by the S3, Azure and GCS
+    file systems (§5.9).
+  - The builder call that counts each resident handle's readers before the first segment, and a resident
+    batch read by one segment moved into its source, not copied (§5.3).
   - The importer's window copy, at any offset, with validity rebased (§5.12).
 
-  Tests: §9.2, the sources group.
-- **The open-call slice, in `async_rt`, `lowering`, `arrow_ipc`, `engine_runtime`, `sdk_exec` and `so`.**
+  Tests: §9.2, the sources group, driven through the rounds slice's three calls. A user sees one change:
+  registering a sliced pyarrow table no longer fails.
+- **The streamed-run slice, in `sdk_exec`, `async_rt` and `engine_runtime`.**
+  - The failed run's code and step added to `RunControl` in a shared cell (§6.3), so the stream sets them
+    and the C calls of the next slice can read them.
   - The driver-thread entry in `async_rt`'s thread boundary (§5.10).
-  - The helper in `engine_runtime` that reads the process's anonymous resident memory, for the memory
-    tests (§9).
-  - The engine core, with the context's one pool, the charge for each stream's own state, and the dispatch
-    lock.
-  - The function in `lowering` that measures a lowered plan's own size, for the open-time charge (§5.3).
-  - The incremental exporter state in `arrow_ipc`: a `get_next` that asks a driver for batches, with its
-    error and cancel returns (§5.2).
   - `StreamedRun` and `open_sql`:
-    - the driver's frame holds the cache, the pool, the builder, the published outputs and the last stage;
+    - the driver's frame holds the cache, the pool, the builder, the published outputs and the last stage,
+      and is dropped when the run is over (§5.2, step 7);
     - every reason to run materialised that the plan shows is decided at open, and the lowered plan is
       never changed;
-    - a trailing `LIMIT` of a streamed run is left out by an operator-count override, and its count goes
-      to the result sink;
+    - a trailing `LIMIT` of a streamed run is left out through the build call's operator count, and its
+      count goes to the result sink;
     - the stream's child token;
     - a root breaker's output is handed out uncut.
-  - The stream's schema from the first batch, with every field nullable, and the empty answer's schema;
-    the fall-back when a file set disagrees; and the conformance sweep with its Mojo runner.
+  - The stream's schema from the first batch, with every field nullable, and the empty answer's schema
+    built as today's; the fall-back when a file set disagrees; and the conformance sweep with its Mojo
+    runner.
   - Statements with effects run inside open, and the other unstreamed shapes run materialised inside the
     stream (§5.11).
-  - `komira_sql_open`, `komira_run_error_code` and `komira_run_error_step` (the next minor), with the code
-    and step added to `RunControl` in a shared cell.
-  - The resident-memory tests; the throughput measurement, the reviewer's gate (§5.3); and the
-    small-batch measurement (§5.12).
+  - The helper in `engine_runtime` that reads the process's anonymous resident memory, and the
+    resident-memory tests.
 
-  Tests: §9.1, and §9.2's schema and run groups. Python and Node do not call it yet, and the C driver is
-  the reader.
+  Tests: §9.1, and §9.2's schema and run groups, through `open_sql` in Mojo. A user sees nothing: no C
+  call exists yet.
+- **The open-call slice, in `arrow_ipc` and `so`.**
+  - The incremental exporter state in `arrow_ipc`: a `get_next` that asks a driver for batches, with its
+    error and cancel returns (§5.2).
+  - `komira_sql_open`, `komira_run_error_code` and `komira_run_error_step` (the next minor), reading the
+    cell the streamed-run slice added.
+  - The throughput measurement, the reviewer's gate (§5.3), and the small-batch measurement (§5.12).
+
+  Tests: the C-interface tests of §9.2. After it, a C caller can stream. Python and Node do not call it
+  yet.
 
 The slices after it:
 
@@ -1949,8 +2184,14 @@ The slices after it:
   - `sql()` goes through `komira_sql_open`, with the first-batch pull.
   - Every terminal reads on the helper thread, and the `Result` keeps the run handle and gains
     `Result.cancel()`.
-  - It also brings `to_reader()`'s wrapper, and Node's iterator, `signal` and finalizer.
-  - The docs that say `to_reader()` reads only what is asked change with it.
+  - It also brings `to_reader()`'s wrapper, and Node's iterator, `signal`, finalizer and late-error path
+    (§7.2).
+  - **What a user sees change.** A streamed `Result`'s schema marks every field nullable (§6.3, §7). The
+    slice names that in its changelog entry, and updates the binding tests and the TypeScript package's
+    goldens that compare schemas. The docs that say `to_reader()` reads only what is asked change with it.
+  - **How streaming is turned off if it misbehaves.** There is no switch (§12, decision 5). The old calls
+    stay as they are until the old calls slice, so the way back is a binding release that calls
+    `komira_sql_stream_run` again, with no library change.
 
   Because §5.11 runs every statement with effects inside open, and every unstreamed shape materialised
   inside the stream, no statement is left undone after this slice, and none that works today fails,
@@ -1967,9 +2208,10 @@ The slices after it:
   bound is free. It is built only if a later measurement (a slow reader, or a query the throughput check
   did not cover) shows the idle time matters (§12, decision 2). If the open-call slice's own throughput
   check needs it, it is built there instead (§5.3).
-- **The old calls slice.** The old run calls are rebuilt as open-then-drain (§6.5), checked over the
-  whole conformance corpus. `CollectSink`'s concatenation stays only where a breaker's input needs one
-  batch.
+- **The old calls slice, deferred.** The old run calls are rebuilt as open-then-drain (§6.5), checked over
+  the whole conformance corpus. `CollectSink`'s concatenation stays only where a breaker's input needs one
+  batch. It lands only after the bindings have streamed in released packages through at least one release
+  with no streaming defect open, because once it lands the old calls are no longer a way back.
 - **Later slices.**
   - The keyed join probes split their output into chunks, as CROSS does, and a probe in the last pipeline
     streams.
@@ -1983,8 +2225,8 @@ The slices after it:
   - A cancel check inside a sort, merge and combine.
   - The Mojo SDK's `ResultStream` (§7.3).
 
-The three parts of the first slice touch the libraries each names. This document is their design, as a change across
-several packages needs one. The CSV slice and the writes slice do not depend on each other.
+The five parts of the first slice touch the libraries each names. This document is their design, as a
+change across several packages needs one. The CSV slice and the writes slice do not depend on each other.
 
 ## 11. Open decision: what a `read_csv(chunksize=n)` chunk is
 
@@ -2042,16 +2284,18 @@ Each is decided here so the slices can start, with its reason.
    limit §6.3 states. A statement
    with effects must not depend on the caller reading: a C caller that opens a `COPY` and releases the
    stream unread still has its file, and learns of a failure from the open call.
-8. **One memory budget per context, each stream's own state charged to it, and no cap on the number of
-   open streams** (§5.3). The pool bounds what all open streams hold for their readers and their own
-   state together, so the charged part of their state is bounded by the budget; what their sources hold
-   is not, as §5.3 says. A separate cap on the count would fail
-   ordinary code that keeps several results. What sources and breakers hold stays uncharged, as today,
-   and the document says so per kind of source.
-9. **Each open stream has a driver thread, whose frame holds the run** (§5.10). Some sources can be taken
-   or built only once, a limit's budget must survive every round, and the builder borrows the cache and
-   pool from the frame that made them. A frame that lives as long as the stream satisfies all three
-   without a pointer type or a change to the builder. Holding the cache and pool by shared ownership
+8. **One operator pool per context, with a tally per run; what a stream holds for its reader is not
+   charged to it** (§5.3). Two runs can now be open on one context, so their operators share the
+   context's budget, and the dispatch lock keeps them from running at once, as today. Charging a stream's
+   held batches to the pool would let an unread `Result` make another query's sort fail where it runs
+   today. So a stream's held bytes are bounded by its own limits instead, outside the pool, as today's
+   answer is. There is no cap on the number of open streams, as there is none on today's results.
+9. **Each running stream has a driver thread, whose frame holds the run, and the frame goes when the run
+   is over** (§5.10, §5.2 step 7). Some sources can be taken or built only once, a limit's budget must
+   survive every round, and the builder borrows the cache and pool from the frame that made them. A frame
+   that lives as long as the run satisfies all three without a pointer type or a change to the builder.
+   Dropping it at the run's end, not at release, means a finished `Result` holds only its queue, as
+   today's holds only its answer. Holding the cache and pool by shared ownership
    instead would avoid the thread, at the cost of a larger change across two libraries' generic
    parameters, and stays open.
 10. **The stream's schema is the first batch's, as today, with every field nullable** (§6.3). The lowered
@@ -2103,12 +2347,19 @@ Each is decided here so the slices can start, with its reason.
 23. **A stream cancels a child of the run handle's token, never the handle's own** (§5.2, §5.8). A cancel of
     the handle is permanent and reaches every run given it, so an early release or a limit's end must not
     use it.
-24. **The real bytes of a claim are charged at the sink, and a refusal there fails the stream** (§5.3).
-    The alternative, exceeding the budget by the excess, would make the budget a soft limit.
-25. **A NULL run handle is allowed** in `komira_*_open`. Release still cancels the stream's own token.
-26. **The old run calls are unchanged until the old calls slice**, and then change only in batch count
-    and in which rows a final `LIMIT` keeps (§6.5). They keep their schema rule (the first batch's),
-    their one batch of no rows, and every refusal at the call.
+24. **The first round takes one claim per worker** (§5.2, §5.3). Two claims per worker would make every
+    `sql()` and every `LIMIT` decode and hold about twice the row groups today's run does before its first
+    batch.
+25. **A stream refuses a changed file by name, and hands out no batch that refers to a mapping**
+    (§5.9, §5.12). A file truncated in place under a live mapping crashes the process. The check before
+    each claim turns that into `STREAM_SOURCE_CHANGED` for the stream's life, leaving only one claim's
+    decode exposed, as a materialised run's reads are today. The copy at hand-out keeps a reader's batches
+    out of the file's reach.
+26. **A NULL run handle is allowed** in `komira_*_open`. Release still cancels the stream's own token.
+27. **The old run calls are unchanged until the old calls slice, which waits for streaming to have run
+    in released bindings** (§6.5, §10). Until then they are the way back. When it lands they change only
+    in batch count and in which rows a final `LIMIT` keeps. They keep their schema rule (the first
+    batch's), their one batch of no rows, and every refusal at the call.
 
 ## 13. Docs this design finds stale
 
