@@ -25,6 +25,10 @@
 #     same rows as the first slot gives, tallied by the member), the other
 #     slots still reach their own members, and the default fourth slot is
 #     `NoSink`, which raises when used.
+#   * The fifth sink slot (the one the as-of join sink fills) works the same
+#     way: `fifth` reports SINK_TAG_FIFTH and forwards the whole life to its
+#     member, the fourth slot of the same name is still `NoSink`, and the
+#     default fifth slot is `NoSink`, which raises when used.
 #   * Each hook of the source trait that takes no pointer reaches the member of
 #     the slot: bypass columns, dictionary preservation, prefetch and count only
 #     each change what the member recorded.
@@ -74,6 +78,7 @@ from pipeline_exec.op_variant import (
     OpVariant,
 )
 from pipeline_exec.pipeline_sink import (
+    SINK_TAG_FIFTH,
     SINK_TAG_FIRST,
     SINK_TAG_FOURTH,
     SINK_TAG_SECOND,
@@ -95,6 +100,9 @@ comptime FourOps = OpVariant[FakeOp, FakeOp, NoOperator, FakeOp]
 comptime JoinOps = OpVariant[FakeOp, FakeOp, NoOperator, HashProbeOp]
 comptime Sinks = PipelineSink[FakeSink, FakeCountSink, NoSink]
 comptime FourSinks = PipelineSink[FakeSink, FakeCountSink, NoSink, FakeCountSink]
+comptime FiveSinks = PipelineSink[
+    FakeSink, FakeCountSink, NoSink, NoSink, FakeCountSink
+]
 
 
 def test_source_variant_calls_the_member_of_its_slot() raises:
@@ -341,6 +349,57 @@ def test_the_default_fourth_sink_slot_raises_and_the_slot_tags_are_unchanged() r
         assert_true("not implemented" in String(e), String(e))
 
 
+def test_sink_variant_forwards_a_sinks_whole_life_from_its_fifth_slot() raises:
+    var tally = Tally()
+    var sink = FiveSinks.fifth(FakeCountSink(tally.share()))
+    assert_equal(Int(sink.tag()), Int(SINK_TAG_FIFTH))
+    sink.resize_worker_state(2)
+    sink.consume(1, Morsel(int64_batch(fake_values(7, 2)), 7, 1))
+    sink.consume(0, Morsel(int64_batch(fake_values(3, 4)), 3, 0))
+    var pipe = PipelineExecution(2, 0)
+    sink.combine(pipe)
+    sink.finalize()
+    var counted = batch_values(sink.take_output())
+    assert_equal(len(counted), 1)
+    assert_equal(counted[0], Int64(6))
+    assert_equal(tally.get(SLOT_CONSUMED_MORSELS), 2)
+    assert_equal(tally.get(SLOT_CONSUMED_ROWS), 6)
+    assert_equal(tally.get(SLOT_COMBINES), 1)
+    assert_equal(tally.get(SLOT_FINALIZES), 1)
+    assert_equal(tally.get(SLOT_TAKES), 1)
+    var fourth = FiveSinks.fourth(NoSink())
+    assert_equal(Int(fourth.tag()), Int(SINK_TAG_FOURTH))
+    try:
+        fourth.finalize()
+        assert_true(False, "the fourth slot of this name is unused")
+    except e:
+        assert_true("sink slot is unused" in String(e), String(e))
+
+
+def test_the_default_fifth_sink_slot_raises() raises:
+    assert_equal(Int(SINK_TAG_FIFTH), 4)
+    var none = Sinks.fifth(NoSink())
+    assert_equal(Int(none.tag()), Int(SINK_TAG_FIFTH))
+    none.resize_worker_state(1)
+    var pipe = PipelineExecution(1, 0)
+    none.combine(pipe)
+    try:
+        none.consume(0, Morsel(int64_batch(fake_values(0, 1)), 0, 0))
+        assert_true(False, "an unused fifth sink slot must raise")
+    except e:
+        assert_true("sink slot is unused" in String(e), String(e))
+    try:
+        none.finalize()
+        assert_true(False, "an unused fifth sink slot must raise")
+    except e:
+        assert_true("sink slot is unused" in String(e), String(e))
+    try:
+        _ = none.take_output()
+        assert_true(False, "an unused fifth sink slot must raise")
+    except e:
+        assert_true("not implemented" in String(e), String(e))
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_source_variant_calls_the_member_of_its_slot]()
@@ -359,4 +418,6 @@ def main() raises:
     suite.test[
         test_the_default_fourth_sink_slot_raises_and_the_slot_tags_are_unchanged
     ]()
+    suite.test[test_sink_variant_forwards_a_sinks_whole_life_from_its_fifth_slot]()
+    suite.test[test_the_default_fifth_sink_slot_raises]()
     suite^.run()

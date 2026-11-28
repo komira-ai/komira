@@ -177,6 +177,7 @@ _DEPS = [
     "//src/net:net",
     "//src/objectstore:objectstore",
     "//src/op_agg_state:op_agg_state",
+    "//src/op_asof:op_asof",
     "//src/op_join_probe:op_join_probe",
     "//src/op_sort:op_sort",
     "//src/op_sources:op_sources",

@@ -43,6 +43,7 @@ from phase_timers.phase_timers import (
 )
 from physical_plan.physical_plan import (
     AggSinkData,
+    AsofJoinSinkData,
     PartitionBySinkData,
     SortSinkData,
     TopNSinkData,
@@ -155,6 +156,12 @@ def run_lowered_plan_with[
         reversed_windows.append(lowered.params.window.pop())
     while len(reversed_windows) > 0:
         _ = builder.add_window_sink(reversed_windows.pop())
+    # And the as-of join sinks, which SINK_ASOF_JOIN segments index.
+    var reversed_asofs = List[AsofJoinSinkData]()
+    while len(lowered.params.asof) > 0:
+        reversed_asofs.append(lowered.params.asof.pop())
+    while len(reversed_asofs) > 0:
+        _ = builder.add_asof_sink(reversed_asofs.pop())
     var token = control.token()
     ref dispatch = ctx.runtime.dispatcher()
     pt_record[PH_EXEC_SETUP](t_setup)

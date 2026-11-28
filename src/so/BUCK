@@ -142,6 +142,7 @@ mojo_library(
         "//src/objectstore:objectstore",
         "//src/objectstore_s3:objectstore_s3",
         "//src/op_agg_state:op_agg_state",
+        "//src/op_asof:op_asof",
         "//src/op_join_probe:op_join_probe",
         "//src/op_sort:op_sort",
         "//src/op_sources:op_sources",

@@ -5,6 +5,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # entry opens no file, reads no clock and no environment variable and touches
 # no global (README.md).
 #
+# test_lower_asof        the as-of join cut: the right child in a SINK_COLLECT
+#                        segment, the left in a SINK_ASOF_JOIN segment over an
+#                        E3 edge to it, the `asof` param row and its render
+#                        (direction, ASOF column storage, tolerance, sorted
+#                        sides), each child's scan facts, every refusal of
+#                        the node (LOWERING_ASOF_UNSERVED), and shared
+#                        subplans under and beside it.
 # test_lower_csv         a CSV scan as a SOURCE_CSV segment: the path, the
 #                        dialect and every bound column in its spec, the
 #                        render line, its filter and projection as operators
@@ -177,6 +184,7 @@ mojo_library(
         "sql",
     ],
     test_srcs = [
+        "tests/test_lower_asof.mojo",
         "tests/test_lower_join_refusals.mojo",
         "tests/test_lower_join_kinds.mojo",
         "tests/test_lower_joins.mojo",

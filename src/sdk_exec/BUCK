@@ -700,6 +700,57 @@ _WINDOW_FRAMES_TEST_DATA.update({f + ".parquet": ":window_frames_oracle[" + f + 
 
 _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".tsv]" for c in _WINDOW_FRAMES_CASES})
 
+# DuckDB's tables and answers for test_run_plan_asof: tests/asof/data.sql
+# writes the trades t, the quotes q and q2, and the empty e and te (Parquet in
+# row groups of 3 rows, and t, q and q2 as CSV too), and each line of
+# tests/asof/cases.sql is one ASOF LEFT JOIN over them and writes its answer.
+_ASOF_CASES = [
+    "backward_keyed_parquet",
+    "backward_keyed_csv",
+    "forward_keyed_parquet",
+    "forward_keyed_csv",
+    "backward_no_key_parquet",
+    "backward_no_key_csv",
+    "forward_no_key_parquet",
+    "forward_no_key_csv",
+    "backward_timestamp_parquet",
+    "forward_timestamp_parquet",
+    "backward_two_keys_parquet",
+    "backward_two_keys_csv",
+    "backward_ties_reordered_parquet",
+    "backward_ties_reordered_csv",
+    "forward_ties_reordered_parquet",
+    "forward_ties_reordered_csv",
+    "backward_empty_right_parquet",
+    "backward_empty_left_parquet",
+]
+
+_ASOF_TABLES = [
+    "t.parquet",
+    "q.parquet",
+    "q2.parquet",
+    "e.parquet",
+    "te.parquet",
+    "t.csv",
+    "q.csv",
+    "q2.csv",
+]
+
+sql_oracle(
+    name = "asof_oracle",
+    srcs = [
+        "tests/asof/data.sql",
+        "tests/asof/cases.sql",
+    ],
+    outputs = _ASOF_TABLES + [c + ".tsv" for c in _ASOF_CASES],
+)
+
+_ASOF_TEST_DATA = {"cases.sql": "tests/asof/cases.sql"}
+
+_ASOF_TEST_DATA.update({t: ":asof_oracle[" + t + "]" for t in _ASOF_TABLES})
+
+_ASOF_TEST_DATA.update({c + ".tsv": ":asof_oracle[" + c + ".tsv]" for c in _ASOF_CASES})
+
 # The engine-execution layer of the SDK: twelve modules (ten leaves plus the
 # plan gate modules) and the engine context with its SQL door and its plan
 # door (see README.md). Each module's header says what it is for.
@@ -762,6 +813,7 @@ mojo_library(
         "//src/net:net",
         "//src/objectstore:objectstore",
         "//src/op_agg_state:op_agg_state",
+        "//src/op_asof:op_asof",
         "//src/op_join_probe:op_join_probe",
         "//src/op_sort:op_sort",
         "//src/op_sources:op_sources",
@@ -832,6 +884,7 @@ mojo_library(
         "tests/test_run_sql_join_kinds.mojo": _JOIN_KINDS_TEST_DATA,
         "tests/test_run_sql_subquery.mojo": _SUBQUERY_TEST_DATA,
         "tests/test_run_sql_set_ops.mojo": _SET_OPS_TEST_DATA,
+        "tests/test_run_plan_asof.mojo": _ASOF_TEST_DATA,
     },
     visibility = ["PUBLIC"],
 )
