@@ -554,6 +554,18 @@ c_shared_lib(
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# Session.sql over generate_series and range in FROM on the real library:
+# integer series inclusive and exclusive, a DATE series as timestamp[us], the
+# empty cases with the column's type, the gap-filling LEFT JOIN over a CSV,
+# and a zero step and a column argument refused, the session answering after.
+[python_binding_test(
+    name = "sql_generate_series_test" + p["suffix"],
+    src = "test_sql_generate_series.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # Session(memory_limit=) on the real library, over labels.parquet: a limit of
 # one byte raises MemoryLimitError (status -3, code MEMORY_BUDGET_EXCEEDED, step
 # execute) from sql for an aggregate, a GROUP BY over an integer key and over a

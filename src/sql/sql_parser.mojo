@@ -39,6 +39,11 @@ from .sql_token import (
 )
 from .sql_fn_table import CAST_DESUGAR_NAME as _CAST_DESUGAR_NAME, TRY_CAST_DESUGAR_NAME as _TRY_CAST_DESUGAR_NAME
 from .sql_fn_table import POSITION_IN_DESUGAR_NAME as _POSITION_IN_DESUGAR_NAME
+from .sql_series_ast import (
+    SERIES_ARG_COLUMN, SERIES_ARG_DATE, SERIES_ARG_DECIMAL, SERIES_ARG_INT,
+    SERIES_ARG_INTERVAL, SERIES_ARG_NULL, SERIES_ARG_OTHER, SERIES_ARG_STRING,
+    SERIES_ARG_TIMESTAMP, SERIES_ARG_TIMESTAMPTZ, SeriesArg, SeriesCall,
+)
 from .sql_tvf_options import (
     TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO, TVF_ICEBERG,
     hive_partitioning_value, _replacement_scan_kind, _file_stem,
@@ -46,7 +51,8 @@ from .sql_tvf_options import (
 from .sql_ast import (
     SqlExpr, SelectItem, OrderKey, SelectStmt, FromRelation, CteDef, SubqueryDef,
     JoinClause, SqlWindowData, SqlStatement, TvfOptions, FROM_LESS_RELATION,
-    SX_COLUMN, SX_STAR, SX_UNARY, SX_BOOL, SX_AGG, SX_CALL, SX_BINARY,
+    SX_COLUMN, SX_STAR, SX_UNARY, SX_NULL, SX_TIMESTAMP, SX_INTERVAL,
+    TSLIT_AWARE, SX_BOOL, SX_AGG, SX_CALL, SX_BINARY,
     SXUN_NOT, SXUN_IS_NULL, SXUN_IS_NOT_NULL, SXUN_NEGATE, SXUN_ABS, SXLIKE_LIKE, SXLIKE_ILIKE,
     JK_CROSS, JK_LEFT, JK_RIGHT, JK_FULL, JK_SEMI, JK_ANTI,
     SUBQ_SCALAR, SUBQ_EXISTS, SUBQ_NOT_EXISTS, SUBQ_IN, SUBQ_NOT_IN, SUBQ_DERIVED,
@@ -1073,6 +1079,14 @@ struct _Parser(Movable):
                 " as a JOIN on the correlated columns, or as a correlated"
                 " `WHERE [NOT] EXISTS (...)`."
             )
+        # `generate_series(...)` / `range(...)`: a table function that reads no
+        # input. Only in FROM: the scalar spelling stays a refused function.
+        if (
+            (name == "generate_series" or name == "range")
+            and self.pos + 1 < len(self.tokens)
+            and self.tokens[self.pos + 1].kind == TK_LPAREN
+        ):
+            return self._parse_series_call(name)
         # Table-valued function: read_parquet('path') / read_csv / read_json /
         # read_avro / iceberg_scan. The ident is lower-folded by the tokenizer, so compare
         # directly.
@@ -1172,6 +1186,46 @@ struct _Parser(Movable):
             self._advance()
         var tbl_alias = self._parse_optional_alias()
         return FromRelation.named(name, tbl_alias)
+
+    def _parse_series_call(mut self, name: String) raises -> FromRelation:
+        """`generate_series(a [, b [, step]])` / `range(...)` in FROM, with an
+        optional alias and, after an explicit alias, a column-name list
+        (`AS t(d)`). Each argument is any expression, kept as the literal
+        facts of a `SeriesArg` (the binder refuses what is not a literal, by
+        name). An unaliased call answers to the function name, as in DuckDB."""
+        var call = SeriesCall(name)
+        self._advance()  # the function name
+        self._expect(TK_LPAREN, "'('")
+        if self._kind() != TK_RPAREN:
+            while True:
+                var e = self._parse_expr()
+                call.args.append(_series_arg_of(e))
+                if self._kind() == TK_COMMA:
+                    self._advance()
+                    continue
+                break
+        self._expect(TK_RPAREN, "')'")
+        var rel_alias = self._parse_optional_alias()
+        if rel_alias == "":
+            rel_alias = name
+        elif self._kind() == TK_LPAREN:
+            self._advance()  # '('
+            while True:
+                if self._kind() != TK_IDENT:
+                    raise Error(
+                        "SQL syntax error: expected column name in a"
+                        " table-function column list"
+                    )
+                call.column_names.append(String(self.tokens[self.pos].text))
+                self._advance()
+                if self._kind() == TK_COMMA:
+                    self._advance()
+                    continue
+                break
+            self._expect(
+                TK_RPAREN, "')' to close the table-function column list"
+            )
+        return FromRelation.series_of(call^, rel_alias)
 
     def _parse_replacement_scan(mut self) raises -> FromRelation:
         """★ `FROM 'path/f.parquet'` — DuckDB's REPLACEMENT SCAN:
@@ -3459,6 +3513,30 @@ struct _Parser(Movable):
             "SQL syntax error: expected a frame bound (UNBOUNDED PRECEDING/FOLLOWING,"
             + " CURRENT ROW, or `<n> PRECEDING/FOLLOWING`)"
         )
+
+
+def _series_arg_of(e: SqlExpr) -> SeriesArg:
+    """The literal facts of one `generate_series` / `range` argument. An
+    integer literal past BIGINT (its digits kept in `text`) is `OTHER`."""
+    if e.tag == SX_INT and e.text.byte_length() == 0:
+        return SeriesArg(SERIES_ARG_INT, e.int_val)
+    if e.tag == SX_NULL:
+        return SeriesArg(SERIES_ARG_NULL)
+    if e.tag == SX_DATE:
+        return SeriesArg(SERIES_ARG_DATE, 0, e.text)
+    if e.tag == SX_TIMESTAMP:
+        if e.op == TSLIT_AWARE:
+            return SeriesArg(SERIES_ARG_TIMESTAMPTZ, 0, e.text)
+        return SeriesArg(SERIES_ARG_TIMESTAMP, 0, e.text)
+    if e.tag == SX_INTERVAL:
+        return SeriesArg(SERIES_ARG_INTERVAL, e.int_val, String(""), e.op)
+    if e.tag == SX_COLUMN:
+        return SeriesArg(SERIES_ARG_COLUMN, 0, e.text)
+    if e.tag == SX_STRING:
+        return SeriesArg(SERIES_ARG_STRING, 0, e.text)
+    if e.tag == SX_FLOAT:
+        return SeriesArg(SERIES_ARG_DECIMAL, 0, e.text)
+    return SeriesArg(SERIES_ARG_OTHER)
 
 
 def _and_into(var acc: Optional[SqlExpr], var p: SqlExpr) -> Optional[SqlExpr]:

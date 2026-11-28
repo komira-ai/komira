@@ -700,6 +700,55 @@ _WINDOW_FRAMES_TEST_DATA.update({f + ".parquet": ":window_frames_oracle[" + f + 
 
 _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".tsv]" for c in _WINDOW_FRAMES_CASES})
 
+# DuckDB's answers for test_run_sql_generate_series: each line of
+# tests/generate_series/cases.sql runs one query over generate_series or range
+# (and the committed tests/generate_series/events.csv) and writes its answer.
+_GENERATE_SERIES_CASES = [
+    "int_inclusive",
+    "int_exclusive",
+    "int_step",
+    "int_negative_step",
+    "int_range_negative_step",
+    "int_one_argument",
+    "int_range_one_argument",
+    "int_wrong_direction",
+    "int_one_value",
+    "int_range_empty",
+    "int_null_bound",
+    "int_null_step",
+    "int_alias",
+    "int_largest",
+    "int_filter",
+    "int_aggregate",
+    "int_limit",
+    "int_join",
+    "int_types",
+    "date_by_day",
+    "date_by_week",
+    "date_by_month",
+    "date_range_by_year",
+    "date_timestamp_by_hour",
+    "date_timestamp_down_by_month",
+    "date_range_by_seconds",
+    "date_types",
+    "fill_gaps_by_day",
+    "fill_gaps_sum",
+]
+
+sql_oracle(
+    name = "generate_series_oracle",
+    srcs = ["tests/generate_series/cases.sql"],
+    inputs = {"events.csv": "tests/generate_series/events.csv"},
+    outputs = [c + ".tsv" for c in _GENERATE_SERIES_CASES],
+)
+
+_GENERATE_SERIES_TEST_DATA = {
+    "cases.sql": "tests/generate_series/cases.sql",
+    "events.csv": "tests/generate_series/events.csv",
+}
+
+_GENERATE_SERIES_TEST_DATA.update({c + ".tsv": ":generate_series_oracle[" + c + ".tsv]" for c in _GENERATE_SERIES_CASES})
+
 # The engine-execution layer of the SDK: twelve modules (ten leaves plus the
 # plan gate modules) and the engine context with its SQL door and its plan
 # door (see README.md). Each module's header says what it is for.
@@ -824,6 +873,7 @@ mojo_library(
         "tests/test_run_sql_correlated.mojo": _CORRELATED_TEST_DATA,
         "tests/test_run_sql_csv.mojo": _CSV_TEST_DATA,
         "tests/test_run_sql_cte.mojo": _CTE_TEST_DATA,
+        "tests/test_run_sql_generate_series.mojo": _GENERATE_SERIES_TEST_DATA,
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,
         "tests/test_run_sql_expr_beside_agg.mojo": _EXPR_BESIDE_AGG_TEST_DATA,
         "tests/test_run_sql_topn.mojo": _TOPN_TEST_DATA,

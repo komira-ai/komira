@@ -26,6 +26,7 @@ from sql.sql_bind_parquet import (
 from sql.sql_catalog import (
     SqlCatalog, from_less_relation_scan, from_less_relation_schema,
 )
+from sql.sql_series_bind import series_relation_scan, series_relation_schema
 from sql.sql_tvf_bind import (
     tvf_relation_scan, tvf_relation_schema,
 )
@@ -151,7 +152,11 @@ def _relation_schema(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope
     an `iceberg_scan` TVF's table schema (the source the caller's reader
     resolved before binding), the FROM-less relation's one column, a CTE /
     derived-relation schema (the name shadows the catalog), or a catalog
-    lookup for a named table."""
+    lookup for a named table. A `generate_series` / `range` call is its
+    one-column series schema (`sql_series_bind`), checked before any name
+    lookup."""
+    if rel.series:
+        return series_relation_schema(rel)
     if rel.tvf_path:
         if rel.tvf_kind == TVF_ICEBERG:
             return _iceberg_source(rel, cte_scope).schema()
@@ -176,7 +181,10 @@ def _relation_scan(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope) 
     FROM-less relation is its one-row scan; an `iceberg_scan` TVF scans the
     source the caller's reader resolved before binding; a CTE reference inlines
     a fresh copy of the bound CTE subplan (the name shadows the catalog);
-    otherwise a catalog scan."""
+    otherwise a catalog scan. A `generate_series` / `range` call scans the
+    `komira.generate_series` source (`sql_series_bind`), checked first."""
+    if rel.series:
+        return series_relation_scan(rel)
     if rel.tvf_path:
         if rel.tvf_kind == TVF_ICEBERG:
             var source = _iceberg_source(rel, cte_scope)

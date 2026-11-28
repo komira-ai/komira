@@ -16,6 +16,9 @@
 #   2. The folds hold in every expression binder: a WHERE predicate, a
 #      correlated subquery's inner predicate, and a post-aggregate
 #      expression. (catches: the fold wired into one binder only)
+#   2b. A DATE shifted by an HOUR, MINUTE or SECOND interval is refused by name
+#      (DuckDB answers a TIMESTAMP there; the fold yields only a DATE). (catches:
+#      the sub-day unit folded as days or as zero)
 #   3. The TPC-H Q1 and Q6 queries bind, their WHERE clauses carrying the
 #      folded date. (catches: the corpus queries still refused)
 #   4. Refusals by name: a non-constant (column) DATE operand, a TIMESTAMP
@@ -218,6 +221,13 @@ def test_non_constant_date_operand_is_refused() raises:
     _refuses("interval '1' year + d", "needs a constant DATE")
     _refuses("timestamp '2000-01-01 00:00:00' + interval '1' day", "needs a constant DATE")
     _refuses("'1994-01-01' + interval '1' day", "needs a constant DATE")
+
+
+def test_date_shifted_by_a_sub_day_interval_is_refused() raises:
+    _refuses("date '2000-01-01' + interval '1' hour", "HOUR, MINUTE or SECOND")
+    _refuses("date '2000-01-01' - interval '30' minute", "HOUR, MINUTE or SECOND")
+    _refuses("interval '5' second + date '2000-01-01'", "HOUR, MINUTE or SECOND")
+    _refuses("interval '1' hour", "only accepted as")
 
 
 def test_interval_anywhere_else_is_refused() raises:

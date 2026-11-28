@@ -5,7 +5,8 @@
 # =============================================================================
 
 from sql.sql_ast import (
-    SXIVL_DAY, SXIVL_MONTH, SXIVL_WEEK, SXIVL_YEAR, SqlExpr,
+    SXIVL_DAY, SXIVL_HOUR, SXIVL_MINUTE, SXIVL_MONTH, SXIVL_SECOND,
+    SXIVL_WEEK, SXIVL_YEAR, SqlExpr,
 )
 from sql.sql_token import (
     TK_IDENT, TK_INT, TK_MINUS, TK_PLUS, TK_STRING, Token,
@@ -14,15 +15,16 @@ from sql.sql_token import (
 
 def _is_unit_word(w: String) -> Bool:
     """Every word the grammar reads as an INTERVAL unit, accepted or refused,
-    so `interval -3 hour` is refused by the unit and not read as a column."""
+    so `interval -3 quarter` is refused by the unit and not read as a column."""
     if (
         w == "year" or w == "years" or w == "month" or w == "months"
         or w == "week" or w == "weeks" or w == "day" or w == "days"
+        or w == "hour" or w == "hours" or w == "minute" or w == "minutes"
+        or w == "second" or w == "seconds"
     ):
         return True
     return (
-        w == "quarter" or w == "quarters" or w == "hour" or w == "hours"
-        or w == "minute" or w == "minutes" or w == "second" or w == "seconds"
+        w == "quarter" or w == "quarters"
         or w == "millisecond" or w == "milliseconds" or w == "microsecond"
         or w == "microseconds" or w == "decade" or w == "decades"
         or w == "century" or w == "centuries" or w == "millennium"
@@ -55,7 +57,7 @@ def parse_interval_literal(tokens: List[Token], mut pos: Int) raises -> SqlExpr:
     """`INTERVAL '<n>' <unit>` or `INTERVAL [+|-]<n> <unit>` with `pos` on
     `interval`; leaves `pos` after the unit. The count is an optionally signed
     decimal integer, quoted or bare, of magnitude at most 10^9. Units accepted:
-    YEAR, MONTH, WEEK, DAY (and plurals). Refused by name: every other unit, a
+    YEAR, MONTH, WEEK, DAY, HOUR, MINUTE, SECOND (and plurals). Refused by name: every other unit, a
     unit written inside the string (`'3 month'`), a non-integer count, a count
     beyond 10^9 and a missing unit."""
     pos += 1  # 'interval'
@@ -76,7 +78,8 @@ def parse_interval_literal(tokens: List[Token], mut pos: Int) raises -> SqlExpr:
             raise Error(
                 "SQL not supported: INTERVAL '" + raw + "' is not a plain"
                 " integer count; write INTERVAL '<n>' <unit> with the unit"
-                " outside the quotes (units YEAR, MONTH, WEEK, DAY)"
+                " outside the quotes (units YEAR, MONTH, WEEK, DAY, HOUR, MINUTE,"
+                " SECOND)"
             )
         for k in range(start, len(b)):
             count = count * 10 + Int64(Int(b[k] - UInt8(ord("0"))))
@@ -101,7 +104,7 @@ def parse_interval_literal(tokens: List[Token], mut pos: Int) raises -> SqlExpr:
     if pos >= len(tokens) or tokens[pos].kind != TK_IDENT:
         raise Error(
             "SQL syntax error: INTERVAL needs a unit after the count"
-            " (YEAR, MONTH, WEEK or DAY)"
+            " (YEAR, MONTH, WEEK, DAY, HOUR, MINUTE or SECOND)"
         )
     var u = String(tokens[pos].text)
     var unit: UInt8
@@ -113,11 +116,17 @@ def parse_interval_literal(tokens: List[Token], mut pos: Int) raises -> SqlExpr:
         unit = SXIVL_WEEK
     elif u == "day" or u == "days":
         unit = SXIVL_DAY
+    elif u == "hour" or u == "hours":
+        unit = SXIVL_HOUR
+    elif u == "minute" or u == "minutes":
+        unit = SXIVL_MINUTE
+    elif u == "second" or u == "seconds":
+        unit = SXIVL_SECOND
     else:
         raise Error(
             "SQL not supported: INTERVAL unit '" + u + "' (only YEAR,"
-            " MONTH, WEEK and DAY are accepted; QUARTER, HOUR, MINUTE,"
-            " SECOND and the sub-second and multi-year units are refused)"
+            " MONTH, WEEK, DAY, HOUR, MINUTE and SECOND are accepted; QUARTER"
+            " and the sub-second and multi-year units are refused)"
         )
     pos += 1  # the unit
     return SqlExpr.interval_lit(count, unit)

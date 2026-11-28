@@ -69,6 +69,9 @@
 #       no metrics before or after a morsel.
 #   test_a_reserved_probe_key_is_refused_by_a_left_probe
 #       JOIN_KEY_RESERVED by exact message.
+#   test_a_reserved_timestamp_or_date64_key_is_refused
+#       a TIMESTAMP_US build key and a DATE64 probe key holding the reserved
+#       value are refused like an INT64 one, by exact message.
 
 from std.builtin.swap import swap
 from std.testing import TestSuite, assert_equal, assert_true
@@ -111,10 +114,14 @@ comptime NULL = "<null>"
 
 
 def _keys_batch(
-    key: String, payload: String, values: List[Int], nulls: List[Bool]
+    key: String,
+    payload: String,
+    values: List[Int],
+    nulls: List[Bool],
+    key_type: ArrowType = ArrowType.INT64,
 ) raises -> RecordBatch:
-    """Rows of an INT64 key column `key` (nullable) and a non-nullable INT64
-    `payload` holding the row number."""
+    """Rows of a key column `key` (nullable, int64 storage, of `key_type`) and
+    a non-nullable INT64 `payload` holding the row number."""
     var rows = len(values)
     var k = PrimitiveArray[DType.int64].allocate_nullable(rows)
     var p = PrimitiveArray[DType.int64].allocate(rows)
@@ -125,8 +132,10 @@ def _keys_batch(
         p.set(i, Int64(i))
     var sb = SchemaBuilder()
     var rb = RecordBatchBuilder()
-    sb.add_field(Field(key, ArrowType.INT64, True))
-    rb.add_column(Column.from_primitive[DType.int64](k^))
+    sb.add_field(Field(key, key_type, True))
+    rb.add_column(
+        Column.from_primitive_with_arrow_type[DType.int64](k^, key_type)
+    )
     sb.add_field(Field(payload, ArrowType.INT64, False))
     rb.add_column(Column.from_primitive[DType.int64](p^))
     return rb.build(sb.build())
@@ -621,6 +630,43 @@ def test_a_reserved_probe_key_is_refused_by_a_left_probe() raises:
         _keys_batch("k", "v", [1, RESERVED], [False, False]), 0, 0
     )
     var failure = String("")
+    try:
+        _ = op.execute(m)
+    except e:
+        failure = String(e)
+    assert_equal(
+        failure,
+        String(JOIN_KEY_RESERVED)
+        + ": the probe key column 'k' holds 9221120237041090561, the value"
+        " the join kernel reserves for a NULL key",
+    )
+
+
+def test_a_reserved_timestamp_or_date64_key_is_refused() raises:
+    var failure = String("")
+    try:
+        _ = _shared(
+            JOIN_INNER,
+            _keys_batch(
+                "bk", "bv", [RESERVED], [False], ArrowType.TIMESTAMP_US
+            ),
+        )
+    except e:
+        failure = String(e)
+    assert_equal(
+        failure,
+        String(JOIN_KEY_RESERVED)
+        + ": the build key column 'bk' holds 9221120237041090561, the value"
+        " the join kernel reserves for a NULL key",
+    )
+    var shared = _shared(
+        JOIN_LEFT, _keys_batch("bk", "bv", [1], [False], ArrowType.DATE64)
+    )
+    var op = shared.make()
+    var m = Morsel(
+        _keys_batch("k", "v", [RESERVED], [False], ArrowType.DATE64), 0, 0
+    )
+    failure = String("")
     try:
         _ = op.execute(m)
     except e:

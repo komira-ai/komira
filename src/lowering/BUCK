@@ -62,6 +62,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        reads the whole file and becomes an operator; a
 #                        projection of a column the schema lacks and an
 #                        unbounded scan are refused; Avro is still refused.
+# test_lower_series_scan a generate_series / range scan is a SOURCE_GENERATE_SERIES
+#                        segment carrying its spec; a filter and a projection
+#                        above it become operators, and so does a LIMIT; the
+#                        render names every spec field; an unbounded series
+#                        scan is refused.
 # test_lower_refusals    every refusal token, raised by the plan that should
 #                        raise it with the text that names why, and a plan
 #                        beside each that lowers (a distinct over a column
@@ -188,6 +193,7 @@ mojo_library(
         "tests/test_lower_names.mojo",
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",
+        "tests/test_lower_series_scan.mojo",
         "tests/test_lower_s3_scan.mojo",
         "tests/test_lower_shared.mojo",
         "tests/test_lower_sum_fuse.mojo",

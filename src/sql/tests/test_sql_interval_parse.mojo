@@ -12,6 +12,9 @@
 #      keywords. (catches: `years` refused; the sign of `'-5'` lost)
 #   3. `interval` stays a column name when no count follows it.
 #      (catches: the keyword reading taken unconditionally)
+#   3b. HOUR, MINUTE and SECOND (singular, plural, signed, bare count) parse to
+#      the sub-day unit codes. (catches: a sub-day unit still refused, or read
+#      as another unit)
 #   4. The refusals, each named: a unit inside the string, a non-integer
 #      count, a count beyond 10^9, a missing unit, and the units outside the
 #      accepted set. (catches: `'3 month'` silently read as 3 of nothing)
@@ -19,7 +22,8 @@
 from std.testing import TestSuite, assert_equal, assert_true
 
 from sql.sql_ast import (
-    SqlExpr, SqlStatement, SXIVL_DAY, SXIVL_MONTH, SXIVL_WEEK, SXIVL_YEAR,
+    SqlExpr, SqlStatement, SXIVL_DAY, SXIVL_HOUR, SXIVL_MINUTE, SXIVL_MONTH,
+    SXIVL_SECOND, SXIVL_WEEK, SXIVL_YEAR,
     SXOP_ADD, SXOP_SUB, SX_BINARY, SX_COLUMN, SX_DATE, SX_INTERVAL,
 )
 from sql.sql_parser import parse_sql
@@ -112,6 +116,21 @@ def _refuses(expr: String, needle: String) raises:
     assert_true(needle in m, "`" + expr + "` raised: " + m)
 
 
+def test_sub_day_units_parse() raises:
+    var h = _e("interval '2' hour")
+    assert_equal(Int(h.tag), Int(SX_INTERVAL))
+    assert_equal(Int(h.int_val), 2)
+    assert_equal(Int(h.op), Int(SXIVL_HOUR))
+    var m = _e("interval -30 minutes")
+    assert_equal(Int(m.int_val), -30)
+    assert_equal(Int(m.op), Int(SXIVL_MINUTE))
+    var s = _e("INTERVAL '45' SECOND")
+    assert_equal(Int(s.int_val), 45)
+    assert_equal(Int(s.op), Int(SXIVL_SECOND))
+    assert_equal(Int(_e("interval 1 hours").op), Int(SXIVL_HOUR))
+    assert_equal(Int(_e("interval 1 seconds").op), Int(SXIVL_SECOND))
+
+
 def test_interval_refusals_are_named() raises:
     _refuses("interval '3 month'", "is not a plain integer count")
     _refuses("interval '3 month' + date '2000-01-01'", "unit outside the quotes")
@@ -124,11 +143,8 @@ def test_interval_refusals_are_named() raises:
     _refuses("interval 99999999999999999999 day", "beyond 10^9")
     _refuses("(interval '1')", "needs a unit")
     _refuses("interval '1' + 2", "needs a unit")
-    _refuses("interval -3 hour", "INTERVAL unit 'hour'")
+    _refuses("interval -3 quarter", "INTERVAL unit 'quarter'")
     _refuses("interval -1000000001 day", "beyond +/-10^9")
-    _refuses("interval '1' hour", "INTERVAL unit 'hour'")
-    _refuses("interval '1' minute", "INTERVAL unit 'minute'")
-    _refuses("interval '1' second", "INTERVAL unit 'second'")
     _refuses("interval '1' quarter", "INTERVAL unit 'quarter'")
     _refuses("interval '1' decade", "INTERVAL unit 'decade'")
     _refuses("interval '1' millisecond", "INTERVAL unit 'millisecond'")

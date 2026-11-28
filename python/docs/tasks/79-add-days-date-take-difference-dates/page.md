@@ -54,4 +54,5 @@ Output:
 - How do I compute a rolling average? (rank 76, works)
 - How do I compare each row with the previous row (lag, lead, change)? (rank 77, partial)
 - How do I group by month or week? (rank 80, partial)
+- [How do I fill gaps in a time series so every date is present?](../81-fill-gaps-time-series-date-present/page.md) (rank 81, partial)
 - How do I convert time zones? (rank 78, gap; no page yet)

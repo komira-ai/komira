@@ -17,6 +17,7 @@
 #   test_a_build_side_the_plan_does_not_define_is_refused
 #   test_a_key_that_is_not_a_column_of_its_side_is_refused
 #   test_a_key_pair_the_probe_does_not_compare_is_refused
+#   test_date_and_timestamp_keys_pair_as_duckdb_compares_them
 #   test_an_output_naming_a_column_twice_is_refused
 #   test_a_join_is_refused_before_any_scan_is_counted
 # =============================================================================
@@ -266,13 +267,80 @@ def test_a_key_pair_the_probe_does_not_compare_is_refused() raises:
     _refused_with(_pair_message(ArrowType.FLOAT64, ArrowType.INT64), "the key pair k (")
     _refused_with(_pair_message(ArrowType.STRING, ArrowType.FLOAT64), "the key pair k (")
     # A type the probe has no key family for is refused even against itself.
-    _refused_with(_pair_message(ArrowType.DATE32, ArrowType.DATE32), "the key pair k (")
+    _refused_with(_pair_message(ArrowType.BOOL, ArrowType.BOOL), "the key pair k (")
     # The integers compare in any pairing; floats and strings with their own.
     assert_equal(_pair_message(ArrowType.INT32, ArrowType.INT64), "")
     assert_equal(_pair_message(ArrowType.INT64, ArrowType.INT32), "")
     assert_equal(_pair_message(ArrowType.INT32, ArrowType.INT32), "")
     assert_equal(_pair_message(ArrowType.FLOAT64, ArrowType.FLOAT64), "")
     assert_equal(_pair_message(ArrowType.STRING, ArrowType.STRING), "")
+
+
+def _timestamp_table(path: String, a: String, at: ArrowType, tz: String) raises -> LogicalPlan:
+    var sb = SchemaBuilder()
+    sb.add_field(Field.timestamp(a, at, tz, False))
+    return LogicalPlan.scan(path, SOURCE_PARQUET, sb.build())
+
+
+def _temporal_pair_message(
+    lt: ArrowType, ltz: String, rt: ArrowType, rtz: String
+) raises -> String:
+    var left = _table1("l.parquet", "k", lt)
+    if lt != ArrowType.DATE32:
+        left = _timestamp_table("l.parquet", "k", lt, ltz)
+    var right = _table1("r.parquet", "k2", rt)
+    if rt != ArrowType.DATE32:
+        right = _timestamp_table("r.parquet", "k2", rt, rtz)
+    var plan = LogicalPlan.join(
+        left^, right^, _names("k"), _names("k2"), JOIN_INNER
+    )
+    return _message(plan, _inputs())
+
+
+def test_date_and_timestamp_keys_pair_as_duckdb_compares_them() raises:
+    var us = ArrowType.TIMESTAMP_US
+    var d = ArrowType.DATE32
+    # A DATE meets a naive microsecond TIMESTAMP (at its midnight), either way.
+    assert_equal(_temporal_pair_message(d, "", d, ""), "")
+    assert_equal(_temporal_pair_message(d, "", us, ""), "")
+    assert_equal(_temporal_pair_message(us, "", d, ""), "")
+    assert_equal(_temporal_pair_message(us, "", us, ""), "")
+    assert_equal(_temporal_pair_message(ArrowType.TIMESTAMP, "", us, ""), "")
+    # Two zoned timestamps are instants, whatever their zones' names.
+    assert_equal(_temporal_pair_message(us, "UTC", us, "Europe/Paris"), "")
+    # A naive value against a zoned one, a DATE against a zoned one, and two
+    # different units are refused.
+    _refused_with(_temporal_pair_message(us, "", us, "UTC"), "the key pair k (")
+    _refused_with(_temporal_pair_message(d, "", us, "UTC"), "the key pair k (")
+    _refused_with(
+        _temporal_pair_message(us, "", ArrowType.TIMESTAMP_MS, ""), "the key pair k ("
+    )
+    _refused_with(
+        _temporal_pair_message(d, "", ArrowType.TIMESTAMP_NS, ""), "the key pair k ("
+    )
+    # The other units compare with their own unit and zone presence only.
+    assert_equal(_temporal_pair_message(ArrowType.TIMESTAMP_S, "", ArrowType.TIMESTAMP_S, ""), "")
+    assert_equal(_temporal_pair_message(ArrowType.TIMESTAMP_MS, "UTC", ArrowType.TIMESTAMP_MS, "UTC"), "")
+    assert_equal(_temporal_pair_message(ArrowType.TIMESTAMP_NS, "", ArrowType.TIMESTAMP_NS, ""), "")
+    _refused_with(
+        _temporal_pair_message(ArrowType.TIMESTAMP_S, "", ArrowType.TIMESTAMP_S, "UTC"),
+        "the key pair k (",
+    )
+    _refused_with(
+        _temporal_pair_message(ArrowType.TIMESTAMP_MS, "", ArrowType.TIMESTAMP_MS, "UTC"),
+        "the key pair k (",
+    )
+    _refused_with(
+        _temporal_pair_message(ArrowType.TIMESTAMP_NS, "UTC", ArrowType.TIMESTAMP_NS, ""),
+        "the key pair k (",
+    )
+    # DATE64 with DATE64 only.
+    assert_equal(_pair_message(ArrowType.DATE64, ArrowType.DATE64), "")
+    _refused_with(_pair_message(ArrowType.DATE64, ArrowType.DATE32), "the key pair k (")
+    # A temporal key never meets a number or a string.
+    _refused_with(_pair_message(ArrowType.DATE32, ArrowType.INT32), "the key pair k (")
+    _refused_with(_pair_message(ArrowType.TIMESTAMP_US, ArrowType.INT64), "the key pair k (")
+    _refused_with(_pair_message(ArrowType.DATE32, ArrowType.STRING), "the key pair k (")
 
 
 def test_an_output_naming_a_column_twice_is_refused() raises:

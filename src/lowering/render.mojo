@@ -24,6 +24,7 @@ from physical_plan.physical_plan import (
     SOURCE_UDF_STEP,
     SOURCE_ICEBERG,
     SOURCE_JSONL,
+    SOURCE_GENERATE_SERIES,
     OP_FILTER,
     OP_PROJECT,
     OP_LIMIT,
@@ -58,6 +59,8 @@ def _source_name(kind: UInt8) -> String:
         return "SOURCE_ICEBERG"
     if kind == SOURCE_JSONL:
         return "SOURCE_JSONL"
+    if kind == SOURCE_GENERATE_SERIES:
+        return "SOURCE_GENERATE_SERIES"
     return "SOURCE_" + String(Int(kind))
 
 
@@ -261,6 +264,15 @@ def _segment_text(seg: SegmentDescPod) -> String:
             out += s.jsonl_schema.field_name(i) + ":"
             out += String(s.jsonl_schema.field_arrow_type(i))
         out += "]"
+    elif seg.source_kind == SOURCE_GENERATE_SERIES:
+        ref g = seg.source_spec.series_spec
+        out += " column=" + g.column
+        out += " timestamp=" + String(g.timestamp)
+        out += " start=" + String(g.start)
+        out += " stop=" + String(g.stop)
+        out += " step=" + String(g.step)
+        out += " step_months=" + String(g.step_months)
+        out += " inclusive=" + String(g.inclusive)
     else:
         out += " from="
         for i in range(len(seg.source_spec.dep_seg_ids)):

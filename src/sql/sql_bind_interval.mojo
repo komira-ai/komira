@@ -9,7 +9,8 @@
 from plan_expr.expr import Expr
 from plan_expr.scalar_value import ScalarValue
 from sql.sql_ast import (
-    SXIVL_DAY, SXIVL_MONTH, SXIVL_WEEK, SXIVL_YEAR, SXOP_ADD, SXOP_SUB,
+    SXIVL_DAY, SXIVL_HOUR, SXIVL_MINUTE, SXIVL_MONTH, SXIVL_SECOND,
+    SXIVL_WEEK, SXIVL_YEAR, SXOP_ADD, SXOP_SUB,
     SX_BINARY, SX_INTERVAL, SqlExpr,
 )
 
@@ -132,6 +133,12 @@ def interval_date_fold(sx: SqlExpr, var date_side: Expr) raises -> Expr:
     else:
         n = Int(b.left[].int_val)
         unit = b.left[].op
+    if unit == SXIVL_HOUR or unit == SXIVL_MINUTE or unit == SXIVL_SECOND:
+        raise Error(
+            "SQL not supported: DATE +/- INTERVAL of a HOUR, MINUTE or SECOND"
+            " unit (DuckDB answers a TIMESTAMP there; this engine folds only"
+            " to a DATE, so only YEAR, MONTH, WEEK and DAY units are accepted)"
+        )
     if not date_side.is_literal() or not date_side.literal_value().is_date32():
         raise Error(
             "SQL not supported: DATE +/- INTERVAL needs a constant DATE"

@@ -123,16 +123,31 @@ comptime CROSS_CHUNK_ROWS = 65536
 partners (see the module header)."""
 
 
+def _keyed_by_int64_storage(t: ArrowType) -> Bool:
+    """True for the key types whose key slot is their int64 storage as it
+    is."""
+    return (
+        t == ArrowType.INT64
+        or t == ArrowType.DATE64
+        or t == ArrowType.TIMESTAMP
+        or t == ArrowType.TIMESTAMP_S
+        or t == ArrowType.TIMESTAMP_MS
+        or t == ArrowType.TIMESTAMP_US
+        or t == ArrowType.TIMESTAMP_NS
+    )
+
+
 def refuse_reserved_int64_keys(
     ref batch: RecordBatch, key_names: List[String], side: String
 ) raises:
     """Raise `JOIN_KEY_RESERVED`, naming the column and the side, when a
-    non-NULL row of an INT64 key column holds the kernel's NULL key-slot
-    value. Key columns of other types cannot hold it and are not read."""
+    non-NULL row of a key column keyed by its int64 storage (INT64, DATE64 or
+    a TIMESTAMP) holds the kernel's NULL key-slot value. Key columns of other
+    types cannot hold it and are not read."""
     for k in range(len(key_names)):
         var idx = batch.schema.column_index(key_names[k])
         ref col = batch.column_at(idx)
-        if col.arrow_type != ArrowType.INT64:
+        if not _keyed_by_int64_storage(col.arrow_type):
             continue
         var values = col.as_primitive[DType.int64]()
         for r in range(batch.num_rows()):

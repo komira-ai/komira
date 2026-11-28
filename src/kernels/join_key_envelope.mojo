@@ -47,6 +47,10 @@
 # DuckDB, which implicitly casts and answers). Asserted by
 # `komira_engine_dispatch.tests.test_join_key_envelope_one_table:
 # test_i64_join_i32_is_refused_by_the_pairing_gate`.
+# This table is the optimizer fold's and the dispatch executor's. The pipeline
+# path (`lowering.cut_join` and `op_join_probe.join_key_extract`) pairs keys by
+# its own rule and serves, as DuckDB does, INT64 with INT32 and DATE32 with a
+# naive microsecond TIMESTAMP.
 #
 # ── THE DESCRIPTOR IS NOT AN `ArrowType`, AND THAT IS THE POINT ────────────
 #
