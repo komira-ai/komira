@@ -50,6 +50,7 @@ from plan_ir.logical_plan import (
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_UNNEST,
 )
 from plan_stats.table_stats import (
     ColumnStats,
@@ -356,6 +357,29 @@ def test_the_walk_finds_a_join_under_every_one_child_node() raises:
     _hc4_footers(f)
     for i in range(len(kinds)):
         _eq(_derive(_over(kinds[i], _hc4()), f), "0:pv:2:1 | 1:bv:2:1")
+
+
+def test_the_walk_finds_a_join_under_an_unnest() raises:
+    # An Unnest of a list column computed above the join: the walk goes
+    # through it to the join. Catches: the PLAN_UNNEST arm dropped (the walk
+    # would refuse the plan as an unknown tag).
+    var pe = ExprArray()
+    pe.append(Expr.col_ref("key"))
+    pe.append(
+        Expr.alias(
+            Expr.regexp_split_to_array(
+                Expr.literal(ScalarValue.from_string("a,b")), ","
+            ),
+            String("l"),
+        )
+    )
+    var plan = LogicalPlan.unnest(
+        LogicalPlan.project(pe^, _hc4()), String("l"), False
+    )
+    assert_true(plan.tag == PLAN_UNNEST)
+    var f = Footers()
+    _hc4_footers(f)
+    _eq(_derive(plan, f), "0:pv:2:1 | 1:bv:2:1")
 
 
 def _asof(var l: LogicalPlan, var r: LogicalPlan) -> LogicalPlan:

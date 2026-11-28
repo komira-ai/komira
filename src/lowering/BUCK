@@ -193,6 +193,7 @@ mojo_library(
         "tests/test_lower_sum_fuse.mojo",
         "tests/test_lower_topn.mojo",
         "tests/test_lower_union.mojo",
+        "tests/test_lower_unnest.mojo",
         "tests/test_lower_window.mojo",
         "tests/test_lower_window_refusals.mojo",
         "tests/test_lower_udf_nodes.mojo",

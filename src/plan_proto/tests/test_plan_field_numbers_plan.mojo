@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # THE FIELD-NUMBER CENSUS of `komira.plan.v1`, part 3 of 3: the plan nodes,
-# WirePlan and its 16 arms, the write target and the envelope. How a message
+# WirePlan and its 19 arms, the write target and the envelope. How a message
 # is pinned, and why, is in the header of test_plan_field_numbers_scan.mojo
 # (part 1); the same helpers are restated here, since a welded test is one
 # source file.
@@ -36,6 +36,7 @@ from plan_proto.plan import (
     WireSortNode,
     WireTopNNode,
     WireUnionNode,
+    WireUnnestNode,
     WireViewRefNode,
     WireWriteTarget,
 )
@@ -506,6 +507,18 @@ def test_sort_limit_distinct_topn(mut L: _Ledger) raises:
 # ---- joins and unions ----------------------------------------------------------------
 
 
+def test_unnest_node(mut L: _Ledger) raises:
+    var u = List[UInt8]()
+    _m(L, u, "WireUnnestNode.child", _plan(L, 31))
+    _s(L, u, "WireUnnestNode.column", "tags")
+    _u(L, u, "WireUnnestNode.keep_empty", 1)
+    var un = decode_proto[WireUnnestNode](u.copy())
+    assert_equal(_hash(un.child[0]), 31, "WireUnnestNode: _hash(un.child[0])")
+    assert_equal(un.column, "tags", "WireUnnestNode: un.column")
+    assert_true(un.keep_empty, "WireUnnestNode: un.keep_empty")
+    _same(encode_proto(un), u, "WireUnnestNode")
+
+
 def test_join_and_union(mut L: _Ledger) raises:
     var b = List[UInt8]()
     _m(L, b, "WireJoinNode.left", _plan(L, 12))
@@ -730,6 +743,8 @@ def _arm_of(p: WirePlan) -> String:
         names.append("map_batches")
     if p.step:
         names.append("step")
+    if len(p.unnest) > 0:
+        names.append("unnest")
     for i in range(len(names)):
         out += (String(",") if i > 0 else String("")) + names[i]
     return out
@@ -737,13 +752,13 @@ def _arm_of(p: WirePlan) -> String:
 
 def test_plan(mut L: _Ledger) raises:
     """2 output_schema; oneof node { 4 scan .. 19 cast_to_varchar, 21
-    map_batches, 22 step } (1 and 3 are reserved, 20 is held for the
+    map_batches, 22 step, 23 unnest } (1 and 3 are reserved, 20 is held for the
     exchange arm): each arm, written under its ledger number, decodes as
     that arm by name."""
     var arms = _names(
         "scan filter project aggregate join sort limit distinct topn union_all"
         + " partition_by partition_topn asof_join view_ref cse_ref cast_to_varchar"
-        + " map_batches step"
+        + " map_batches step unnest"
     )
     for k in range(len(arms)):
         var q = "WirePlan." + arms[k]
@@ -825,6 +840,7 @@ def main() raises:
     test_project_node(L)
     test_aggregate_node(L)
     test_sort_limit_distinct_topn(L)
+    test_unnest_node(L)
     test_join_and_union(L)
     test_asof_join(L)
     test_partition_nodes(L)
@@ -873,6 +889,9 @@ WireSortNode.child 4
 WireLimitNode.n 1
 WireLimitNode.offset 2
 WireLimitNode.child 3
+WireUnnestNode.child 1
+WireUnnestNode.column 2
+WireUnnestNode.keep_empty 3
 WireDistinctNode.has_columns 1
 WireDistinctNode.columns 2
 WireDistinctNode.child 3
@@ -943,6 +962,7 @@ WirePlan.cse_ref 18
 WirePlan.cast_to_varchar 19
 WirePlan.map_batches 21
 WirePlan.step 22
+WirePlan.unnest 23
 WireWriteTarget.path 1
 WireWriteTarget.format 2
 WireWriteTarget.codec 3

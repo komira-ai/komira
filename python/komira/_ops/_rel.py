@@ -53,6 +53,7 @@ __all__ = [
     "SortKey",
     "TopN",
     "Union",
+    "Unnest",
     "WindowExpr",
     "Write",
     "WriteTarget",
@@ -519,6 +520,30 @@ class Distinct:
 
 
 @dataclass(frozen=True, slots=True)
+class Unnest:
+    """The child with its list column `column` replaced by one row per
+    element: the other columns repeat, and the column holds the element.
+    A row whose list is empty or NULL gives no row, or one row holding NULL
+    when `keep_empty` is true."""
+
+    child: Plan
+    column: str
+    keep_empty: bool
+    _columns: tuple[str, ...] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        _need_plan(self.child, "child", "Unnest")
+        _need_name(self.column, "column", "Unnest")
+        _need_bool(self.keep_empty, "keep_empty", "Unnest")
+        require_columns((self.column,), self.child.columns)
+        _set_columns(self, self.child.columns)
+
+    @property
+    def columns(self) -> tuple[str, ...]:
+        return self._columns
+
+
+@dataclass(frozen=True, slots=True)
 class Join:
     """Two inputs joined on key columns, a residual predicate, or both."""
 
@@ -709,6 +734,7 @@ Plan = (
     | Union
     | Write
     | MapBatches
+    | Unnest
 )
 
 PLAN_NODES = (
@@ -724,6 +750,7 @@ PLAN_NODES = (
     Union,
     Write,
     MapBatches,
+    Unnest,
 )
 
 

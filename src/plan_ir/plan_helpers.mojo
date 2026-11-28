@@ -102,6 +102,7 @@ from plan_ir.logical_plan import (
     PLAN_EXCHANGE,
     PLAN_MAP_BATCHES,
     PLAN_STEP,
+    PLAN_UNNEST,
     PLAN_TAG_COUNT,
     join_build_side_is_valid,
     agg_mode_is_valid,
@@ -427,13 +428,15 @@ def _plan_payload_present(plan: LogicalPlan) -> Bool:
         return Bool(plan._map_batches)
     elif plan.tag == PLAN_STEP:
         return Bool(plan._step)
+    elif plan.tag == PLAN_UNNEST:
+        return Bool(plan._unnest)
     return False
 
 
 def _tag_carries_a_variant_payload(tag: UInt8) -> Bool:
     """Does `tag` name a `LogicalPlan` variant field at all?
 
-    THE 19 TAGS. Tags 0..15 and 18..20 are declared in
+    THE 20 TAGS. Tags 0..15 and 18..21 are declared in
     `plan_ir/logical_plan.mojo` and each owns a variant Optional on
     `LogicalPlan`. Tag values 16/17 are retired and must not be reused.
 
@@ -461,6 +464,7 @@ def _tag_carries_a_variant_payload(tag: UInt8) -> Bool:
         or tag == PLAN_EXCHANGE
         or tag == PLAN_MAP_BATCHES
         or tag == PLAN_STEP
+        or tag == PLAN_UNNEST
     )
 
 
@@ -585,7 +589,7 @@ def _copy_plan_body(plan: LogicalPlan) raises -> LogicalPlan:
         return _copy_asof_join_node(plan)
 
     # PLAN_CSE_REF / PLAN_UNION / PLAN_VIEW_REF / PLAN_CAST_TO_VARCHAR /
-    # PLAN_EXCHANGE / PLAN_MAP_BATCHES / PLAN_STEP: delegate to
+    # PLAN_EXCHANGE / PLAN_MAP_BATCHES / PLAN_STEP / PLAN_UNNEST: delegate to
     # `LogicalPlan.copy()`, which has an arm for
     # every tag. Without
     # these arms the tag would fall through, and a SHELL LogicalPlan with only
@@ -603,6 +607,7 @@ def _copy_plan_body(plan: LogicalPlan) raises -> LogicalPlan:
         or plan.tag == PLAN_EXCHANGE
         or plan.tag == PLAN_MAP_BATCHES
         or plan.tag == PLAN_STEP
+        or plan.tag == PLAN_UNNEST
     ):
         return plan.copy()
 
@@ -1208,6 +1213,8 @@ def _plan_has_tag(plan: LogicalPlan, target: UInt8) -> Bool:
         return _plan_has_tag(plan._partition_by.value()[].child[], target)
     elif plan.tag == PLAN_PARTITION_TOPN:
         return _plan_has_tag(plan._partition_topn.value()[].child[], target)
+    elif plan.tag == PLAN_UNNEST:
+        return _plan_has_tag(plan._unnest.value()[].child[], target)
     return False
 
 
@@ -1236,6 +1243,8 @@ def _plan_has_any_tag(plan: LogicalPlan, tag1: UInt8, tag2: UInt8) -> Bool:
         return _plan_has_any_tag(plan._partition_by.value()[].child[], tag1, tag2)
     elif plan.tag == PLAN_PARTITION_TOPN:
         return _plan_has_any_tag(plan._partition_topn.value()[].child[], tag1, tag2)
+    elif plan.tag == PLAN_UNNEST:
+        return _plan_has_any_tag(plan._unnest.value()[].child[], tag1, tag2)
     return False
 
 
@@ -1259,6 +1268,8 @@ def _plan_has_consecutive_filters(plan: LogicalPlan) -> Bool:
         return _plan_has_consecutive_filters(plan._distinct.value()[].child[])
     elif plan.tag == PLAN_TOPN:
         return _plan_has_consecutive_filters(plan._topn.value()[].child[])
+    elif plan.tag == PLAN_UNNEST:
+        return _plan_has_consecutive_filters(plan._unnest.value()[].child[])
     return False
 
 
@@ -1282,6 +1293,8 @@ def _plan_has_sort_above_limit(plan: LogicalPlan) -> Bool:
         return _plan_has_sort_above_limit(plan._distinct.value()[].child[])
     elif plan.tag == PLAN_TOPN:
         return _plan_has_sort_above_limit(plan._topn.value()[].child[])
+    elif plan.tag == PLAN_UNNEST:
+        return _plan_has_sort_above_limit(plan._unnest.value()[].child[])
     return False
 
 
@@ -1619,6 +1632,12 @@ def validate_plan_integrity(plan: LogicalPlan) -> Bool:
             return False
         return True
 
+    elif plan.tag == PLAN_UNNEST:
+        if not plan._unnest:
+            print("INTEGRITY VIOLATION: PLAN_UNNEST but _unnest is None")
+            return False
+        return validate_plan_integrity(plan._unnest.value()[].child[])
+
     print("INTEGRITY VIOLATION: unknown tag", Int(plan.tag))
     return False
 
@@ -1689,6 +1708,14 @@ def _explain_node(plan: LogicalPlan, indent: Int, mut out: String):
         out += prefix + plan_tag_name(plan.tag) + " [n=" + String(plan._topn.value()[].n) + "]\n"
         _explain_node(plan._topn.value()[].child[], indent + 1, out)
 
+    elif plan.tag == PLAN_UNNEST:
+        out += (
+            prefix + plan_tag_name(plan.tag) + " [column="
+            + plan._unnest.value()[].column + ", keep_empty="
+            + ("true" if plan._unnest.value()[].keep_empty else "false") + "]\n"
+        )
+        _explain_node(plan._unnest.value()[].child[], indent + 1, out)
+
     else:
         out += prefix + "Unknown(tag=" + String(Int(plan.tag)) + ")\n"
 
@@ -1726,6 +1753,8 @@ def _count_nodes(plan: LogicalPlan) -> Int:
         return 1 + _count_nodes(plan._distinct.value()[].child[])
     elif plan.tag == PLAN_TOPN:
         return 1 + _count_nodes(plan._topn.value()[].child[])
+    elif plan.tag == PLAN_UNNEST:
+        return 1 + _count_nodes(plan._unnest.value()[].child[])
     return 1
 
 
@@ -1753,4 +1782,6 @@ def _plan_depth(plan: LogicalPlan) -> Int:
         return 1 + _plan_depth(plan._distinct.value()[].child[])
     elif plan.tag == PLAN_TOPN:
         return 1 + _plan_depth(plan._topn.value()[].child[])
+    elif plan.tag == PLAN_UNNEST:
+        return 1 + _plan_depth(plan._unnest.value()[].child[])
     return 1

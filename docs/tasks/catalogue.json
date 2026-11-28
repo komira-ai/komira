@@ -384,10 +384,7 @@
     "slug": "explode-list-column-row-per-element",
     "category": "Nested/JSON",
     "question": "How do I explode a list column into one row per element?",
-    "status": "gap",
-    "issues": [
-      "komira-ai/komira#2339"
-    ]
+    "status": "works"
   },
   {
     "rank": 47,

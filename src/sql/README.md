@@ -115,6 +115,14 @@ binds window functions with their `PARTITION BY` and `ORDER BY` (each window
 order key may carry `NULLS FIRST` / `NULLS LAST`; an unwritten one is the
 derived default), and the statement-level `ORDER BY` (column, ordinal, output
 alias or expression, with explicit `NULLS FIRST` / `NULLS LAST`).
+`sql_bind_unnest` binds `unnest(list)` as a whole SELECT item, as DuckDB does:
+one row per element, the other items repeated, and no row for an empty or NULL
+list. The list is projected into a hidden column below an `Unnest` node and
+the item reads that column, named by its alias or `unnest(<arg>)`. Two unnest
+items, unnest nested in an expression or outside the SELECT list, unnest
+beside an aggregate, `GROUP BY`, a window function or `*`, and a non-list
+argument are refused by name. For example
+`SELECT id, unnest(string_split(tags, ',')) AS tag FROM t ORDER BY id, tag`.
 
 `sql.sql_binder` turns a parsed statement into a plan:
 `bind_statement(stmt, catalog, footers)` returns a `BoundStatement` whose

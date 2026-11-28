@@ -17,7 +17,7 @@ from sql_e2e import check_corpus, load_corpus, open_session
 
 # `ls src/tests/e2e/sql_e2e/cases/*.sql | wc -l`; BUCK stages each with its
 # answer, so a case lost on the way fails here.
-comptime _CASES = 128
+comptime _CASES = 129
 
 # A case whose answer is one row starting with count(*) of `nulls`, 5000.
 comptime _COUNTS_CASE = "aggregate_counts"

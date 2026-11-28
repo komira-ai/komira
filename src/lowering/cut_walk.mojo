@@ -9,7 +9,8 @@
 #             table scan, or SOURCE_JSONL for one JSON Lines file;
 #             `cut_scan`); PLAN_STEP, a user function run once, opens
 #             one whose source is SOURCE_UDF_STEP (`cut_step`);
-#   streaming PLAN_FILTER, PLAN_PROJECT, PLAN_LIMIT, and PLAN_MAP_BATCHES (an
+#   streaming PLAN_FILTER, PLAN_PROJECT, PLAN_LIMIT, PLAN_UNNEST (OP_UNNEST,
+#             `cut_unnest`) and PLAN_MAP_BATCHES (an
 #             ungrouped frame, OP_UDF_FRAME): appended to the open pipeline's
 #             `ops`; a projection column that is a user-function call adds an
 #             OP_UDF_APPLY before its OP_PROJECT (`cut_project`);
@@ -75,6 +76,7 @@ from lowering.cut_limit import (
     _sorted_stream_refusal,
 )
 from lowering.cut_map_batches import _map_batches_op, _fuse_map_batches
+from lowering.cut_unnest import _unnest_op, _fuse_unnest
 from lowering.cut_project import _project_op, _fuse_project
 from lowering.cut_scan import _open_scan
 from lowering.cut_shared import (
@@ -114,6 +116,7 @@ from plan_ir.logical_plan import (
     PLAN_VIEW_REF,
     PLAN_MAP_BATCHES,
     PLAN_STEP,
+    PLAN_UNNEST,
 )
 from physical_plan.physical_plan import (
     SINK_COLLECT,
@@ -188,6 +191,11 @@ def _walk_node(
         return pipe^
     if tag == PLAN_STEP:
         return _open_step(node, inputs)
+    if tag == PLAN_UNNEST:
+        var op = _unnest_op(node)
+        var pipe = _walk(cutter, node.unnest_data_ref().child[], inputs)
+        _fuse_unnest(pipe, node, op^)
+        return pipe^
     if tag == PLAN_LIMIT:
         if _reaches_sort(node):
             var pipe = _walk_range(cutter, node, RowRange.every_row(), inputs)

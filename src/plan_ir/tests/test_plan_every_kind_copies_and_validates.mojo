@@ -75,6 +75,7 @@ from plan_ir.logical_plan import (
     PLAN_EXCHANGE,
     PLAN_MAP_BATCHES,
     PLAN_STEP,
+    PLAN_UNNEST,
     agg_func_base_name,
 )
 from plan_ir.plan_helpers import _copy_plan, validate_plan_integrity
@@ -90,6 +91,14 @@ def _schema(a: String, b: String) -> Schema:
     sb.add_field(Field(a, ArrowType.INT64, True))
     sb.add_field(Field(b, ArrowType.INT64, True))
     return sb.build()
+
+
+def _list_scan() -> LogicalPlan:
+    """A scan of (id: INT64, tags: LIST<STRING>)."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field("id", ArrowType.INT64, True))
+    sb.add_field(Field.list_of_string("tags", True))
+    return LogicalPlan.scan("l.parquet", SOURCE_PARQUET, sb.build())
 
 
 def _gt(c: String, v: Int) -> Expr:
@@ -130,7 +139,7 @@ def _render(p: LogicalPlan) -> String:
     return s^
 
 
-comptime N_KINDS: Int = 18
+comptime N_KINDS: Int = 19
 
 
 def _kind(i: Int) raises -> LogicalPlan:
@@ -200,9 +209,11 @@ def _kind(i: Int) raises -> LogicalPlan:
         var gb = List[Expr]()
         gb.append(Expr.col_ref("a"))
         return LogicalPlan.map_batches(_scan(), 1, gb^, _schema("k", "v"))
-    var args = List[ScalarValue]()
-    args.append(ScalarValue.from_int(3))
-    return LogicalPlan.step(2, args^, _schema("k", "v"))
+    if i == 17:
+        var args = List[ScalarValue]()
+        args.append(ScalarValue.from_int(3))
+        return LogicalPlan.step(2, args^, _schema("k", "v"))
+    return LogicalPlan.unnest(_list_scan(), "tags", True)
 
 
 def _tags() -> List[UInt8]:
@@ -211,7 +222,7 @@ def _tags() -> List[UInt8]:
         PLAN_SORT, PLAN_LIMIT, PLAN_DISTINCT, PLAN_TOPN, PLAN_PARTITION_BY,
         PLAN_PARTITION_TOPN, PLAN_ASOF_JOIN, PLAN_UNION, PLAN_VIEW_REF,
         PLAN_CSE_REF, PLAN_CAST_TO_VARCHAR, PLAN_MAP_BATCHES, PLAN_STEP,
-        PLAN_EXCHANGE,
+        PLAN_UNNEST, PLAN_EXCHANGE,
     ]
     return t^
 
@@ -222,7 +233,7 @@ def _tags() -> List[UInt8]:
 
 
 def test_every_kind_copies_both_ways_and_passes_integrity() raises:
-    """Each of the 18 kinds (an exchange is test_plan_exchange's) keeps its
+    """Each of the 19 kinds (an exchange is test_plan_exchange's) keeps its
     tag, render and hash through `copy()` and `_copy_plan`, and is accepted
     by `validate_plan_integrity`. Catches a `copy()` arm that leaves the
     payload out (the copy renders as a shell), a `_copy_plan` arm missing

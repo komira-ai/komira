@@ -58,7 +58,7 @@ in the generator. A repository lint fails if you do.
 comptime PLAN_WIRE_UNSPECIFIED_VALUE: Int32 = 0
 """Wire 0, in every space. Never a valid tag."""
 
-comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 359
+comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 360
 """Total published members across all 33 spaces. A drift tripwire a test can pin."""
 
 comptime PLAN_WIRE_SPACE_COUNT: Int = 33
@@ -67,7 +67,7 @@ comptime PLAN_WIRE_SPACE_COUNT: Int = 33
 
 # ==========================================================================
 # PlanTag — engine prefix `PLAN_`
-# LogicalPlan node kind. ONE declaration site, logical_plan.mojo (0-15, 18-20).
+# LogicalPlan node kind. ONE declaration site, logical_plan.mojo (0-15, 18-21).
 # 16-17 were the ROW<->COLUMN converts and are DELETED; their numbers stay
 # burned.
 # Declared in: src/plan_ir/logical_plan.mojo
@@ -82,19 +82,19 @@ comptime PLAN_WIRE_SPACE_COUNT: Int = 33
 #     carry the node
 # ==========================================================================
 
-comptime PLAN_TAG_WIRE_MEMBERS: Int = 19
+comptime PLAN_TAG_WIRE_MEMBERS: Int = 20
 comptime PLAN_TAG_ENGINE_MIN: UInt8 = 0
-comptime PLAN_TAG_ENGINE_MAX: UInt8 = 20
+comptime PLAN_TAG_ENGINE_MAX: UInt8 = 21
 comptime PLAN_TAG_WIRE_MIN: Int32 = 1
-comptime PLAN_TAG_WIRE_MAX: Int32 = 21
+comptime PLAN_TAG_WIRE_MAX: Int32 = 22
 
 
 def plan_tag_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this PlanTag value?
 
-    Runs: [(0, 15), (18, 20)]. Total, never raising.
+    Runs: [(0, 15), (18, 21)]. Total, never raising.
     """
-    return engine_tag <= 15 or (engine_tag >= 18 and engine_tag <= 20)
+    return engine_tag <= 15 or (engine_tag >= 18 and engine_tag <= 21)
 
 
 def plan_tag_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -218,6 +218,9 @@ def write_plan_tag_wire_name[W: Writer](mut writer: W, wire: Int32):
         return
     if wire == 21:
         writer.write("PLAN_STEP")
+        return
+    if wire == 22:
+        writer.write("PLAN_UNNEST")
         return
     writer.write("PlanTag#", Int(wire))
 
@@ -4336,7 +4339,7 @@ def plan_wire_space_name(space: Int) -> String:
 def plan_wire_space_member_count(space: Int) raises -> Int:
     """How many members a space publishes. RAISES on a bad index."""
     if space == 0:
-        return 19
+        return 20
     if space == 1:
         return 28
     if space == 2:
@@ -4407,7 +4410,7 @@ def plan_wire_space_member_count(space: Int) raises -> Int:
 def plan_wire_space_engine_max(space: Int) raises -> UInt8:
     """The highest engine value a space declares."""
     if space == 0:
-        return 20
+        return 21
     if space == 1:
         return 27
     if space == 2:

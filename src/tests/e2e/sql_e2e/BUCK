@@ -343,6 +343,8 @@ _CAPABILITY_CASES = {
         "regress_string_key_semi",
     ],
     "limit": ["limit_offset"],
+    # unnest(list) as a SELECT item: one row per element, none for a NULL list.
+    "unnest": ["unnest_string_split"],
     "math_functions": ["math_functions"],
     # NULL in comparisons and logic, IN lists, joins, aggregates, windows and
     # ordering.

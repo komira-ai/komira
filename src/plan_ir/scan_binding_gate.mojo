@@ -130,6 +130,7 @@ from plan_ir.logical_plan import (
     PLAN_EXCHANGE,
     PLAN_MAP_BATCHES,
     PLAN_STEP,
+    PLAN_UNNEST,
     plan_tag_name,
 )
 from plan_ir.corr_subquery import corr_subq_inner_plan_ref
@@ -339,6 +340,13 @@ def check_plan_scan_bindings[
         # A source with no child; its arguments are literals, no expression
         # site and no scan.
         return 0
+    if tag == PLAN_UNNEST:
+        # The column is a name; no expression site.
+        if not plan._unnest:
+            return 0
+        return check_plan_scan_bindings(
+            resolver, plan.unnest_data_ref().child[]
+        )
 
     # ---- TWO-CHILD ---------------------------------------------------------
     # BOTH sides, always. A join whose RIGHT side carries the stale handle is

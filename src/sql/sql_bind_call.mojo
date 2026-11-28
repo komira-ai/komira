@@ -112,6 +112,15 @@ def _bind_udf_call(
     )
 
 
+comptime UNNEST_NOT_A_SELECT_ITEM = (
+    "SQL not supported: unnest(...) is served only as a whole SELECT item"
+    " (`SELECT unnest(list) [AS name] FROM ...`); it cannot be nested in an"
+    " expression or used outside the SELECT list"
+)
+"""`unnest` reaches the scalar binder only where it is not a whole SELECT
+item: the SELECT binder takes that form first (`sql_bind_unnest`)."""
+
+
 def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:
     """Bind a scalar function-call node (SX_CALL) -> an IR `Expr`, through the
     name table in `sql_fn_table`.
@@ -144,6 +153,8 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
             "SQL bind error: aggregate function '" + sx.text
             + "' is not allowed in this position"
         )
+    if sx.text == "unnest":
+        raise Error(UNNEST_NOT_A_SELECT_ITEM)
     var spec = sql_scalar_fn_spec(sx.text)
     if not spec.lowers_to_a_node:
         # The UDF resolution step. The condition is `not

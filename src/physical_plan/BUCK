@@ -23,6 +23,7 @@ mojo_library(
         "tests/test_source_spec_parquet_files.mojo",
         "tests/test_source_spec_parquet_fs.mojo",
         "tests/test_udf_call_spec.mojo",
+        "tests/test_unnest_op_spec.mojo",
     ],
     visibility = ["PUBLIC"],
 )

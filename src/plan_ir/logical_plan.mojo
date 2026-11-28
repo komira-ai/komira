@@ -27,8 +27,9 @@
 #     _partition_topn: Optional[OwnedPointer[PartitionTopNData]] -- populated when tag == PLAN_PARTITION_TOPN
 #     _asof_join: Optional[OwnedPointer[AsofJoinData]]        -- populated when tag == PLAN_ASOF_JOIN
 #     (and `_union`, `_view_ref`, `_cse_ref`, `_cast_to_varchar`, `_exchange`,
-#      `_map_batches`, `_step` for PLAN_UNION / PLAN_VIEW_REF / PLAN_CSE_REF /
-#      PLAN_CAST_TO_VARCHAR / PLAN_EXCHANGE / PLAN_MAP_BATCHES / PLAN_STEP)
+#      `_map_batches`, `_step`, `_unnest` for PLAN_UNION / PLAN_VIEW_REF /
+#      PLAN_CSE_REF / PLAN_CAST_TO_VARCHAR / PLAN_EXCHANGE / PLAN_MAP_BATCHES /
+#      PLAN_STEP / PLAN_UNNEST)
 #
 # Only one Optional is populated at a time. The others are None.
 #
@@ -172,6 +173,11 @@ comptime PLAN_MAP_BATCHES: UInt8 = 19
 # schema is the children of its `UdfRef`'s `return_type`. Produced only by
 # the plan-wire decoder; nothing in this tree lowers or runs it yet.
 comptime PLAN_STEP: UInt8 = 20
+# unnest: one row per element of a LIST column of the child (SQL `unnest`,
+# DataFrame `explode`; they differ only in `keep_empty`). Payload:
+# `UnnestData` (`logical_plan_unnest.mojo`). Its output schema is the child's
+# with the list column replaced in place by its element type.
+comptime PLAN_UNNEST: UInt8 = 21
 
 
 # =============================================================================
@@ -192,10 +198,10 @@ comptime PLAN_STEP: UInt8 = 20
 # tag space" and "the part declared in this file" are the same set. Tag ids 16
 # and 17 are RETIRED (wire numbers 17 and 18 are reserved forever); id 18 is
 # `PLAN_EXCHANGE` (wire number 19), 19 and 20 are `PLAN_MAP_BATCHES` and
-# `PLAN_STEP` (wire numbers 20 and 21), and the next plan tag takes id 21.
+# `PLAN_STEP` (wire numbers 20 and 21), 21 is `PLAN_UNNEST` (wire number 22), and the next plan tag takes id 22.
 
-comptime PLAN_TAG_COUNT: Int = 21
-"""One past the highest `PLAN_*` tag id — `PLAN_STEP = 20`.
+comptime PLAN_TAG_COUNT: Int = 22
+"""One past the highest `PLAN_*` tag id — `PLAN_UNNEST = 21`.
 
 ⚠ THE SPACE HAS A HOLE. Ids 16 and 17 are retired and lie below this count,
 so `range(PLAN_TAG_COUNT)` visits two ids no node may carry. A walk over the
@@ -205,7 +211,7 @@ count keeps two empty slots.
 ⛔ A RETIRED ID IS NEVER REUSED. Reusing 16 or 17 would silently mis-decode any
 old bytes that still carry a node with that id — the same reason `plan.proto`
 RESERVES a retired field number rather than renumbering around it. Reserving
-the NUMBER is permanent. The next tag added takes 21."""
+the NUMBER is permanent. The next tag added takes 22."""
 
 
 def plan_tag_is_retired(tag: UInt8) -> Bool:
@@ -280,10 +286,13 @@ def _write_plan_tag_name[W: Writer](mut writer: W, tag: UInt8):
     if tag == PLAN_STEP:
         writer.write(String("Step"))
         return
+    if tag == PLAN_UNNEST:
+        writer.write(String("Unnest"))
+        return
     # ⛔ 16 / 17 ARE RETIRED IDS — DO NOT REUSE THEM FOR A NEW TAG.
     # A plan carrying 16 or 17 renders as `tag#16` / `tag#17` — which is
     # correct: no such node can be produced, and a plan that carries one is
-    # old bytes, not a live tag. The NEXT tag added takes 21.
+    # old bytes, not a live tag. The NEXT tag added takes 22.
     writer.write(String("tag#") + String(Int(tag)))
     return
 
@@ -729,6 +738,7 @@ from plan_ir.logical_plan_variants import (
 )
 from plan_ir.logical_plan_exchange import ExchangeData
 from plan_ir.logical_plan_udf import MapBatchesData, StepData
+from plan_ir.logical_plan_unnest import UnnestData, unnest_output_schema
 
 
 # =============================================================================
@@ -768,6 +778,7 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
     var _exchange: Optional[OwnedPointer[ExchangeData]]
     var _map_batches: Optional[OwnedPointer[MapBatchesData]]
     var _step: Optional[OwnedPointer[StepData]]
+    var _unnest: Optional[OwnedPointer[UnnestData]]
 
     # --- Private constructor (all fields None) ---
 
@@ -795,6 +806,7 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         self._exchange = None
         self._map_batches = None
         self._step = None
+        self._unnest = None
 
     # =========================================================================
     # Factory methods
@@ -1277,6 +1289,25 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
             )
         var plan = LogicalPlan(PLAN_STEP, output_schema^)
         plan._step = OwnedPointer(StepData(udf_index, args^))
+        return plan^
+
+    @staticmethod
+    def unnest(
+        var child: LogicalPlan, column: String, keep_empty: Bool
+    ) raises -> LogicalPlan:
+        """Create an Unnest node: one row per element of the LIST column
+        `column` of `child`. The output schema is the child's with `column`
+        replaced in place by its element type (`unnest_output_schema`).
+
+        RAISES, naming the column, when `child` has no such column or it is
+        not a LIST. `keep_empty` False drops a row whose list is empty or
+        NULL (SQL `unnest`); True keeps it as one row with a NULL element
+        (DataFrame `explode`)."""
+        var out_schema = unnest_output_schema(
+            child.output_schema, column, keep_empty
+        )
+        var plan = LogicalPlan(PLAN_UNNEST, out_schema^)
+        plan._unnest = OwnedPointer(UnnestData(child^, column, keep_empty))
         return plan^
 
     @staticmethod
@@ -1869,6 +1900,10 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
     def is_step(self) -> Bool:
         return self.tag == PLAN_STEP
 
+    @always_inline
+    def is_unnest(self) -> Bool:
+        return self.tag == PLAN_UNNEST
+
     # =========================================================================
     # Typed-UDF presence + kind predicates. The three node types that can
     # carry a UDF are FILTER / PROJECT / AGGREGATE; all others return
@@ -2011,6 +2046,11 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         """Get a reference to the StepData. Requires tag == PLAN_STEP."""
         return self._step.value()[]
 
+    @always_inline
+    def unnest_data_ref(self) -> ref [origin_of(self._unnest.value()[])] UnnestData:
+        """Get a reference to the UnnestData. Requires tag == PLAN_UNNEST."""
+        return self._unnest.value()[]
+
     # =========================================================================
     # `BoxablePlan` conformance — what lets `Expr` carry a plan without naming
     # one
@@ -2101,6 +2141,8 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
             plan._map_batches = Optional(OwnedPointer(self._map_batches.value()[].copy()))
         elif self.tag == PLAN_STEP and self._step:
             plan._step = Optional(OwnedPointer(self._step.value()[].copy()))
+        elif self.tag == PLAN_UNNEST and self._unnest:
+            plan._unnest = Optional(OwnedPointer(self._unnest.value()[].copy()))
         return plan^
 
     # =========================================================================

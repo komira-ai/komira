@@ -387,7 +387,7 @@ Import each module by name; the package root exports nothing.
   spec's order into one batch it serves as a `SinkOutputSource`, with each
   column nullable when any producer's is; a concatenation of no segment is
   refused), OP_FILTER,
-  OP_PROJECT, OP_LIMIT, OP_JOIN_PROBE (a `HashProbeOp`, whose index
+  OP_PROJECT, OP_LIMIT, OP_UNNEST (an `UnnestOp`), OP_JOIN_PROBE (a `HashProbeOp`, whose index
   `build_source` makes from the rows the build segment published; a build
   segment that is not among the segment's dependencies is refused; for a RIGHT
   or FULL probe `op_tail` gives the unmatched build rows, probe columns NULL at
@@ -414,6 +414,15 @@ Import each module by name; the package root exports nothing.
   opener (`RealBuilder(cache, pool, opener)`) reads a spec on a bucket through
   the file system the opener opens on it, beside the local ones, with one
   footer cache keyed per file system.
+- `op_unnest`: `UnnestShared` and `UnnestOp`, OP_UNNEST. The operator finds the
+  LIST column of its spec by name in each morsel, replaces it in place by the
+  element column and repeats every other column once per element. An empty or
+  NULL list gives no row, or with `keep_empty` one row whose element is NULL.
+  A morsel with a selection mask is gathered first; the output is emitted in
+  chunks of whole input rows (about `UNNEST_CHUNK_ROWS` output rows) across
+  HAVE_MORE_OUTPUT. `unnest_output_schema` gives the output schema (the element
+  field is nullable when the list's child is or `keep_empty` is set); the real
+  builder uses it for the schema of a segment with no row.
 - `op_hash_probe`: `HashProbeShared` and `HashProbeOp`, OP_JOIN_PROBE for
   INNER, LEFT, RIGHT, FULL, SEMI, ANTI and CROSS joins, the join type being the
   probe's view (probe left, build right; `lowering` exchanges LEFT and RIGHT

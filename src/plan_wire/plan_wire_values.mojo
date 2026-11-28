@@ -292,6 +292,7 @@ from plan_ir.logical_plan import (
     PLAN_CAST_TO_VARCHAR,
     PLAN_MAP_BATCHES,
     PLAN_STEP,
+    PLAN_UNNEST,
 )
 from plan_ir.corr_subquery import corr_subq_inner_plan_ref
 
@@ -3005,6 +3006,11 @@ def _check_plan(plan: LogicalPlan) raises:
         # A source with no child; its arguments are literals the UDF check
         # holds to `arg_types`. No column is named here.
         pass
+
+    elif plan.tag == PLAN_UNNEST:
+        # The column is resolved, and shown to be a list, where the node is
+        # built (`LogicalPlan.unnest`), so only the child is left to check.
+        _check_plan(plan.unnest_data_ref().child[])
 
     elif plan.tag == PLAN_VIEW_REF or plan.tag == PLAN_CSE_REF:
         # OPAQUE LEAVES — see limit 1 in the header. There is no subtree yet, so

@@ -125,6 +125,7 @@ from plan_proto.plan import (
     WireSortNode,
     WireStringFn,
     WireStepNode,
+    WireUnnestNode,
     WireStringFnN,
     WireStringOp,
     WireStructField,
@@ -502,6 +503,8 @@ def _fields_of(message: String) raises -> _Shape:
         return _vocabulary[WireMapBatchesNode]()
     elif message == "WireStepNode":
         return _vocabulary[WireStepNode]()
+    elif message == "WireUnnestNode":
+        return _vocabulary[WireUnnestNode]()
     elif message == "RecordedFields":
         return _vocabulary[RecordedFields]()
     elif message == "UdfRef":

@@ -64,10 +64,10 @@
 # know that the part of it protecting the process is one layer down, on the
 # recursion itself, where nothing has to agree with it.
 #
-# --- PLAN TAGS: 18 of 21 modelled --------------------------------------------
+# --- PLAN TAGS: 19 of 22 modelled --------------------------------------------
 #   MODELLED   SCAN, FILTER, PROJECT, AGGREGATE, JOIN, SORT, LIMIT, DISTINCT,
 #              TOPN, UNION, PARTITION_BY, PARTITION_TOPN, ASOF_JOIN, VIEW_REF,
-#              CSE_REF, CAST_TO_VARCHAR, MAP_BATCHES, STEP
+#              CSE_REF, CAST_TO_VARCHAR, MAP_BATCHES, STEP, UNNEST
 #   REFUSED    EXCHANGE (no message arm until optimized_plan.md §12 stage 3)
 #
 #   ★ THE UDF ARMS (optimized_plan_udfs.md §10.4): MAP_BATCHES, STEP and the
@@ -446,6 +446,7 @@ from plan_proto.plan import (
     WireUdfApply,
     WireMapBatchesNode,
     WireStepNode,
+    WireUnnestNode,
     UdfRef as WireUdfRef,
     WirePlan,
     WirePlanEnvelope,
@@ -556,6 +557,7 @@ from plan_ir.logical_plan import (
     PLAN_CAST_TO_VARCHAR,
     PLAN_MAP_BATCHES,
     PLAN_STEP,
+    PLAN_UNNEST,
     AsofTolerance,
     CORR_KIND_IN_CORRELATED,
     JOIN_BUILD_SIDE_UNSET,
@@ -3135,6 +3137,7 @@ def _plan_to_wire(p: LogicalPlan, optimized: Bool) raises -> WirePlan:
     var cast_to_varchar = List[WireCastToVarcharNode]()
     var map_batches = List[WireMapBatchesNode]()
     var step: Optional[WireStepNode] = None
+    var unnest = List[WireUnnestNode]()
     # Same as `_expr_to_wire`: every branch assigns or raises.
     var arm: Int
 
@@ -3471,6 +3474,16 @@ def _plan_to_wire(p: LogicalPlan, optimized: Bool) raises -> WirePlan:
         for i in range(len(d.args)):
             args.append(_scalar_to_wire(d.args[i]))
         step = Optional(WireStepNode(UInt32(d.udf_index), args^))
+    elif tag == PLAN_UNNEST:
+        # Arm ordinal, not field number — `unnest` is field 23, arm 19.
+        # The node's meaning beyond the child is the column and the flag; its
+        # output schema is derived from them, which `_check_output_schema`
+        # holds the wire's to on decode.
+        arm = 19
+        ref d = p.unnest_data_ref()
+        var kid = List[WirePlan]()
+        kid.append(_plan_to_wire(d.child[], optimized))
+        unnest.append(WireUnnestNode(kid^, d.column.copy(), d.keep_empty))
     else:
         # ⚠ REACHABLE ONLY THROUGH THE BARE `LogicalPlan(tag, schema)` CTOR.
         # Every materializable tag now has an arm; the two that do not —
@@ -3491,7 +3504,7 @@ def _plan_to_wire(p: LogicalPlan, optimized: Bool) raises -> WirePlan:
         out_schema^, arm, scan^, filter^, project^, aggregate^,
         join^, sort^, limit^, distinct^, topn^, union_all^, partition_by^,
         partition_topn^, asof_join^, view_ref^, cse_ref^, cast_to_varchar^,
-        map_batches^, step^,
+        map_batches^, step^, unnest^,
     )
 
 
@@ -3849,6 +3862,8 @@ def _plan_tag_of_arm(arm: Int) raises -> UInt8:
         return PLAN_MAP_BATCHES
     if arm == 18:
         return PLAN_STEP
+    if arm == 19:
+        return PLAN_UNNEST
     if arm == 0:
         raise _malformed(
             "a WirePlan with NO `node` arm set. The arm IS the node kind — the"
@@ -4234,6 +4249,17 @@ def _plan_from_wire(w: WirePlan, ctx: _DecodeCtx) raises -> LogicalPlan:
             index,
             args^,
             udf_frame_schema(ctx.udfs[index], index, "a WireStepNode"),
+        )
+    elif tag == PLAN_UNNEST:
+        if not w.unnest:
+            raise _malformed("PLAN_UNNEST with no unnest payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
+        ref d = w.unnest[0]
+        # Built through the factory, so a column the child lacks or one that
+        # is not a list is refused here by name.
+        out = LogicalPlan.unnest(
+            _one_child(d.child, "WireUnnestNode.child", ctx),
+            d.column.copy(),
+            d.keep_empty,
         )
     else:
         # UNREACHABLE BY CONSTRUCTION — `_plan_tag_of_arm` returns only the 16

@@ -77,7 +77,6 @@ FRAME_TABLE = {
     "fetch": PLAN,
     "with_column": "with_column() is not a polars verb; use with_columns()",
     "unpivot": ".unpivot() is not supported yet: the plan has no node for it",
-    "explode": ".explode() is not supported yet: the plan has no node for it",
     "cache": RUNS.format("cache"),
     "profile": RUNS.format("profile"),
     "collect_async": RUNS.format("collect_async"),

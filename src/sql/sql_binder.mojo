@@ -38,6 +38,10 @@ from sql.sql_bind_corr_scalar import (
     scalar_body_is_correlated, scalar_outer_of,
 )
 from sql.sql_bind_set_op import _bind_select_with_union
+from sql.sql_bind_unnest import (
+    UNNEST_BESIDE_AGGREGATE, UNNEST_ORDER_EXPRESSION, _bind_unnest_projection,
+    _has_unnest,
+)
 from sql.sql_bind_window_order import (
     _has_window, _bind_window_projection, _order_key_name, _OK_COLUMN, _OK_OUTPUT,
     _classify_order_keys, _order_output_column, _bind_order,
@@ -417,6 +421,7 @@ def _bind_select(
             has_agg = True
     var group_present = len(stmt.group_by) > 0
     var has_window = _has_window(stmt)
+    var has_unnest = _has_unnest(stmt)
 
     # ORDER BY keys that may need carrying through the projection. Only bare
     # column keys are collected here; `_classify_order_keys` handles the rest.
@@ -445,7 +450,20 @@ def _bind_select(
         order_expr_names,
     )
 
-    if has_window:
+    if has_unnest:
+        # `unnest(x)` items build Project -> Unnest -> Project
+        # (`sql_bind_unnest`). Beside an aggregate, GROUP BY or a window the
+        # list would have to be unnested before or after the other node,
+        # which this binder does not choose; refused by name.
+        if has_agg or group_present or has_window:
+            raise Error(UNNEST_BESIDE_AGGREGATE)
+        if len(order_expr_idx) > 0:
+            raise Error(UNNEST_ORDER_EXPRESSION)
+        plan = _bind_unnest_projection(
+            stmt, schema, scope, plan^, catalog, cte_scope, prebound,
+            order_names, order_carry,
+        )
+    elif has_window:
         # Window functions build PARTITION BY node(s) then a Project. They are
         # refused beside GROUP BY / aggregation in the same SELECT (a window
         # over an aggregate needs a two-stage plan this binder does not build).
@@ -500,6 +518,7 @@ def _bind_select(
         and not has_agg
         and not group_present
         and not has_window
+        and not has_unnest
     )
     var bare_limit = (
         Bool(stmt.limit) and len(stmt.order_by) == 0 and not stmt.distinct

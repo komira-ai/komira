@@ -55,6 +55,7 @@ from plan_ir.logical_plan import (
     PLAN_SORT,
     PLAN_TOPN,
     PLAN_UNION,
+    PLAN_UNNEST,
 )
 from scan_source.source_variant import (
     SOURCE_VARIANT_IN_MEMORY,
@@ -133,6 +134,8 @@ def _collect(
         _collect(inputs, node.topn_data_ref().child[], ctx)
     elif tag == PLAN_PARTITION_BY:
         _collect(inputs, node.partition_by_data_ref().child[], ctx)
+    elif tag == PLAN_UNNEST:
+        _collect(inputs, node.unnest_data_ref().child[], ctx)
     elif tag == PLAN_JOIN:
         _collect(inputs, node.join_data_ref().left[], ctx)
         _collect(inputs, node.join_data_ref().right[], ctx)
