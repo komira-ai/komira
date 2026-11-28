@@ -33,6 +33,10 @@ from sql.sql_bind_subquery import (
     _bind_scalar_subquery_body, _bind_correlated_subquery_body,
     _corr_outer_of, _not_in_lhs_is_null_free, _in_lhs_output_name,
 )
+from sql.sql_bind_distinct_on import (
+    _bind_distinct_on, _distinct_on_carry_names,
+)
+from sql.sql_bind_qualify import QUALIFY_NEEDS_A_WINDOW
 from sql.sql_bind_corr_scalar import (
     bind_correlated_scalar_body, refuse_grouped_correlated_scalar,
     scalar_body_is_correlated, scalar_outer_of,
@@ -417,6 +421,8 @@ def _bind_select(
             has_agg = True
     var group_present = len(stmt.group_by) > 0
     var has_window = _has_window(stmt)
+    if stmt.qualify_pred and not has_window:
+        raise Error(QUALIFY_NEEDS_A_WINDOW)
 
     # ORDER BY keys that may need carrying through the projection. Only bare
     # column keys are collected here; `_classify_order_keys` handles the rest.
@@ -426,12 +432,16 @@ def _bind_select(
     # key and change the row count. DuckDB v1.5.3 accepts
     # `SELECT DISTINCT k FROM t ORDER BY v` with a nondeterministic order;
     # PostgreSQL refuses it, and so does this binder.
+    #
+    # Under DISTINCT ON the keys are carried too: the partition that keeps one
+    # row per key names them (`sql_bind_distinct_on`).
     var order_names = List[String]()
     if not stmt.distinct:
         for i in range(len(stmt.order_by)):
             ref okx = stmt.order_by[i]
             if okx.expr.tag == SX_COLUMN:
                 order_names.append(_order_key_name(okx.expr, scope))
+        order_names.extend(_distinct_on_carry_names(stmt, scope))
     var order_carry = List[String]()
     # Every ORDER BY key is classified: a column (above), an ordinal or an
     # expression a SELECT item already produces (the item's output column), or
@@ -503,6 +513,7 @@ def _bind_select(
     )
     var bare_limit = (
         Bool(stmt.limit) and len(stmt.order_by) == 0 and not stmt.distinct
+        and len(stmt.distinct_on) == 0
     )
 
     # 3b. SELECT DISTINCT -> a row-level distinct over the projected output.
@@ -528,18 +539,26 @@ def _bind_select(
         var distinct_cols: Optional[List[String]] = None
         plan = LogicalPlan.distinct(distinct_cols^, plan^)
 
+    # The column each ORDER BY key RESOLVED to.
+    var sort_names = List[String]()
+    for i in range(len(stmt.order_by)):
+        if order_kind[i] == _OK_COLUMN:
+            sort_names.append(_order_key_name(stmt.order_by[i].expr, scope))
+        elif order_kind[i] == _OK_OUTPUT:
+            sort_names.append(
+                _order_output_column(plan.output_schema, order_out_idx[i], n_result)
+            )
+        else:
+            sort_names.append(String("__order_key_") + String(i))
+
+    # 3c. SELECT DISTINCT ON -> the first row of each key under ORDER BY,
+    # over the projected output (carried columns included) and before the
+    # sort, which then orders the kept rows. See `sql_bind_distinct_on`.
+    if len(stmt.distinct_on) > 0:
+        plan = _bind_distinct_on(stmt, plan^, scope, sort_names, n_result)
+
     # 4. ORDER BY -> sort, over the column each key RESOLVED to.
     if len(stmt.order_by) > 0:
-        var sort_names = List[String]()
-        for i in range(len(stmt.order_by)):
-            if order_kind[i] == _OK_COLUMN:
-                sort_names.append(_order_key_name(stmt.order_by[i].expr, scope))
-            elif order_kind[i] == _OK_OUTPUT:
-                sort_names.append(
-                    _order_output_column(plan.output_schema, order_out_idx[i], n_result)
-                )
-            else:
-                sort_names.append(String("__order_key_") + String(i))
         plan = _bind_order(stmt, plan^, scope, sort_names)
 
     # 5. LIMIT / OFFSET -> one limit node (a range limit when OFFSET > 0).

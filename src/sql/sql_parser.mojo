@@ -655,20 +655,19 @@ struct _Parser(Movable):
         # COUNT(DISTINCT col) form (which the aggregate parser handles inside `(`).
         if self._is_kw("distinct"):
             self._advance()
-            stmt.distinct = True
-            # ⛔ `DISTINCT ON (k) ...` keeps ONE row per k. Without this arm
-            # `on (k)` would parse as a call to a function named `on` (and `k`,
-            # the next word, as its alias), and die at bind on "scalar function
-            # 'on'" — naming neither DISTINCT ON nor the misread.
+            # `DISTINCT ON (k, ...)`: ONE row per key (`sql_bind_distinct_on`).
+            # `on` not followed by `(` is a column named `on`, as in DuckDB.
             if (
                 self._is_kw("on")
                 and self.pos + 1 < len(self.tokens)
                 and self.tokens[self.pos + 1].kind == TK_LPAREN
             ):
-                raise Error(
-                    "SQL not supported: SELECT DISTINCT ON (...) (one row per"
-                    " key). Plain SELECT DISTINCT is served."
-                )
+                self._advance()
+                self._expect(TK_LPAREN, "'(' after DISTINCT ON")
+                stmt.distinct_on = self._parse_expr_list()
+                self._expect(TK_RPAREN, "')' to close DISTINCT ON")
+            else:
+                stmt.distinct = True
         stmt.select_items = self._parse_select_list()
         # ★ FROM-LESS SELECT: `SELECT 7/2`, `SELECT 1 +
         # 1 AS a WHERE ...`. Recognised ONLY where the select list ends the
@@ -876,6 +875,10 @@ struct _Parser(Movable):
             self._advance()
             stmt.having_pred = self._parse_expr()
 
+        if self._is_kw("qualify"):
+            self._advance()
+            stmt.qualify_pred = self._parse_expr()
+
         if self._is_kw("order"):
             self._advance()
             self._expect_kw("by")
@@ -999,7 +1002,8 @@ struct _Parser(Movable):
             )
 
     def _refuse_unsupported_clause(self) raises:
-        """Name the DuckDB clause keywords this grammar has NO production for.
+        """Name the DuckDB clause keywords this grammar has NO production for,
+        and a QUALIFY written twice or after ORDER BY / LIMIT.
 
         ⚠ EVERY WORD HERE IS ALSO IN `_is_structural_kw`, AND THAT IS WHAT
         MAKES THIS REACHABLE. Without the stop-list row the implicit-alias grab
@@ -1014,10 +1018,8 @@ struct _Parser(Movable):
         ref w = self.tokens[self.pos].text
         if w == "qualify":
             raise Error(
-                "SQL not supported: the QUALIFY clause (a filter over window"
-                " function results). Compute the window in a derived table and"
-                " filter it from the outer query: `SELECT * FROM (SELECT ...,"
-                " <window> AS w FROM t) d WHERE <predicate on w>`."
+                "SQL syntax error: QUALIFY is written once, before ORDER BY,"
+                " LIMIT and OFFSET"
             )
         if w == "window":
             raise Error(
@@ -1749,8 +1751,8 @@ struct _Parser(Movable):
 
     ⚠ `fetch` is here because its FETCH FIRST arm is otherwise UNREACHABLE
     without an explicit alias (`FROM t FETCH FIRST 1 ROWS ONLY` would eat
-    `fetch` as t's alias). `qualify` / `window` / `pivot` / `unpivot` /
-    `tablesample` are here so `_refuse_unsupported_clause` can NAME them
+    `fetch` as t's alias), and `qualify` for its arm after HAVING. `window` /
+    `pivot` / `unpivot` / `tablesample` so `_refuse_unsupported_clause` can NAME them
     instead of dying on the token after. `isnull` / `notnull` are here so the
     SELECT-list grab never takes them as an alias (they are postfix NULL tests
     — `_parse_null_test_suffix`). DuckDB reserves every one of these words in

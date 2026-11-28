@@ -95,10 +95,7 @@
     "slug": "remove-duplicate-rows",
     "category": "Clean",
     "question": "How do I remove duplicate rows?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2380"
-    ]
+    "status": "partial"
   },
   {
     "rank": 14,

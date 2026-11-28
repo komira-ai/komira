@@ -10,9 +10,9 @@
 #   1. Each window function lowers to one PARTITION BY node with its own
 #      `PF_*` function; with no ORDER BY the default frame is the whole
 #      partition and with one it is RANGE ... CURRENT ROW; a written frame is
-#      kept; value windows carry their offset and DEFAULT; an unknown
-#      column, a window beside GROUP BY or `*`, and a missing argument are
-#      refused.
+#      kept; value windows carry their offset and DEFAULT; `*` beside a
+#      window projects every input column; an unknown column, a window
+#      beside GROUP BY, and a missing argument are refused.
 #   2. A window named like an input column is computed under an internal
 #      name; a qualified window column resolves through the join scope.
 #   3. ORDER BY: a column key, an ordinal (range-checked), a SELECT item's
@@ -287,6 +287,15 @@ def test_window_functions() raises:
     )
 
 
+def test_star_beside_a_window_projects_every_input_column() raises:
+    _check(
+        "SELECT *, rank() OVER (ORDER BY k) FROM kk",
+        "Project(exprs=[ColRef(k), ColRef(a), ColRef(_w0)])\n"
+        "  PartitionBy(partition=[], order=[k ASC], funcs=[RANK(, offset=0, frame=RANGE[0:0..2:0]) AS _w0])\n"
+        "    Scan(path=\"kk.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
 def test_window_refusals() raises:
     _check(
         "SELECT sum(zz) OVER () FROM t",
@@ -303,10 +312,6 @@ def test_window_refusals() raises:
     _check(
         "SELECT sum(v) OVER (ORDER BY zz) FROM t",
         "ERR: SQL bind error: unknown ORDER BY column 'zz' in OVER clause"
-    )
-    _check(
-        "SELECT *, rank() OVER (ORDER BY k) FROM t",
-        "ERR: SQL not supported: SELECT * alongside a window function"
     )
     _check(
         "SELECT k, sum(v) OVER () FROM t GROUP BY k",

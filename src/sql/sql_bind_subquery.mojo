@@ -348,6 +348,8 @@ def _bind_correlated_subquery_body(
         or body.limit or body.offset or body.distinct
     ):
         raise Error("SQL not supported: GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET / DISTINCT inside a predicate subquery")
+    if len(body.distinct_on) > 0 or body.qualify_pred:
+        raise Error("SQL not supported: DISTINCT ON / QUALIFY inside an EXISTS subquery")
 
     if kind == SUBQ_NOT_IN:
         return _bind_null_aware_not_in(
@@ -409,13 +411,14 @@ def _in_body_is_general(body: SelectStmt) -> Bool:
     """True when an IN / NOT IN body is not the one-table, one-bare-column,
     WHERE-only shape `_bind_correlated_subquery_body` binds inner and outer
     columns apart in: it has more than one FROM relation or a JOIN, a GROUP
-    BY, HAVING, DISTINCT, ORDER BY, LIMIT or OFFSET, or does not project
-    exactly one bare column."""
+    BY, HAVING, DISTINCT [ON], QUALIFY, ORDER BY, LIMIT or OFFSET, or does not
+    project exactly one bare column."""
     if len(body.from_tables) != 1 or len(body.joins) > 0:
         return True
     if (
         len(body.group_by) > 0 or body.having_pred or len(body.order_by) > 0
         or body.limit or body.offset or body.distinct
+        or len(body.distinct_on) > 0 or Bool(body.qualify_pred)
     ):
         return True
     if len(body.select_items) != 1:

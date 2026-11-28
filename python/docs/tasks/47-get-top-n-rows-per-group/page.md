@@ -51,8 +51,8 @@ Output:
 ## Notes
 
 - Write the filter as `rn BETWEEN 1 AND 2` (or `rn IN (1, 2)`), not `rn <= 2`. The plain `rn <= N` form, the one most people write, fails today with `UnsupportedOperation: lower: LOWERING_UNCUTTABLE_NODE: PartitionTopN (no cutter arm for this node) is not cut`, because the optimizer turns that exact shape into a node komira cannot run yet (komira-ai/komira#2377). `probe_rn_at_most.py` beside this page tries it and must fail with the line in `probe_rn_at_most.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
-- `QUALIFY` is refused by name; the message points to this subquery form.
-- The subquery needs an alias (`ranked` above), and `SELECT *` next to a window function in the same select list is refused, so name the columns.
+- `QUALIFY` filters on the window's result without the subquery: `SELECT region, rep, amount FROM sales QUALIFY row_number() OVER (PARTITION BY region ORDER BY amount DESC) BETWEEN 1 AND 2`. Write its bound as `BETWEEN` too: `<= N` fails there the same way.
+- The subquery needs an alias (`ranked` above). `SELECT *` next to a window function works.
 - On the pandas-shaped frame, `groupby("region")["amount"].rank(method="min", ascending=False)` ranks each row within its group. `method="min"` gives tied rows the same rank, so a tie at the cut keeps more than N rows; `method="first"` is refused because a frame has no row order. `groupby().head(n)`, `groupby().cumcount()`, `groupby().nlargest(n)` and `DataFrame.nlargest` are not there.
 - Rows come back in no promised order unless sorted: add `ORDER BY` or `sort_values`.
 - For the single top row per group, `rn = 1` runs as written, or take the group's `max` and join it back.

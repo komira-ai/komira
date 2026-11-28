@@ -1441,6 +1441,8 @@ struct SelectStmt(Movable):
 
     `distinct` marks `SELECT DISTINCT ...` — the binder wraps the SELECT
     output in a `PLAN_DISTINCT` node (before ORDER BY / LIMIT).
+    `distinct_on` holds `DISTINCT ON (k, ...)`'s keys (empty if absent;
+    `distinct` stays False) and `qualify_pred` the QUALIFY filter.
 
     `joins` is the per-relation join descriptor, one entry PARALLEL to each
     `from_tables[i]` for i >= 1 (so `len(joins) == len(from_tables) - 1`, and
@@ -1467,6 +1469,8 @@ struct SelectStmt(Movable):
     var ctes: Slab[CteDef]
     var subqueries: Slab[SubqueryDef]
     var distinct: Bool  # SELECT DISTINCT
+    var distinct_on: Slab[SqlExpr]  # SELECT DISTINCT ON (k, ...); empty if absent
+    var qualify_pred: Optional[SqlExpr]  # QUALIFY <pred>
     # ★ Set operations: index into the TOP-LEVEL statement's `subqueries`
     # side-table of this SELECT's right-hand branch (`UNION ALL`, `INTERSECT`
     # or `EXCEPT`, the entry's `kind`), or -1.
@@ -1492,6 +1496,8 @@ struct SelectStmt(Movable):
         self.ctes = Slab[CteDef]()
         self.subqueries = Slab[SubqueryDef]()
         self.distinct = False
+        self.distinct_on = Slab[SqlExpr]()
+        self.qualify_pred = None
         self.union_all_idx = -1
 
 

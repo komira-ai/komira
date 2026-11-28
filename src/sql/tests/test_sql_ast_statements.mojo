@@ -94,6 +94,8 @@ def test_select_stmt_defaults() raises:
     assert_equal(len(s.ctes), 0)
     assert_equal(len(s.subqueries), 0)
     assert_false(s.distinct)
+    assert_equal(len(s.distinct_on), 0)
+    assert_false(Bool(s.qualify_pred))
     assert_equal(s.union_all_idx, -1)
 
 
