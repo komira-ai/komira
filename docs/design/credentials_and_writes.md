@@ -785,7 +785,7 @@ read for identity A.
 The three credential rows **EXIST** at ABI 1.2, with session scope only, the eight kinds and the
 thirteen fields below, the two error rows **EXIST** at ABI 1.7, and `komira_add_sql_binding`
 **EXISTS** at ABI 1.10, with session scope only and the `files` kind only (a local path, or
-Parquet objects of an `s3://` or `az://` location; see [Where is the code?](#where-is-the-code)),
+Parquet objects of an `s3://`, `az://` or `gs://` location; see [Where is the code?](#where-is-the-code)),
 in the golden's spelling ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)):
 
 ```text
@@ -1070,7 +1070,7 @@ var result = session.sql("SELECT * FROM sales_catalog.sales.orders LIMIT 10")
 |---|---|
 | first release (local only) | `COPY ... TO` a local Parquet, CSV or JSON file: `Count`, the all-or-nothing write, extension inference. `SQL_STATEMENT_UNSUPPORTED` for the refused statements. `komira_last_error_code` and `_step` (built, ABI 1.7). Every remote URL refused with `STORAGE_URL_REFUSED` |
 | bindings | `komira_add_sql_binding`, `Session.add_sql_binding`, `sql` with call bindings and the unnamed source, `komira.files` for local files and frames, `BIND_NAME_UNBOUND`. `register_parquet` becomes `add_sql_binding` underneath, which fixes its re-registration defect |
-| object stores | credentials and their ABI calls; `WireSourceAccess` on the wire; the S3 read arm with `ambient`; `https://` reads; the S3 write arm; GCS and Azure reads |
+| object stores | credentials and their ABI calls; `WireSourceAccess` on the wire; the S3 read arm with `ambient`; `https://` reads; the S3 write arm; GCS and Azure reads. Built: the credential calls, and the S3, Azure and GCS read arms of a bound `files` source at ABI 1.10 (S3 with `AwsKeys`, Azure with `AzureKey`, `AzureSas` or `anonymous`, GCS with `GcpToken`); not built: `ambient`, `AwsProfile`, `GcpServiceAccount`, `https://` reads and every write |
 | catalogs | `komira.iceberg` and the Iceberg statements ([the Iceberg design](#reconciling-with-the-iceberg-design)) |
 | DataFrame surface | built: the pandas-shaped write terminals (`to_parquet`, `to_csv`, `to_json`) with `compression=`, through `komira_plan_stream`, which no longer refuses a write target. Built too: the polars-shaped `sink_parquet`, `sink_csv` and `sink_ndjson` of `komira.pl`. To come: `write_table`, and readers taking `komira.files` sources |
 | job manager | the resolver interface of decision 5, with its header check, kind check and endpoint allow-list; `DeclaredNeeds.credentials`; `PLAN_URL_QUERY_REFUSED` |
@@ -1360,13 +1360,18 @@ built and private until `add_sql_binding` exports them (`python/komira/_iceberg.
 `komira_add_sql_binding` is built at ABI 1.10 ([src/so](../../src/so/README.md), `bindings.mojo`):
 session scope only; `WireBoundSource` (`src/plan_proto/bound_source.proto`) with its `files` arm
 only; a local path, or Parquet objects (one key or a glob) of an `s3://`/`s3a://` location read with
-`AwsKeys`, or of an `az://`/`abfs://`/`abfss://` location read with `AzureKey`, `AzureSas` or
-`anonymous`, footers read through the store at the call; `komira_sql_stream` reads those tables
-through `so.store_fs`, revealing the sealed values for each statement. It refuses by name what is
-not built yet: other scopes (`BIND_SCOPE_UNSUPPORTED`), `gs://` and every other scheme
+`AwsKeys`, of an `az://`/`abfs://`/`abfss://` location read with `AzureKey`, `AzureSas` or
+`anonymous`, or of a `gs://`/`gcs://` location read with `GcpToken` (its token is each call's bearer
+token, over google.storage.v2 gRPC on TLS at Google's endpoint or an `https://host[:port]` endpoint
+of the source's own; `so.gcs_access`), footers read through the store at the call;
+`komira_sql_stream` reads those tables through `so.store_fs`, revealing the sealed values for each
+statement, and refuses a statement whose `gs://` table's credential name now holds another kind
+(`CREDENTIAL_KIND_MISMATCH`). It refuses by name what is not built yet: other scopes
+(`BIND_SCOPE_UNSUPPORTED`), every other scheme and an `http://` endpoint on `gs://`
 (`STORAGE_URL_REFUSED`), `ambient` or no credential (`CREDENTIALS_NOT_FOUND`), `anonymous` and
-`AwsProfile` on S3, Hive partitioning and a signing service (`BIND_SOURCE_UNSUPPORTED`), a scope as
-a table (`BIND_SCOPE_NOT_A_TABLE`), and a second table reading a bucket with other settings
+`AwsProfile` on S3, `anonymous` and `GcpServiceAccount` on GCS, a region or an addressing style on
+GCS, Hive partitioning and a signing service (`BIND_SOURCE_UNSUPPORTED`), a scope as a table
+(`BIND_SCOPE_NOT_A_TABLE`), and a second table reading a bucket with other settings
 (`BIND_STORE_CONFLICT`). `register_parquet` replaces a taken name.
 No other surface, wire field or error code of this design is built. The parts it builds on are:
 - [src/sql](../../src/sql/sql_binder.mojo) (`sql_binder.mojo`, `sql_catalog.mojo`, `sql_parser.mojo`);

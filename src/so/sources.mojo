@@ -46,6 +46,7 @@ from byte_buffer.file_identity import FileIdentity
 from compression.codec_libraries import probe_codec_libraries
 from csv.csv_options import QUOTE_STYLE_TAG_RFC4180
 from http_core.transport.io_stream import Connector
+from objectstore_gcs import GcsStorageBackend
 from parquet_footers.parquet_files import resolve_parquet_source
 from plan_ir.logical_plan import LogicalPlan
 from plan_wire import (
@@ -374,12 +375,15 @@ def sql_result(
 
 
 def sql_result_with[
-    S3C: Connector, AZC: Connector, K: AwsClock & Copyable & Deinitable
+    S3C: Connector,
+    AZC: Connector,
+    G: GcsStorageBackend,
+    K: AwsClock & Copyable & Deinitable,
 ](
     mut session: Session,
     sql: String,
     control: RunControl,
-    var connectors: StoreConnectors[S3C, AZC, K],
+    var connectors: StoreConnectors[S3C, AZC, G, K],
 ) raises -> ArrowResult:
     """`sql_result` under `control`, reading the session's bound object stores
     through the connectors and clock `connectors` gives: the file systems of
@@ -388,7 +392,7 @@ def sql_result_with[
     at step `bind` (`<step>: <reason>`, recorded on the session).
     """
     probe_codec_libraries()
-    var opener: StoreScanFs[S3C, AZC, K]
+    var opener: StoreScanFs[S3C, AZC, G, K]
     try:
         opener = store_opener(session, connectors^)
     except e:

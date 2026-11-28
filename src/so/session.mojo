@@ -118,9 +118,9 @@ struct Session(Movable):
     `_set`, `_seal`), by name; their values are wiped when the session is
     dropped."""
     var bound_stores: BoundStores
-    """The object store each table bound to an `s3://` or `az://` location
-    reads (`add_sql_binding`): the bucket, the credential's name and the
-    settings, never a value."""
+    """The object store each table bound to an `s3://`, `az://` or `gs://`
+    location reads (`add_sql_binding`): the bucket, the credential's name and
+    the settings, never a value."""
 
     def __init__(out self, options: EngineOptions = EngineOptions()) raises:
         """A session with no error, no table and no credential, over an engine

@@ -1,5 +1,6 @@
 # =============================================================================
-# StoreFs and StoreScanFs: S3 and Azure Blob behind one file system, over the
+# StoreFs and StoreScanFs: S3 and Azure Blob behind one file system (the GCS
+# arm is test_gcs_store_fs's), over the
 # fakes (no socket, no network)
 # =============================================================================
 #
@@ -29,8 +30,9 @@
 #     write_at, pwrite_at, close_write, abort_write, delete, fsync_file and
 #     fsync_dir are Azure's own refusals, unchanged.
 #   * test_a_handle_of_the_other_store_is_refused_by_name: a read or write
-#     handle of one store given to the file system of the other is
-#     STORE_FS_HANDLE, for every verb that takes a handle, both ways.
+#     handle of one store given to the file system of another is
+#     STORE_FS_HANDLE, for every verb that takes a handle, both ways (the GCS
+#     arm's are test_gcs_store_fs's).
 #   * test_an_opener_serves_the_buckets_it_was_told_of: serves and
 #     open_scan_fs for S3 and Azure, and what they do not serve.
 #   * test_an_opener_refuses_what_it_does_not_serve_word_for_word:
@@ -83,7 +85,9 @@ from plan_expr.fs_descriptor_pod import (
 
 from komira_test_fake_azure import FakeAzureConnector
 from komira_test_fake_s3 import FakeS3Connector
+from objectstore_gcs import FakeGcsStorageBackend
 
+from so.gcs_access import GcsAccess, KernelGcsBackend
 from so.store_fs import (
     STORE_FS_HANDLE,
     StoreConnectors,
@@ -93,9 +97,15 @@ from so.store_fs import (
     kernel_store_connectors,
 )
 
-comptime _Connectors = StoreConnectors[FakeS3Connector, FakeAzureConnector, FixedClock]
-comptime _Opener = StoreScanFs[FakeS3Connector, FakeAzureConnector, FixedClock]
-comptime _Fs = StoreFs[FakeS3Connector, FakeAzureConnector, FixedClock]
+comptime _Connectors = StoreConnectors[
+    FakeS3Connector, FakeAzureConnector, FakeGcsStorageBackend, FixedClock
+]
+comptime _Opener = StoreScanFs[
+    FakeS3Connector, FakeAzureConnector, FakeGcsStorageBackend, FixedClock
+]
+comptime _Fs = StoreFs[
+    FakeS3Connector, FakeAzureConnector, FakeGcsStorageBackend, FixedClock
+]
 
 comptime _ACCOUNT = "devstoreaccount1"
 comptime _FAKE_KEY = "VGhpcyBpcyBhIGZha2Uga2V5IGZvciB0ZXN0aW5nIDEyMzQ1Njc4OTAxMjMK"
@@ -168,9 +178,19 @@ def _mk_azure_tls() raises -> FakeAzureConnector:
     return FakeAzureConnector()
 
 
+def _mk_gcs(access: GcsAccess) raises -> FakeGcsStorageBackend:
+    """An empty bucket: the GCS arm is test_gcs_store_fs's."""
+    return FakeGcsStorageBackend()
+
+
 def _connectors() -> _Connectors:
     return _Connectors(
-        _mk_s3, _mk_s3_tls, _mk_azure, _mk_azure_tls, FixedClock(1790000000)
+        _mk_s3,
+        _mk_s3_tls,
+        _mk_azure,
+        _mk_azure_tls,
+        _mk_gcs,
+        FixedClock(1790000000),
     )
 
 
@@ -220,7 +240,7 @@ def _handle_refusal(verb: String) -> String:
         String(STORE_FS_HANDLE)
         + ": StoreFs."
         + verb
-        + " was given a handle of the other object store"
+        + " was given a handle of another object store"
     )
 
 
@@ -535,9 +555,12 @@ def test_an_https_endpoint_is_refused_by_a_connector_that_is_not_tls() raises:
 
 
 def test_the_production_connectors_open_file_systems_without_dialing() raises:
-    var o = StoreScanFs[KernelSchemeConnector, KernelSchemeConnector, SystemAwsClock](
-        kernel_store_connectors()
-    )
+    var o = StoreScanFs[
+        KernelSchemeConnector,
+        KernelSchemeConnector,
+        KernelGcsBackend,
+        SystemAwsClock,
+    ](kernel_store_connectors())
     o.add_s3("lake", S3Config.aws("us-east-1"), _aws(_KEY_ID))
     o.add_s3("local", _s3_config(), _aws(_KEY_ID))
     o.add_azure("box", AzureFsConfig.azure(String(_ACCOUNT)), AzureCredential.anonymous())

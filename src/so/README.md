@@ -18,10 +18,10 @@ way; and
 `komira_register_arrow_stream`, which drains a host's Arrow C stream into a
 table the session holds in memory, which SQL on the session reads by name; and
 `komira_add_sql_binding`, which binds a table name to the protobuf bytes of a
-`WireBoundSource` (a local Parquet path, or Parquet objects of an `s3://` or
-`az://` location read with a credential sealed on the session), replacing a
-table of that name; `komira_sql_stream` reads such a table through the object
-store.
+`WireBoundSource` (a local Parquet path, or Parquet objects of an `s3://`,
+`az://` or `gs://` location read with a credential sealed on the session),
+replacing a table of that name; `komira_sql_stream` reads such a table through
+the object store.
 
 - `abi/komira.tsv`: the golden of the C ABI; `komira.h` is made from it.
 - `status.mojo`: the seven status codes, `KOMIRA_MAX_INPUT_BYTES`, the credential
@@ -44,6 +44,13 @@ store.
 - `bindings.mojo`: what `komira_add_sql_binding` does on values (a name, the
   bytes of a `WireBoundSource` and a scope in; a table bound on the session, or
   a raise with the named refusal).
+- `store_fs.mojo`: `StoreFs`, the one file system type a statement reads its
+  bound buckets through (an S3 bucket, an Azure container or a GCS bucket),
+  `StoreScanFs`, the opener of exactly the buckets the session's tables name,
+  and `StoreConnectors`, what the stores are dialed and signed with.
+- `gcs_access.mojo`: `GcsAccess`, how a GCS bucket is reached (the endpoint's
+  host and port and the access token), and the GCS backend a `StoreFs` builds
+  on its first read (`LazyGcsBackend`; `kernel_gcs_backend` in production).
 - `_c_abi.mojo`: the exports. It is the only file here that holds pointers, it
   is not part of the Mojo package (it is the source of the `libkomira`
   target), and its header says who owns and frees each pointer.
@@ -644,15 +651,21 @@ and the source's `region` (and `endpoint`, `addressing`), or
 `az://container/blob` (`abfs://`, `abfss://`, and the forms `azure_blob`'s
 `parse_azure_url` reads) read with an `AzureKey` or `AzureSas` credential,
 whose `ACCOUNT` names the account, or `anonymous` when the location names the
-account. The key may be a glob (`*`, `?`, `[...]`, `{a,b}`, one `**`), listed
+account, or `gs://bucket/object` (`gcs://` too) read with a `GcpToken`
+credential, whose `TOKEN` is each call's bearer token, over gRPC on TLS at
+Google's endpoint or the source's `endpoint` (`https://host[:port]`; a gs://
+source takes no region and no addressing). The key may be a glob (`*`, `?`, `[...]`, `{a,b}`, one `**`), listed
 now. The footers are read now, through the store, so a refused key or a
 missing object is -3 with the store's message. Path-style addressing is the
 default on an endpoint of the source's own, virtual-hosted on the
-provider's; plaintext only for an `http://` endpoint. `komira_sql_stream`
+provider's; plaintext only for an `http://` endpoint of S3 or Azure (a
+`gs://` source is read on TLS only). `komira_sql_stream`
 reads the table through the same store, with the value sealed under the
 credential's name when the statement starts (`so.store_fs`: one file system per
 bound bucket); a credential that no longer fits refuses the statement at step
-`bind`. The bytes
+`bind` (for a `gs://` table, a name sealed again as any kind but `GcpToken`
+is `CREDENTIAL_KIND_MISMATCH`, so a `BearerToken` is never sent to Cloud
+Storage). The bytes
 carry no secret: the source's access names a credential sealed on the
 session beforehand (`komira_credential_add`, `_set`, `_seal`), and the library
 reveals its value inside itself when it reads. The bytes are copied before
@@ -678,10 +691,14 @@ bytes that decode but name no kind, an empty buffer among them
 and a local file the reader refuses. Then the source's own refusals, each
 `<CODE>: add_sql_binding name=<name>: <reason>`: `STORAGE_URL_REFUSED` (user
 information in a location or endpoint, a query or fragment, an endpoint that is
-not `http://` or `https://`, and every scheme but those above: `gs://` is not
-read yet), `BIND_SOURCE_UNSUPPORTED` (a signing service, Hive partitioning on
-an object store, an endpoint, region or addressing on a local path, a region on
-Azure, `anonymous` or an `AwsProfile` on S3), `CREDENTIALS_NOT_FOUND` (an
+not `http://` or `https://`, a `gs://` endpoint that is not
+`https://host[:port]` with a DNS name or IPv4 address as the host, a port
+from 1 to 65535 and no path, and every scheme
+but those above), `BIND_SOURCE_UNSUPPORTED` (a signing service, Hive
+partitioning on an object store, an endpoint, region or addressing on a local
+path, a region on Azure, a region or addressing on GCS, `anonymous` or an
+`AwsProfile` on S3, `anonymous` or a `GcpServiceAccount` on GCS),
+`CREDENTIALS_NOT_FOUND` (an
 object-store source naming no credential, or `ambient`, which the library does
 not resolve), `CREDENTIAL_KIND_MISMATCH` (a credential of another store, or
 one on a local path), `STORAGE_REGION_UNKNOWN` (an S3 source with no region),
@@ -693,6 +710,30 @@ sealed value. No message holds a credential's value. Nothing is bound or
 replaced on a refusal.
 
 On values, the call is `add_sql_binding` over the source's bytes (`so.bindings`).
+
+A `gs://` source's endpoint is read by `GcsAccess.at` (`so.gcs_access`): an
+empty one is Google's own, and `gcs_endpoint_refusal` names why another is
+not read, never echoing it:
+
+```mojo
+from so import GcsAccess, gcs_endpoint_refusal
+from std.testing import assert_equal
+
+var google = GcsAccess.at(String(""), String("ya29.a-token"))
+assert_equal(google.host, "storage.googleapis.com")
+assert_equal(google.port, UInt16(443))
+var emulator = GcsAccess.at(
+    String("https://gcs.emulator.test:4443"), String("ya29.a-token")
+)
+assert_equal(emulator.host, "gcs.emulator.test")
+assert_equal(emulator.port, UInt16(4443))
+assert_equal(gcs_endpoint_refusal(String("https://gcs.emulator.test:4443")), "")
+assert_equal(
+    gcs_endpoint_refusal(String("http://gcs.emulator.test:4443")),
+    "a gs:// endpoint must start with https://: Cloud Storage is read over"
+    " gRPC on TLS, with no plaintext route",
+)
+```
 
 ## Building and testing
 
@@ -731,8 +772,9 @@ name free; the streams the library drains are the C driver's.
 checks the NULL cases (-1, -2 with the named last error), a `source_len` of 64 MiB
 plus one (-5 with its last error), and each -3 word for word with step `bind`
 and its code: a scope other than 1, an empty name, a name that is not UTF-8, a
-one-byte source, a zero-length source and a missing file; a good call after a
-refusal leaves no error.
+one-byte source, a zero-length source, a missing file and a `gs://` location
+that names no credential (`CREDENTIALS_NOT_FOUND`: the library reads `gs://`);
+a good call after a refusal leaves no error.
 `exports_exact` makes the twenty-six names above the whole dynamic symbol table.
 On Linux the eleven C owners in the library's closure (async, async_api,
 compression, crypto, fs, http_core, libc, metrics, objectstore, parquet_codec,

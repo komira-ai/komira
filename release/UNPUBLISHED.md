@@ -233,7 +233,7 @@ superseded" are read from the code by hand, and no library has either today. In 
 | [`shuffle_streaming`](../src/shuffle_streaming/) | no README example | its README.md holds no mojo example, which the release README gate refuses |
 | [`smtp_client`](../src/smtp_client/) | depends on an unpublished library | imports `async_rt`, `http_client`, `http_core`, `net` |
 | [`smtp_server`](../src/smtp_server/) | no README example | its README.md holds no mojo example, which the release README gate refuses |
-| [`so`](../src/so/) | depends on an unpublished library | imports `arrow`, `arrow_ipc`, `csv`, `plan_ir`, `plan_wire`, `scan_source`, `sdk`, `sdk_exec`, `secret_registry`, `secret_store`, `sql` |
+| [`so`](../src/so/) | depends on an unpublished library | imports `arrow`, `arrow_ipc`, `csv`, `gcp_core`, `objectstore_gcs`, `plan_ir`, `plan_wire`, `scan_source`, `sdk`, `sdk_exec`, `secret_registry`, `secret_store`, `sql` |
 | [`source_url`](../src/source_url/) | depends on an unpublished library | imports `plan_expr` |
 | [`sql`](../src/sql/) | depends on an unpublished library | imports `arrow`, `arrow_ipc`, `avro`, `column_kernels`, `csv`, `decimal_literal`, `jsonl`, `parquet_codec`, `plan_expr`, `plan_ir`, `scan_source` |
 | [`supervisor`](../src/supervisor/) | native dependency pending | owns C (_proc_shim.c, _proc_io_shim.c) linked through a native shared library; it is not yet the static archive a mopm package declares |
