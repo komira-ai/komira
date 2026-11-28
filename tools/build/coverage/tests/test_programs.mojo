@@ -557,7 +557,7 @@ def test_a_program_that_is_a_test_source_is_an_error() raises:
         raised = True
         assert_equal(
             String(e),
-            "src/p/mopm.toml:6: bins entry `tool` names src/p/tests/test_a.mojo, which is a test source of src/p (under its tests/, or a --test-source)",
+            "src/p/mopm.toml:6: bins entry `tool` names src/p/tests/test_a.mojo, which is a test source of src/p (under its tests/, a README example in its examples/, or a --test-source)",
         )
     assert_true(raised)
 

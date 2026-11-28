@@ -11,7 +11,8 @@ and the findings: the one computation both `covcheck report` and
    any test binary reached is covered).
 3. Each file's package is the nearest directory with a BUCK file. With
    `only_package`, the files of every other package are dropped here. Test
-   sources (`<package>/tests/...`, and each path of `test_sources`: a
+   sources (`<package>/tests/...`, a source-first README's examples
+   `<package>/examples/<name>.mojo`, and each path of `test_sources`: a
    welded test elsewhere in its package, named by the gate) are counted and
    dropped unless `include_tests`.
 3b. A kept `.mojo` file whose first line is the header `# @generated`
@@ -253,7 +254,7 @@ def _programs(
         if _keep(p.package, p.path, opts) == 2:
             raise Error(
                 p.manifest + String(":") + String(p.line) + String(": bins entry `") + p.name + String("` names ") + p.path
-                + String(", which is a test source of ") + p.package + String(" (under its tests/, or a --test-source)")
+                + String(", which is a test source of ") + p.package + String(" (under its tests/, a README example in its examples/, or a --test-source)")
             )
     return programs^
 
