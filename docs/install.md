@@ -145,7 +145,10 @@ What each call does:
   `name`. `path` is a `str` or a `pathlib.Path`; a relative path is resolved against the working
   directory and `~` is expanded. `register_csv(name, path)` and `register_json(name, path)` register
   a CSV file and a newline-delimited JSON file the same way, with the column names and types the
-  engine infers from the file.
+  engine infers from the file. `register(name, obj)` registers rows in memory, as DuckDB's
+  `register` does: a komira DataFrame, or any object with the Arrow C stream interface (a
+  `pyarrow.Table` or `RecordBatchReader`, a pandas or polars DataFrame), its rows copied when the
+  call is made (newer than 0.1.1623).
 - `s.sql(query)` runs one SQL statement over the session's tables and returns a `komira.Result`. A
   syntax error (`komira.ParseError`), an unknown table or column (`komira.BindError`), or a construct
   the engine does not run yet (`komira.UnsupportedOperation`) raises from `sql`, with the engine's
@@ -163,7 +166,7 @@ The package's [README](../python/README.md), which is also its PyPI description,
   [capability table](design/dataframe_surface_verbs.md) marks each one "not built", and gives what the
   engine does with each capability's plan. Among them: the ORC, Avro and Arrow IPC readers, the
   readers on an object-store URL (`s3://`, `gs://`, `az://`; SQL reads `s3://` and `az://` Parquet
-  through `Session.add_sql_binding`), and frames made from Arrow data. Both frames write a local
+  through `Session.add_sql_binding`), and frames made from Arrow data (SQL reads Arrow data through `Session.register`). Both frames write a local
   file: the pandas-shaped one with `to_parquet`, `to_csv` and `to_json`, the polars-shaped one with
   `sink_parquet`, `sink_csv` and `sink_ndjson`.
 - **Python UDFs**: no verb takes a Python function yet, and `sql` runs none.

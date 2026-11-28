@@ -97,7 +97,6 @@
     "question": "How do I remove duplicate rows?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2378",
       "komira-ai/komira#2380"
     ]
   },
@@ -309,10 +308,7 @@
     "slug": "run-sql-csv-parquet-file",
     "category": "Performance",
     "question": "How do I run SQL on a CSV or Parquet file (or a DataFrame)?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2391"
-    ]
+    "status": "works"
   },
   {
     "rank": 38,

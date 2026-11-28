@@ -34,6 +34,10 @@ by nothing and give one row. No SQL text is written.
   row, computed over the row's group by a window (komira/_windows.py). Under
   `dropna=True` a row whose key is missing is in no group, and its value is
   missing, as in pandas.
+- `drop_duplicates` over every column is a DISTINCT (an AGGREGATE for
+  `keep=False`); over fewer columns, a `subset`, it is a window that numbers
+  or counts the rows of each value, under a filter (komira/_windows.py), and
+  the row it keeps of a value is any one of them (a plan has no row order).
 """
 
 from __future__ import annotations
@@ -630,26 +634,47 @@ def agg_frame(frame: DataFrame, arg: object, named: dict[str, object]) -> DataFr
     return GroupBy._of(frame, (), False, False).agg(arg, **named)
 
 
-def drop_duplicates(frame: DataFrame, subset: object, keep: object) -> DataFrame:
-    """`df.drop_duplicates(subset, keep=...)` over every column: a DISTINCT,
-    or for `keep=False` the rows no other row equals (an AGGREGATE by every
-    column with count(*) = 1, then the columns)."""
+def subset_of(frame: DataFrame, subset: object, verb: str) -> tuple[str, ...]:
+    """The columns `subset` names for `verb` (`drop_duplicates`,
+    `duplicated`), each once in the order first given; every column of the
+    frame when it is None."""
     columns = frame._plan.columns
-    if subset is not None:
-        names = (subset,) if isinstance(subset, str) else subset
-        if not isinstance(names, (list, tuple)):
-            raise TypeError(f"drop_duplicates subset takes column names, not a {type(subset).__name__}")
-        for name in names:
-            if not isinstance(name, str):
-                raise TypeError(f"drop_duplicates subset takes column names, which are str, not {type(name).__name__}")
-        _ops.require_columns(tuple(names), columns)
-        if set(names) != set(columns):
-            listed = list(names)
-            raise UnsupportedOperation(
-                f"drop_duplicates(subset={listed!r}) keeps one whole row of each group of rows equal on "
-                f"those columns, which this release does not build: keep only those columns first, as "
-                f"df[{listed!r}].drop_duplicates()"
-            )
+    if subset is None:
+        return tuple(columns)
+    names = (subset,) if isinstance(subset, str) else subset
+    if not isinstance(names, (list, tuple)):
+        raise TypeError(f"{verb} subset takes column names, not a {type(subset).__name__}")
+    for name in names:
+        if not isinstance(name, str):
+            raise TypeError(f"{verb} subset takes column names, which are str, not {type(name).__name__}")
+    if not names:
+        raise ValueError(f"{verb} subset names no column: name at least one, or leave it out to compare every column")
+    _ops.require_columns(tuple(names), columns)
+    return tuple(dict.fromkeys(names))
+
+
+def check_keep(keep: object) -> object:
+    """`keep` of `drop_duplicates` and `duplicated`: "first", "last" or
+    False, which pandas also accepts as a value equal to it (0); returned as
+    "first", "last" or False."""
+    if keep not in ("first", "last", False):
+        raise ValueError("keep must be either \"first\", \"last\" or False")
+    return keep if keep in ("first", "last") else False
+
+
+def drop_duplicates(frame: DataFrame, subset: object, keep: object) -> DataFrame:
+    """`df.drop_duplicates(subset, keep=...)`. Over every column (no subset,
+    or one naming every column): a DISTINCT, or for `keep=False` the rows no
+    other row equals (an AGGREGATE by every column with count(*) = 1, then the
+    columns). Over fewer columns: the rows `duplicated(subset, keep)` holds
+    false, by a window (komira/_windows.py, `unique_rows`) over the frame with
+    its sort dropped. The answer has no row order."""
+    names = subset_of(frame, subset, "drop_duplicates")
+    keep = check_keep(keep)
+    columns = frame._plan.columns
+    if set(names) != set(columns):
+        plan = frame._plan.child if isinstance(frame._plan, _ops.Sort) else frame._plan
+        return frame._derive(_windows.unique_rows(plan, names, keep))
     if keep is False:
         count = "count"
         while count in columns:
@@ -657,8 +682,6 @@ def drop_duplicates(frame: DataFrame, subset: object, keep: object) -> DataFrame
         plan = _ops.aggregate(frame._plan, columns, ((count, _ops.Agg("count")),))
         plan = _ops.filter_(plan, _ops.Compare("eq", _ops.ColRef(count), _ops.Lit(1)))
         return frame._derive(_ops.select(plan, columns))
-    if keep not in ("first", "last"):
-        raise ValueError("keep must be either \"first\", \"last\" or False")
     # Rows equal on every column are the same row, so "first" and "last"
     # keep the same one.
     return frame._derive(_ops.distinct(frame._plan))

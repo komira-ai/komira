@@ -1,6 +1,6 @@
 # How do I run SQL on a CSV or Parquet file (or a DataFrame)?
 
-Name the file in `FROM` (`FROM 'sales.csv'`, `read_csv`, `read_parquet`) or register it with `Session.register_csv` / `register_parquet`, and run the SQL with `Session.sql`; a DataFrame is not a table yet, so write its rows to a file first.
+Name the file in `FROM` (`FROM 'sales.csv'`, `read_csv`, `read_parquet`) or register it with `Session.register_csv` / `register_parquet`, register a DataFrame or an Arrow table with `Session.register(name, obj)`, and run the SQL with `Session.sql`.
 
 <!-- include example.py -->
 ```python
@@ -43,12 +43,12 @@ with komira.Session() as s:
     )
     print(over.to_arrow().to_pylist())
 
-    # A DataFrame is not a table yet: its rows go to a Parquet file first.
+    # A DataFrame or an Arrow table in memory is a table once registered.
     df = komira.read_csv("sales.csv")
-    big = df[df["amount"] > 100]
-    pq.write_table(big.materialize().to_arrow(), "big.parquet")
-    s.register_parquet("big", "big.parquet")
+    s.register("big", df[df["amount"] > 100])
     print(s.sql("SELECT id, amount FROM big ORDER BY id").to_arrow().to_pylist())
+    s.register("goals", targets)
+    print(s.sql("SELECT region FROM goals WHERE target > 100").to_arrow().to_pylist())
 ```
 
 Output:
@@ -61,6 +61,7 @@ Output:
 [{'region': 'east', 'target': 100}, {'region': 'north', 'target': 150}, {'region': 'west', 'target': 100}]
 [{'id': 1, 'region': 'east', 'amount': 120, 'target': 100}, {'id': 4, 'region': 'north', 'amount': 200, 'target': 150}, {'id': 5, 'region': 'west', 'amount': 150, 'target': 100}]
 [{'id': 1, 'amount': 120}, {'id': 4, 'amount': 200}, {'id': 5, 'amount': 150}]
+[{'region': 'north'}]
 ```
 
 ## Notes
@@ -68,8 +69,10 @@ Output:
 - `FROM '<path>'` picks the reader from the extension (`.csv`, `.parquet`, `.json`, `.jsonl` or `.ndjson`; any other extension, such as `.tsv` or `.csv.gz`, is refused by name, so spell the reader out) and names the table after the file, so `FROM 'sales.csv'` is also `sales`. `read_csv('<path>')`, `read_parquet('<path>')` and `read_json('<path>')` say the same by name; each also takes a glob pattern (`FROM 'sales/*.csv'`), whose files read as one table.
 - A registered table is the same file under a name you choose; use it when a query reads the file more than once or joins it with another.
 - `AVG` over an integer column answers a float, and `MAX` an integer, as in the output above.
-- The DataFrame part is the limit. The SQL sees files and registered tables only: there is no `register_frame` and no `SELECT * FROM df` that finds a Python variable. `probe_dataframe_in_sql.py` beside this page tries that and must fail with the line in `probe_dataframe_in_sql.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it. komira-ai/komira#2391 tracks it.
-- The workaround is the last block of the program: run the frame (`materialize()`), write the Arrow table with `pyarrow.parquet.write_table`, and register that file. A pandas or polars DataFrame in memory goes the same way, through `pyarrow.Table.from_pandas` or `polars.DataFrame.write_parquet`; neither is installed for this page's check, so it is not run here.
+- `Session.register(name, obj)` takes a komira DataFrame or `komira.pl.LazyFrame` (its plan runs then), or any object with the Arrow C stream interface (`__arrow_c_stream__`): a `pyarrow.Table`, `RecordBatch` or `RecordBatchReader`, and a pandas or polars DataFrame, which have it too. It is DuckDB's `register(name, obj)`.
+- The rows are copied when the call is made, and every query reads the copy: a change to the frame afterwards is not seen until it is registered again. A `pyarrow.RecordBatchReader` is read then, once, and its table answers every query; giving the same reader to `register` again is refused by name.
+- Registering a name again replaces its table, of any kind, as DuckDB's `register` does. A column of a nested type (a list, a struct, a map) is refused by name: `UnsupportedOperation` with the code `TABLE_TYPE_UNSUPPORTED`.
+- DuckDB also finds a frame by its Python variable name (`SELECT * FROM df` with no `register`); komira does not, and that query fails as an unknown table: register the frame first. komira-ai/komira#2391 tracks it.
 - Parquet objects on `s3://` and Azure Blob are bound to a name with `Session.add_sql_binding` and `komira.files` ([rank 31](../31-read-parquet-csv-files-s3/page.md)); a URL written in the SQL text, `gs://` and `https://` are not read yet: komira-ai/komira#2337 and komira-ai/komira#2345.
 
 ## Related
