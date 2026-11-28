@@ -4,7 +4,8 @@
 #
 # Each test writes its own input CSV (sales.csv: id, amount, year, month,
 # region; five rows over three (year, month) pairs and two regions) under the
-# test's scratch directory and copies from read_csv over it.
+# test's scratch directory and copies from read_csv over it; the escaped-value
+# test writes a Parquet input of its own, which holds a VARCHAR NULL.
 #
 # What each test proves:
 #   * test_year_and_month_make_the_tree_duckdb_writes: PARTITION_BY
@@ -35,7 +36,10 @@ from std.os.path import exists, isdir
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from arrow.arrow_types import ArrowType
-from arrow.schema import RecordBatch
+from arrow.column import Column
+from arrow.primitive_array import PrimitiveArray
+from arrow.schema import Field, RecordBatch, RecordBatchBuilder, SchemaBuilder
+from arrow.string_array import StringArray
 from komira_plan_harness import CanonPolicy, render_batch
 from runtime_paths import test_tmpdir
 from sdk_exec.engine_context import EngineContext
@@ -44,6 +48,7 @@ from sdk_exec.engine_sql import STEP_BIND, STEP_EXECUTE, STEP_PARSE, run_sql
 from sdk_exec.engine_write import COPY_TYPE_UNSUPPORTED, STORAGE_URL_REFUSED
 from sdk_exec.engine_write_partitioned import COPY_TARGET_EXISTS
 from fs.atomic_write import STORAGE_NOT_FOUND
+from parquet_writer.record_batch_writer import write_record_batch_to_parquet_bytes
 
 comptime _SALES = (
     "id,amount,year,month,region\n"
@@ -194,16 +199,44 @@ def test_one_column_to_gzip_csv() raises:
     )
 
 
+def _put_keys(path: String) raises:
+    """`keys.parquet` at `path`: id BIGINT 1..5 and a nullable VARCHAR k of
+    'a/b', 'sp ace', NULL, '' and 'é', written directly (no SQL expression
+    can make a VARCHAR NULL beside string values today)."""
+    var ids = PrimitiveArray[DType.int64].allocate(5)
+    for i in range(5):
+        ids.set(i, Int64(i + 1))
+    var ks = List[String]()
+    ks.append("a/b")
+    ks.append("sp ace")
+    ks.append("")
+    ks.append("")
+    ks.append("é")
+    var valid = List[Bool]()
+    for i in range(5):
+        valid.append(i != 2)
+    var sb = SchemaBuilder()
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    sb.add_field(Field("k", ArrowType.STRING, True))
+    var rb = RecordBatchBuilder()
+    rb.add_column(Column.from_primitive[DType.int64](ids^))
+    rb.add_column(Column.from_string(StringArray.from_strings_with_validity(ks, valid)))
+    var bytes = write_record_batch_to_parquet_bytes(rb.build(sb.build()))
+    var fh = open(path, "w")
+    fh.write_bytes(Span(bytes))
+    fh.close()
+
+
 def test_escaped_null_and_empty_values() raises:
     var ctx = _context()
     var d = _dir("escaped")
     var out = d + "/out"
+    _put_keys(d + "/keys.parquet")
     assert_equal(
         _count(
             ctx,
-            "COPY (SELECT id, CASE WHEN id = 1 THEN 'a/b' WHEN id = 2 THEN 'sp ace'"
-            " WHEN id = 3 THEN NULL WHEN id = 4 THEN '' ELSE 'é' END AS k FROM "
-            + _sales(d) + ") TO '" + out + "' (FORMAT parquet, PARTITION_BY (k))",
+            "COPY (SELECT id, k FROM read_parquet('" + d + "/keys.parquet')) TO '"
+            + out + "' (FORMAT parquet, PARTITION_BY (k))",
         ),
         5,
     )

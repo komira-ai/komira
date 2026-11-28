@@ -96,12 +96,13 @@ def test_partition_by_writes_one_directory_per_value_pair(lib_dir):
 def test_escaped_and_null_values_read_back_with_pyarrow(lib_dir):
     with tempfile.TemporaryDirectory() as work:
         out = os.path.join(work, "out")
+        keys = os.path.join(work, "keys.parquet")
+        pq.write_table(
+            pa.table({"id": [1, 2, 3, 4, 5], "k": pa.array(["a/b", "sp ace", None, "a/b", "a/b"], pa.string())}), keys
+        )
         with session_with_sales(work) as s:
-            s.sql(
-                "COPY (SELECT id, CASE WHEN id = 1 THEN 'a/b' WHEN id = 2 THEN 'sp ace'"
-                f" WHEN id = 3 THEN NULL ELSE 'a/b' END AS k FROM sales) TO '{out}'"
-                " (FORMAT parquet, PARTITION_BY (k))"
-            ).to_arrow()
+            s.register_parquet("keys", keys)
+            s.sql(f"COPY (SELECT id, k FROM keys) TO '{out}' (FORMAT parquet, PARTITION_BY (k))").to_arrow()
         assert tree(out) == [
             "k=__HIVE_DEFAULT_PARTITION__/data_0.parquet",
             "k=a%2Fb/data_0.parquet",
