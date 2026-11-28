@@ -128,9 +128,11 @@ def _bytes_plain(lib: OwnedDLHandle, ctx: Int, path: Int) raises -> List[UInt8]:
     return out^
 
 
-def _contains(haystack: List[UInt8], needle: String) -> Bool:
+def _count(haystack: List[UInt8], needle: String) -> Int:
+    """How many times `needle`'s bytes occur in `haystack`."""
     var nb = needle.as_bytes()
     var n = len(nb)
+    var found = 0
     for i in range(len(haystack) - n + 1):
         var ok = True
         for j in range(n):
@@ -138,8 +140,8 @@ def _contains(haystack: List[UInt8], needle: String) -> Bool:
                 ok = False
                 break
         if ok:
-            return True
-    return False
+            found += 1
+    return found
 
 
 def main() raises:
@@ -188,8 +190,13 @@ def main() raises:
     var plain = _bytes_plain(lib, ctx, plain_c)
     _expect(_bytes_with_skip(lib, ctx, plain_c, Int64(0)) == plain, "skip 0 is not the bytes of komira_csv_binding")
     var noted = _bytes_with_skip(lib, ctx, note_c, Int64(1))
-    _expect(_contains(noted, String("skip")), "the binding of skip 1 does not name the skip param")
-    _expect(not _contains(plain, String("skip")), "the binding of skip 0 names a skip param")
+    # The same file at skip 0 and at skip 1: the path may hold "skip" (the scratch directory is
+    # the gate's), so the param is the one more occurrence the skip-1 binding has.
+    var noted_plain = _bytes_with_skip(lib, ctx, note_c, Int64(0))
+    _expect(
+        _count(noted, String("skip")) == _count(noted_plain, String("skip")) + 1,
+        "the binding of skip 1 does not name the skip param once more than skip 0",
+    )
     _expect(_bytes_with_skip(lib, ctx, note_c, Int64(1)) == noted, "the binding of skip 1 is not repeatable")
     _expect(_bytes_with_skip(lib, ctx, plain_c, Int64(1)) != plain, "skip 1 did not change the binding")
 
