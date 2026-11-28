@@ -31,7 +31,15 @@ _BOTH = _rows(
     (("index", "set_index", "reset_index", "sort_index", "reindex"), "komira frames have no index"),
     (("sample",), ".sample() is not supported: it picks rows at random, and a plan names no random rows"),
     (
-        ("shift", "diff", "pct_change", "ffill", "bfill", "interpolate", "expanding"),
+        (
+            "bfill",
+            "diff",
+            "expanding",
+            "ffill",
+            "interpolate",
+            "pct_change",
+            "shift",
+        ),
         ".{name}() is not supported yet",
     ),
     (
@@ -59,7 +67,16 @@ FRAME = _BOTH | _rows(
         ".{name}() is pandas' own: run with materialize(), then call to_pandas().{name}()",
     ),
     (
-        ("pivot", "pivot_table", "melt", "stack", "unstack", "explode", "transpose", "T"),
+        (
+            "T",
+            "explode",
+            "melt",
+            "pivot",
+            "pivot_table",
+            "stack",
+            "transpose",
+            "unstack",
+        ),
         ".{name}() is not supported yet: the plan has no node for it",
     ),
     (
@@ -93,7 +110,15 @@ SERIES = _BOTH | _rows(
 )
 
 GROUPBY = _rows(
-    (("first", "last", "nth", "cumcount"), ".{name}() is not supported yet; use min() or max() of an ordered key"),
+    (
+        (
+            "cumcount",
+            "first",
+            "last",
+            "nth",
+        ),
+        ".{name}() is not supported yet; use min() or max() of an ordered key",
+    ),
     (("filter",), "GroupBy.filter() is not supported yet; aggregate, then filter the result"),
     (
         ("ngroups", "groups", "indices", "get_group"),
@@ -105,7 +130,12 @@ GROUPBY = _rows(
 MODULE = _rows(
     (("Index", "MultiIndex", "RangeIndex"), "komira frames have no index"),
     (
-        ("pivot_table", "melt", "crosstab", "get_dummies"),
+        (
+            "crosstab",
+            "get_dummies",
+            "melt",
+            "pivot_table",
+        ),
         "komira.{name}() is not supported yet: the plan has no node for it",
     ),
     (
@@ -120,40 +150,81 @@ MODULE = _rows(
 # The names the `.str` accessor of a Series does not define.
 STRING = _rows(
     (
-        ("strip", "lstrip", "rstrip"),
+        (
+            "lstrip",
+            "rstrip",
+            "strip",
+        ),
         ".str.{name}() is not supported yet: the engine trims spaces only, and pandas trims all whitespace",
     ),
     (
-        ("split", "rsplit", "cat", "get", "join", "findall", "extractall", "get_dummies", "partition", "rpartition"),
+        (
+            "cat",
+            "extractall",
+            "findall",
+            "get",
+            "get_dummies",
+            "join",
+            "partition",
+            "rpartition",
+            "rsplit",
+            "split",
+        ),
         ".str.{name}() is not supported yet: the plan has no node for it",
     ),
     (
-        ("ljust", "rjust"),
+        (
+            "ljust",
+            "rjust",
+        ),
         ".str.{name}() is not supported yet: use .str.pad(width, side=...), which pads to one side",
     ),
     (
-        ("center", "zfill", "wrap", "normalize", "translate", "slice_replace", "encode", "decode"),
+        (
+            "center",
+            "decode",
+            "encode",
+            "normalize",
+            "slice_replace",
+            "translate",
+            "wrap",
+            "zfill",
+        ),
         ".str.{name}() is not supported yet: the plan has no node for it",
     ),
     (
-        ("title", "capitalize", "swapcase", "casefold"),
+        (
+            "capitalize",
+            "casefold",
+            "swapcase",
+            "title",
+        ),
         ".str.{name}() is not supported yet: use .str.lower() or .str.upper()",
     ),
     (
-        ("count", "find", "rfind", "index", "rindex", "repeat", "removeprefix", "removesuffix"),
+        (
+            "count",
+            "find",
+            "index",
+            "removeprefix",
+            "removesuffix",
+            "repeat",
+            "rfind",
+            "rindex",
+        ),
         ".str.{name}() is not supported yet",
     ),
     (
         (
-            "isalpha",
-            "isdigit",
             "isalnum",
-            "isnumeric",
+            "isalpha",
             "isdecimal",
-            "isspace",
+            "isdigit",
             "islower",
-            "isupper",
+            "isnumeric",
+            "isspace",
             "istitle",
+            "isupper",
         ),
         ".str.{name}() is not supported yet: test the text with .str.fullmatch(pattern)",
     ),
@@ -162,7 +233,11 @@ STRING = _rows(
 # The names the `.dt` accessor of a Series does not define.
 DATETIME = _rows(
     (
-        ("date", "time", "timetz"),
+        (
+            "date",
+            "time",
+            "timetz",
+        ),
         ".dt.{name} is not supported yet: the engine cannot cast a timestamp to a date or a time of day; "
         '.dt.floor("D") cuts the time off and stays a timestamp',
     ),
@@ -171,11 +246,18 @@ DATETIME = _rows(
         ".dt.{name} is not supported: a komira timestamp carries no time zone to convert",
     ),
     (
-        ("strftime", "day_name", "month_name"),
+        (
+            "day_name",
+            "month_name",
+            "strftime",
+        ),
         ".dt.{name}() is not supported yet: the engine does not format a timestamp as text",
     ),
     (
-        ("round", "ceil"),
+        (
+            "ceil",
+            "round",
+        ),
         ".dt.{name}() is not supported yet: only .dt.floor() has a plan node",
     ),
     (
@@ -195,20 +277,25 @@ DATETIME = _rows(
         ".dt.nanosecond is not supported yet: the plan's extract has no nanosecond part",
     ),
     (
-        ("week", "weekofyear", "isocalendar", "isocalendar_week"),
+        (
+            "isocalendar",
+            "isocalendar_week",
+            "week",
+            "weekofyear",
+        ),
         ".dt.{name} is not supported yet",
     ),
     (
         (
-            "is_month_start",
-            "is_month_end",
-            "is_quarter_start",
-            "is_quarter_end",
-            "is_year_start",
-            "is_year_end",
-            "is_leap_year",
             "days_in_month",
             "daysinmonth",
+            "is_leap_year",
+            "is_month_end",
+            "is_month_start",
+            "is_quarter_end",
+            "is_quarter_start",
+            "is_year_end",
+            "is_year_start",
         ),
         ".dt.{name} is not supported yet: the plan has no node for it",
     ),

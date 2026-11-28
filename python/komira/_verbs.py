@@ -1,6 +1,10 @@
-"""The argument handling and literals of the pandas-shaped frame's `fillna`,
-`add_prefix`, `add_suffix` and `komira.concat` (komira/_frame.py calls these).
+"""Argument checks, literals and nodes of the pandas-shaped frame's verbs
+that the verbs share or that are too long for komira/_frame.py, which calls
+them. The longer ones, one bullet per verb in name order:
 
+- `concat` checks, before it builds the union, that the frames are on one
+  session and have the same column set, one type per column and the same
+  nullability, so that the encoder's own refusal is never what a user reads.
 - `fillna` puts a value of the column's own type where a value is missing:
   an int for an int32 or int64 column, an int or a float for a float32 or
   float64 one, a bool, a str; a value or column of another type is refused
@@ -10,9 +14,6 @@
   CASE over the column widened to int64 or float64 and cast back, and a bool
   one is no CASE: `x IS NULL OR x = true` fills with True and
   `x IS NOT NULL AND x = true` with False.
-- `concat` checks, before it builds the union, that the frames are on one
-  session and have the same column set, one type per column and the same
-  nullability, so that the encoder's own refusal is never what a user reads.
 """
 
 from __future__ import annotations
@@ -27,7 +28,13 @@ from ._series import Series, _fits
 if TYPE_CHECKING:
     from ._frame import DataFrame
 
-__all__ = ["check_label_axis", "concat_frames", "fill_column", "fill_literal", "no_series_fill"]
+__all__ = [
+    "check_label_axis",
+    "concat_frames",
+    "fill_column",
+    "fill_literal",
+    "no_series_fill",
+]
 
 # What `fillna` fills, and with what: a literal of the column's own type.
 _FILL_TYPES = "int32, int64, float32, float64, bool and string"

@@ -34,4 +34,9 @@ imports polars.
   tables' message for the names they hold.
 
 The expressions are on [their own page](expressions.md). Not built yet:
-`from_arrow`, `shift`, `join_asof`, regular expressions and `.dt`.
+
+- `.dt`
+- `from_arrow`
+- `join_asof`
+- `shift`
+- regular expressions

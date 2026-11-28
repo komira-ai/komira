@@ -69,17 +69,17 @@ MODULE_TABLE = {
 PLAN = "a LazyFrame is a plan: run it with .collect(), then convert the Result"
 RUNS = ".{}() is not supported: komira runs a plan only at .collect()"
 FRAME_TABLE = {
+    "cache": RUNS.format("cache"),
+    "collect_async": RUNS.format("collect_async"),
+    "explode": ".explode() is not supported yet: the plan has no node for it",
+    "fetch": PLAN,
     "materialize": ".materialize() is the pandas-shaped skin's word; this frame runs at .collect()",
+    "profile": RUNS.format("profile"),
+    "to_arrow": PLAN,
     "to_pandas": PLAN,
     "to_polars": PLAN,
-    "to_arrow": PLAN,
-    "fetch": PLAN,
-    "with_column": "with_column() is not a polars verb; use with_columns()",
     "unpivot": ".unpivot() is not supported yet: the plan has no node for it",
-    "explode": ".explode() is not supported yet: the plan has no node for it",
-    "cache": RUNS.format("cache"),
-    "profile": RUNS.format("profile"),
-    "collect_async": RUNS.format("collect_async"),
+    "with_column": "with_column() is not a polars verb; use with_columns()",
 }
 
 EXPR_TABLE = {

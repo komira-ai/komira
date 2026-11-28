@@ -36,15 +36,16 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
   komira/_cast.py. `tail` takes the last rows of a sorted frame as a TOPN by
   the reversed keys, sorted back. `komira.concat` is a union of frames of one
   schema, checked in komira/_verbs.py before it is built.
-- Row order (section 7): a sort makes a frame ordered; a filter, a projection
-  that keeps the sort keys, an `assign`, `fillna`, `astype` or `rename` that
-  changes none of them, a `dropna` and `head`
-  keep it ordered, the builder placing filters and projections under the sort
-  and a limit above it, and a sort above a limit when a verb comes after one.
-  `tail` of a sorted frame is sorted. A reduction, `isna`, `notna`,
-  `drop_duplicates`, `concat` and `merge` give an unordered frame, except that
-  `groupby(sort=True)` and `merge(sort=True)` sort by their keys; a semi or
-  anti join keeps the order, as a filter does.
+- Row order (section 7): a sort makes a frame ordered. A verb whose rows are
+  rows of the frame (a filter, a projection, a limit) keeps the order unless
+  it drops, renames or replaces the column of a sort key (`_ordered` asks
+  each verb): the builder places filters and projections under the sort and
+  a limit above it, and a sort above a limit when a verb comes after one, and
+  `tail` of a sorted frame is sorted. A verb that drops, renames or replaces
+  a sort key's column, or whose rows are not the frame's rows one for one (a
+  reduction, a distinct, a union, a join), gives an unordered frame, except
+  that `groupby(sort=True)` and `merge(sort=True)` sort by their keys; a semi
+  or anti join keeps the order, as a filter does.
 - The write terminals `to_parquet`, `to_csv` and `to_json(orient="records",
   lines=True)` run the plan once and write its rows to a file through the same
   plan door, with a write target in the envelope (komira/_write.py); they
@@ -63,7 +64,16 @@ from collections.abc import Callable
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
-from . import _display, _groupby, _merge, _ops, _refusals, _verbs, _windows, _write
+from . import (
+    _display,
+    _groupby,
+    _merge,
+    _ops,
+    _refusals,
+    _verbs,
+    _windows,
+    _write,
+)
 from ._errors import UnsupportedOperation
 from ._groupby import GroupBy
 from ._missing import present

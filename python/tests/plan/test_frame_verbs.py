@@ -3,15 +3,17 @@ DataFrame (komira/_frame.py, komira/_verbs.py, komira/_missing.py) with no
 libkomira: a frame over a Parquet scan whose schema is made here, on a session
 stand-in that records the plan bytes it is given. Checked:
 
-- the plan each verb builds, by equality with a hand-built node tree: the
-  expression `fillna` puts over each filled column (a CASE, computed in
-  int64 or float64 and cast back for an int32 or float32 column, and boolean
-  logic with no CASE for a bool column), the filter of `dropna` (any and all,
-  subset), the projection of `isna` and `notna` (and their aliases `isnull`
-  and `notnull`) over a frame and the node of each over a Series, the
-  projection of `rename`, `add_prefix` and `add_suffix`, the
-  casts of `astype`, and the TOPN by the reversed keys under the sort of
-  `tail`;
+- the plan each verb builds, by equality with a hand-built node tree, one
+  verb per line in name order:
+  - `astype`: its casts;
+  - `dropna`: its filter (any and all, subset);
+  - `fillna`: the expression it puts over each filled column (a CASE,
+    computed in int64 or float64 and cast back for an int32 or float32
+    column, and boolean logic with no CASE for a bool column);
+  - `isna` and `notna` (and their aliases `isnull` and `notnull`): the
+    projection over a frame and the node of each over a Series;
+  - `rename`, `add_prefix` and `add_suffix`: the projection;
+  - `tail`: the TOPN by the reversed keys under the sort;
 - how a float column's missing value is tested: not NULL and not NaN, built
   from comparisons with infinity, through a cast for float32;
 - the output columns and types of each verb;
