@@ -876,6 +876,10 @@ komira_last_error_step	Int32	Handle	1.7
 
 ### 9. `https://` reads
 
+The full design, with its slices and one question for the owner (plaintext `http://` on a loopback
+address), is [http_sources.md](http_sources.md). If the owner accepts that exception, the plaintext
+and redirect bullets below change with it.
+
 - **PROPOSED** `FS_SCHEME_HTTPS` (4) is a new scheme code, added under rule B8, with its matrix row
   `scan_https`. `source_url` maps every `https://` URL whose host is not the Blob service's to it.
 - **Read-only, one file per URL.**
