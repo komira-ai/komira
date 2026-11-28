@@ -1,5 +1,6 @@
 """The argument handling and literals of the pandas-shaped frame's `fillna`,
-`add_prefix`, `add_suffix` and `komira.concat` (komira/_frame.py calls these).
+`add_prefix`, `add_suffix`, `komira.concat` and `melt` (komira/_frame.py calls
+these).
 
 - `fillna` puts a value of the column's own type where a value is missing:
   an int for an int32 or int64 column, an int or a float for a float32 or
@@ -13,6 +14,9 @@
 - `concat` checks, before it builds the union, that the frames are on one
   session and have the same column set, one type per column and the same
   nullability, so that the encoder's own refusal is never what a user reads.
+- `melt` resolves pandas' arguments to the id and value columns and the two
+  new names, with pandas' own errors where pandas has them, and hands them to
+  komira/_unpivot.py, which builds the plan.
 """
 
 from __future__ import annotations
@@ -23,11 +27,12 @@ from . import _groupby, _ops
 from ._errors import UnsupportedOperation
 from ._missing import present
 from ._series import Series, _fits
+from ._unpivot import unpivot_plan
 
 if TYPE_CHECKING:
     from ._frame import DataFrame
 
-__all__ = ["check_label_axis", "concat_frames", "fill_column", "fill_literal", "no_series_fill"]
+__all__ = ["check_label_axis", "concat_frames", "fill_column", "fill_literal", "melt_frame", "no_series_fill"]
 
 # What `fillna` fills, and with what: a literal of the column's own type.
 _FILL_TYPES = "int32, int64, float32, float64, bool and string"
@@ -245,3 +250,120 @@ def concat_frames(
     return DataFrame._new(first._session, _ops.concat(plans), sources)
 
 
+# ---- melt -------------------------------------------------------------------
+
+
+def _labels(value: object, label: str) -> list[str]:
+    """`id_vars` or `value_vars` as a list of names: None is none, a str is
+    one, and any other iterable (a list, a tuple, a set, `df.columns`) is its
+    items, as pandas takes them."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    try:
+        names = list(value)
+    except TypeError:
+        raise TypeError(
+            f"melt() takes {label} as a column name or a list of them, not {type(value).__name__}"
+        ) from None
+    for name in names:
+        if isinstance(name, tuple):
+            raise UnsupportedOperation(
+                f"melt({label}=...) names {name!r}, a column of a column MultiIndex, and a komira frame's "
+                "columns have one level of names: name the columns as strings"
+            )
+    return names
+
+
+def _melt_name(value: object, label: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"melt() takes {label} as a str, not {type(value).__name__}")
+    return value
+
+
+def _type_text(field: object, name: str) -> str:
+    """The type `name` of `field` as a melt refusal names it: with a
+    decimal's precision and scale, or a timestamp's zone."""
+    if name == "decimal128":
+        return f"decimal128({field.decimal_precision}, {field.decimal_scale})"
+    if field.tz:
+        return f"{name} ({field.tz})"
+    return name
+
+
+def melt_frame(
+    frame: DataFrame,
+    id_vars: object = None,
+    value_vars: object = None,
+    var_name: object = None,
+    value_name: object = "value",
+    col_level: object = None,
+    ignore_index: bool = True,
+) -> DataFrame:
+    """pandas' `melt` of `frame` (komira/_unpivot.py builds the plan). The
+    checks and their messages are pandas' own where pandas has them: a
+    `value_name` that is a column of the frame, a column named twice in
+    `id_vars`, a name the frame lacks, and a `var_name` that is not a
+    scalar. A `value_vars` column that is also in `id_vars` is an id column,
+    and one named twice is melted once, as in pandas. Refused by name: a
+    row index (`ignore_index=False`), a column MultiIndex (`col_level`, or
+    a tuple name), no value column (pandas gives a frame of no rows whose
+    value column is of object type), value columns of two types (pandas
+    gives object), and a `var_name` that is an id column's or
+    `value_name`'s name (pandas gives two columns of one name)."""
+    from ._frame import DataFrame
+
+    if not isinstance(frame, DataFrame):
+        raise TypeError(f"melt() takes a komira DataFrame, not {type(frame).__name__}")
+    _groupby._check_bool(ignore_index, "ignore_index", "melt")
+    if not ignore_index:
+        raise UnsupportedOperation(
+            "melt(ignore_index=False) repeats the row index, and komira frames have no index: "
+            "leave ignore_index out"
+        )
+    if col_level is not None:
+        raise UnsupportedOperation(
+            "melt(col_level=...) picks a level of a column MultiIndex, and a komira frame's columns "
+            "have one level of names: leave col_level out"
+        )
+    columns = frame._plan.columns
+    if value_name in columns:
+        raise ValueError(f"value_name ({value_name}) cannot match an element in the DataFrame columns.")
+    ids = _labels(id_vars, "id_vars")
+    named = _labels(value_vars, "value_vars")
+    if len(set(ids)) < len(ids):
+        raise ValueError("id_vars cannot contain duplicate columns.")
+    missing = [name for name in ids + named if name not in columns]
+    if missing:
+        raise KeyError(f"The following id_vars or value_vars are not present in the DataFrame: {missing}")
+    if isinstance(var_name, (list, tuple, set, dict)):
+        raise ValueError(f"{var_name=} must be a scalar.")
+    variable = "variable" if var_name is None else _melt_name(var_name, "var_name")
+    value = _melt_name(value_name, "value_name")
+    if value_vars is None:
+        values = [name for name in columns if name not in ids]
+    else:
+        values = [name for name in dict.fromkeys(named) if name not in ids]
+    if not values:
+        raise UnsupportedOperation(
+            "melt() with no value column gives no rows and a value column of no type, which a komira "
+            "frame cannot hold: name at least one column in value_vars that is not in id_vars"
+        )
+    if variable in ids or variable == value:
+        taken = "an id column's" if variable in ids else "value_name's"
+        raise UnsupportedOperation(
+            f"melt(var_name={variable!r}) is {taken} name too, and pandas would give two columns of one "
+            "name, which a komira frame cannot hold: pick another var_name"
+        )
+    plan = unpivot_plan(
+        frame._plan,
+        frame._fields,
+        ids,
+        values,
+        variable,
+        value,
+        verb="melt()",
+        type_text=lambda f: _type_text(f, frame._type_name(f)),
+    )
+    return DataFrame._new(frame._session, plan, frame._sources)

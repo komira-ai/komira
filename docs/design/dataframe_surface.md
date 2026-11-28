@@ -78,7 +78,7 @@ The public names of each module:
 
 | module | names it adds |
 |---|---|
-| `komira` | `DataFrame`, `Series`, `GroupBy`, `col` (pandas 3's `pd.col`), `concat`, `merge_asof`, `from_arrow`, `add_sql_binding`; the readers `read_parquet`, `read_csv`, `read_json`, `read_feather`, `read_orc`, `read_avro` |
+| `komira` | `DataFrame`, `Series`, `GroupBy`, `col` (pandas 3's `pd.col`), `concat`, `melt`, `merge_asof`, `from_arrow`, `add_sql_binding`; the readers `read_parquet`, `read_csv`, `read_json`, `read_feather`, `read_orc`, `read_avro` |
 | `komira.pl` | `LazyFrame`, `LazyGroupBy`, `Expr`, `col`, `lit`, `when`, `len`, `concat`, `concat_str`, `from_arrow`; the readers `scan_parquet`, `scan_csv`, `scan_ndjson`, `scan_ipc`, `scan_orc`, `scan_avro` |
 
 The names `files`, `iceberg`, the credential classes, `AMBIENT`, `ANONYMOUS` and `read_table`'s catalog
@@ -295,8 +295,8 @@ whether the frame is **ordered**.
 
   The skin keeps the sort at the root of the plan: it places a filter or projection below the sort,
   and a limit above it.
-- **Every other verb makes the frame unordered:** group-by, join, merge, `concat`, `unique`,
-  `drop_duplicates`, and a projection that drops a sort key.
+- **Every other verb makes the frame unordered:** group-by, join, merge, `concat`, `melt` and
+  `unpivot`, `unique`, `drop_duplicates`, and a projection that drops a sort key.
 
 The rules that follow from this:
 

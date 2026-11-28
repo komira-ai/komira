@@ -11,7 +11,7 @@ sources, and:
   with each comparison operator, `&`, `|`, `~` and a boolean column, a
   projection, a column set by arithmetic, a cast or a string function, a sort
   with its null placement, a head and a tail, a group-by with each aggregate,
-  a merge or join of each kind, a concat, a distinct, a dropna, a rename, an
+  a merge or join of each kind, a concat, a melt (an unpivot), a distinct, a dropna, a rename, an
   isin, a between, and programs stacked on one another), the pandas frame's
   plan equals the polars frame's plan, the column names are equal, the
   sources are equal, and the plan bytes (`_plan_bytes()` and `_encode()`) are
@@ -526,6 +526,11 @@ case(
 
 # stacking, distinct, missing values and names
 case("concat", lambda f: komira.concat([f.t, f.t.head(1)]), lambda f: kpl.concat([f.t, f.t.head(1)]))
+case(
+    "melt_equals_unpivot",
+    lambda f: f.t.melt(id_vars="g", value_vars=["x", "id"], var_name="k", value_name="v"),
+    lambda f: f.t.unpivot(["x", "id"], index="g", variable_name="k", value_name="v"),
+)
 case("distinct_over_every_column", lambda f: f.t.drop_duplicates(), lambda f: f.t.unique())
 case("dropna_of_non_float_columns", lambda f: f.t.dropna(subset=["x", "g"]), lambda f: f.t.drop_nulls(["x", "g"]))
 case("dropna_of_one_non_float_column", lambda f: f.t.dropna(subset="x"), lambda f: f.t.drop_nulls("x"))

@@ -111,6 +111,7 @@ def main(args):
         "abi_version",
         "concat",
         "files",
+        "melt",
         "read_csv",
         "read_json",
         "read_parquet",

@@ -56,7 +56,6 @@ TABLES = {
         "to_arrow": _PLAN,
         "fetch": _PLAN,
         "with_column": "with_column() is not a polars verb; use with_columns()",
-        "unpivot": _NO_NODE,
         "explode": _NO_NODE,
         "cache": _RUNS_AT,
         "profile": _RUNS_AT,

@@ -24,7 +24,7 @@ imports polars.
 - **Readers.** `scan_parquet`, `scan_ndjson` and `scan_csv`.
 - **`LazyFrame`.** `select`, `with_columns`, `filter`, `sort`, `head`,
   `limit`, `slice`, `tail`, `top_k`, `bottom_k`, `drop`, `rename`,
-  `drop_nulls`, `columns`, `schema`, `explain` and `collect`;
+  `drop_nulls`, `unpivot`, `columns`, `schema`, `explain` and `collect`;
   [`group_by`, `join` and `unique`](group_by_join_unique.md) (newer than
   0.1.1623).
 - **Writing.** [`sink_csv`, `sink_parquet` and `sink_ndjson`](writing_files.md)
