@@ -171,7 +171,7 @@ DATETIME = _rows(
         ".dt.{name} is not supported: a komira timestamp carries no time zone to convert",
     ),
     (
-        ("strftime", "day_name", "month_name"),
+        ("strftime",),
         ".dt.{name}() is not supported yet: the engine does not format a timestamp as text",
     ),
     (

@@ -10,8 +10,9 @@ plan bytes it is given. Checked:
   has already, and the `copy` and `errors` arguments;
 - each `.str` method: the node it builds by equality with a hand-built tree,
   the type of the result, and every refusal by class and full message;
-- each `.dt` property and `floor`: the same, for a timestamp and a date32
-  column, with the parts a date has no value for refused;
+- each `.dt` property, `day_name`, `month_name` and `floor`: the same, for a
+  timestamp and a date32 column, with the parts a date has no value for and a
+  `locale` refused;
 - the accessor attribute rules: `hasattr` is False on a Series of the wrong
   type with the accessor's message, every row of the STRING and DATETIME tables,
   Python's own message for any other name, no attribute can be set, `dir` lists
@@ -544,6 +545,39 @@ def test_the_calendar_parts_of_a_timestamp_and_a_date_are_extracts_of_int64():
         check(s.dt.weekday, monday_is_zero, "int64")
 
 
+def test_the_weekday_and_month_names_of_a_timestamp_and_a_date_are_extracts_of_a_string():
+    for name, col in (("t", T), ("d", D)):
+        s = series(name)
+        check(s.dt.day_name(), Extract("dayname", col), "string")
+        check(s.dt.month_name(), Extract("monthname", col), "string")
+        check(s.dt.day_name(locale=None), Extract("dayname", col), "string")
+        check(s.dt.month_name(None), Extract("monthname", col), "string")
+
+
+def test_a_locale_for_the_names_is_refused_by_name():
+    s = series("t")
+    refuses(
+        lambda: s.dt.day_name(locale="fr_FR"),
+        UnsupportedOperation,
+        ".dt.day_name(locale='fr_FR') is not supported: the engine names days and months in English only; "
+        "leave locale out",
+    )
+    refuses(
+        lambda: series("d").dt.month_name("de_DE"),
+        UnsupportedOperation,
+        ".dt.month_name(locale='de_DE') is not supported: the engine names days and months in English only; "
+        "leave locale out",
+    )
+    # English spelled out is still a locale argument, and still refused: the
+    # engine has no notion of one.
+    refuses(
+        lambda: s.dt.day_name(locale="en_US"),
+        UnsupportedOperation,
+        ".dt.day_name(locale='en_US') is not supported: the engine names days and months in English only; "
+        "leave locale out",
+    )
+
+
 def test_the_time_of_day_parts_of_a_timestamp_and_the_part_of_the_second_of_a_microsecond():
     s = series("t")
     check(s.dt.hour, Extract("hour", T), "int64")
@@ -623,6 +657,15 @@ def test_a_date_part_used_in_a_filter_and_in_assign_builds_the_expected_plan():
     got = df.assign(w=df["d"].dt.dayofweek)
     assert got._plan == _ops.with_columns(SCAN, (("w", Arith("sub", Extract("isodow", D), Lit(1))),))
     assert got.dtypes["w"] == "int64"
+
+
+def test_a_name_used_in_a_filter_and_in_assign_builds_the_expected_plan():
+    df = Env().df
+    kept = df[df["d"].dt.day_name() == "Monday"]
+    assert kept._plan == _ops.filter_(SCAN, Compare("eq", Extract("dayname", D), Lit("Monday")))
+    got = df.assign(m=df["t"].dt.month_name())
+    assert got._plan == _ops.with_columns(SCAN, (("m", Extract("monthname", T)),))
+    assert got.dtypes["m"] == "string"
 
 
 # --- the attribute rules --------------------------------------------------------------
@@ -716,6 +759,7 @@ def test_dir_lists_only_the_defined_members_of_each_accessor():
     assert dir(t.dt) == sorted(
         [
             "day",
+            "day_name",
             "day_of_week",
             "day_of_year",
             "dayofweek",
@@ -725,6 +769,7 @@ def test_dir_lists_only_the_defined_members_of_each_accessor():
             "microsecond",
             "minute",
             "month",
+            "month_name",
             "quarter",
             "second",
             "weekday",

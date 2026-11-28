@@ -192,6 +192,12 @@ plan {
       dict_index_type_id: 4
     }
     fields {
+      name: "ex_dayname"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
       name: "ex_dayofweek"
       arrow_type_id: 5
       dtype_code: _DT_INT64
@@ -251,6 +257,12 @@ plan {
       name: "ex_month"
       arrow_type_id: 5
       dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "ex_monthname"
+      arrow_type_id: 13
       nullable: true
       dict_index_type_id: 4
     }
@@ -823,6 +835,22 @@ plan {
       alias {
         child {
           extract {
+            unit: EXTRACT_DAYNAME
+            child {
+              col_ref {
+                name: "ts"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "ex_dayname"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          extract {
             unit: EXTRACT_DAYOFWEEK
             child {
               col_ref {
@@ -961,6 +989,22 @@ plan {
           }
         }
         name: "ex_month"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          extract {
+            unit: EXTRACT_MONTHNAME
+            child {
+              col_ref {
+                name: "ts"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "ex_monthname"
       }
     }
     exprs {

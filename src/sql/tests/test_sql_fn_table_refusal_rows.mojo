@@ -2,8 +2,8 @@
 # Row pins: every REFUSAL row of sql_scalar_fn_spec, grouped by its reason
 # =============================================================================
 #
-# What it proves: each of the 538 refused names resolves to an FNK_REFUSED
-# row that carries exactly its family's `_R_*` reason (77 families), lowers
+# What it proves: each of the 536 refused names resolves to an FNK_REFUSED
+# row that carries exactly its family's `_R_*` reason (76 families), lowers
 # to no node (so a UDF may take the name) and has op 0 and the open arity
 # sentinels. Every refused name is called, so every one of those rows is
 # taken once.
@@ -40,7 +40,6 @@ from sql.sql_fn_table import (
     _R_CLOCK,
     _R_CODEPOINT,
     _R_DATEMINT,
-    _R_DATENAME,
     _R_DUCKINTERNAL,
     _R_ENUMT,
     _R_EPOCHCONV,
@@ -427,12 +426,6 @@ def test_refusal_families_4() raises:
         _R_TZFN,
         [
             "timezone", "timezone_hour", "timezone_minute",
-        ],
-    )
-    _refused(
-        _R_DATENAME,
-        [
-            "dayname", "monthname",
         ],
     )
     _refused(

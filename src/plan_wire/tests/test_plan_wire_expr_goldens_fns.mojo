@@ -45,6 +45,7 @@ from arrow.schema import Field, Schema, SchemaBuilder
 from plan_expr.expr import (
     Expr,
     EXTRACT_DAY,
+    EXTRACT_DAYNAME,
     EXTRACT_DAYOFWEEK,
     EXTRACT_DAYOFYEAR,
     EXTRACT_HOUR,
@@ -54,6 +55,7 @@ from plan_expr.expr import (
     EXTRACT_MILLISECOND,
     EXTRACT_MINUTE,
     EXTRACT_MONTH,
+    EXTRACT_MONTHNAME,
     EXTRACT_QUARTER,
     EXTRACT_SECOND,
     EXTRACT_TRUNC_DAY,
@@ -620,16 +622,18 @@ def _expr_math_temporal() raises -> LogicalPlan:
     )
 
     var e_names: List[String] = [
-        "day", "dayofweek", "dayofyear", "hour", "isodow", "isoyear",
-        "microsecond", "millisecond", "minute", "month", "quarter", "second",
+        "day", "dayname", "dayofweek", "dayofyear", "hour", "isodow",
+        "isoyear", "microsecond", "millisecond", "minute", "month",
+        "monthname", "quarter", "second",
         "trunc_day", "trunc_hour", "trunc_microsecond", "trunc_millisecond",
         "trunc_minute", "trunc_month", "trunc_quarter", "trunc_second",
         "trunc_week", "trunc_year", "week", "year", "yearweek",
     ]
     var e_ops: List[UInt8] = [
-        EXTRACT_DAY, EXTRACT_DAYOFWEEK, EXTRACT_DAYOFYEAR, EXTRACT_HOUR,
-        EXTRACT_ISODOW, EXTRACT_ISOYEAR, EXTRACT_MICROSECOND,
-        EXTRACT_MILLISECOND, EXTRACT_MINUTE, EXTRACT_MONTH, EXTRACT_QUARTER,
+        EXTRACT_DAY, EXTRACT_DAYNAME, EXTRACT_DAYOFWEEK, EXTRACT_DAYOFYEAR,
+        EXTRACT_HOUR, EXTRACT_ISODOW, EXTRACT_ISOYEAR, EXTRACT_MICROSECOND,
+        EXTRACT_MILLISECOND, EXTRACT_MINUTE, EXTRACT_MONTH, EXTRACT_MONTHNAME,
+        EXTRACT_QUARTER,
         EXTRACT_SECOND, EXTRACT_TRUNC_DAY, EXTRACT_TRUNC_HOUR,
         EXTRACT_TRUNC_MICROSECOND, EXTRACT_TRUNC_MILLISECOND,
         EXTRACT_TRUNC_MINUTE, EXTRACT_TRUNC_MONTH, EXTRACT_TRUNC_QUARTER,

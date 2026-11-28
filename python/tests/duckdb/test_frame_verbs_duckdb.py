@@ -43,7 +43,9 @@ below is a copy of its own, since a test file cannot import another.
   and as a filter; a NULL in is a NULL out;
 - Series.dt: year, quarter, month, day, hour, minute, second, microsecond,
   dayofweek and aliases, dayofyear, floor("D"), floor("h") on the timestamp;
-  year, month, day and dayofweek on the date; a filter on a field;
+  year, month, day and dayofweek on the date; day_name() and month_name() on
+  the timestamp and the date, equal to DuckDB's dayname and monthname (a
+  string column, NULL for a NULL value); a filter on a field and on a name;
 - casts and string functions the engine does not run build their plan and are
   refused at materialize() with the engine's step (ENGINE_REFUSED);
 - columns are equal by name and order; ints, strings, bools, dates and
@@ -1023,6 +1025,10 @@ DTS = [
     dt_case("dt.month of a date", "d", lambda s: s.dt.month, field("d", "month")),
     dt_case("dt.day of a date", "d", lambda s: s.dt.day, field("d", "day")),
     dt_case("dt.dayofweek of a date", "d", lambda s: s.dt.dayofweek, "CAST(isodow(d) - 1 AS BIGINT)"),
+    dt_case("dt.day_name of a timestamp is dayname", "t", lambda s: s.dt.day_name(), "dayname(t)"),
+    dt_case("dt.month_name of a timestamp is monthname", "t", lambda s: s.dt.month_name(), "monthname(t)"),
+    dt_case("dt.day_name of a date is dayname", "d", lambda s: s.dt.day_name(), "dayname(d)"),
+    dt_case("dt.month_name of a date is monthname", "d", lambda s: s.dt.month_name(), "monthname(d)"),
     Case(
         "a filter on dt.year",
         lambda d: on(d[["n", "t"]], lambda f: f[f["t"].dt.year == 2028]),
@@ -1032,6 +1038,11 @@ DTS = [
         "a filter on dt.dayofweek of a date",
         lambda d: on(d[["n", "d"]], lambda f: f[f["d"].dt.dayofweek >= 5]),
         "SELECT n, d FROM t WHERE isodow(d) - 1 >= 5",
+    ),
+    Case(
+        "a filter on dt.day_name of a date",
+        lambda d: on(d[["n", "d"]], lambda f: f[f["d"].dt.day_name() == "Sunday"]),
+        "SELECT n, d FROM t WHERE dayname(d) = 'Sunday'",
     ),
 ]
 

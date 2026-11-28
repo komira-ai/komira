@@ -201,7 +201,8 @@
 #   is to drive it; see the falsification record in the round-trip test.
 #
 #   ⚠ EXTRACT'S UNIT SPACE IS THE SPARSEST IN THE FORMAT: two disjoint runs,
-#   0..6 (fields) and 16..25 (truncations), with 7..15 DECLARED BY NOTHING. So
+#   0..14 (fields) and 16..27 (truncations 16..25, calendar names 26..27),
+#   with 15 DECLARED BY NOTHING. So
 #   both directions go through `extract_field_{to,from}_wire`, which test
 #   MEMBERSHIP rather than a bound — exactly the distinction the ArrowType
 #   narrowing turns on. A hole value narrows into a `UInt8` losslessly and is
@@ -1669,8 +1670,8 @@ def _expr_to_wire(e: Expr, optimized: Bool) raises -> WireExpr:
         # Arm ordinal, not field number — `extract` is field 13 and arm 12.
         arm = 12
         # ⚠ THE UNIT GOES THROUGH `extract_field_to_wire`, WHICH IS A
-        # MEMBERSHIP TEST OVER TWO DISJOINT RUNS (0..6 and 16..25), not a
-        # bound. An `ExtractData` built with unit 12 — reachable, because
+        # MEMBERSHIP TEST OVER TWO DISJOINT RUNS (0..14 and 16..27), not a
+        # bound. An `ExtractData` built with unit 15 — reachable, because
         # `Expr.extract(unit, child)` and `Expr.date_trunc(unit, child)` both
         # take a raw `UInt8` — is REFUSED at encode rather than written as a
         # number the reader would have to invent a meaning for.

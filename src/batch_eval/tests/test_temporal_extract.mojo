@@ -691,10 +691,10 @@ def test_day_index_kernel_unit_codes_mirror_the_plan_IR() raises:
     assert_equal(Int(_K_DAYOFWEEK), Int(EXTRACT_DAYOFWEEK))
     assert_equal(Int(_K_ISODOW), Int(EXTRACT_ISODOW))
     assert_equal(Int(_K_DAYOFYEAR), Int(EXTRACT_DAYOFYEAR))
-    # ⚠ AND THEY MUST BE BELOW THE TRUNC RUN. `_is_trunc_unit` is `unit >= 16`
-    # and everything from the type ladder to the row capability gate delegates
-    # to it, so a field unit numbered 16+ would be DECLARED as its child's
-    # temporal type over an INT64 buffer.
+    # ⚠ AND THEY MUST BE BELOW THE TRUNC RUN. `_is_trunc_unit` is the run
+    # 16..25 and everything from the type ladder to the row capability gate
+    # delegates to it, so a field unit numbered in that run would be DECLARED
+    # as its child's temporal type over an INT64 buffer.
     assert_true(Int(EXTRACT_DAYOFYEAR) < 16)
 
 

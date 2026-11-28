@@ -126,6 +126,7 @@ from plan_expr.expr import (
     EXTRACT_DAYOFWEEK, EXTRACT_ISODOW, EXTRACT_DAYOFYEAR,
     EXTRACT_WEEK, EXTRACT_ISOYEAR, EXTRACT_YEARWEEK,
     EXTRACT_MILLISECOND, EXTRACT_MICROSECOND,
+    EXTRACT_DAYNAME, EXTRACT_MONTHNAME,
     EXTRACT_TRUNC_YEAR, EXTRACT_TRUNC_QUARTER, EXTRACT_TRUNC_MONTH,
     EXTRACT_TRUNC_WEEK, EXTRACT_TRUNC_DAY, EXTRACT_TRUNC_HOUR,
     EXTRACT_TRUNC_MINUTE, EXTRACT_TRUNC_SECOND, EXTRACT_TRUNC_MILLISECOND,
@@ -642,9 +643,8 @@ comptime _R_NULLC: String = (
     "'\"NULL\"'). THE MISSING PRIMITIVE IS A NULL-TYPED NULL: "
     "`broadcast_scalar`'s null arm carries exactly TWO logical types, "
     "float64 and int64, so the closest this engine can answer is a "
-    "BIGINT NULL. Every VALUE would agree and every TYPE would not — "
-    "the same wall that keeps `dayname`/`monthname` unbound. Bound on "
-    "that approximation this would be a silent type divergence, which "
+    "BIGINT NULL. Every VALUE would agree and every TYPE would not. "
+    "Bound on that approximation this would be a silent type divergence, which "
     "is worth less than the missing name."
 )
 
@@ -856,8 +856,8 @@ comptime _R_PGCASE: String = (
     "that ELSE and never NULL. THE TWO HALVES OF THIS PAIR ARE EASY TO "
     "SWAP: it is `map_to_pg_oid` whose ELSE is NULL (19 INTEGER "
     "arms; `map_to_pg_oid('nope')` -> NULL), and INTEGER arms ride the "
-    "int64 null arm — so the string-NULL wall that keeps "
-    "`dayname`/`monthname` unbound applies to NEITHER of these two. "
+    "int64 null arm — so the missing string NULL literal "
+    "applies to NEITHER of these two. "
     "⭐ THE REAL BLOCKER FOR `format_pg_type` IS A STRING-LITERAL CASE "
     "ARM. Its THEN arms are string LITERALS ('float4', 'float8', ...) "
     "and this engine's Utf8 CASE evaluator states its offsets "
@@ -1177,10 +1177,11 @@ comptime _R_TSFORMAT: String = (
     "TEMPORAL FORMAT DIRECTIVE string — `strftime` renders a temporal value "
     "to VARCHAR and the other two PARSE a VARCHAR to TIMESTAMP on DuckDB "
     "v1.5.3. TWO MISSING PRIMITIVES, one per direction. (1) RENDER: no "
-    "expression here converts a temporal column to text — `EXPR_EXTRACT` "
-    "answers INT64 for field units and, for trunc units, carries the CHILD's "
-    "own temporal type through unchanged, so there is no temporal-to-string "
-    "route at all. (2) PARSE: a string-to-timestamp conversion needs a "
+    "expression here renders a temporal column through a format directive — "
+    "`EXPR_EXTRACT` answers INT64 for field units, the CHILD's own temporal "
+    "type for trunc units, and text only for the two calendar names "
+    "(`dayname`, `monthname`), so there is no directive-driven "
+    "temporal-to-string route. (2) PARSE: a string-to-timestamp conversion needs a "
     "CALENDAR-FIELDS-TO-INSTANT step — the parsed year/month/day have to "
     "become a tick count — which is the SAME civil-calendar-to-days primitive "
     "`_R_TSMINT` measures absent for `make_date(y, m, d)`. ⚠ THE EPOCH-COUNT "
@@ -1273,20 +1274,6 @@ comptime _R_TZFN: String = (
     "3-arg `Field` ctor had DROPPED it. ⚠ ALL THREE ARE ALSO REFUSED AS "
     "`date_part` SPECIFIERS by `sql_date_part_unit`, which measured them as "
     "0 on a NAIVE timestamp: the same gap seen from the other namespace."
-)
-
-comptime _R_DATENAME: String = (
-    "SQL not supported: `dayname` and `monthname` are `VARCHAR(DATE)` "
-    "CALENDAR NAME LOOKUPs on DuckDB v1.5.3 — a temporal value in, a "
-    "locale-independent English name out. THE MISSING PRIMITIVE IS A "
-    "STRING-PRODUCING TEMPORAL EXPRESSION: `EXPR_EXTRACT` is the only tag "
-    "that reads a temporal operand and `expr_walk.walk_expr_field` types it "
-    "INT64 for every field unit, so the seven-element and twelve-element "
-    "name tables have nowhere to be returned to. ⚠ THIS IS THE SAME WALL "
-    "`_R_NULLC` NAMES IN PASSING ('the same wall that keeps "
-    "dayname/monthname unbound') and this row is where it is measured rather "
-    "than mentioned; it is NOT the string-LITERAL wall, which is fixed "
-    "and must not be quoted here."
 )
 
 comptime _R_INTERVALCTOR: String = (
@@ -2970,8 +2957,7 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     # ⚠ `nullif`'s NULL IS TYPED, AND THE TYPE IS PICKED FROM THE FIRST
     # OPERAND. `broadcast_scalar`'s null arm has exactly two types — float64
     # and int64 — so a STRING operand has no expressible NULL and is REFUSED BY
-    # NAME rather than raising mid-execution. Same wall that keeps
-    # `dayname`/`monthname` unbound.
+    # NAME rather than raising mid-execution.
     #
     # ⛔ `split_part` IS A MACRO AND IS REACHABLE THERE — a measurement against
     # the scalar tier ONLY reports it as "does not exist in v1.5.3, it is a
@@ -3319,10 +3305,25 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     # a `date_part` specifier there (`date_part('nanosecond', ...)` is a
     # Conversion Error). It is absent because a TIMESTAMP_NS column is the
     # only input for which it carries information this engine does not
-    # already expose, and the unit space below 16 has ONE slot left — see
-    # `expr.mojo`. Its absence is a decision, not an oversight.
+    # already expose. Its absence is a decision, not an oversight.
     if name == "millisecond": return SqlFnSpec(FNK_EXTRACT_FIELD, EXTRACT_MILLISECOND, 1, 1)
     if name == "microsecond": return SqlFnSpec(FNK_EXTRACT_FIELD, EXTRACT_MICROSECOND, 1, 1)
+    #
+    # ---- CALENDAR NAMES — VARCHAR, not BIGINT
+    #
+    # DuckDB's `dayname(x)` / `monthname(x)` over a DATE or a TIMESTAMP
+    # (https://duckdb.org/docs/stable/sql/functions/date): the English name of
+    # the weekday ('Sunday' .. 'Saturday') or the month ('January' ..
+    # 'December'), whatever the locale; a timestamp names its date
+    # (`dayname(TIMESTAMP '2028-02-29 23:59:59.999999')` = 'Tuesday'), and
+    # `dayname(NULL::DATE)` is NULL. The answers are held to the pinned DuckDB
+    # by the `scalar_fn` corpus (`dayname_*` / `monthname_*` cases). The unit is
+    # typed STRING by `walk_expr_field` (`_is_name_unit`), not INT64 as every
+    # other field unit. ⚠ NEITHER IS A `date_part` SPECIFIER: DuckDB refuses
+    # `date_part('dayname', d)` ('extract specifier "dayname" not
+    # recognized'), so `sql_date_part_unit` has no row for them.
+    if name == "dayname": return SqlFnSpec(FNK_EXTRACT_FIELD, EXTRACT_DAYNAME, 1, 1)
+    if name == "monthname": return SqlFnSpec(FNK_EXTRACT_FIELD, EXTRACT_MONTHNAME, 1, 1)
 
     # -- BINDER DESUGARS — no new tag, no kernel, no pinned counter --
     #
@@ -3965,10 +3966,6 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     if name == "timezone": return SqlFnSpec(FNK_REFUSED, _R_TZFN)
     if name == "timezone_hour": return SqlFnSpec(FNK_REFUSED, _R_TZFN)
     if name == "timezone_minute": return SqlFnSpec(FNK_REFUSED, _R_TZFN)
-    #
-    # ---- CALENDAR NAME lookups — 2 names
-    if name == "dayname": return SqlFnSpec(FNK_REFUSED, _R_DATENAME)
-    if name == "monthname": return SqlFnSpec(FNK_REFUSED, _R_DATENAME)
     #
     # ---- INTERVAL producers and consumers — 16 names
     if name == "age": return SqlFnSpec(FNK_REFUSED, _R_INTERVALCTOR)

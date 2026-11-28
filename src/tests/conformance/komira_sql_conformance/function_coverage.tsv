@@ -136,7 +136,7 @@ datepart	FNK_DESUGAR	-	-	4	equal:4
 datesub	FNK_DESUGAR	-	-	3	equal:3
 datetrunc	FNK_DESUGAR	-	-	4	equal:4
 day	FNK_EXTRACT_FIELD	-	yes	2	equal:2
-dayname	FNK_REFUSED	_R_DATENAME	yes	0	probe:refused_bind
+dayname	FNK_EXTRACT_FIELD	-	yes	4	equal:4
 dayofmonth	FNK_EXTRACT_FIELD	-	-	1	equal:1
 dayofweek	FNK_EXTRACT_FIELD	-	yes	2	equal:2
 dayofyear	FNK_EXTRACT_FIELD	-	yes	2	equal:2
@@ -527,7 +527,7 @@ mismatches	FNK_STRING_FN_N	-	-	1	equal:1
 mod	FNK_BINARY_OP	-	yes	2	equal:2
 mode	FNK_REFUSED	_R_AGGRETAIN	-	0	probe:refused_bind
 month	FNK_EXTRACT_FIELD	-	yes	2	equal:2
-monthname	FNK_REFUSED	_R_DATENAME	yes	0	probe:refused_bind
+monthname	FNK_EXTRACT_FIELD	-	yes	3	equal:3
 multiply	FNK_BINARY_OP	-	-	1	equal:1
 nanosecond	FNK_DESUGAR	-	-	1	equal:1
 nextafter	FNK_REFUSED	_R_MATH2	-	0	probe:refused_bind

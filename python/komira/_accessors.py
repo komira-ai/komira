@@ -23,8 +23,10 @@ regexp_extract does, where pandas gives NaN).
 
 `.dt` builds `year`, `quarter`, `month`, `day`, `dayofweek` (Monday is 0),
 `dayofyear` of a timestamp or a date, `hour`, `minute`, `second` and
-`microsecond` (the part of the second, as pandas) of a timestamp only, each int64,
-and `floor(freq)` of a timestamp to one fixed unit.
+`microsecond` (the part of the second, as pandas) of a timestamp only, each int64;
+`day_name()` and `month_name()` of a timestamp or a date, the English name
+('Monday', 'October') as a string; and `floor(freq)` of a timestamp to one fixed
+unit.
 
 Arguments pandas has that this release cannot honour raise
 `UnsupportedOperation` at the call and name what to write instead. A method
@@ -378,6 +380,14 @@ def _dayofweek(child: _ops.Node) -> _ops.Node:
     return _ops.Arith("sub", _ops.Extract("isodow", child), _ops.Lit(1))
 
 
+def _check_locale(locale: object, verb: str) -> None:
+    if locale is not None:
+        raise UnsupportedOperation(
+            f"{verb}(locale={locale!r}) is not supported: the engine names days and months in English "
+            "only; leave locale out"
+        )
+
+
 class DatetimeMethods(_Accessor):
     """`s.dt` of a timestamp or date32 Series."""
 
@@ -397,6 +407,20 @@ class DatetimeMethods(_Accessor):
     weekday = _part("weekday", _dayofweek)
     dayofyear = _part("dayofyear", _extract("dayofyear"))
     day_of_year = _part("day_of_year", _extract("dayofyear"))
+
+    def day_name(self, locale: str | None = None) -> Series:
+        """The English name of each value's weekday ('Monday' .. 'Sunday'),
+        a string Series; a missing value gives a missing name."""
+        child = self._child()
+        _check_locale(locale, ".dt.day_name")
+        return self._derive(_ops.Extract("dayname", child))
+
+    def month_name(self, locale: str | None = None) -> Series:
+        """The English name of each value's month ('January' .. 'December'),
+        a string Series; a missing value gives a missing name."""
+        child = self._child()
+        _check_locale(locale, ".dt.month_name")
+        return self._derive(_ops.Extract("monthname", child))
 
     def floor(self, freq: str, ambiguous: object = "raise", nonexistent: object = "raise") -> Series:
         """Each timestamp cut down to the start of its day, hour, minute,

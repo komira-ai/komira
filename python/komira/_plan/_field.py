@@ -75,6 +75,8 @@ _INT32_MIN = -(2**31)
 _INT64_MIN = -(2**63)
 
 _STRING_FN_INT = frozenset({"length", "ascii", "unicode", "strlen", "bit_length"})
+# The extract units whose value is a name (a string), not a number.
+_EXTRACT_NAMES = frozenset({"dayname", "monthname"})
 _STRING_FN_N_INT = frozenset({"strpos", "levenshtein", "damerau_levenshtein", "hamming"})
 _STRING_FN_N_FLOAT = frozenset({"jaro", "jaro_winkler", "jaccard"})
 
@@ -363,6 +365,8 @@ def field_of(node: Node, columns: dict[str, pb.WireField]) -> pb.WireField:
             f = field_of(node.child, columns)
             f.name = "date_trunc"
             return f
+        if node.unit in _EXTRACT_NAMES:
+            return field("extract", _STRING, True)
         return field("extract", _INT64, True)
     if isinstance(node, UdfCall):
         return call_ref(node, columns).return_type

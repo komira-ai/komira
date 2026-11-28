@@ -688,11 +688,12 @@ message WireAggFn {
 // DATE32 or TIMESTAMP_* column, or a `date_trunc` to a period start.
 message WireExtract {
   // ⚠ THE SPARSEST VOCABULARY IN THE FORMAT. The engine's EXTRACT_* space is
-  // two disjoint runs — fields 0..6 and truncations 16..25 — so engine values
-  // 7..15 are DECLARED BY NOTHING and `extract_field_is_declared` returns
-  // False for them. That is why the decode side goes through
-  // `extract_field_from_wire` (a MEMBERSHIP test) rather than a range check:
-  // wire 12 narrows losslessly into a UInt8 and is still not a unit, and a
+  // two disjoint runs — fields 0..14, then truncations 16..25 and the
+  // calendar names 26..27 — so engine value 15 is DECLARED BY NOTHING and
+  // `extract_field_is_declared` returns False for it. That is why the decode
+  // side goes through `extract_field_from_wire` (a MEMBERSHIP test) rather
+  // than a range check: wire 16 narrows losslessly into a UInt8 and is still
+  // not a unit, and a
   // decoder that accepted it would name a `date_trunc` period that does not
   // exist rather than failing.
   ExtractField unit = 1;

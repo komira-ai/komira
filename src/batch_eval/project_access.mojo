@@ -72,11 +72,13 @@ from plan_expr.expr import (
     EXTRACT_YEAR,
     EXTRACT_YEARWEEK,
     Expr,
+    _is_name_unit,
     _is_trunc_unit,
 )
 
 from .column_decimal import _expr_name_hint, _resolve_temporal_arrow_type
 from .eval_column import _eval_column_expr
+from .temporal_names import calendar_name_column
 
 
 def _project_struct_field(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion]:
@@ -312,7 +314,8 @@ def _project_extract(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion
     """The `EXPR_EXTRACT` arm of `_eval_column_expr`."""
     # temporal field
     # extraction (year / month / day / hour / minute / second /
-    # quarter) and date_trunc(unit).  Dispatch on (unit, child_arrow_type).
+    # quarter), the calendar names (dayname / monthname) and
+    # date_trunc(unit).  Dispatch on (unit, child_arrow_type).
     var child_col = _eval_column_expr(expr.extract_child_ref(), batch)
     var unit = expr.extract_unit()
     # ⚠ THE TYPE COMES FROM `_resolve_temporal_arrow_type`, NOT FROM
@@ -339,6 +342,9 @@ def _project_extract(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion
             + String(Int(child_col.arrow_type.type_id))
             + " and the batch schema does not declare it temporal either"
         )
+    # --- calendar names (STRING out) ---
+    if _is_name_unit(unit):
+        return calendar_name_column(child_col, src_at, unit)
     # --- date_trunc family ---
     if _is_trunc_unit(unit):
         # Map the IR EXTRACT_TRUNC_* tag onto the kernel TRUNC_* tag.
