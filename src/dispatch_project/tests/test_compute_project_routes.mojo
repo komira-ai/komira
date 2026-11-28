@@ -45,6 +45,9 @@ from plan_expr.expr import (
     STR_LIKE,
     UN_ABS,
     UN_BIT_COUNT,
+    RDG_ROUND,
+    RDG_TRUNC,
+    RDG_ROUND_HALF_EVEN,
     UN_IS_NOT_NULL,
     UN_IS_NULL,
     UN_NEGATE,
@@ -280,6 +283,19 @@ def test_null_test_cast_and_numeric_function_outputs() raises:
     assert_false(_is_num_typepres_output(Expr.unary(UN_NEGATE, _c("k"))))
     assert_false(_is_num_typepres_output(_a(Expr.unary(UN_NEGATE, _c("k")))))
     assert_false(_is_num_typepres_output(_c("k")))
+
+
+def test_round_digits_routes_to_the_column_evaluator() raises:
+    """Every rule of `EXPR_ROUND_DIGITS`, at the top and under an alias, is a
+    type-preserving numeric output; a plain column is not."""
+    var ops = List[UInt8]()
+    ops.append(RDG_ROUND)
+    ops.append(RDG_TRUNC)
+    ops.append(RDG_ROUND_HALF_EVEN)
+    for i in range(len(ops)):
+        var e = Expr.round_digits(ops[i], _c("k"), Int32(-2))
+        assert_true(_is_num_typepres_output(e))
+        assert_true(_is_num_typepres_output(_a(_a(e.copy()))))
 
 
 def test_nested_and_temporal_extract_outputs() raises:

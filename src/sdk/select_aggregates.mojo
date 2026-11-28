@@ -85,7 +85,7 @@ from plan_expr.agg_expr import AGG_COUNT
 from plan_expr.expr import (
     Expr, WhenCaseData,
     EXPR_AGG_FN, EXPR_ALIAS, EXPR_BINARY_OP, EXPR_UNARY_OP, EXPR_CAST,
-    EXPR_MATH_FN, EXPR_MATH_FN2, EXPR_WHEN, EXPR_COL_REF,
+    EXPR_MATH_FN, EXPR_MATH_FN2, EXPR_ROUND_DIGITS, EXPR_WHEN, EXPR_COL_REF,
 )
 from plan_expr.expr_walk import walk_expr_column_refs, ordered_name_sink
 from plan_expr.agg_expr import AggExpr
@@ -253,6 +253,7 @@ def _rebuildable(tag: UInt8) -> Bool:
     return (
         tag == EXPR_ALIAS or tag == EXPR_BINARY_OP or tag == EXPR_UNARY_OP
         or tag == EXPR_CAST or tag == EXPR_MATH_FN or tag == EXPR_MATH_FN2
+        or tag == EXPR_ROUND_DIGITS
         or tag == EXPR_WHEN
     )
 
@@ -274,6 +275,8 @@ def has_aggregate(e: Expr) -> Bool:
         return has_aggregate(e.cast_child_ref())
     if e.tag == EXPR_MATH_FN:
         return has_aggregate(e.math_fn_child_ref())
+    if e.tag == EXPR_ROUND_DIGITS:
+        return has_aggregate(e.round_digits_child_ref())
     if e.tag == EXPR_MATH_FN2:
         return has_aggregate(e.math_fn2_left_ref()) or has_aggregate(
             e.math_fn2_right_ref()
@@ -307,6 +310,8 @@ def reads_a_row(e: Expr) -> Bool:
         return reads_a_row(e.cast_child_ref())
     if e.tag == EXPR_MATH_FN:
         return reads_a_row(e.math_fn_child_ref())
+    if e.tag == EXPR_ROUND_DIGITS:
+        return reads_a_row(e.round_digits_child_ref())
     if e.tag == EXPR_MATH_FN2:
         return reads_a_row(e.math_fn2_left_ref()) or reads_a_row(
             e.math_fn2_right_ref()
@@ -352,6 +357,12 @@ def hoist_aggregates(e: Expr, mut aggs: List[Expr]) -> Expr:
     if e.tag == EXPR_MATH_FN:
         return Expr.math_fn(
             e.math_fn_op(), hoist_aggregates(e.math_fn_child_ref(), aggs)
+        )
+    if e.tag == EXPR_ROUND_DIGITS:
+        return Expr.round_digits(
+            e.round_digits_op(),
+            hoist_aggregates(e.round_digits_child_ref(), aggs),
+            e.round_digits_count(),
         )
     if e.tag == EXPR_MATH_FN2:
         var l = hoist_aggregates(e.math_fn2_left_ref(), aggs)

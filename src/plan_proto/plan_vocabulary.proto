@@ -109,6 +109,7 @@ enum ExprTag {
   EXPR_UDF_CALL = 26;
   EXPR_STRING_FN_N = 27;
   EXPR_UDF_APPLY = 28;
+  EXPR_ROUND_DIGITS = 29;
   reserved 11;  // EXPR_BETWEEN
   reserved 12;  // EXPR_SORT_KEY
 }
@@ -520,6 +521,20 @@ enum MathFn2 {
   MATH2_WIRE_UNSPECIFIED = 0;
   MATH2_ATAN2 = 1;
   MATH2_POW = 2;
+}
+
+// ----------------------------------------------------------------------
+// The rounding rule of a digit-count round (EXPR_ROUND_DIGITS): DuckDB's
+// `round` (halves away from zero), DuckDB's `trunc` (toward zero), and
+// numpy's `np.round` (halves to even, pandas `Series.round`).
+// Derived from: src/plan_expr/expr.mojo
+// Engine prefix: RDG_
+// ----------------------------------------------------------------------
+enum RoundDigitsOp {
+  RDG_WIRE_UNSPECIFIED = 0;
+  RDG_ROUND = 1;
+  RDG_TRUNC = 2;
+  RDG_ROUND_HALF_EVEN = 3;
 }
 
 // ----------------------------------------------------------------------

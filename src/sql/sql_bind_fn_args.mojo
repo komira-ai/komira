@@ -16,13 +16,13 @@ from plan_expr.scalar_desugar import (
     float_class_of, greatest_least_of, nanosecond_of, year_derived_of,
 )
 from sql.sql_ast import (
-    SX_DATE, SX_NULL, SX_STRING, SqlExpr,
+    SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT, SX_NULL, SX_STRING, SqlExpr,
 )
 from sql.sql_bind_call import _regexp_literal_string
 from sql.sql_bind_expr import (
     _bound_expr_is_float, _promote_int_literal_to_float, _bind_scalar,
 )
-from sql.sql_bind_ops import _BARE_NULL_REFUSAL
+from sql.sql_bind_ops import _BARE_NULL_REFUSAL, _sx_is_big_int
 from sql.sql_bind_scope import (
     CteScope, _date_to_days, BindScope,
 )
@@ -250,6 +250,33 @@ def _unit_literal_text(sx: SqlExpr, fn_name: String) raises -> String:
     return sx.text.lower()
 
 
+def _round_digits_literal(name: String, arg: SqlExpr) raises -> Int32:
+    """The digit count of `round(x, digits)` / `trunc(x, digits)`: an integer
+    literal in INT32 range (the parser folds `-2` to a literal). Any other
+    argument is refused by name, because the kernel carries the count in the
+    plan node and cannot read it per row."""
+    var got: String
+    if arg.tag == SX_INT:
+        if not _sx_is_big_int(arg) and arg.int_val >= Int64(-2147483648) and arg.int_val <= Int64(2147483647):
+            return Int32(Int(arg.int_val))
+        if _sx_is_big_int(arg):
+            got = String("the integer literal ") + arg.text + ", outside the INT32 range"
+        else:
+            got = String("the integer literal ") + String(arg.int_val) + ", outside the INT32 range"
+    elif arg.tag == SX_NULL:
+        got = String("a NULL literal")
+    elif arg.tag == SX_FLOAT:
+        got = String("a non-integer number literal")
+    elif arg.tag == SX_COLUMN:
+        got = String("the column ") + arg.text
+    else:
+        got = String("an expression")
+    raise Error(
+        String("SQL not supported: ") + name
+        + "() digit count must be an integer literal here - got " + got
+    )
+
+
 def _fn_arity_msg(name: String, kind: UInt8, n: Int) -> String:
     """The arity message the LOWERING FAMILY `kind` states, for a call to `name`
     with `n` arguments.
@@ -319,17 +346,17 @@ def _fn_arity_msg(name: String, kind: UInt8, n: Int) -> String:
             + " declares."
         )
     if kind == FNK_UNARY_NUM:
-        # Its own message: the two-argument call is a real DuckDB function
-        # (`round(x, 2)`, `trunc(x, 2)`), a digit count this engine cannot
-        # carry on a unary node, and dropping the digits would answer a
-        # zero-digit round.
+        # `round` and `trunc` take an optional digit count; `abs`, `sign` and
+        # `bit_count` have no 2-argument form in DuckDB and take exactly one.
+        if name == "round" or name == "trunc":
+            return (
+                String("SQL bind error: ") + name + "() takes 1 argument (x)"
+                + " or 2 arguments (x, digits) — got " + String(n)
+            )
         return (
             String("SQL bind error: ") + name + "() takes exactly 1 argument"
             + " here — got " + String(n)
-            + ". DuckDB also has a 2-argument round(x, digits) / trunc(x,"
-            + " digits); this engine lowers the 1-argument form onto a UNARY"
-            + " node that has no slot for a digit count, so the 2-argument"
-            + " form is REFUSED rather than rounded to zero digits."
+            + ". DuckDB has no 2-argument form of " + name + "()."
         )
     # A NEW LOWERING KIND WITH NO ARITY MESSAGE MUST SAY SO RATHER THAN INHERIT
     # ONE. Falling through to the "exactly 1 argument" text would hand a future

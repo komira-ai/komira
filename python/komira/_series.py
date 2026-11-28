@@ -16,6 +16,8 @@ nothing. It is used inside its own frame's verbs: `df[s]` filters by it and
   `-`, and `& | ~` over boolean Series. `isin` takes a list of values, or a
   Series of a frame of the same session (a semi join, which only `df[...]`
   takes).
+- `round(decimals=0)` rounds a numeric column halves to even, as pandas does
+  (an `_ops.RoundDigits` node with the `round_half_even` rule).
 - `isna()` and `notna()` (and their aliases `isnull()` and `notnull()`) say
   whether each value is missing, a boolean Series that is never NULL: a value
   is missing when it is NULL, or NaN in a float Series (komira/_missing.py).
@@ -61,6 +63,8 @@ _UNSIGNED = {"uint8": 1, "uint16": 2, "uint32": 3, "uint64": 4}
 _SIGNED_OF_RANK = {rank: name for name, rank in _SIGNED.items()}
 _INTEGERS = frozenset(_SIGNED) | frozenset(_UNSIGNED)
 _FLOATS = frozenset({"float16", "float32", "float64"})
+# The column types round() rounds.
+_ROUNDABLE = frozenset({"int8", "int16", "int32", "int64", "float32", "float64"})
 
 
 def _fits(value: int, dtype: str) -> bool:
@@ -277,6 +281,34 @@ class Series:
             _ops.Compare("eq", *self._widened(self._node, _literal(v, "isin()"), self._windows)) for v in values
         )
         return self._derive(_ops.or_all(tests) if tests else _ops.Lit(False))
+
+    def round(self, decimals: int = 0, *args: object, **kwargs: object) -> Series:
+        """The values rounded to `decimals` places, halves to even as pandas
+        does: `2.5` becomes `2.0` and `0.5` becomes `0.0` (SQL's `round(x, d)`
+        rounds halves away from zero). A negative `decimals` rounds left of
+        the point; an integer column is unchanged for `decimals >= 0`, and the
+        result has the column's type. `decimals` is an int within int32 (a
+        bool or a float is refused). Only int8..int64, float32 and float64
+        columns are rounded; a decimal, an unsigned or any other column is
+        refused by name. pandas takes and ignores numpy's `*args` and
+        `**kwargs`; here any is refused."""
+        self._check_current()
+        if args or kwargs:
+            given = [repr(a) for a in args] + [f"{k}=..." for k in kwargs]
+            raise UnsupportedOperation(
+                f"round() takes only decimals, and was given the extra arguments {', '.join(given)}: "
+                "pandas ignores them and komira refuses them"
+            )
+        if isinstance(decimals, bool) or not isinstance(decimals, int):
+            raise TypeError(f"round() decimals must be an int, not a {type(decimals).__name__}")
+        if not _ops.INT32_MIN <= decimals <= _ops.INT32_MAX:
+            raise ValueError(f"round() decimals must be within int32, not {decimals}")
+        if self._type not in _ROUNDABLE:
+            raise UnsupportedOperation(
+                f"round() of a {self._type} column is not built: it rounds int8, int16, int32, int64, "
+                "float32 and float64 columns"
+            )
+        return self._derive(_ops.RoundDigits("round_half_even", self._node, decimals))
 
     # ---- missing values (komira/_missing.py) ----------------------------
 

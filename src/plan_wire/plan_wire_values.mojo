@@ -240,6 +240,7 @@ from plan_expr.expr import (
     EXPR_STRING_FN_N,
     EXPR_UDF_CALL,
     EXPR_UDF_APPLY,
+    EXPR_ROUND_DIGITS,
 )
 from plan_expr.agg_expr import (
     AGG_SUM,
@@ -2204,6 +2205,13 @@ def _check_expr(
                 expr.udf_apply_arg_ref(i), schema, left, right, sided_scope,
                 where, _child_pos(pos, expr, False),
             )
+    elif expr.tag == EXPR_ROUND_DIGITS:
+        # The operand is a value the rounding reads; the digit count is a
+        # constant of the node, not an expression.
+        _check_expr(
+            expr.round_digits_child_ref(), schema, left, right, sided_scope,
+            where, _child_pos(pos, expr, False),
+        )
     elif expr.tag == EXPR_EXTRACT:
         _check_expr(
             expr.extract_child_ref(), schema, left, right, sided_scope,

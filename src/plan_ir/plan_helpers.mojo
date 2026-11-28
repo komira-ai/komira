@@ -49,6 +49,7 @@ from plan_expr.expr import (
     EXPR_REGEXP,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
+    EXPR_ROUND_DIGITS,
     EXPR_SUBSTRING,
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
@@ -835,6 +836,19 @@ def _expr_fingerprint(expr: Expr) -> String:
         # output to the first fn's value. Mirrors the EXPR_UNARY_OP arm shape.
         var child_fp = _expr_fingerprint(expr.math_fn_child_ref())
         return "M:" + String(Int(expr.math_fn_op())) + "(" + child_fp + ")"
+    elif expr.tag == EXPR_ROUND_DIGITS:
+        # Op and digit count are part of identity: round(x, 1) and
+        # round(x, 2) must not fingerprint equal.
+        var child_fp = _expr_fingerprint(expr.round_digits_child_ref())
+        return (
+            "RD:"
+            + String(Int(expr.round_digits_op()))
+            + ":"
+            + String(Int(expr.round_digits_count()))
+            + "("
+            + child_fp
+            + ")"
+        )
     elif expr.tag == EXPR_MATH_FN2:
         # Binary scalar
         # math fns (e.g. atan2) fingerprint by op + (left, right). NOT

@@ -502,6 +502,13 @@ The rulings that settled each item once open or departing, the table of parity g
 - **Current behaviour.** The plan types DECIMAL `%` with the **left** operand's precision and scale (`src/plan_expr/expr_walk.mojo:896-901`), which cannot hold `5.0 % 0.33` = `0.05` (5.0 − 15 × 0.33) at scale 1; no DECIMAL `%` kernel is here ("Code that does not follow", item 9).
 - **Mark.** MATCHES.
 
+### 5.11 round and trunc with a digit count
+
+- **Rule.** `round(x, d)` and `trunc(x, d)` take an integer literal `d` (a column, an expression, NULL, a non-integer or a value outside INT32 is refused by name). A DOUBLE or FLOAT (FLOAT computed in double, then narrowed) with `d >= 0` is `round(x * 10^d) / 10^d` (`trunc` for `trunc`), half away from zero; with `d < 0` it is `round(x / 10^-d) * 10^-d`. If that result is infinite or NaN, `round` answers `x` for `d >= 0` and 0.0 for `d < 0`, and `trunc` answers `x` on both sides, so `round(1e308, 1)` is 1e308 and `round(nan, -1)` is 0.0. An integer column keeps its type: `d >= 0` is the value, `d <= -19` is 0, otherwise the value moves half the step away from zero (`round` only), divides by `10^-d` truncating, and multiplies back, in INT64 with wrapping arithmetic, so `round(INT64_MAX, -1)` is -9223372036854775800. A DECIMAL(w, s) with `d >= s` is unchanged; with `0 <= d < s` it becomes DECIMAL(w, d); with `d < 0` it becomes DECIMAL(w, 0), and every row is 0, NULL rows included, when `-d >= w - s`. The one-argument `round(x)` and `trunc(x)` are unchanged.
+- **DuckDB.** The same rules, measured on v1.5.6, including the all-zero DECIMAL case (DuckDB folds it to a constant).
+- **Current behaviour.** `EXPR_ROUND_DIGITS` (`RDG_ROUND`, `RDG_TRUNC`) carries the digit count in the node; the SQL binder emits it from `round` and `trunc` with two arguments. `round_even` and `roundbankers` stay refused by name.
+- **Mark.** MATCHES.
+
 ## 6. Casts
 
 ### 6.1 Strict casts and TRY_CAST

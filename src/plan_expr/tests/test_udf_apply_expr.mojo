@@ -221,7 +221,7 @@ def test_udf_apply_is_named_and_counted() raises:
     """Defect: a tag added without its name or without growing the count, so
     every walker that sizes itself from `EXPR_TAG_COUNT` skips it."""
     assert_equal(Int(EXPR_UDF_APPLY), 27, "the design's engine tag")
-    assert_equal(EXPR_TAG_COUNT, 28, "the count covers the new tag")
+    assert_equal(EXPR_TAG_COUNT, 29, "the count covers the UDF tag and the round-digits tag after it")
     assert_equal(expr_tag_name(EXPR_UDF_APPLY), "EXPR_UDF_APPLY", "its name")
 
 

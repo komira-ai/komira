@@ -15,7 +15,7 @@ from std.testing import TestSuite, assert_equal, assert_true, assert_false
 from arrow.arrow_types import ArrowType
 from arrow.schema import Field, Schema, SchemaBuilder
 from plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_SUM
-from plan_expr.expr import Expr, BIN_GT
+from plan_expr.expr import Expr, BIN_GT, RDG_ROUND, RDG_TRUNC
 from plan_expr.partition_expr import PartitionExpr
 from plan_expr.scalar_value import ScalarValue
 from plan_expr.udf_data import (
@@ -869,6 +869,45 @@ def test_a_deep_plan_is_shared_whole() raises:
     assert_equal(_ref_hashes(out)[0], h)
     assert_equal(_count_tag(out, PLAN_FILTER), depth + 1)
     assert_equal(_count_tag(out, PLAN_SCAN), 1)
+
+
+def _round_proj(op: UInt8, digits: Int32) -> LogicalPlan:
+    """`Project(round_digits(op, v, digits), Scan)`."""
+    var ex = ExprArray()
+    ex.append(Expr.round_digits(op, Expr.col_ref("v"), digits))
+    return LogicalPlan.project(ex^, _scan())
+
+
+def test_round_digits_projects_share_only_when_op_and_digits_match() raises:
+    """Proves: two Projects computing round(v, 1) and round(v, 2) hash
+    differently and both stay, as do round and trunc at one digit count; two
+    Projects with equal op and digits are one shared subtree."""
+    assert_true(
+        _round_proj(RDG_ROUND, 1).structural_hash()
+        != _round_proj(RDG_ROUND, 2).structural_hash()
+    )
+    assert_true(
+        _round_proj(RDG_ROUND, 1).structural_hash()
+        != _round_proj(RDG_TRUNC, 1).structural_hash()
+    )
+    assert_equal(
+        _round_proj(RDG_ROUND, 1).structural_hash(),
+        _round_proj(RDG_ROUND, 1).structural_hash(),
+    )
+    var differ = plan_cse_eliminate(
+        _join(_round_proj(RDG_ROUND, 1), _round_proj(RDG_ROUND, 2))
+    )
+    assert_equal(_count_tag(differ, PLAN_PROJECT), 2)
+    assert_equal(len(_ref_hashes(differ)), 1)
+    assert_equal(_ref_hashes(differ)[0], _scan().structural_hash())
+    var same = plan_cse_eliminate(
+        _join(_round_proj(RDG_ROUND, 1), _round_proj(RDG_ROUND, 1))
+    )
+    assert_equal(_count_tag(same, PLAN_PROJECT), 1)
+    assert_equal(len(_ref_hashes(same)), 1)
+    assert_equal(
+        _ref_hashes(same)[0], _round_proj(RDG_ROUND, 1).structural_hash()
+    )
 
 
 def main() raises:

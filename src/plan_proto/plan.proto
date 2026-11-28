@@ -872,6 +872,21 @@ message WireUdfApply {
   repeated WireExpr args = 2;
 }
 
+// `RoundDigitsData` — `EXPR_ROUND_DIGITS` (engine tag 28): `child` rounded to
+// `digits` decimal places by the rule `op` names. SQL `round(x, d)` and
+// `trunc(x, d)` and pandas `Series.round(d)`; one-argument `round(x)` is still
+// a `WireUnaryOp`. The digit count is a constant of the plan, not an
+// expression: a DECIMAL operand's output scale is computed from it.
+message WireRoundDigits {
+  // RDG_ROUND is engine value 0; the wire is engine + 1, as for every enum
+  // here. UNSPECIFIED is refused at decode.
+  RoundDigitsOp op = 1;
+  WireExpr child = 2;
+  // Negative rounds left of the point (`round(1250, -2)` is 1300). `0` is a
+  // real count, which is why this is not an optional with 0 as absence.
+  int32 digits = 3;
+}
+
 // `SubstringData` — `EXPR_SUBSTRING`, SQL `substring(s, start, length)` over a
 // string column.
 message WireSubstring {
@@ -1155,6 +1170,10 @@ message WireExpr {
     // Field 27, ARM 26. The design's arm for a UDF call by `UdfRef` index
     // (optimized_plan_udfs.md §10.4).
     WireUdfApply udf_apply = 27;
+    // Field 28, ARM 27. APPENDED, so the field number and the arm ordinal
+    // stay one apart exactly as every arm above does — see the ordinal
+    // warning on the `extract` arm.
+    WireRoundDigits round_digits = 28;
   }
 }
 

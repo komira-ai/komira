@@ -12,7 +12,7 @@ from std.testing import assert_equal, assert_true, assert_false
 from arrow.schema import Field
 from containers.slab import Slab
 from plan_expr.col_expr import col
-from plan_expr.expr import Expr
+from plan_expr.expr import Expr, RDG_ROUND
 from plan_expr.fs_descriptor_pod import FsDescriptorPod, FS_SCHEME_S3
 from plan_ir.logical_plan import ExprArray
 from physical_plan.physical_plan import (
@@ -24,6 +24,7 @@ from pplan_wire import (
     PPLAN_WIRE_BAD_MAGIC,
     PPLAN_WIRE_TRAILING_BYTES,
     PPLAN_WIRE_TRUNCATED,
+    PPLAN_WIRE_UNSUPPORTED_EXPR_TAG,
     pplan_fields_equal,
     pplan_from_bytes,
     pplan_to_bytes,
@@ -159,6 +160,21 @@ def test_truncation_is_refused_by_name() raises:
     assert_true(_error_of(cut^).find(PPLAN_WIRE_TRUNCATED) >= 0)
 
 
+def test_a_round_to_digits_is_refused_by_tag_at_encode() raises:
+    var ops = Slab[MorselOp]()
+    ops.append(
+        MorselOp.filter(
+            Expr.round_digits(RDG_ROUND, Expr.col_ref(String("a")), Int32(2))
+        )
+    )
+    var text = String("")
+    try:
+        _ = pplan_to_bytes(_mk_rich(), ops)
+    except e:
+        text = String(e)
+    assert_equal(text, PPLAN_WIRE_UNSUPPORTED_EXPR_TAG + ": tag 28")
+
+
 def main() raises:
     test_rich_plan_round_trips_field_for_field()
     test_encoding_is_deterministic()
@@ -167,4 +183,5 @@ def main() raises:
     test_bad_magic_is_refused_by_name()
     test_trailing_byte_is_refused_by_name()
     test_truncation_is_refused_by_name()
+    test_a_round_to_digits_is_refused_by_tag_at_encode()
     print("ok")

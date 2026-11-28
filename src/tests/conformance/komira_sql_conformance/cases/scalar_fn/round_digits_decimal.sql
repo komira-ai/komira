@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k, round(CAST(d AS DECIMAL(12,4)) + CAST(0.0045 AS DECIMAL(12,4)), 2) AS r2, round(CAST(d AS DECIMAL(12,4)) + CAST(0.0045 AS DECIMAL(12,4)), 6) AS r6, round(CAST(d AS DECIMAL(12,4)) + CAST(5.5 AS DECIMAL(12,4)), -1) AS rm1, round(CAST(d AS DECIMAL(12,4)), -8) AS rm8, round(CAST(d AS DECIMAL(12,4)), -7) AS rm7 FROM T

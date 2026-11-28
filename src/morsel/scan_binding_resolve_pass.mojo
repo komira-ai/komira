@@ -117,6 +117,7 @@ from plan_expr.expr import (
     EXPR_EXTRACT,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
+    EXPR_ROUND_DIGITS,
     EXPR_SUBSTRING,
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
@@ -1185,6 +1186,15 @@ def resolve_expr_binding_leaves(
             return 0
         return resolve_expr_binding_leaves(
             expr._math_fn.value().child[], resolvers, scan_registry, snapshots
+        )
+    if tag == EXPR_ROUND_DIGITS:
+        if not expr._round_digits:
+            return 0
+        return resolve_expr_binding_leaves(
+            expr._round_digits.value().child[],
+            resolvers,
+            scan_registry,
+            snapshots,
         )
     if tag == EXPR_SUBSTRING:
         if not expr._substring:

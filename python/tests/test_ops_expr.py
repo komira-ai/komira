@@ -27,6 +27,7 @@ from komira._ops import (
     MathFn,
     MathFn2,
     Regexp,
+    RoundDigits,
     StringFn,
     StringFnN,
     StringOp,
@@ -71,7 +72,7 @@ def one_of(vocab):
 def test_every_node_class_is_listed():
     names = [c.__name__ for c in EXPR_NODES]
     assert names == [
-        "ColRef", "Lit", "Compare", "Arith", "BoolOp", "Unary", "Cast", "When", "StringOp",
+        "ColRef", "Lit", "Compare", "Arith", "BoolOp", "Unary", "RoundDigits", "Cast", "When", "StringOp",
         "Regexp", "StringFn", "StringFnN", "Substring", "MathFn", "MathFn2", "Extract",
         "StructField", "Alias", "UdfCall",
     ], names
@@ -264,6 +265,33 @@ def test_unary_refusals():
     assert Unary("negate", A).child is A
     assert Unary("is_null", A).child is A
     assert Unary("not", Lit(True)).child == Lit(True)
+
+
+def test_round_digits_accepts_every_rule_and_the_int32_range():
+    for op in _vocab.ROUND_DIGITS_OPS:
+        node = RoundDigits(op, A, 2)
+        assert (node.op, node.child, node.digits) == (op, A, 2)
+    assert _vocab.ROUND_DIGITS_OPS == {"round", "trunc", "round_half_even"}
+    for digits in (-(2**31), -1, 0, 2**31 - 1):
+        assert RoundDigits("round", A, digits).digits == digits
+    assert RoundDigits("round", A, 1) == RoundDigits("round", A, 1)
+    assert RoundDigits("round", A, 1) != RoundDigits("round", A, 2)
+    assert RoundDigits("round", A, 1) != RoundDigits("trunc", A, 1)
+    assert RoundDigits("round", A, 1) != Unary("round", A)
+
+
+def test_round_digits_refusals():
+    refuses(lambda: RoundDigits("floor", A, 1), ValueError,
+            "RoundDigits op 'floor' is not one of: " + one_of(_vocab.ROUND_DIGITS_OPS))
+    refuses(lambda: RoundDigits(b"round", A, 1), TypeError, "RoundDigits op must be a str, not bytes")
+    refuses(lambda: RoundDigits("round", 5, 1), TypeError, "RoundDigits.child must be an expression node, not int")
+    refuses(lambda: RoundDigits("round", A, 1.0), TypeError, "RoundDigits.digits must be an int, not float")
+    refuses(lambda: RoundDigits("round", A, True), TypeError, "RoundDigits.digits must be an int, not bool")
+    refuses(lambda: RoundDigits("round", A, None), TypeError, "RoundDigits.digits must be an int, not NoneType")
+    refuses(lambda: RoundDigits("round", A, 2**31), ValueError,
+            "RoundDigits.digits must be within int32, not 2147483648")
+    refuses(lambda: RoundDigits("round", A, -(2**31) - 1), ValueError,
+            "RoundDigits.digits must be within int32, not -2147483649")
 
 
 def test_cast_construction_and_try_cast():
@@ -525,6 +553,7 @@ def test_is_predicate_false_cases():
         Unary("negate", A),
         Unary("abs", A),
         Unary("round", A),
+        RoundDigits("round", A, 1),
         Regexp("match", A, "p"),
         Regexp("replace", A, "p", "r"),
         Regexp("extract", A, "p"),

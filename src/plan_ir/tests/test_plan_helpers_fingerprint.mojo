@@ -35,6 +35,9 @@ from plan_expr.expr import (
     EXTRACT_YEARWEEK,
     MATH_SQRT,
     MATH2_ATAN2,
+    RDG_ROUND,
+    RDG_TRUNC,
+    RDG_ROUND_HALF_EVEN,
     REGEXP_EXTRACT,
     REGEXP_REPLACE,
     STR_ENDS_WITH,
@@ -223,6 +226,37 @@ def test_math_functions_fold_op_and_children_in_order() raises:
     assert_equal(
         _expr_fingerprint(Expr.atan2(_c("b"), _c("a"))),
         "M2:" + _op(MATH2_ATAN2) + "(C:1:b,C:1:a)",
+    )
+
+
+def test_round_digits_folds_op_digits_and_child() raises:
+    assert_equal(
+        _expr_fingerprint(Expr.round_digits(RDG_ROUND, _c("a"), 2)),
+        "RD:" + _op(RDG_ROUND) + ":2(C:1:a)",
+    )
+    assert_equal(
+        _expr_fingerprint(Expr.round_digits(RDG_TRUNC, _c("a"), -3)),
+        "RD:" + _op(RDG_TRUNC) + ":-3(C:1:a)",
+    )
+
+
+def test_round_digits_with_different_op_digits_or_child_never_collide() raises:
+    var base = _expr_fingerprint(Expr.round_digits(RDG_ROUND, _c("a"), 1))
+    assert_equal(
+        base, _expr_fingerprint(Expr.round_digits(RDG_ROUND, _c("a"), 1))
+    )
+    assert_true(
+        base != _expr_fingerprint(Expr.round_digits(RDG_ROUND, _c("a"), 2))
+    )
+    assert_true(
+        base != _expr_fingerprint(Expr.round_digits(RDG_TRUNC, _c("a"), 1))
+    )
+    assert_true(
+        base
+        != _expr_fingerprint(Expr.round_digits(RDG_ROUND_HALF_EVEN, _c("a"), 1))
+    )
+    assert_true(
+        base != _expr_fingerprint(Expr.round_digits(RDG_ROUND, _c("b"), 1))
     )
 
 

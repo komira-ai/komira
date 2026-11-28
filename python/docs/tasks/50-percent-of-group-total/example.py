@@ -13,19 +13,19 @@ Path("sales.csv").write_text(
 )
 
 # SQL: a window SUM gives each row its group total; a second SELECT divides.
-# round(x * 1000 / total) / 10 keeps one decimal.
+# round(x, 1) keeps one decimal.
 with komira.Session() as s:
     s.register_csv("sales", "sales.csv")
     shares = s.sql(
-        "SELECT region, rep, amount, round(amount * 1000.0 / total) / 10 AS pct"
+        "SELECT region, rep, amount, round(amount * 100.0 / total, 1) AS pct"
         " FROM (SELECT region, rep, amount,"
         " SUM(amount) OVER (PARTITION BY region) AS total FROM sales)"
         " ORDER BY region, rep"
     )
     print(shares.to_arrow().to_pylist())
 
-# pandas-shaped: divide by the group's transform('sum'), round when printing.
+# pandas-shaped: divide by the group's transform('sum'), then round to one decimal.
 df = komira.read_csv("sales.csv")
-df["pct"] = df["amount"] / df.groupby("region")["amount"].transform("sum") * 100
+df["pct"] = (df["amount"] / df.groupby("region")["amount"].transform("sum") * 100).round(1)
 for row in df.sort_values("rep").materialize().to_arrow().to_pylist():
-    print(row["rep"], f"{row['pct']:.1f}")
+    print(row["rep"], row["pct"])

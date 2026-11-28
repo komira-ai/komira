@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # `plan_wire_vocabulary.mojo` and `plan_proto/plan_vocabulary.proto`
-# publish the same 33 enumerated spaces: one is what this package encodes and
+# publish the same 34 enumerated spaces: one is what this package encodes and
 # decodes with, the other is what every non-Mojo producer reads. The .proto's
 # header says they are kept in step by hand. test_plan_wire_vocabulary.mojo
 # holds the Mojo side to the ENGINE (counts, wire = engine + 1); nothing held
@@ -55,12 +55,12 @@
 #       reserved.
 #
 #   test_space_names_are_the_proto_enum_names
-#       `plan_wire_space_name` for all 33 spaces equals the enum's name in the
+#       `plan_wire_space_name` for all 34 spaces equals the enum's name in the
 #       .proto (`_proto_types`, a ledger in .proto declaration order), and the
 #       fallbacks for an index no space has.
 #
 #   test_bad_space_index_is_refused_by_every_dispatcher
-#       -1 and 33 against all five raising dispatchers, by message, and the
+#       -1 and 34 against all five raising dispatchers, by message, and the
 #       name dispatcher's total fallback.
 #
 # `_exempt`: the .proto RESERVES PlanTag 19 (PLAN_EXCHANGE), ExprTag 11 and 12
@@ -96,6 +96,7 @@ from plan_proto.plan_vocabulary import (
     PlanTag,
     PushdownGateMode,
     RegexpOp,
+    RoundDigitsOp,
     ScalarKind,
     ScalarTimeUnit,
     SnapshotPolicy,
@@ -153,12 +154,13 @@ from plan_wire.plan_wire_vocabulary import (
     param_tag_wire_name,
     pushdown_gate_mode_wire_name,
     snapshot_policy_wire_name,
+    round_digits_op_wire_name,
 )
 
 
 # ---------------------------------------------------------------------------
 # protoc's view: the generated enum of each space, in the vocabulary's space
-# index order (the .proto declaration order, JoinBuildSide last).
+# index order (the .proto declaration order, JoinBuildSide and RoundDigitsOp last).
 # ---------------------------------------------------------------------------
 
 
@@ -230,6 +232,8 @@ def _proto_name(space: Int, w: Int) -> String:
         return SnapshotPolicy(w).json_name()
     if space == 32:
         return JoinBuildSide(w).json_name()
+    if space == 33:
+        return RoundDigitsOp(w).json_name()
     return "no proto enum for space " + String(space)
 
 
@@ -238,8 +242,8 @@ def _proto_declares(space: Int, w: Int) -> Bool:
 
 
 # The enum names of plan_vocabulary.proto, in the vocabulary's space index
-# order: declaration order, except JoinBuildSide, which is the last space so
-# that no earlier index moves (DTypeCode is the codec's own and is not a
+# order: declaration order, except JoinBuildSide and RoundDigitsOp, the last
+# spaces so that no earlier index moves (DTypeCode is the codec's own and is not a
 # vocabulary space).
 def _proto_types() -> List[String]:
     return [
@@ -276,6 +280,7 @@ def _proto_types() -> List[String]:
         "PushdownGateMode",
         "SnapshotPolicy",
         "JoinBuildSide",
+        "RoundDigitsOp",
     ]
 
 
@@ -387,6 +392,8 @@ def _direct_name(space: Int, w: Int32) -> String:
         return snapshot_policy_wire_name(w)
     if space == 32:
         return join_build_side_wire_name(w)
+    if space == 33:
+        return round_digits_op_wire_name(w)
     return "no wrapper for space " + String(space)
 
 
@@ -466,7 +473,7 @@ def test_space_names_are_the_proto_enum_names() raises:
             types[space],
             "space " + String(space),
         )
-    assert_equal(plan_wire_space_name(33), "PlanWireSpace#33")
+    assert_equal(plan_wire_space_name(34), "PlanWireSpace#34")
     assert_equal(plan_wire_space_name(-1), "PlanWireSpace#-1")
 
 
@@ -663,7 +670,7 @@ def test_bad_space_index_is_refused_by_every_dispatcher() raises:
             "PlanWireSpace#" + String(space) + "/7",
             "the name dispatcher is total",
         )
-    # Space 32, the last arm of every dispatcher, is a real space: the index
+    # Space 33, the last arm of every dispatcher, is a real space: the index
     # past it is the first refused one, not 31 itself.
     assert_equal(_space_error(0, PLAN_WIRE_SPACE_COUNT - 1), String())
 

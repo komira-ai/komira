@@ -101,6 +101,7 @@ from plan_expr.expr import (
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
     EXPR_REGEXP,
+    EXPR_ROUND_DIGITS,
     EXPR_SORT_KEY,
     EXPR_STRING_OP,
     EXPR_STRUCT_FIELD,
@@ -254,6 +255,10 @@ def expr_carries_correlated_subquery(expr: Expr) raises -> Bool:
         if not expr._math_fn:
             return False
         return expr_carries_correlated_subquery(expr.math_fn_child_ref())
+    if tag == EXPR_ROUND_DIGITS:
+        if not expr._round_digits:
+            return False
+        return expr_carries_correlated_subquery(expr.round_digits_child_ref())
     if tag == EXPR_SUBSTRING:
         if not expr._substring:
             return False

@@ -7,7 +7,7 @@
 from arrow.schema import Schema
 from plan_expr.expr import (
     BIN_ADD, BIN_DIV, BIN_SUB, EXPR_LITERAL, Expr, REGEXP_EXTRACT, REGEXP_EXTRACT_ALL,
-    REGEXP_REPLACE, UN_NEGATE, string_fn_n_arity, string_fn_n_arity_ok,
+    RDG_ROUND, RDG_TRUNC, REGEXP_REPLACE, UN_NEGATE, UN_ROUND, string_fn_n_arity, string_fn_n_arity_ok,
 )
 from plan_expr.expr_walk import (
     PlanColRefFields, walk_expr_field,
@@ -21,7 +21,7 @@ from sql.sql_bind_expr import _bind_scalar
 from sql.sql_bind_fn_args import (
     _bind_greatest_least, _bind_coalesce, _fn_arity_msg, _bind_date_part,
     _bind_date_trunc, _bind_left_right, _bind_substring, _bind_year_derived,
-    _bind_nanosecond, _bind_float_class, _bind_string_split,
+    _bind_nanosecond, _bind_float_class, _bind_string_split, _round_digits_literal,
 )
 from sql.sql_bind_fn_nested import (
     _bind_json_extract, _bind_struct_extract, _bind_map_get, _bind_date_diff,
@@ -246,7 +246,16 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
         )
     if spec.kind == FNK_UNARY_NUM:
         # `abs` / `sign` / `trunc` / `round` onto EXPR_UNARY_OP, which keeps
-        # the operand's type.
+        # the operand's type. The 2-argument `round(x, digits)` /
+        # `trunc(x, digits)` is EXPR_ROUND_DIGITS with a literal digit count.
+        if n == 2:
+            var rd_op = RDG_ROUND if spec.op == UN_ROUND else RDG_TRUNC
+            var rd_digits = _round_digits_literal(sx.text, args[1])
+            return Expr.round_digits(
+                rd_op,
+                _bind_scalar(args[0], schema, scope, catalog, cte_scope, prebound),
+                rd_digits,
+            )
         return Expr.unary(
             spec.op,
             _bind_scalar(args[0], schema, scope, catalog, cte_scope, prebound),

@@ -29,6 +29,7 @@ from plan_expr.expr import (
     EXPR_ALIAS,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
+    EXPR_ROUND_DIGITS,
     EXPR_WHEN,
     EXPR_SUBSTRING,
     EXPR_STRING_OP,
@@ -42,6 +43,8 @@ from plan_expr.expr import (
     STR_LIKE,
     STRFN_UPPER,
     MATH2_POW,
+    RDG_ROUND,
+    RDG_TRUNC,
 )
 from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import ExprArray
@@ -162,6 +165,20 @@ def test_substitute_math_fn_and_math_fn2() raises:
     assert_false(_has(m2, "w") or _has(m2, "v"))
 
 
+def test_substitute_round_digits_replaces_child_and_keeps_op_and_digits() raises:
+    # Defect: the RoundDigits arm leaves its child as built, or drops op or
+    # digits when it rebuilds.
+    var r = _sub(Expr.round_digits(RDG_TRUNC, Expr.col_ref("w"), -2))
+    assert_equal(Int(r.tag), Int(EXPR_ROUND_DIGITS))
+    assert_true(_has(r, "y") and not _has(r, "w"))
+    assert_equal(Int(r.round_digits_op()), Int(RDG_TRUNC))
+    assert_equal(Int(r.round_digits_count()), -2)
+    var r2 = _sub(Expr.round_digits(RDG_ROUND, Expr.col_ref("v"), 3))
+    assert_true(_has(r2, "x") and not _has(r2, "v"))
+    assert_equal(Int(r2.round_digits_op()), Int(RDG_ROUND))
+    assert_equal(Int(r2.round_digits_count()), 3)
+
+
 def test_substitute_substring_string_op_string_fn_in_list() raises:
     # Defect: one of the single-child payload arms leaves its child as built,
     # or drops its payload (pattern, start/length, values).
@@ -242,6 +259,8 @@ def test_safe_recurses_through_every_listed_arm() raises:
     assert_false(_safe(Expr.cast(_regexp_on("v"), DType.int64)))
     assert_false(_safe(Expr.alias(_regexp_on("v"), "q")))
     assert_false(_safe(Expr.sqrt(_regexp_on("v"))))
+    assert_false(_safe(Expr.round_digits(RDG_ROUND, _regexp_on("v"), 2)))
+    assert_true(_safe(Expr.round_digits(RDG_ROUND, Expr.col_ref("w"), 2)))
     assert_false(_safe(Expr.math_fn2(MATH2_POW, _regexp_on("v"), _lit(2))))
     assert_false(_safe(Expr.math_fn2(MATH2_POW, _lit(2), _regexp_on("v"))))
     assert_false(_safe(Expr.substring(_regexp_on("v"), 1, 1)))

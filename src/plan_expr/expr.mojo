@@ -353,6 +353,20 @@ comptime EXPR_STRING_FN_N: UInt8 = 26
 # UDF runtimes are later stages, and an evaluator that meets it refuses.
 comptime EXPR_UDF_APPLY: UInt8 = 27
 
+# Rounding to a number of decimal places: `{op, digits, child}`
+# (`RoundDigitsData`). `op` is an `RDG_*` member and names WHOSE rounding rule
+# the node computes; `digits` is a plan constant, never an expression, because
+# a DECIMAL operand's output scale is read off it at plan time
+# (`walk_expr_field`). One argument `round(x)` / `trunc(x)` stay
+# `EXPR_UNARY_OP` (`UN_ROUND` / `UN_TRUNC`), byte for byte as before.
+#
+# ⛔ A TAG AND NOT A `BIN_*` MEMBER. A digit count on `EXPR_BINARY_OP` reads as
+# the free route (`round(x, 2)` is two operands), and it is the fail-open
+# space the `BIN_CONCAT` note above records: a reader of `BIN_*` that misses a
+# member answers NULL or treats it as `BIN_MOD`. Every walker of the `EXPR_*`
+# space is held to this tag by the walker-arms test and the tag count.
+comptime EXPR_ROUND_DIGITS: UInt8 = 28
+
 
 
 # =============================================================================
@@ -373,7 +387,7 @@ comptime EXPR_UDF_APPLY: UInt8 = 27
 # Adding an `EXPR_*` constant above means bumping the count and adding one arm
 # below.
 
-comptime EXPR_TAG_COUNT: Int = 28
+comptime EXPR_TAG_COUNT: Int = 29
 """One past the highest `EXPR_*` tag id.
 
 Every `EXPR_*` constant is declared in this file, so this covers the whole
@@ -472,6 +486,9 @@ def _write_expr_tag_name[W: Writer](mut writer: W, tag: UInt8):
         return
     if tag == EXPR_UDF_APPLY:
         writer.write(String("EXPR_UDF_APPLY"))
+        return
+    if tag == EXPR_ROUND_DIGITS:
+        writer.write(String("EXPR_ROUND_DIGITS"))
         return
     writer.write(String("tag#") + String(Int(tag)))
     return
@@ -787,9 +804,8 @@ v1.5.3: `round(0.5)`=1, `round(1.5)`=2, `round(2.5)`=3, `round(-2.5)`=-3 — so
 it is C `round`, NOT banker's rounding and NOT `nearbyint`. An INTEGER input is
 returned unchanged (`round(BIGINT) -> BIGINT`).
 
-⚠ ONE-ARGUMENT ONLY. DuckDB also has `round(x, digits)`; this node is unary and
-cannot carry the second operand, so the SQL table refuses the 2-arg form BY
-NAME rather than silently rounding to zero digits."""
+One argument only: `round(x, digits)` is `EXPR_ROUND_DIGITS` with
+`RDG_ROUND`, so this node and its kernel are untouched by the digit form."""
 
 comptime UN_BIT_COUNT: UInt8 = 8
 """`bit_count(x)` — POPCOUNT over a SIGNED INTEGER operand. **INT8 (DuckDB
@@ -2315,6 +2331,73 @@ struct UdfApplyData(Movable):
         pass
 
 
+# `EXPR_ROUND_DIGITS` ops. Each names a rounding rule AND whose rule it is,
+# because the two callers disagree on halves and the node must not pick one.
+# Measured on the pinned DuckDB for the first two; numpy's `np.round` (what
+# pandas `Series.round` calls) for the third.
+comptime RDG_ROUND: UInt8 = 0
+"""SQL `round(x, digits)`, DuckDB's rule: halves AWAY from zero.
+
+FLOAT64 / FLOAT32 (FLOAT32 computed in FLOAT64, as DuckDB does): with
+`m = pow(10, |digits|)`, `round(x * m) / m` for `digits >= 0` and
+`round(x / m) * m` below zero; a result that is inf or nan is replaced by `x`
+for `digits >= 0` and by `0.0` below zero (so `round(1e300, 20)` is `1e300`
+and `round(inf, -1)` is `0.0`).
+INT8..INT64: `digits >= 0` returns the value; below zero, computed in INT64
+with wrapping arithmetic (`(v +- p/2) / p * p`, `p = 10^-digits`) and wrapped
+back to the column's width, and `digits <= -19` is 0. NULL stays NULL.
+DECIMAL(w, s): `digits >= s` returns the value as DECIMAL(w, s); `0 <= digits <
+s` rounds to DECIMAL(w, digits); below zero rounds to a multiple of
+`10^-digits` as DECIMAL(w, 0), and when `-digits >= w - s` every row,
+NULL included, is 0."""
+
+comptime RDG_TRUNC: UInt8 = 1
+"""SQL `trunc(x, digits)`, DuckDB's rule: toward zero.
+
+FLOAT64 / FLOAT32: `trunc(x * m) / m` for `digits >= 0` and `trunc(x / m) *
+m` below zero; a result that is inf or nan is replaced by `x` on both sides
+(unlike `RDG_ROUND`, `trunc(inf, -1)` is `inf`). INT8..INT64: `digits >= 0`
+returns the value; below zero `v / p * p`, and `digits <= -19` is 0. DECIMAL
+as `RDG_ROUND` without the half step, the all-zero rule included."""
+
+comptime RDG_ROUND_HALF_EVEN: UInt8 = 2
+"""pandas `Series.round(decimals)`, numpy's `np.round` rule: halves to EVEN.
+
+FLOAT64: `rint(x)` at 0 digits; `rint(x * f) / f` above, `rint(x / f) * f`
+below, with `f` numpy's power of ten (exact table to 1e8, then repeated
+multiplication by 10) and no inf or nan fallback. FLOAT32 is computed in
+FLOAT32, as numpy does. INT8..INT64: `digits >= 0` returns the value; below
+zero computed in FLOAT64 and truncated back. DECIMAL has no rule here and is
+refused by name."""
+
+comptime RDG_OP_COUNT: Int = 3
+"""One past the highest `RDG_*` op."""
+
+
+struct RoundDigitsData(Movable):
+    """Payload for `EXPR_ROUND_DIGITS` (tag 28): round `child` to `digits`
+    decimal places by the rule `op` (`RDG_*`) names.
+
+    `digits` is the count itself (negative rounds left of the point). It is
+    an Int32 because DuckDB's digit count is INTEGER."""
+
+    var op: UInt8
+    var digits: Int32
+    var child: OwnedPointer[Expr]
+
+    def __init__(out self, op: UInt8, digits: Int32, var child: Expr):
+        self.op = op
+        self.digits = digits
+        self.child = OwnedPointer(child^)
+
+    def copy(self) -> Self:
+        return Self(self.op, self.digits, self.child[].copy())
+
+    # PORT(1.0.0): explicit destructor, as on `MathFn2Data`.
+    def __deinit__(deinit self):
+        pass
+
+
 
 # THE STRING-SIMILARITY family. Three ops, three SQL
 # names, all Utf8 x Utf8 -> **FLOAT64**.
@@ -2848,6 +2931,8 @@ struct Expr(Movable, Writable):
     var _string_fn_n: Optional[StringFnNData]
     # A call of a `UdfRef` by index. Populated when tag == EXPR_UDF_APPLY.
     var _udf_apply: Optional[UdfApplyData]
+    # Rounding to a digit count. Populated when tag == EXPR_ROUND_DIGITS.
+    var _round_digits: Optional[RoundDigitsData]
 
     # --- Private constructor (all fields) ---
 
@@ -2880,6 +2965,7 @@ struct Expr(Movable, Writable):
         self._udf_call = None
         self._string_fn_n = None
         self._udf_apply = None
+        self._round_digits = None
 
     def copy(self) -> Self:
         """Deep copy of the expression tree.
@@ -2946,6 +3032,8 @@ struct Expr(Movable, Writable):
             e._string_fn_n = self._string_fn_n.value().copy()
         elif self.tag == EXPR_UDF_APPLY:
             e._udf_apply = self._udf_apply.value().copy()
+        elif self.tag == EXPR_ROUND_DIGITS:
+            e._round_digits = self._round_digits.value().copy()
         # else: unknown tag — return placeholder Expr(tag) as-is.
         return e^
 
@@ -4115,6 +4203,36 @@ struct Expr(Movable, Writable):
         """The `i`-th argument. Requires tag == EXPR_UDF_APPLY."""
         return self._udf_apply.value().args[i]
 
+    # -- rounding to a digit count (EXPR_ROUND_DIGITS) ------------
+
+    @staticmethod
+    def round_digits(op: UInt8, var child: Expr, digits: Int32) -> Expr:
+        """Create an `EXPR_ROUND_DIGITS` node: `child` rounded to `digits`
+        decimal places by the rule `op` (`RDG_*`) names.
+
+        ⛔ NON-RAISING, like every factory here. An `op` outside `RDG_*` is
+        refused by the wire decoder and by the evaluator, by name."""
+        var e = Expr(EXPR_ROUND_DIGITS)
+        e._round_digits = RoundDigitsData(op, digits, child^)
+        return e^
+
+    @always_inline
+    def round_digits_op(self) -> UInt8:
+        """The rule (`RDG_*`). Requires tag == EXPR_ROUND_DIGITS."""
+        return self._round_digits.value().op
+
+    @always_inline
+    def round_digits_count(self) -> Int32:
+        """The digit count. Requires tag == EXPR_ROUND_DIGITS."""
+        return self._round_digits.value().digits
+
+    @always_inline
+    def round_digits_child_ref(
+        self,
+    ) -> ref [origin_of(self._round_digits.value().child[])] Expr:
+        """The rounded operand. Requires tag == EXPR_ROUND_DIGITS."""
+        return self._round_digits.value().child[]
+
     @staticmethod
     @always_inline
     def math_fn2(op: UInt8, var left: Expr, var right: Expr) -> Expr:
@@ -5204,6 +5322,16 @@ struct Expr(Movable, Writable):
             for i in range(len(sfnn.args)):
                 writer.write(", ")
                 sfnn.args[i].write_to(writer)
+            writer.write(")")
+        elif self.tag == EXPR_ROUND_DIGITS:
+            # ⛔ PLAN IDENTITY: the rule and the digit count both, so that
+            # `round(x, 1)` and `round(x, 2)`, or SQL `round` and pandas
+            # `round`, never share a compiled plan.
+            ref rd = self._round_digits.value()
+            writer.write(
+                "RoundDigits(op=", Int(rd.op), ", digits=", Int(rd.digits), ", "
+            )
+            rd.child[].write_to(writer)
             writer.write(")")
         elif self.tag == EXPR_UDF_APPLY:
             # ⛔ PLAN IDENTITY: the index, the type and every argument, with

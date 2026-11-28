@@ -17,7 +17,7 @@ from plan_expr.agg_expr import (
 from plan_expr.corr_subquery_data import CORR_KIND_SCALAR
 from plan_expr.expr import (
     EXPR_ALIAS, EXPR_BINARY_OP, EXPR_CAST, EXPR_COL_REF, EXPR_CORRELATED_SUBQUERY,
-    EXPR_LITERAL, EXPR_UNARY_OP, Expr,
+    EXPR_LITERAL, EXPR_UNARY_OP, Expr, RDG_ROUND, RDG_TRUNC, UN_ROUND,
 )
 from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import AggExprArray, _infer_expr_field
@@ -33,7 +33,7 @@ from sql.sql_ast import (
 )
 from sql.sql_bind_call import _bind_scalar_call
 from sql.sql_bind_expr import _bind_scalar
-from sql.sql_bind_fn_args import _fn_arity_msg
+from sql.sql_bind_fn_args import _fn_arity_msg, _round_digits_literal
 from sql.sql_bind_names import _group_has
 from sql.sql_bind_ops import (
     _map_unop, _bind_sql_operator, _bind_like, _post_agg_typing_schema,
@@ -678,13 +678,22 @@ def _extract_and_bind_post_agg(
         var pa_spec = sql_scalar_fn_spec(sx.text)
         if pa_spec.kind == FNK_MATH_FN or pa_spec.kind == FNK_UNARY_NUM:
             ref uargs = sx._call.value().args
-            if len(uargs) != 1:
+            if len(uargs) < 1 or len(uargs) > pa_spec.max_args:
                 raise Error(_fn_arity_msg(sx.text, pa_spec.kind, len(uargs)))
+            var u_digits = Int32(0)
+            if len(uargs) == 2:
+                u_digits = _round_digits_literal(sx.text, uargs[1])
             var uchild = _extract_and_bind_post_agg(
                 uargs[0], input_schema, scope, group_names, agg_out_names, agg_exprs, agg_counter, catalog, cte_scope, prebound
             )
             if pa_spec.kind == FNK_MATH_FN:
                 return Expr.math_fn(pa_spec.op, uchild^)
+            if len(uargs) == 2:
+                return Expr.round_digits(
+                    RDG_ROUND if pa_spec.op == UN_ROUND else RDG_TRUNC,
+                    uchild^,
+                    u_digits,
+                )
             return Expr.unary(pa_spec.op, uchild^)
         if pa_spec.kind == FNK_MATH_FN2:
             ref pargs = sx._call.value().args

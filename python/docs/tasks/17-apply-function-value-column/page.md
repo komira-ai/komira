@@ -49,12 +49,12 @@ Output:
 
 ## Notes
 
-- In SQL, the built-in scalar functions work as in DuckDB: `upper`, `lower`, `length`, `substr`, `replace`, `concat`, `abs`, `sqrt`, `power`, `exp`, `ln`, `floor`, `ceil`, `round(x)`, `CASE WHEN`, `CAST`, and arithmetic. Pick the one that does what your function does, and the engine runs it over every value.
-- The pandas-shaped Series has arithmetic, comparisons, `astype`, `isin`, the `.str` and `.dt` accessors, and the cumulative and window verbs. The polars-shaped `Expr` has arithmetic, `abs`, `cast`, `fill_null`, `is_in`, `when/then/otherwise`, the `.str` and `.dt` namespaces and the aggregate and window verbs.
+- In SQL, the built-in scalar functions work as in DuckDB: `upper`, `lower`, `length`, `substr`, `replace`, `concat`, `abs`, `sqrt`, `power`, `exp`, `ln`, `floor`, `ceil`, `round(x)`, `round(x, digits)`, `CASE WHEN`, `CAST`, and arithmetic. Pick the one that does what your function does, and the engine runs it over every value.
+- The pandas-shaped Series has arithmetic, comparisons, `astype`, `isin`, `round`, the `.str` and `.dt` accessors, and the cumulative and window verbs. The polars-shaped `Expr` has arithmetic, `abs`, `cast`, `fill_null`, `is_in`, `when/then/otherwise`, the `.str` and `.dt` namespaces and the aggregate and window verbs.
 - A Python function of your own over each value is not available. `Series.apply`, `Series.map` and `DataFrame.apply` do not exist, and nor does a public `udf` decorator: komira-ai/komira#2332. `probe_series_apply.py` beside this page tries `df["price"].apply(...)` and must fail with the line in `probe_series_apply.error.txt`.
 - The polars-shaped `Expr.map_elements` does not exist either: komira-ai/komira#2384. `probe_polars_map_elements.py` must fail with the line in `probe_polars_map_elements.error.txt`.
 - SQL cannot call a Python function: komira-ai/komira#2330.
-- Some everyday functions have no method or no form yet: `round(x, digits)` in SQL is refused (only `round(x)` runs), and `Series.round`, `Series.abs` and `Expr.round` do not exist: komira-ai/komira#2383.
+- Some everyday functions have no method or no form yet: `round(x, digits)` in SQL and `Series.round` exist, but `Series.abs` and `Expr.round` do not: komira-ai/komira#2383.
 - The day a probe runs to the end, this page's check goes red, and the page and the catalogue status change with it.
 - The `.str` accessor of the pandas-shaped Series is newer than the PyPI release 0.1.1623.
 

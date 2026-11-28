@@ -62,7 +62,7 @@ from plan_expr.scalar_value import ScalarValue
 from plan_expr.expr import (
     Expr, WhenCaseData, OVER_REFUSED_PREFIX,
     EXPR_LITERAL, EXPR_CAST, EXPR_BINARY_OP, EXPR_UNARY_OP, EXPR_ALIAS,
-    EXPR_WHEN, EXPR_MATH_FN, EXPR_MATH_FN2, EXPR_AGG_FN,
+    EXPR_WHEN, EXPR_MATH_FN, EXPR_MATH_FN2, EXPR_ROUND_DIGITS, EXPR_AGG_FN,
     BIN_DIV, BIN_EQ,
 )
 from plan_expr.expr_walk import (
@@ -364,6 +364,12 @@ def bind_unbound_expr(e: Expr, schema: Schema, narrow_float: Bool) -> Expr:
             e.math_fn2_op(),
             bind_unbound_expr(e.math_fn2_left_ref(), schema, False),
             bind_unbound_expr(e.math_fn2_right_ref(), schema, False),
+        )
+    if e.tag == EXPR_ROUND_DIGITS:
+        return Expr.round_digits(
+            e.round_digits_op(),
+            bind_unbound_expr(e.round_digits_child_ref(), schema, False),
+            e.round_digits_count(),
         )
     if e.tag == EXPR_AGG_FN:
         return Expr.agg_fn(

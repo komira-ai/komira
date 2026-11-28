@@ -41,7 +41,7 @@
 from std.testing import TestSuite, assert_equal, assert_true
 
 from plan_ir.logical_plan import PLAN_TAG_COUNT, plan_tag_is_retired
-from plan_expr.expr import EXPR_TAG_COUNT
+from plan_expr.expr import EXPR_TAG_COUNT, RDG_OP_COUNT
 from plan_wire.plan_wire_vocabulary import (
     PLAN_WIRE_SPACE_COUNT,
     PLAN_WIRE_VOCABULARY_MEMBERS,
@@ -49,6 +49,8 @@ from plan_wire.plan_wire_vocabulary import (
     PLAN_TAG_ENGINE_MAX,
     EXPR_TAG_WIRE_MEMBERS,
     EXPR_TAG_ENGINE_MAX,
+    ROUND_DIGITS_OP_WIRE_MEMBERS,
+    ROUND_DIGITS_OP_ENGINE_MAX,
     AGG_FN_WIRE_MEMBERS,
     ARROW_TYPE_WIRE_MEMBERS,
     JOIN_TYPE_WIRE_MEMBERS,
@@ -137,6 +139,19 @@ def test_expr_tag_vocabulary_is_complete_against_engine_count() raises:
     )
 
 
+def test_round_digits_op_vocabulary_is_complete_against_engine_count() raises:
+    assert_equal(
+        ROUND_DIGITS_OP_WIRE_MEMBERS,
+        RDG_OP_COUNT,
+        "the wire vocabulary must publish exactly RDG_OP_COUNT round ops",
+    )
+    assert_equal(
+        Int(ROUND_DIGITS_OP_ENGINE_MAX),
+        RDG_OP_COUNT - 1,
+        "the highest published round op must be RDG_OP_COUNT - 1",
+    )
+
+
 def test_countless_space_totals_are_pinned() raises:
     """A pin, and labelled as one.
 
@@ -176,9 +191,9 @@ def test_countless_space_totals_are_pinned() raises:
     # or this library's build goes red. If this line collides in a merge,
     # ⛔ DO NOT PICK A SIDE — both sides' numbers are wrong; re-run the
     # generator over the MERGED sources and read the constant.
-    assert_equal(PLAN_WIRE_VOCABULARY_MEMBERS, 359, "total published members")
+    assert_equal(PLAN_WIRE_VOCABULARY_MEMBERS, 363, "total published members")
     assert_equal(AGG_FN_WIRE_MEMBERS, 38, "AGG_* has no engine count constant")
-    assert_equal(PLAN_WIRE_SPACE_COUNT, 33, "enumerated tag spaces")
+    assert_equal(PLAN_WIRE_SPACE_COUNT, 34, "enumerated tag spaces")
     # ArrowType has no engine count constant either, and it is the space LEG 2
     # of the round trip compares. Its members are declared in a shape a
     # module-level regex matches zero of — `    comptime NULL = ArrowType(0)`:
@@ -502,6 +517,7 @@ def main() raises:
     var suite = TestSuite()
     suite.test[test_plan_tag_vocabulary_is_complete_against_engine_count]()
     suite.test[test_expr_tag_vocabulary_is_complete_against_engine_count]()
+    suite.test[test_round_digits_op_vocabulary_is_complete_against_engine_count]()
     suite.test[test_countless_space_totals_are_pinned]()
     suite.test[test_every_space_round_trips_every_declared_tag]()
     suite.test[test_every_space_refuses_the_four_bad_wire_values]()

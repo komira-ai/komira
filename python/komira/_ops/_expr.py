@@ -179,6 +179,27 @@ class Unary:
             raise TypeError(f"Unary not needs a predicate, not a {type(self.child).__name__}")
 
 
+INT32_MIN, INT32_MAX = -(1 << 31), (1 << 31) - 1
+
+
+@dataclass(frozen=True, slots=True)
+class RoundDigits:
+    """A value rounded to `digits` decimal places by the rule `op` names
+    (`round`, `trunc` or `round_half_even`); a negative count rounds left of
+    the point. `digits` is a plain int of the plan, within int32."""
+
+    op: str
+    child: "Node"
+    digits: int
+
+    def __post_init__(self):
+        _need_op(self.op, _vocab.ROUND_DIGITS_OPS, "RoundDigits")
+        _need_node(self.child, "child", "RoundDigits")
+        _need_int(self.digits, "digits", "RoundDigits", None)
+        if not INT32_MIN <= self.digits <= INT32_MAX:
+            raise ValueError(f"RoundDigits.digits must be within int32, not {self.digits}")
+
+
 @dataclass(frozen=True, slots=True)
 class Cast:
     """A conversion to a primitive type, an Arrow type, or both.
@@ -497,6 +518,7 @@ Node = (
     | Arith
     | BoolOp
     | Unary
+    | RoundDigits
     | Cast
     | When
     | StringOp
@@ -519,6 +541,7 @@ EXPR_NODES = (
     Arith,
     BoolOp,
     Unary,
+    RoundDigits,
     Cast,
     When,
     StringOp,

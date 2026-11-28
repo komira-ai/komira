@@ -55,6 +55,8 @@ from plan_expr.expr import (
     EXTRACT_YEAR,
     STR_CONTAINS,
     UN_NOT,
+    RDG_ROUND,
+    RDG_TRUNC,
     EXPR_TAG_COUNT,
 )
 from plan_expr.partition_expr import PartitionExpr
@@ -578,6 +580,10 @@ def test_one_child_expressions_descend_their_child() raises:
         _subq(32),
     )
     _walk_expr(e14, 1, 32)
+    var e15 = Expr.round_digits(RDG_ROUND, _subq(64), 2)
+    _walk_expr(e15, 1, 64)
+    var e16 = Expr.round_digits(RDG_TRUNC, _subq(128), -1)
+    _walk_expr(e16, 1, 128)
 
 
 def test_n_child_string_fn_walks_every_argument() raises:

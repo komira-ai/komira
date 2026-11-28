@@ -603,7 +603,7 @@ reservoir_quantile	FNK_REFUSED	_R_AGGSKETCH	-	0	probe:refused_bind
 reverse	FNK_STRING_FN	-	yes	1	equal:1
 right	FNK_DESUGAR	-	yes	3	equal:3
 right_grapheme	FNK_REFUSED	_R_GRAPHEME	-	0	probe:refused_bind
-round	FNK_UNARY_NUM	-	yes	3	equal:3
+round	FNK_UNARY_NUM	-	yes	8	equal:8
 round_even	FNK_REFUSED	_R_ROUNDN	-	0	probe:refused_bind
 roundbankers	FNK_REFUSED	_R_ROUNDN	-	0	probe:refused_bind
 row	FNK_REFUSED	_R_STRUCTTYPE	-	0	probe:refused_bind
@@ -695,7 +695,7 @@ today	FNK_REFUSED	_R_WALLCLOCK	-	0	probe:refused_bind
 transaction_timestamp	FNK_REFUSED	_R_WALLCLOCK	-	0	probe:refused_bind
 translate	FNK_STRING_FN_N	-	-	2	equal:2
 trim	FNK_STRING_FN	-	yes	1	equal:1
-trunc	FNK_UNARY_NUM	-	yes	3	equal:3
+trunc	FNK_UNARY_NUM	-	yes	8	equal:8
 try_strptime	FNK_REFUSED	_R_TSFORMAT	-	0	probe:refused_bind
 txid_current	FNK_REFUSED	_R_SESSION	-	0	probe:refused_bind
 typeof	FNK_REFUSED	_R_TYPEVAL	yes	0	probe:refused_bind

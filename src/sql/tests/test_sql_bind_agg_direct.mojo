@@ -868,7 +868,7 @@ def test_having_null_comparisons_and_literals() raises:
     )
     _check(
         "SELECT k FROM t GROUP BY k HAVING abs(sum(v), 1) > 0",
-        "ERR: SQL bind error: abs() takes exactly 1 argument here — got 2. DuckDB also has a 2-argument round(x, digits) / trunc(x, digits); this engine lowers the 1-argument form onto a UNARY node that has no slot for a digit count, so the 2-argument form is REFUSED rather than rounded to zero digits."
+        "ERR: SQL bind error: abs() takes exactly 1 argument here — got 2. DuckDB has no 2-argument form of abs().",
     )
 
 
@@ -916,6 +916,28 @@ def test_aggregate_output_types() raises:
     assert_equal(
         _types("SELECT k, sum(dc) AS total FROM t GROUP BY k"),
         "k:int64,total:decimal128(38,2)",
+    )
+
+
+def test_round_digits_types_and_aggregate_argument() raises:
+    """round/trunc with a digit count give the operand's type (a DECIMAL
+    changes scale), and wrap an aggregate as the 1-argument forms do."""
+    assert_equal(_types("SELECT round(k, -2) AS r FROM t"), "r:int64")
+    assert_equal(_types("SELECT round(v, 2) AS r FROM t"), "r:float64")
+    assert_equal(_types("SELECT round(dc, 1) AS r FROM t"), "r:decimal128(12,1)")
+    assert_equal(_types("SELECT round(dc, -1) AS r FROM t"), "r:decimal128(12,0)")
+    assert_equal(_types("SELECT round(dc, 5) AS r FROM t"), "r:decimal128(12,2)")
+    assert_equal(_types("SELECT trunc(dc, 1) AS r FROM t"), "r:decimal128(12,1)")
+    assert_equal(_types("SELECT round(sum(v), 2) AS r FROM t"), "r:float64")
+    assert_equal(_types("SELECT trunc(sum(dc), 1) AS r FROM t"), "r:decimal128(38,1)")
+    assert_equal(_types("SELECT k, round(sum(v), -1) AS r FROM t GROUP BY k"), "k:int64,r:float64")
+    _check(
+        "SELECT k FROM t GROUP BY k HAVING round(sum(v), k) > 0",
+        "ERR: SQL not supported: round() digit count must be an integer literal here - got the column k",
+    )
+    _check(
+        "SELECT k FROM t GROUP BY k HAVING round(sum(v), 1, 2) > 0",
+        "ERR: SQL bind error: round() takes 1 argument (x) or 2 arguments (x, digits) — got 3",
     )
 
 

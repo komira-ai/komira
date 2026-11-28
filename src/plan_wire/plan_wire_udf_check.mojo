@@ -75,6 +75,7 @@ from plan_expr.expr import (
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
     EXPR_REGEXP,
+    EXPR_ROUND_DIGITS,
     EXPR_SORT_KEY,
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
@@ -506,6 +507,8 @@ def _walk_expr(
         _walk_expr(e.string_fn_child_ref(), input, udfs, where, check, calls)
     elif tag == EXPR_UDF_CALL:
         _walk_expr(e.udf_call_child_ref(), input, udfs, where, check, calls)
+    elif tag == EXPR_ROUND_DIGITS:
+        _walk_expr(e.round_digits_child_ref(), input, udfs, where, check, calls)
     elif tag == EXPR_EXTRACT:
         _walk_expr(e.extract_child_ref(), input, udfs, where, check, calls)
     elif tag == EXPR_MATH_FN:

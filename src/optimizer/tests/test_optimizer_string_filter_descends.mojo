@@ -63,7 +63,8 @@ from std.memory import OwnedPointer
 
 from arrow.schema import Schema, SchemaBuilder, Field
 from arrow.arrow_types import ArrowType
-from plan_expr.expr import Expr, EXPR_STRING_OP, EXPR_REGEXP, STR_LIKE, BIN_AND, BIN_EQ, UN_NOT
+from plan_expr.expr import Expr, EXPR_STRING_OP, EXPR_REGEXP, STR_LIKE, BIN_AND, BIN_EQ, BIN_GT, UN_NOT, RDG_ROUND
+from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import (
     JOIN_ALGO_AUTO,
     JOIN_CROSS,
@@ -198,6 +199,31 @@ def test_string_filter_over_inner_join_pushes_to_side() raises:
         " owning side, leaving the JOIN at the top (not a parked Filter)",
     )
     assert_equal(_string_filter_child_tag(plan), Int(PLAN_SCAN))
+
+
+def test_round_digits_filter_over_inner_join_pushes_to_side() raises:
+    """`Filter(round(p_partkey, 1) > 3, INNER(line, part))`: the round node's
+    only column is in its child, so the predicate belongs to the part side and
+    descends to it, leaving the JOIN on top."""
+    var part = _scan("part.parquet", _part_schema())
+    var line = _scan("lineitem.parquet", _line_schema())
+    var lk = List[String]()
+    lk.append("l_partkey")
+    var rk = List[String]()
+    rk.append("p_partkey")
+    var joined = LogicalPlan.join(line^, part^, lk^, rk^, JOIN_INNER)
+    var pred = Expr.binary(
+        BIN_GT,
+        Expr.round_digits(RDG_ROUND, Expr.col_ref("p_partkey"), 1),
+        Expr.literal(ScalarValue.from_int(3)),
+    )
+    var plan = LogicalPlan.filter(pred^, joined^)
+    plan = push_predicates_down(plan^)
+    assert_true(
+        plan.is_join(),
+        "a single-side predicate over round_digits must descend into the"
+        " owning side, leaving the JOIN at the top",
+    )
 
 
 def _regexp_filter_child_tag(plan: LogicalPlan) -> Int:

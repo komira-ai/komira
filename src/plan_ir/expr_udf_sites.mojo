@@ -71,6 +71,7 @@ from plan_expr.expr import (
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
     EXPR_REGEXP,
+    EXPR_ROUND_DIGITS,
     EXPR_SORT_KEY,
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
@@ -218,6 +219,11 @@ def collect_udf_calls(
         return
     if tag == EXPR_MATH_FN:
         collect_udf_calls(expr.math_fn_child_ref(), out, refuse_correlated_subquery)
+        return
+    if tag == EXPR_ROUND_DIGITS:
+        collect_udf_calls(
+            expr.round_digits_child_ref(), out, refuse_correlated_subquery
+        )
         return
     if tag == EXPR_SUBSTRING:
         collect_udf_calls(expr.substring_child_ref(), out, refuse_correlated_subquery)
