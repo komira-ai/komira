@@ -297,7 +297,7 @@ def test_an_unserved_source_kind_is_refused_listing_the_served_ones() raises:
         contains=(
             "pipeline_exec: source kind 200 of segment 0 is not served"
             " (SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CSV,"
-            " SOURCE_ICEBERG, SOURCE_CONCAT and SOURCE_JSONL are)"
+            " SOURCE_ICEBERG, SOURCE_CONCAT, SOURCE_JSONL and SOURCE_ORC are)"
         )
     ):
         _ = run_plan(

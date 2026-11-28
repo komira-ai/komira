@@ -101,7 +101,7 @@ def bind_statement[P: SqlParquetFooters](
     """Bind a parsed top-level `SqlStatement` against `catalog` -> a
     `BoundStatement`. The parquet facts the statement needs are read first,
     through `footers` (`collect_parquet_facts`); binding itself opens no
-    parquet file (a `read_csv`, `read_json` or `read_avro` relation reads its
+    parquet file (a `read_csv`, `read_json`, `read_avro` or `read_orc` relation reads its
     file through `sql_tvf_bind` while it binds).
     Every kind binds its query through the same path, so a COPY / CTAS source
     takes the whole SELECT grammar.

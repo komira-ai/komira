@@ -12,6 +12,8 @@ The package is organised in layers:
     Hive-notation canonical form for round-trip equality testing.
   - rle_decode / rle_encode, orc_codec, column_decoder, nested_decoder —
     the stream encodings, the compression codecs and the column decoders.
+  - orc_file_schema — a file's tail (any codec) and the schema the reader
+    returns, from the Footer alone.
   - orc_reader / orc_writer / orc_stride_skip — whole-file read and write,
     and the statistics-driven stripe and row-group pruning.
 
@@ -138,6 +140,7 @@ from .orc_logical_arrow import (
     ARROW_ORC_FIXED_LIST_SIZE,
     ARROW_ORC_MAP_KEYS_SORTED,
 )
+from .orc_file_schema import read_orc_bytes_schema, read_orc_tail
 from .orc_reader import (
     read_orc_bytes,
     read_orc_bytes_opts,

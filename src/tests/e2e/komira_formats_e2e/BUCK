@@ -145,3 +145,17 @@ mojo_library(
     ],
     visibility = ["PUBLIC"],
 )
+
+# The six pyarrow-written ORC files, for the SQL end-to-end test of read_orc,
+# which reads them by value through run_sql.
+[export_file(
+    name = "tests/fixtures/orc/" + f,
+    visibility = ["//src/tests/e2e/komira_read_orc_e2e:"],
+) for f in [
+    "pyarrow_multistripe_nullable.orc",
+    "pyarrow_nullable_codec_lz4.orc",
+    "pyarrow_nullable_codec_snappy.orc",
+    "pyarrow_nullable_codec_zlib.orc",
+    "pyarrow_nullable_codec_zstd.orc",
+    "pyarrow_nullable_mixed.orc",
+]]

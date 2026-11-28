@@ -1283,7 +1283,7 @@ struct SqlExpr(Movable):
 comptime FROM_LESS_RELATION: String = "from-less select"
 
 from .sql_tvf_options import (
-    TVF_NONE, TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO, TVF_ICEBERG,
+    TVF_NONE, TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO, TVF_ICEBERG, TVF_ORC,
     HIVE_PARTITIONING_AUTO, HIVE_PARTITIONING_ON, HIVE_PARTITIONING_OFF,
     TvfOptions,
 )
@@ -1314,7 +1314,7 @@ struct FromRelation(Copyable, Movable):
 
     var name: String  # catalog/CTE/derived table name; "" when a pure TVF
     var tvf_path: Optional[String]  # Some(path) => a read_* TVF
-    var tvf_kind: UInt8  # TVF_{NONE,PARQUET,CSV,JSON,AVRO,ICEBERG}
+    var tvf_kind: UInt8  # TVF_{NONE,PARQUET,CSV,JSON,AVRO,ICEBERG,ORC}
     var tvf_opts: TvfOptions  # the TVF call's semantics-bearing options
     var rel_alias: String  # AS alias ("" if none) — `alias` is a reserved word
 
@@ -1354,8 +1354,8 @@ struct FromRelation(Copyable, Movable):
         invitation to drop them, and with one call site there was nothing to
         weigh against removing it.
 
-        The AVRO arm always passes a DEFAULT `TvfOptions` — the parser rejects
-        an option list on that kind outright rather than recording one
+        The AVRO and ORC arms always pass a DEFAULT `TvfOptions` — the parser rejects
+        an option list on those kinds outright rather than recording one
         (`sql_parser._parse_table_ref`, 2026-09-14). The PARQUET arm likewise
         always passes a default, because every dialect option is now refused by
         name for that kind (`_refuse_option_for_kind`); it is routed through

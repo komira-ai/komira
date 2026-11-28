@@ -1,0 +1,123 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: read_orc through run_sql (the SQL door of sdk_exec: parse, bind
+# the file's columns from its footer, optimize, lower to a SOURCE_ORC segment,
+# run) over local ORC files, read by value. The six files pyarrow's ORC C++
+# writer wrote (komira_formats_e2e's tests/fixtures/orc, with the generator
+# script beside them as provenance) are the input; the expected values are
+# recomputed from the generator's rules, never from a komira read. Files of
+# other column types and the refused shapes are written by the test itself in
+# its scratch directory.
+#
+#   test_read_orc_sql  every row and NULL of each codec's file (none, zlib,
+#                      snappy, zstd, lz4) and of the file of three stripes,
+#                      with DuckDB's column types; a projection in query
+#                      order; a filter on a column the projection leaves out;
+#                      count(*); a grouped aggregate with a NULL group; the
+#                      eight other types the SQL scan reads; and each refusal
+#                      by name: a missing file, a file that is not ORC, an
+#                      option, a glob, a struct, list or timestamp column.
+#
+# The README's example (examples/read_orc_sql.mojo) writes a small ORC file
+# and runs read_orc in SQL over it; it runs as a welded test of its own.
+#
+# Nothing depends on this package.
+mojo_library(
+    name = "komira_read_orc_e2e",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "examples/**/*.mojo"]),
+    deps = [
+        "//src/agg:agg",
+        "//src/agg_api:agg_api",
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_api:async_api",
+        "//src/async_rt:async_rt",
+        "//src/atomic_alias:atomic_alias",
+        "//src/avro:avro",
+        "//src/batch_eval:batch_eval",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/containers:containers",
+        "//src/counters:counters",
+        "//src/crypto:crypto",
+        "//src/csv:csv",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/encoding:encoding",
+        "//src/engine_runtime:engine_runtime",
+        "//src/exec_types:exec_types",
+        "//src/expr:expr",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/host_profile:host_profile",
+        "//src/join_assembly:join_assembly",
+        "//src/json:json",
+        "//src/json_index:json_index",
+        "//src/jsonl:jsonl",
+        "//src/kernels:kernels",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/lowering:lowering",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/morsel:morsel",
+        "//src/name_registry:name_registry",
+        "//src/objectstore:objectstore",
+        "//src/op_agg_state:op_agg_state",
+        "//src/op_sources:op_sources",
+        "//src/operator_api:operator_api",
+        "//src/optimizer:optimizer",
+        "//src/orc:orc",
+        "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_footers:parquet_footers",
+        "//src/parquet_scan:parquet_scan",
+        "//src/physical_plan:physical_plan",
+        "//src/pipeline_exec:pipeline_exec",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_proto:plan_proto",
+        "//src/plan_stats:plan_stats",
+        "//src/plan_wire:plan_wire",
+        "//src/proto_codec:proto_codec",
+        "//src/protobuf:protobuf",
+        "//src/row_format:row_format",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_planning:scan_planning",
+        "//src/scan_source:scan_source",
+        "//src/sdk:sdk",
+        "//src/sdk_exec:sdk_exec",
+        "//src/secret_registry:secret_registry",
+        "//src/secret_store:secret_store",
+        "//src/shuffle:shuffle",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/sql:sql",
+        "//src/sync:sync",
+        "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
+        "//src/trace:trace",
+        "//src/udf:udf",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    conda = False,
+    readme_examples = glob(["examples/*.mojo"]),
+    test_srcs = [
+        "tests/test_read_orc_sql.mojo",
+    ],
+    test_data = {
+        "tests/test_read_orc_sql.mojo": {
+            "pyarrow_multistripe_nullable.orc": "//src/tests/e2e/komira_formats_e2e:tests/fixtures/orc/pyarrow_multistripe_nullable.orc",
+            "pyarrow_nullable_codec_lz4.orc": "//src/tests/e2e/komira_formats_e2e:tests/fixtures/orc/pyarrow_nullable_codec_lz4.orc",
+            "pyarrow_nullable_codec_snappy.orc": "//src/tests/e2e/komira_formats_e2e:tests/fixtures/orc/pyarrow_nullable_codec_snappy.orc",
+            "pyarrow_nullable_codec_zlib.orc": "//src/tests/e2e/komira_formats_e2e:tests/fixtures/orc/pyarrow_nullable_codec_zlib.orc",
+            "pyarrow_nullable_codec_zstd.orc": "//src/tests/e2e/komira_formats_e2e:tests/fixtures/orc/pyarrow_nullable_codec_zstd.orc",
+            "pyarrow_nullable_mixed.orc": "//src/tests/e2e/komira_formats_e2e:tests/fixtures/orc/pyarrow_nullable_mixed.orc",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

@@ -17,6 +17,7 @@ mojo_library(
     test_srcs = [
         "tests/test_physical_plan_ir_version_door.mojo",
         "tests/test_physical_plan_jsonl_spec.mojo",
+        "tests/test_physical_plan_orc_spec.mojo",
         "tests/test_physical_plan_purity_gate.mojo",
         "tests/test_source_spec_csv.mojo",
         "tests/test_source_spec_iceberg.mojo",

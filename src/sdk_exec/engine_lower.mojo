@@ -107,7 +107,8 @@ def _add_scan_facts(
         var planned = plan_iceberg_scan(sd.source.binding_ref(), sd.filter)
         inputs.add_iceberg_scan(planned.spec.copy())
         return
-    # An in-memory or CSV scan: no facts here; the cutter serves both.
+    # An in-memory, CSV, JSON Lines or ORC scan: no facts here; the cutter
+    # serves each from the scan itself.
     inputs.add_scan()
 
 

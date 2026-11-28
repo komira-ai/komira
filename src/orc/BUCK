@@ -6,7 +6,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # compression's codec API, LZO read-only in native Mojo), the
 # flat and nested column decoders, the stripe writer with per-stride
 # statistics and bloom filters, and statistics-driven stripe / stride
-# pruning. async_rt supplies the dispatcher the parallel column decode and
+# pruning, and a file's tail and output schema read from its Footer alone
+# (orc_file_schema). async_rt supplies the dispatcher the parallel column decode and
 # stream compress run on. runtime_paths is declared because two tests
 # take their scratch directory from `test_tmpdir()`.
 mojo_library(
@@ -45,6 +46,7 @@ mojo_library(
         "tests/test_orc_column_decode.mojo",
         "tests/test_orc_crafted_file_refusals.mojo",
         "tests/test_orc_dispatcher_and_file_io.mojo",
+        "tests/test_orc_file_schema.mojo",
         "tests/test_orc_column_decoder_nullable.mojo",
         "tests/test_orc_column_decoder_refusals.mojo",
         "tests/test_orc_footer_decode.mojo",
