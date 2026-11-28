@@ -11,7 +11,9 @@
 # (HIVE_PARTITION_LAYOUT_MISMATCH); a glob that matches nothing is refused
 # word for word, naming the pattern; files of two schemas are refused
 # (PARQUET_FILES_SCHEMA_MISMATCH); a mode that is no KOMIRA_HIVE_* value is
-# refused word for word before anything is read.
+# refused word for word before anything is read; files with a string column
+# (the fixture pyarrow wrote) give the schema parquet_schema_bytes gives, and
+# a string key column.
 from std.os import makedirs
 from std.testing import assert_equal, assert_true
 
@@ -27,8 +29,8 @@ from parquet_footers.parquet_files import (
 from parquet_writer.record_batch_writer import (
     write_record_batch_to_parquet_bytes,
 )
-from plan_proto.plan import WireParquetSource
-from proto_codec import decode_proto
+from plan_proto.plan import WireParquetSource, WireSchema
+from proto_codec import decode_proto, encode_proto
 
 from runtime_paths import test_tmpdir
 
@@ -38,8 +40,11 @@ from so import (
     KOMIRA_HIVE_OFF,
     KOMIRA_HIVE_ON,
     Session,
+    parquet_schema_bytes,
     parquet_source_bytes,
 )
+
+comptime PARQUET = "src/so/tests/fixtures/two_columns.parquet"
 
 
 def _int_file(path: String, column: String) raises -> String:
@@ -180,6 +185,36 @@ def test_an_unknown_mode_is_refused_before_reading() raises:
     )
 
 
+def _copy_fixture(path: String) raises:
+    var bytes: List[UInt8]
+    with open(PARQUET, "r") as f:
+        bytes = f.read_bytes()
+    with open(path, "w") as f:
+        f.write_bytes(Span(bytes))
+
+
+def test_a_string_column_has_the_schema_of_one_file() raises:
+    var d = _dir("strings")
+    makedirs(d + "/region=emea", exist_ok=True)
+    makedirs(d + "/region=apac", exist_ok=True)
+    _copy_fixture(d + "/region=emea/a.parquet")
+    _copy_fixture(d + "/region=apac/b.parquet")
+    var one = encode_proto[WireSchema](
+        decode_proto[WireSchema](parquet_schema_bytes(String(PARQUET)))
+    )
+    var glob = _source(d + "/*/*.parquet", KOMIRA_HIVE_OFF)
+    assert_equal(len(glob.paths), 2)
+    assert_true(encode_proto[WireSchema](glob.schema.value()) == one, "the glob's schema is not the file's")
+    var keyed = _source(d, KOMIRA_HIVE_AUTO)
+    assert_true(encode_proto[WireSchema](keyed.schema.value()) == one, "the folder's schema is not the file's")
+    assert_equal(len(keyed.partition_cols), 1)
+    assert_equal(keyed.partition_cols[0].name, "region")
+    assert_equal(keyed.partition_values[0].values[0], "apac")
+    assert_equal(keyed.partition_values[1].values[0], "emea")
+    var single = _source(d + "/region=emea/a.parquet", KOMIRA_HIVE_OFF)
+    assert_true(encode_proto[WireSchema](single.schema.value()) == one, "one file's schema is not the file's")
+
+
 def main() raises:
     test_a_glob_gives_its_files_sorted()
     test_one_file_is_its_own_path()
@@ -188,4 +223,5 @@ def main() raises:
     test_a_glob_matching_nothing_is_refused_by_name()
     test_files_of_two_schemas_are_refused()
     test_an_unknown_mode_is_refused_before_reading()
+    test_a_string_column_has_the_schema_of_one_file()
     print("OK")

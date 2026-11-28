@@ -55,8 +55,9 @@ NATIVE_OWNERS = [
 # file as its own path, a directory's Hive keys as partition columns for
 # KOMIRA_HIVE_AUTO and KOMIRA_HIVE_ON and none for KOMIRA_HIVE_OFF, keys that
 # differ between files (none for AUTO, HIVE_PARTITION_LAYOUT_MISMATCH for ON),
-# and the named refusals of a glob matching nothing, files of two schemas and
-# an unknown mode;
+# the named refusals of a glob matching nothing, files of two schemas and
+# an unknown mode, and files with a string column (the fixture) whose schema
+# is the bytes parquet_schema_bytes gives;
 # test_register_text holds register_csv and
 # register_json: a CSV or JSON file registered by name and queried through
 # the session's engine, each CSV dialect argument equal to read_csv's (a
@@ -211,6 +212,7 @@ mojo_library(
         "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
     ],
     test_data = {
+        "tests/test_parquet_source.mojo": ["tests/fixtures/two_columns.parquet"],
         "tests/test_plan_result.mojo": ["tests/fixtures/two_columns.parquet"],
         "tests/test_register_arrow.mojo": ["tests/fixtures/two_columns.parquet"],
         "tests/test_register_text.mojo": ["tests/fixtures/two_columns.parquet"],

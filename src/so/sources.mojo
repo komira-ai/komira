@@ -61,6 +61,7 @@ from plan_wire import (
     schema_to_bytes,
 )
 from scan_source.csv_source import CsvSource
+from scan_source.parquet_source import ParquetSource
 from scan_source.json_source import JsonSource
 from scan_source.source_variant import SourceVariant
 from sdk.parquet_footer import read_parquet_footer
@@ -329,7 +330,21 @@ def parquet_source_bytes(
             + " KOMIRA_HIVE_OFF (2)"
         )
     probe_codec_libraries()
-    var source = resolve_parquet_source(session.engine.footers, path, mode, True)
+    var resolved = resolve_parquet_source(session.engine.footers, path, mode, True)
+    # The files' schema as `parquet_schema_bytes` reads it, from the first
+    # file's footer: the footer cache's schema can carry a field whose DType
+    # the wire has no code for (a string column), and `resolve_parquet_source`
+    # has already held every file to the first one's schema.
+    var footer = read_parquet_footer(resolved.paths[0])
+    var schema = footer.take_schema()
+    if not resolved.is_multi_file() and not resolved.is_partitioned():
+        return parquet_source_to_bytes(ParquetSource(resolved.paths[0].copy(), schema^))
+    var source = ParquetSource.partitioned(
+        resolved.paths.copy(),
+        schema^,
+        resolved.partition_cols.copy(),
+        resolved.partition_values.copy(),
+    )
     return parquet_source_to_bytes(source)
 
 

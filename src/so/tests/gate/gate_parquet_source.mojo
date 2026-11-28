@@ -128,6 +128,12 @@ def _last_error(lib: OwnedDLHandle, ctx: Int) raises -> List[UInt8]:
 comptime PARQUET_HEX = "504152311504193c35001806736368656d6115040015042502180369363400150c250218017325004c1c0000001600191c192c26001c150419150619180369363415021600160016002600490c000026001c150c1915061918017315021600160016002600490c0000160016002600160000191c180c4152524f573a736368656d6118ec012f2f2f2f2f36674141414151414141414141414b41417741426741464141674143674141414141424241414d41414141434141494141414142414149414141414241414141414941414142414141414142414141414e6a2f2f2f3841414145464541414141426741414141454141414141414141414145414141427a41414141424141454141514141414151414251414341414741416341444141414142414145414141414141414151495141414141484141414141514141414141414141414177414141476b324e414149414177414341414841416741414141414141414251414141414141414141413d001820706172717565742d6370702d6172726f772076657273696f6e2032342e302e30192c1c00001c0000009901000050415231"
 
 
+def _why(lib: OwnedDLHandle, ctx: Int) raises -> String:
+    # The context's last error as text, for a failure message.
+    var text = _last_error(lib, ctx)
+    return String(from_utf8=Span(text))
+
+
 def _call(
     lib: OwnedDLHandle, ctx: Int, path: Int, hive: Int32, buf: Int, cap: UInt64, out_len: Int
 ) raises -> Int32:
@@ -146,7 +152,7 @@ def _source(lib: OwnedDLHandle, ctx: Int, path: Int, hive: Int32) raises -> List
 
     out_len[0] = UInt64(0)
     var rc = _call(lib, ctx, path, hive, 0, UInt64(0), Int(out_len))
-    _expect(rc == -4, "zero-capacity probe returned " + String(rc) + ", want -4")
+    _expect(rc == -4, "zero-capacity probe returned " + String(rc) + ", want -4: " + _why(lib, ctx))
     var n = Int(out_len[0])
     _expect(n > 0 and n < CAP, "probe reported length " + String(n))
 
@@ -158,7 +164,7 @@ def _source(lib: OwnedDLHandle, ctx: Int, path: Int, hive: Int32) raises -> List
 
     out_len[0] = UInt64(0)
     rc = _call(lib, ctx, path, hive, Int(buf), UInt64(n), Int(out_len))
-    _expect(rc == 0 and Int(out_len[0]) == n, "exact buffer: rc " + String(rc))
+    _expect(rc == 0 and Int(out_len[0]) == n, "exact buffer: rc " + String(rc) + ": " + _why(lib, ctx))
     _expect(buf[n] == SENTINEL, "the call wrote past the reported length")
     var first = List[UInt8]()
     for i in range(n):
@@ -189,7 +195,7 @@ def _expect_refused(
     _expect(rc == -3, "a refused call returned " + String(rc) + ", want -3")
     _expect(out_len[0] == 77, "a refused call set the length")
     var error = _last_error(lib, ctx)
-    _expect(_contains(error, want), "the last error does not hold `" + want + "`")
+    _expect(_contains(error, want), "the last error does not hold `" + want + "`: " + String(from_utf8=Span(error)))
     out_len.free()
 
 
