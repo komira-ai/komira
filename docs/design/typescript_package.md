@@ -161,7 +161,9 @@ Fixed before this design, and not reopened here:
     (`:node_macos_arm64`, `:node_22_macos_arm64`, `:node_26_macos_arm64`), unpacked and run by the
     macOS build of `node_act` on a macOS worker, for the macOS install test alone, and the addon
     linked for the target platform's OS (`target_os`: Mach-O with `-undefined dynamic_lookup` on
-    macOS). linux-arm64 has neither a
+    macOS). On both, the loader check of `c_shared_lib` fails the build when the addon leaves a
+    name other than `napi_*` or `node_api_*` for `node` to define, and `//node:komira_addon_macho`
+    links the macOS addon in the Linux part of the pull request check. linux-arm64 has neither a
     Node pin nor a registered build platform (`tools/build/platforms/table.bzl`,
     `komira-limit:linux-arm64-unregistered`).
 - **EXISTS** The Node rules also hold `npm_modules` (an offline `npm ci --ignore-scripts` from a

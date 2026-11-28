@@ -76,11 +76,14 @@ node_test(
 )
 
 # A Node-API addon: napi_* left undefined, resolved by node when it loads.
+# `node_api` lets its loader check leave the napi_* and node_api_* names to
+# node and requires the module init export, as node_addon does.
 c_shared_lib(
     name = "addon",
     srcs = ["addon/addon.c"],
     include_dirs = ["//third_party/node:node[include]"],
     out = "addon.node",
+    node_api = True,
 )
 
 node_test(
