@@ -338,7 +338,8 @@ def _fold_decimal(
         if has_nulls and arr.is_null(r):
             continue
         if welford:
-            welford_step(cell, as_double(cell, arr.get_i128(r)))
+            var d = as_double(cell, arr.get_i128(r))
+            welford_step(cell, d)
         else:
             _step(cell, func, arr.get_i128(r), label)
 
@@ -608,7 +609,8 @@ def fold_wide(
         if w.bind.kind == IN_FLOAT:
             welford_step(cell, w.fvals[row])
         else:
-            welford_step(cell, as_double(cell, w.vals[row]))
+            var d = as_double(cell, w.vals[row])
+            welford_step(cell, d)
         return
     if w.bind.kind == IN_FLOAT:
         _fstep(cell, func, w.fvals[row])

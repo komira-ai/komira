@@ -216,7 +216,7 @@ def keep_column[
     ref batch: RecordBatch,
     col_idx: Int,
     rows: Int,
-):
+) raises:
     """Keep the non-NULL values of the first `rows` rows of column `col_idx`
     of `batch`, a column of `dtype`, under group `group`."""
     ref col = batch.column_at(col_idx)
