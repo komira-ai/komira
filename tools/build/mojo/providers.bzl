@@ -38,6 +38,11 @@ MojoInfo = provider(fields = {
     # declared soname that tools/build/package/system_libs.bzl names, in
     # soname order. Its conda package requires each requirement.
     "dlopen": provider_field(typing.Any, default = []),
+    # The sonames the library and every library of its closure open at run
+    # time (their `dlopen`), each mapped to the sorted import names of the
+    # libraries that declare it: {soname: [import name]}, {} for a closure
+    # that opens none (dlopen.bzl, dlopen_closure).
+    "opens": provider_field(typing.Any, default = {}),
     "import_name": provider_field(str),
     # The directories of the pinned shared libraries the library's code opens at run time, with those of every package it depends on
     # (tools/build/mojo/system_libs.bzl): what a test run that loads this package must find on its library path. Artifacts (directories) in the order

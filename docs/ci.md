@@ -1752,6 +1752,14 @@ byte, WHEEL differing only in its Tag's platform part (both `py3-none`), and the
 are its native libraries: `libkomira.dylib` and the three runtime dylibs on macOS; `libkomira.so`, the
 eleven native owner libraries and the three runtime `.so` files on Linux.
 
+**What the macOS wheel takes from the host, before the merge.** The libraries libkomira opens at run time
+with `dlopen` are in neither wheel. `//tools/build/package/libkomira:dist_opens`, a Linux target of the pull
+request's check, refuses at analysis a Mojo closure of libkomira that opens a library the hosts of a
+platform of the native directory do not provide (`HOST_LIBS` of `tools/build/package/system_libs.bzl`; macOS
+provides libz, libbz2 and liblzma). The `dlopen` declarations are the same for every platform, so the
+macOS row is judged on Linux, and a change to one of them selects the check through libkomira's closure.
+The macOS install test itself stays in this workflow, never in a pull request (B9).
+
 
 ### Which run to look at
 

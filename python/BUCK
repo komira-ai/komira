@@ -138,6 +138,9 @@ changelog_file(
 # wheel, read back" below holds the finished file. `:komira_wheel`, the wheels
 # derived from it, and the tests that install or read them are linux-x86_64
 # only (limit manylinux-wheel-linux-x86-64): a darwin-arm64 build skips them.
+# What the native directory takes from the host, the libraries libkomira opens
+# at run time, is held for macOS on Linux, in the pull request
+# (//tools/build/package/libkomira:dist_opens).
 
 _PLATFORM = "linux-x86_64"
 
