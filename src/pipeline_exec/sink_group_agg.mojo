@@ -6,9 +6,11 @@
 # The grouped aggregation sink over fixed-width keys: GROUP BY one or more
 # integer columns (rows I64 and I32), float columns (rows F64 and F32), DATE32
 # columns (row DATE32), BOOL columns (row BOOL) or DECIMAL128 columns (row
-# DECIMAL128), with SUM, COUNT, COUNT(*), COUNT(DISTINCT), MIN, MAX and AVG,
-# the aggregates and their exact folds being those of the ungrouped sink
-# (`agg_fold`, `count_distinct`). A key column takes one 64-bit cell of the
+# DECIMAL128), with SUM, COUNT, COUNT(*), COUNT(DISTINCT), MIN, MAX, AVG,
+# STDDEV_SAMP, STDDEV_POP, VAR_SAMP, VAR_POP, MEDIAN and QUANTILE_CONT, the
+# aggregates and their folds being those of the ungrouped sink (`agg_fold`,
+# `count_distinct`, `agg_values`: a MEDIAN's values are kept per worker group
+# and moved under the merged group at `combine`, as COUNT(DISTINCT)'s are). A key column takes one 64-bit cell of the
 # group key, a DECIMAL128 column two (`group_keys`). With no aggregate the
 # output is one row per distinct key, which is how `lowering` cuts SELECT
 # DISTINCT.
@@ -89,8 +91,9 @@
 # and reading one back the bytes read and the decoded batch, each at most
 # twice the bytes of the groups of one partition of one table; both are freed
 # before the next chunk. The spill files are deleted when `combine` is done,
-# or when the sink is dropped. A sink with a COUNT(DISTINCT) aggregate does
-# not spill (its per-group value sets are kept apart from the table), nor does
+# or when the sink is dropped. A sink with a COUNT(DISTINCT), MEDIAN or
+# QUANTILE_CONT aggregate does not spill (its per-group values are kept apart
+# from the table), nor does
 # a sink that folds by position (its grains name the groups of the worker's
 # table): either refuses as without a spill directory and says why.
 #
@@ -119,14 +122,7 @@ from morsel.morsel_sink import MorselSinkImpl
 from morsel.pipeline_execution import PipelineExecution
 from operator_api.map_op import MapOp
 from physical_plan.physical_plan import AggSinkData
-from plan_expr.agg_expr import (
-    AGG_COUNT,
-    AGG_COUNT_DISTINCT,
-    AGG_MAX,
-    AGG_MEAN,
-    AGG_MIN,
-    AGG_SUM,
-)
+from plan_expr.agg_expr import AGG_COUNT_DISTINCT
 from plan_expr.expr_id import ExprId
 from plan_expr.expr_pool import ExprPool
 
@@ -135,8 +131,16 @@ from .agg_fold import (
     WideColumn,
     agg_name,
     fold_wide,
+    keeps_values,
     merge_cell,
     widen_column,
+)
+from .agg_values import (
+    ValueMerge,
+    ValueSlot,
+    check_agg_args,
+    keep_wide,
+    reserve_wide,
 )
 from .agg_output import agg_result_column_rows, check_declared_type
 from .count_distinct import (
@@ -164,6 +168,7 @@ struct _GroupSlot(Movable):
     var map: Optional[MapOp]
     var reservation: WorkerReservation
     var distinct: DistinctSlot
+    var values: ValueSlot
     var key_arrows: List[ArrowType]
     var scratch_cells: List[Int64]
     var scratch_nulls: List[UInt8]
@@ -187,6 +192,7 @@ struct _GroupSlot(Movable):
         self.map = None
         self.reservation = reservation^
         self.distinct = DistinctSlot(na)
+        self.values = ValueSlot(na)
         self.key_arrows = List[ArrowType]()
         self.scratch_cells = List[Int64]()
         self.scratch_nulls = List[UInt8]()
@@ -211,6 +217,8 @@ struct GroupAggSink(MorselSinkImpl):
     var _cell_at: List[Int]
     var _max_groups: Int
     var _funcs: List[UInt8]
+    # The fraction of each MEDIAN or QUANTILE_CONT (0.0 for the others).
+    var _fractions: List[Float64]
     var _arg_col: List[Int]
     var _labels: List[String]
     var _key_labels: List[String]
@@ -281,6 +289,7 @@ struct GroupAggSink(MorselSinkImpl):
         self._cell_at = List[Int]()
         self._max_groups = max_groups
         self._funcs = List[UInt8]()
+        self._fractions = List[Float64]()
         self._arg_col = List[Int]()
         self._labels = List[String]()
         self._key_labels = List[String]()
@@ -308,28 +317,11 @@ struct GroupAggSink(MorselSinkImpl):
         for i in range(na):
             ref agg = data.agg_exprs[i]
             var func = agg.func
-            if (
-                func != AGG_SUM
-                and func != AGG_COUNT
-                and func != AGG_COUNT_DISTINCT
-                and func != AGG_MIN
-                and func != AGG_MAX
-                and func != AGG_MEAN
-            ):
-                raise Error(
-                    where_
-                    + " does not serve aggregate tag "
-                    + String(Int(func))
-                    + " (SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)"
-                )
             var label = (
                 agg_name(func) + " (output column " + String(nk + i) + ")"
             )
-            if agg.num_children() > 1:
-                raise Error(where_ + ": " + label + " takes one argument")
+            self._fractions.append(check_agg_args(agg, where_, label))
             if not agg.child:
-                if func != AGG_COUNT:
-                    raise Error(where_ + ": " + label + " has no argument")
                 self._arg_col.append(-1)
             else:
                 self._arg_col.append(len(self._expr_ids))
@@ -358,6 +350,10 @@ struct GroupAggSink(MorselSinkImpl):
                 if self._funcs[i] == AGG_COUNT_DISTINCT:
                     self._spill_off = (
                         "a COUNT(DISTINCT) aggregate does not spill"
+                    )
+                elif keeps_values(self._funcs[i]):
+                    self._spill_off = (
+                        "a MEDIAN or QUANTILE_CONT aggregate does not spill"
                     )
             if self._spill_off == "" and by_position:
                 self._spill_off = (
@@ -502,6 +498,14 @@ struct GroupAggSink(MorselSinkImpl):
                         self._labels[i],
                     )
                 )
+                if keeps_values(self._funcs[i]):
+                    reserve_wide(
+                        slot.reservation,
+                        args[i],
+                        selected,
+                        self._where,
+                        self._pool,
+                    )
         if self._by_position:
             if not slot.positions.begin(
                 self._funcs, args, self._labels, partition_id, origin_hint
@@ -578,6 +582,8 @@ struct GroupAggSink(MorselSinkImpl):
                         r,
                         self._labels[i],
                     )
+                    if keeps_values(self._funcs[i]):
+                        keep_wide(slot.values, i, g, args[i], r)
 
     def _merge_key_types(mut self, w: Int) raises:
         """Fold worker `w`'s key column types into the merged ones; refuse a
@@ -766,6 +772,7 @@ struct GroupAggSink(MorselSinkImpl):
             scratch_cells.append(0)
             scratch_nulls.append(0)
         var distinct = DistinctMerge(na, WorkerReservation(self._pool.share()))
+        var values = ValueMerge(na, WorkerReservation(self._pool.share()))
         # By position: each worker's grains and the merged group of each of
         # its groups, merged after every worker's table.
         var positions = List[GroupPositions]()
@@ -807,10 +814,12 @@ struct GroupAggSink(MorselSinkImpl):
                 self._labels,
                 self._pool,
             )
+            values.merge_worker(slot.values, group_map, self._where, self._pool)
             # This worker is merged: free its tables and return its memory.
             # Its grains move out with their own reservation.
             slot.table = GroupTable(nc, na, self._max_groups)
             slot.distinct = DistinctSlot(na)
+            slot.values = ValueSlot(na)
             slot.reservation.give_back_all()
             if self._by_position:
                 var moved = GroupPositions(WorkerReservation(self._pool.share()))
@@ -829,6 +838,14 @@ struct GroupAggSink(MorselSinkImpl):
             for w in range(len(positions)):
                 positions[w].reservation.give_back_all()
         distinct.finish()
+        values.finish(
+            self._merged.cells,
+            self._funcs,
+            self._fractions,
+            self._merged.n,
+            self._where,
+            self._pool,
+        )
         self._combined = True
 
     def finalize(mut self) raises:

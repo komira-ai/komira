@@ -1598,22 +1598,15 @@ comptime _R_AGGSTRCAT: String = (
 
 
 comptime _R_AGGQUANTILE: String = (
-    "SQL not supported: this name is a DuckDB v1.5.3 PARAMETERISED QUANTILE. "
-    "ONE MISSING PRIMITIVE, THE PARAMETER: `AGG_MEDIAN` (10) hardcodes "
-    "p = 0.5 — it is the only order-statistic tag here and it takes no "
-    "percentile argument. THE RETENTION IS NOT MISSING: the route every "
-    "door's `median(x)` reaches, the extended fold's `_ext_median_inplace`, "
-    "keeps EVERY value of a group and selects exactly at any group size "
-    "(MEASURED at every user-facing door "
-    "over groups of 189-389 values arriving largest first, and a "
-    "route-witness mutation of each median body), as does the typed "
-    "catalog's `MedianOp[dt]`. So the gap is the PARAMETER and its plumbing "
-    "(a tag or tag argument, the wire, the binder, a q threaded to that "
-    "finalize), not the state. (The 64-value `MedianState` reservoir still "
-    "in the tree is reached by NO plan route.) A per-group state is held in "
-    "memory; a group larger than "
-    "memory is a separate, unsolved limit. ⚠ THE ORDINARY DEFAULT IS "
-    "SERVED: `median(x)` binds and executes, exactly."
+    "SQL not supported: `quantile_disc` returns a value of the INPUT'S OWN "
+    "TYPE (a BIGINT column's quantile is a BIGINT, a DECIMAL column's is a "
+    "DECIMAL), and this path does not produce that: its one quantile tag, "
+    "`AGG_QUANTILE_CONT`, answers a nullable DOUBLE for every input. `quantile` "
+    "is DuckDB's alias of `quantile_disc`, so it is refused for the same "
+    "reason. ⚠ THE CONTINUOUS QUANTILE IS SERVED: `quantile_cont(x, q)` with "
+    "`q` a constant number in [0, 1] binds and executes, as does `median(x)`, "
+    "which is `quantile_cont(x, 0.5)`. A list of fractions "
+    "(`quantile_cont(x, [0.25, 0.75])`) is not served."
     " ⛔ AND THE `register_scalar` REMEDY THE BINDER APPENDS BELOW CANNOT "
     "SERVE THIS NAME. `SqlCatalog` declares exactly ONE UDF door — "
     "`declare_udf[U: DeclaredScalarUdf]` (`sql/sql_catalog.mojo`) — "
@@ -3582,11 +3575,10 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     #
     # ---- HIGHER MOMENTS — the Welford state has no M3/M4 slot
     #
-    # ---- PARAMETERISED QUANTILE — AGG_MEDIAN hardcodes p=0.5 (its routes keep
-    #      EVERY value; the 64-row `MedianState` reservoir is reached by no
-    #      plan route)
+    # ---- QUANTILE — `quantile_cont` has NO ROW: it is served (`AGG_QUANTILE_CONT`,
+    #      named in `sql_ast.sql_call_is_aggregate`). `quantile` and
+    #      `quantile_disc` return the input's own type and stay refused.
     if name == "quantile": return SqlFnSpec(FNK_REFUSED, _R_AGGQUANTILE)
-    if name == "quantile_cont": return SqlFnSpec(FNK_REFUSED, _R_AGGQUANTILE)
     if name == "quantile_disc": return SqlFnSpec(FNK_REFUSED, _R_AGGQUANTILE)
     #
     # ---- FULL-SAMPLE / PER-DISTINCT-VALUE STATE

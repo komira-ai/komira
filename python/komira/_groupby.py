@@ -15,7 +15,9 @@ by nothing and give one row. No SQL text is written.
 - A reduction's pandas name maps to one engine aggregate: `sum`, `mean`,
   `median`, `min`, `max`, `count` (values that are not missing), `size`
   (rows), `nunique` (distinct values that are not missing), `std` and `var`
-  (the sample ones, ddof=1).
+  (`ddof=1`, the default, is the sample one, `stddev_samp` and `var_samp`;
+  `ddof=0` is the population one, `stddev_pop` and `var_pop`; another ddof is
+  refused by name).
 - `sum`, `mean`, `median`, `std` and `var` need a numeric or boolean column
   (ruling 4): a reduction of every column names the first one that is not,
   unless `numeric_only=True` leaves it out. pandas counts True as 1: a
@@ -68,6 +70,8 @@ _FUNCS = {
     "size": "count",
 }
 _SUPPORTED = ", ".join(sorted(_FUNCS))
+# The engine aggregate of `std` and `var` for ddof=0, the population ones.
+_POPULATION = {"std": "stddev_pop", "var": "var_pop"}
 # The reductions defined only over numbers (ruling 4).
 _NUMERIC_ONLY = frozenset({"sum", "mean", "median", "std", "var"})
 _NUMERIC_TYPES = frozenset(
@@ -99,13 +103,14 @@ class _Item:
     """One output column of an aggregate: its name, the reduction and the
     column it reads (None for `size`), and whether an empty sum is 0."""
 
-    __slots__ = ("name", "how", "column", "zero")
+    __slots__ = ("name", "how", "column", "zero", "ddof")
 
-    def __init__(self, name: str, how: str, column: str | None, zero: bool = True) -> None:
+    def __init__(self, name: str, how: str, column: str | None, zero: bool = True, ddof: int = 1) -> None:
         self.name = name
         self.how = how
         self.column = column
         self.zero = zero
+        self.ddof = ddof
 
 
 def _is_numeric(dtype: str) -> bool:
@@ -144,7 +149,13 @@ def _agg_node(dtypes: dict[str, str], item: _Item, where: str, hint: str) -> _op
             )
         if dtype == "bool":
             ref = _ops.Cast(ref, "int64" if item.how == "sum" else "float64")
-    return _ops.Agg(_FUNCS[item.how], (ref,))
+        elif dtype == "float32" and item.how == "median":
+            # The engine's median keeps the values as doubles and refuses a
+            # FLOAT32 column (DuckDB's answer there is a FLOAT): the frame's
+            # median is a float64, so the column is widened, exactly, first.
+            ref = _ops.Cast(ref, "float64")
+    func = _POPULATION[item.how] if item.ddof == 0 and item.how in _POPULATION else _FUNCS[item.how]
+    return _ops.Agg(func, (ref,))
 
 
 def _zero(dtype: str, precision: int, scale: int) -> _ops.Node:
@@ -231,11 +242,15 @@ def _check_skipna(skipna: object, verb: str) -> None:
         )
 
 
-def _check_ddof(ddof: object, verb: str) -> None:
+def _check_ddof(ddof: object, verb: str) -> int:
+    """`ddof` once checked: 1 is the sample statistic, 0 the population one."""
     if isinstance(ddof, bool) or not isinstance(ddof, int):
         raise TypeError(f"{verb} ddof must be an int, not {type(ddof).__name__}")
-    if ddof != 1:
-        raise UnsupportedOperation(f"{verb}(ddof={ddof}) is not supported: the sample one, ddof=1, is")
+    if ddof not in (0, 1):
+        raise UnsupportedOperation(
+            f"{verb}(ddof={ddof}) is not supported: use ddof=1, the sample {verb}, or ddof=0, the population {verb}"
+        )
+    return ddof
 
 
 def _sum_zero(min_count: object, verb: str) -> bool:
@@ -442,14 +457,14 @@ class GroupBy:
             self._frame, self._keys, items, sort=self._sort, dropna=self._dropna, where=where, hint=hint
         )
 
-    def _reduce(self, how: str, numeric_only: bool = False, zero: bool = True) -> DataFrame:
+    def _reduce(self, how: str, numeric_only: bool = False, zero: bool = True, ddof: int = 1) -> DataFrame:
         where = f"{how}()"
         _check_bool(numeric_only, "numeric_only", how)
         columns = self._values
         if numeric_only and how in _NUMERIC_ONLY | {"min", "max", "count"}:
             dtypes = self._frame.dtypes
             columns = tuple(c for c in columns if _is_numeric(dtypes[c]))
-        return self._run([_Item(c, how, c, zero) for c in columns], where, _REDUCTION_HINT)
+        return self._run([_Item(c, how, c, zero, ddof) for c in columns], where, _REDUCTION_HINT)
 
     def agg(self, arg: object = None, **named: object) -> DataFrame:
         """The groups reduced: by named aggregates, `agg(total=("v", "sum"))`
@@ -485,18 +500,20 @@ class GroupBy:
         return self._reduce("median", numeric_only)
 
     def std(self, ddof: int = 1, numeric_only: bool = False, skipna: bool = True) -> DataFrame:
-        """Each group's sample standard deviation (ddof=1), as float64;
-        missing for a group of one value."""
-        _check_ddof(ddof, "std")
+        """Each group's standard deviation, as float64: the sample one
+        (`ddof=1`, missing for a group of one value) or the population one
+        (`ddof=0`, 0.0 for a group of one value)."""
+        ddof = _check_ddof(ddof, "std")
         _check_skipna(skipna, "std")
-        return self._reduce("std", numeric_only)
+        return self._reduce("std", numeric_only, ddof=ddof)
 
     def var(self, ddof: int = 1, numeric_only: bool = False, skipna: bool = True) -> DataFrame:
-        """Each group's sample variance (ddof=1), as float64; missing for a
-        group of one value."""
-        _check_ddof(ddof, "var")
+        """Each group's variance, as float64: the sample one (`ddof=1`,
+        missing for a group of one value) or the population one (`ddof=0`,
+        0.0 for a group of one value)."""
+        ddof = _check_ddof(ddof, "var")
         _check_skipna(skipna, "var")
-        return self._reduce("var", numeric_only)
+        return self._reduce("var", numeric_only, ddof=ddof)
 
     def min(self, numeric_only: bool = False, min_count: int = -1, skipna: bool = True) -> DataFrame:
         """Each group's least value of every column, of the column's type."""
@@ -622,9 +639,11 @@ class GroupBy:
 # ---- the frame's own reductions ----------------------------------------------
 
 
-def reduce_frame(frame: DataFrame, how: str, numeric_only: bool = False, zero: bool = True) -> DataFrame:
+def reduce_frame(
+    frame: DataFrame, how: str, numeric_only: bool = False, zero: bool = True, ddof: int = 1
+) -> DataFrame:
     """`df.<how>()`: one row, one column per column of the frame."""
-    return GroupBy._of(frame, (), False, False)._reduce(how, numeric_only, zero)
+    return GroupBy._of(frame, (), False, False)._reduce(how, numeric_only, zero, ddof)
 
 
 def agg_frame(frame: DataFrame, arg: object, named: dict[str, object]) -> DataFrame:

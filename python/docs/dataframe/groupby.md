@@ -13,7 +13,8 @@ stats = df[["value"]].median()            # one row, the column value
   by the keys, missing keys last; `sort=False` promises no row order.
   `dropna=True` leaves out the rows with a missing key; `dropna=False` keeps
   their group. `gb["v"]` and `gb[["v", "w"]]` choose the columns to reduce.
-- **Reductions.** `sum`, `mean`, `median`, `std` and `var` (ddof=1), `min`,
+- **Reductions.** `sum`, `mean`, `median`, `std` and `var` (`ddof=1`, the sample
+  one and the default, or `ddof=0`, the population one), `min`,
   `max`, `count` (values that are not missing), `nunique` (distinct values
   that are not missing) and, on a GroupBy, `size` (rows, the column `size`).
   `sum`, `mean`, `median`, `std` and `var` need numeric or boolean columns
@@ -27,7 +28,7 @@ stats = df[["value"]].median()            # one row, the column value
   every verb they are lazy, and the number comes from `materialize()`.
 - **Refused by name** with `UnsupportedOperation`: a Python function in
   `agg`, `first`, `last` and the other choices by row order, `ddof` other
-  than 1, `skipna=False`, `nunique(dropna=False)` and `axis=1`. A missing
+  than 0 or 1, `skipna=False`, `nunique(dropna=False)` and `axis=1`. A missing
   value is NULL: unlike pandas, a NaN in a float column is a value in these
   reductions, not a missing one ([`fillna` and `dropna`](missing_values.md)
   (newer than 0.1.1623) do read it as missing).

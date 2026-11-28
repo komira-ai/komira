@@ -9,11 +9,10 @@ Path("orders.csv").write_text(
 )
 
 # A z-score rule: flag a value more than 1.5 standard deviations from the mean.
-# The standard deviation is written as sqrt(avg(x*x) - avg(x)^2), the population form.
+# stddev_pop is the population standard deviation.
 query = """
 WITH stats AS (
-    SELECT avg(total) AS mean,
-           sqrt(avg(total * total) - avg(total) * avg(total)) AS sd
+    SELECT avg(total) AS mean, stddev_pop(total) AS sd
     FROM orders
 )
 SELECT id, total, (total - mean) / sd AS z
@@ -26,3 +25,14 @@ with komira.Session() as s:
     s.register_csv("orders", "orders.csv")
     for row in s.sql(query).to_arrow().to_pylist():
         print(f"id={row['id']} total={row['total']} z={row['z']:.2f}")
+
+# The interquartile-range rule: flag a value below Q1 - 1.5 * IQR or above
+# Q3 + 1.5 * IQR. Series.quantile runs at once and gives a float.
+df = komira.read_csv("orders.csv")
+q1, q3 = df["total"].quantile(0.25), df["total"].quantile(0.75)
+iqr = q3 - q1
+low, high = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+print(f"q1={q1} q3={q3} iqr={iqr} fences=({low}, {high})")
+outliers = df[(df["total"] < low) | (df["total"] > high)].sort_values("id")
+for row in outliers.materialize().to_arrow().to_pylist():
+    print(f"id={row['id']} total={row['total']}")

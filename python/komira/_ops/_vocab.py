@@ -258,10 +258,12 @@ AGG_FUNCS = frozenset(
         "skewness",
         "kurtosis",
         "kurtosis_pop",
+        "quantile_cont",
     }
 )
 AGG_TWO_ARG = frozenset(
     {
+        "quantile_cont",
         "corr",
         "covar_pop",
         "covar_samp",

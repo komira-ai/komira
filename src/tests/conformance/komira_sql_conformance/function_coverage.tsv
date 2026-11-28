@@ -580,7 +580,6 @@ power	FNK_MATH_FN2	-	yes	2	equal:2
 prefix	FNK_STRING_PRED	-	-	1	equal:1
 printf	FNK_REFUSED	_R_FMTSTR	yes	0	probe:refused_bind
 quantile	FNK_REFUSED	_R_AGGQUANTILE	-	0	probe:refused_bind
-quantile_cont	FNK_REFUSED	_R_AGGQUANTILE	-	0	probe:refused_bind
 quantile_disc	FNK_REFUSED	_R_AGGQUANTILE	-	0	probe:refused_bind
 quarter	FNK_EXTRACT_FIELD	-	yes	1	equal:1
 radians	FNK_MATH_FN	-	yes	1	equal:1

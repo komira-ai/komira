@@ -129,7 +129,7 @@ def test_agg_arity_per_function_family():
     assert Agg("count", one).args == one
     assert Agg("sum", one).func == "sum"
     assert Agg("mean", one).k is None
-    for func in ("corr", "covar_pop", "regr_slope", "regr_r2"):
+    for func in ("corr", "covar_pop", "regr_slope", "regr_r2", "quantile_cont"):
         assert Agg(func, two).args == two, func
     assert Agg("largest_k", one, 3).k == 3
 
@@ -142,6 +142,7 @@ def test_agg_refuses_wrong_argument_counts():
     refused(lambda: Agg("count", two), ValueError, "Agg count takes 0 or 1 argument(s), and was given 2")
     refused(lambda: Agg("corr", one), ValueError, "Agg corr takes 2 argument(s), and was given 1")
     refused(lambda: Agg("regr_count"), ValueError, "Agg regr_count takes 2 argument(s), and was given 0")
+    refused(lambda: Agg("quantile_cont", one), ValueError, "Agg quantile_cont takes 2 argument(s), and was given 1")
     refused(lambda: Agg("largest_k", (), 2), ValueError, "Agg largest_k takes 1 argument(s), and was given 0")
 
 

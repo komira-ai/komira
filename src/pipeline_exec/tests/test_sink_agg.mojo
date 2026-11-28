@@ -544,7 +544,10 @@ def test_what_the_sink_refuses_when_it_is_built() raises:
     )
     assert_true("does not serve aggregate tag 7" in last, last)
     assert_true(
-        "(SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)" in last, last
+        "(SUM, COUNT, COUNT(DISTINCT), MIN, MAX, AVG, STDDEV_SAMP,"
+        " STDDEV_POP, VAR_SAMP, VAR_POP, MEDIAN and QUANTILE_CONT are)"
+        in last,
+        last,
     )
     # SUM with no argument.
     assert_true(

@@ -197,10 +197,7 @@
     "slug": "compute-summary-statistics-column",
     "category": "Aggregate",
     "question": "How do I compute summary statistics of a column?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2367"
-    ]
+    "status": "partial"
   },
   {
     "rank": 25,
@@ -485,10 +482,7 @@
     "slug": "detect-outliers",
     "category": "Clean",
     "question": "How do I detect outliers?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2367"
-    ]
+    "status": "works"
   },
   {
     "rank": 57,

@@ -740,16 +740,18 @@ class DataFrame:
     def std(
         self, axis: int | str = 0, skipna: bool = True, ddof: int = 1, numeric_only: bool = False
     ) -> DataFrame:
-        """One row: the sample standard deviation (ddof=1) of each column."""
-        _groupby._check_ddof(ddof, "std")
-        return self._reduce("std", axis, skipna, numeric_only)
+        """One row: the standard deviation of each column, the sample one
+        (`ddof=1`) or the population one (`ddof=0`); another ddof is refused."""
+        ddof = _groupby._check_ddof(ddof, "std")
+        return self._reduce("std", axis, skipna, numeric_only, ddof)
 
     def var(
         self, axis: int | str = 0, skipna: bool = True, ddof: int = 1, numeric_only: bool = False
     ) -> DataFrame:
-        """One row: the sample variance (ddof=1) of each column."""
-        _groupby._check_ddof(ddof, "var")
-        return self._reduce("var", axis, skipna, numeric_only)
+        """One row: the variance of each column, the sample one (`ddof=1`)
+        or the population one (`ddof=0`); another ddof is refused."""
+        ddof = _groupby._check_ddof(ddof, "var")
+        return self._reduce("var", axis, skipna, numeric_only, ddof)
 
     def min(self, axis: int | str = 0, skipna: bool = True, numeric_only: bool = False) -> DataFrame:
         """One row: the least value of each column, of its type."""
@@ -772,10 +774,10 @@ class DataFrame:
         _groupby._check_dropna(dropna, "nunique")
         return _groupby.reduce_frame(self, "nunique")
 
-    def _reduce(self, how: str, axis: object, skipna: object, numeric_only: bool) -> DataFrame:
+    def _reduce(self, how: str, axis: object, skipna: object, numeric_only: bool, ddof: int = 1) -> DataFrame:
         _groupby._check_axis(axis, how)
         _groupby._check_skipna(skipna, how)
-        return _groupby.reduce_frame(self, how, numeric_only)
+        return _groupby.reduce_frame(self, how, numeric_only, ddof=ddof)
 
     def drop_duplicates(
         self,

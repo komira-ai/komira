@@ -492,6 +492,28 @@ def test_regression_and_covariance_slots_hold_x_first_and_corr_keeps_order():
         assert names == (first, "qty" if first == "price" else "price"), func
 
 
+def test_quantile_cont_fills_the_value_slot_then_the_fraction_slot_and_is_a_nullable_float64():
+    plan = root(Aggregate(ORDERS, (), (("q", Agg("quantile_cont", (ColRef("qty"), Lit(0.25)))),)))
+    e = plan.aggregate.agg_exprs[0]
+    assert e.func == vocab.AGG_QUANTILE_CONT and e.has_child0 and e.has_child1
+    assert not e.has_child2 and not e.has_child3
+    assert e.child0.col_ref.name == "qty"
+    assert (e.child1.literal.dtype_code, e.child1.literal.float_val) == (vocab._DT_FLOAT64, 0.25)
+    f = plan.output_schema.fields[0]
+    assert (f.name, arrow_name(f), f.nullable) == ("q", "float64", True)
+
+
+def test_quantile_cont_refuses_a_fraction_that_is_not_a_float_literal_in_range():
+    for bad in (ColRef("price"), Lit(1), Lit(True), Lit("0.5"), Lit(1.5), Lit(-0.1), Lit(float("nan"))):
+        node = Aggregate(ORDERS, (), (("q", Agg("quantile_cont", (ColRef("qty"), bad))),))
+        refuses(
+            lambda: encode_plan(node, ORDERS_SOURCES),
+            UnsupportedOperation,
+            "the aggregate 'q' is quantile_cont, whose second argument is the "
+            f"fraction: a float literal in [0, 1], not {bad!r}",
+        )
+
+
 def test_largest_k_is_the_engines_two_only():
     e = root(Aggregate(ORDERS, (), (("t", Agg("largest_k", (ColRef("price"),), 2)),))).aggregate.agg_exprs[0]
     assert e.func == vocab.AGG_LARGEST_K and e.has_child0 and not e.has_child1

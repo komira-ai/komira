@@ -4,7 +4,8 @@
 # =============================================================================
 #
 # The grouped aggregation sink over string keys: GROUP BY one or more STRING
-# columns, with SUM, COUNT, COUNT(*), COUNT(DISTINCT), MIN, MAX and AVG exactly
+# columns, with SUM, COUNT, COUNT(*), COUNT(DISTINCT), MIN, MAX, AVG,
+# STDDEV_SAMP, STDDEV_POP, VAR_SAMP, VAR_POP, MEDIAN and QUANTILE_CONT exactly
 # as the fixed-width sink (`sink_group_agg`) serves them (with no aggregate, one
 # row per distinct key: SELECT DISTINCT): the same `GroupTable`, the same exact
 # folds (`agg_fold`), the same merge rule, the same refusals and the same
@@ -110,18 +111,25 @@ from morsel.morsel_sink import MorselSinkImpl
 from morsel.pipeline_execution import PipelineExecution
 from operator_api.map_op import MapOp
 from physical_plan.physical_plan import AggSinkData, KEY_DTYPE_NONE
-from plan_expr.agg_expr import (
-    AGG_COUNT,
-    AGG_COUNT_DISTINCT,
-    AGG_MAX,
-    AGG_MEAN,
-    AGG_MIN,
-    AGG_SUM,
-)
+from plan_expr.agg_expr import AGG_COUNT_DISTINCT
 from plan_expr.expr_id import ExprId
 from plan_expr.expr_pool import ExprPool
 
-from .agg_fold import WideColumn, agg_name, fold_wide, merge_cell, widen_column
+from .agg_fold import (
+    WideColumn,
+    agg_name,
+    fold_wide,
+    keeps_values,
+    merge_cell,
+    widen_column,
+)
+from .agg_values import (
+    ValueMerge,
+    ValueSlot,
+    check_agg_args,
+    keep_wide,
+    reserve_wide,
+)
 from .agg_output import agg_result_column_rows, check_declared_type
 from .count_distinct import (
     DistinctColumn,
@@ -157,6 +165,7 @@ struct _StringSlot(Movable):
     var map: Optional[MapOp]
     var reservation: WorkerReservation
     var distinct: DistinctSlot
+    var values: ValueSlot
     var scratch_cells: List[Int64]
     var scratch_nulls: List[UInt8]
     var started: Bool
@@ -177,6 +186,7 @@ struct _StringSlot(Movable):
         self.map = None
         self.reservation = reservation^
         self.distinct = DistinctSlot(na)
+        self.values = ValueSlot(na)
         self.scratch_cells = List[Int64]()
         self.scratch_nulls = List[UInt8]()
         for _ in range(nc):
@@ -203,6 +213,8 @@ struct StringGroupAggSink(MorselSinkImpl):
     var _max_groups: Int
     var _max_strings: Int
     var _funcs: List[UInt8]
+    # The fraction of each MEDIAN or QUANTILE_CONT (0.0 for the others).
+    var _fractions: List[Float64]
     var _arg_col: List[Int]
     var _labels: List[String]
     var _key_labels: List[String]
@@ -272,6 +284,7 @@ struct StringGroupAggSink(MorselSinkImpl):
         self._max_groups = max_groups
         self._max_strings = max_strings
         self._funcs = List[UInt8]()
+        self._fractions = List[Float64]()
         self._arg_col = List[Int]()
         self._labels = List[String]()
         self._key_labels = List[String]()
@@ -314,28 +327,11 @@ struct StringGroupAggSink(MorselSinkImpl):
         for i in range(na):
             ref agg = data.agg_exprs[i]
             var func = agg.func
-            if (
-                func != AGG_SUM
-                and func != AGG_COUNT
-                and func != AGG_COUNT_DISTINCT
-                and func != AGG_MIN
-                and func != AGG_MAX
-                and func != AGG_MEAN
-            ):
-                raise Error(
-                    where_
-                    + " does not serve aggregate tag "
-                    + String(Int(func))
-                    + " (SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)"
-                )
             var label = (
                 agg_name(func) + " (output column " + String(nk + i) + ")"
             )
-            if agg.num_children() > 1:
-                raise Error(where_ + ": " + label + " takes one argument")
+            self._fractions.append(check_agg_args(agg, where_, label))
             if not agg.child:
-                if func != AGG_COUNT:
-                    raise Error(where_ + ": " + label + " has no argument")
                 self._arg_col.append(-1)
             else:
                 self._arg_col.append(len(self._expr_ids))
@@ -507,6 +503,14 @@ struct StringGroupAggSink(MorselSinkImpl):
                         self._labels[i],
                     )
                 )
+                if keeps_values(self._funcs[i]):
+                    reserve_wide(
+                        slot.reservation,
+                        args[i],
+                        selected,
+                        self._where,
+                        self._pool,
+                    )
         if self._by_position:
             if not slot.positions.begin(
                 self._funcs, args, self._labels, partition_id, origin_hint
@@ -586,6 +590,8 @@ struct StringGroupAggSink(MorselSinkImpl):
                         r,
                         self._labels[i],
                     )
+                    if keeps_values(self._funcs[i]):
+                        keep_wide(slot.values, i, g, args[i], r)
 
     def combine(mut self, mut pipeline: PipelineExecution) raises -> None:
         var nk = self._nk
@@ -597,6 +603,7 @@ struct StringGroupAggSink(MorselSinkImpl):
             scratch_cells.append(0)
             scratch_nulls.append(0)
         var distinct = DistinctMerge(na, WorkerReservation(self._pool.share()))
+        var values = ValueMerge(na, WorkerReservation(self._pool.share()))
         # By position: each worker's grains and the merged group of each of
         # its groups, merged after every worker's table.
         var positions = List[GroupPositions]()
@@ -669,10 +676,12 @@ struct StringGroupAggSink(MorselSinkImpl):
                 self._labels,
                 self._pool,
             )
+            values.merge_worker(slot.values, group_map, self._where, self._pool)
             # This worker is merged: free its tables and return its memory.
             slot.table = GroupTable(nc, na, self._max_groups)
             slot.intern = InternTable(self._max_strings)
             slot.distinct = DistinctSlot(na)
+            slot.values = ValueSlot(na)
             slot.reservation.give_back_all()
             # Its grains move out with their own reservation.
             if self._by_position:
@@ -692,6 +701,14 @@ struct StringGroupAggSink(MorselSinkImpl):
             for w in range(len(positions)):
                 positions[w].reservation.give_back_all()
         distinct.finish()
+        values.finish(
+            self._merged.cells,
+            self._funcs,
+            self._fractions,
+            self._merged.n,
+            self._where,
+            self._pool,
+        )
         self._combined = True
 
     def finalize(mut self) raises:

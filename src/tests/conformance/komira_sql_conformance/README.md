@@ -241,7 +241,7 @@ Counts of the names in `function_coverage.tsv` (731 names), each from
 | 1 | lowering rows refused at execute by every case that calls them: `to_hex`, whose row is the VARCHAR overload; DuckDB's `to_hex` of an integer is a second overload, refused by name |
 | 8 | lowering rows no `scalar_fn` case calls: the catalog constants `current_role`, `current_user`, `session_user`, `user` and `pg_table_is_visible` (their answer is the session's, not a function of the row), and `struct_extract`, `struct_extract_at` and `map_extract_value`, which no SQL here can reach (the Parquet scan reads flat columns only, and `struct_pack`, `row` and `map` are refusal rows) |
 | 3 | rows keyed by a constant (`internal`) |
-| 538 | refusal rows; every one is refused at bind by `SELECT name(k) FROM T` |
+| 537 | refusal rows; every one is refused at bind by `SELECT name(k) FROM T` |
 | 2 | common names with no row at all (`initcap`, `current_timestamp`), refused at bind |
 
 So the rows that execute and are checked against DuckDB are 177 of the 188

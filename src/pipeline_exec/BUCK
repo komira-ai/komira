@@ -192,6 +192,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 a STRING) against a dict oracle, NULL per column,
 #                                 workers numbering strings differently, a mask,
 #                                 RealBuilder, and the refusals by name.
+# test_sink_stat_agg              MEDIAN, QUANTILE_CONT, STDDEV_SAMP, STDDEV_POP,
+#                                 VAR_SAMP and VAR_POP in the ungrouped sink held to
+#                                 DuckDB's answers: odd and even counts, NULLs, no
+#                                 row, one value, workers and dealing, by position,
+#                                 integer, float and decimal columns, a large mean,
+#                                 NaN and the ends of the double range, refusals.
+# test_sink_group_stat_agg        the same aggregates in the fixed-width and string
+#                                 grouped sinks, each group equal to the ungrouped
+#                                 sink over its rows; one-value and all-NULL groups.
 # test_sink_group_agg_keys        the grouped sink over DATE32, BOOL and DECIMAL128
 #                                 keys against a dict oracle, empty input, the
 #                                 refusals by name, decimal scale and precision.
@@ -207,8 +216,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 tables give the oracle's groups on 1 to 4 workers,
 #                                 the same budget refused without one, no spill
 #                                 when the pool has room, the merge's refusals,
-#                                 COUNT(DISTINCT) and the group limit, the chunk
-#                                 format round trip, files deleted.
+#                                 COUNT(DISTINCT), MEDIAN and the group limit, a
+#                                 VAR_POP through the spill, the chunk format
+#                                 round trip, files deleted.
 # test_group_agg_plan             scan, filter and grouped sink over Parquet,
 #                                 inline and on threads, a budget refusal, and the
 #                                 same budget spilled with a spill directory.
@@ -398,8 +408,10 @@ mojo_library(
         "tests/test_sink_group_agg_keys.mojo",
         "tests/test_sink_group_float_agg.mojo",
         "tests/test_sink_group_float_agg_edges.mojo",
+        "tests/test_sink_group_stat_agg.mojo",
         "tests/test_sink_int_sum_decimal.mojo",
         "tests/test_sink_sort.mojo",
+        "tests/test_sink_stat_agg.mojo",
         "tests/test_sink_string_group_agg.mojo",
         "tests/test_sink_topn.mojo",
         "tests/test_sink_window.mojo",

@@ -65,4 +65,4 @@ Output:
 - [How do I count how many times each value appears?](../9-count-each-value/page.md) (rank 9, works)
 - [How do I sort rows by one or more columns?](../8-sort-rows-by-columns/page.md) (rank 8, works)
 - How do I compute several aggregates at once with named outputs? (rank 25, works; no page yet)
-- How do I compute summary statistics of a column? (rank 24, works; no page yet)
+- [How do I compute summary statistics of a column?](../24-compute-summary-statistics-column/page.md) (rank 24, partial)

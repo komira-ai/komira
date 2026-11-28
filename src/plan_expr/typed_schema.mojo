@@ -52,7 +52,7 @@ from plan_expr.agg_expr import (
     AGG_VAR_POP, AGG_STDDEV_POP, AGG_SEM,
     AGG_COUNT_IF, AGG_BOOL_AND, AGG_BOOL_OR, AGG_PRODUCT, AGG_ANY_VALUE,
     AGG_KAHAN_SUM, AGG_KAHAN_AVG,
-    AGG_SKEWNESS, AGG_KURTOSIS, AGG_KURTOSIS_POP,
+    AGG_SKEWNESS, AGG_KURTOSIS, AGG_KURTOSIS_POP, AGG_QUANTILE_CONT,
 )
 
 
@@ -1234,7 +1234,7 @@ def agg_output_type(func: UInt8, child_type: Int) -> Int:
         return TYPE_BOOL
     if func == AGG_CORR:
         return TYPE_FLOAT64
-    if func == AGG_MEDIAN:
+    if func == AGG_MEDIAN or func == AGG_QUANTILE_CONT:
         return TYPE_FLOAT64
     if func == AGG_LARGEST_K:
         return TYPE_FLOAT64

@@ -27,6 +27,8 @@
 #   f<i>         FLOAT64  the double fold
 #   meta<i>      INT64    kind (bits 0-7), arrow type id (8-15), precision
 #                         (16-31), scale as a signed 32-bit value (32-63)
+#   mean<i>      FLOAT64  the mean of a variance aggregate's values
+#   m2<i>        FLOAT64  their sum of squared distances from the mean
 #
 # The format lives only between a write and a read of one process: it is not
 # a file format of any release, and a chunk is never read by another build.
@@ -69,6 +71,9 @@ comptime SPILL_PARTITIONS: Int = 16
 comptime _PARTITION_SHIFT: UInt64 = 60
 """`spill_partition` reads the top 4 bits of the hash: 2^4 partitions."""
 
+comptime _CELL_COLUMNS: Int = 7
+"""The columns of one aggregate's cell in a chunk."""
+
 comptime _LOW_64: I128 = (I128(1) << 64) - 1
 
 
@@ -94,7 +99,15 @@ def _run_schema(nc: Int, na: Int) -> Schema:
         sb.add_field(Field("hi" + s, ArrowType.INT64, False))
         sb.add_field(Field("f" + s, ArrowType.FLOAT64, False))
         sb.add_field(Field("meta" + s, ArrowType.INT64, False))
+        sb.add_field(Field("mean" + s, ArrowType.FLOAT64, False))
+        sb.add_field(Field("m2" + s, ArrowType.FLOAT64, False))
     return sb.build()
+
+
+def _float64_column(var values: List[Float64]) -> Column[HeapRegion]:
+    return Column.from_primitive[DType.float64](
+        PrimitiveArray[DType.float64].from_list(values)
+    )
 
 
 def _int64_column(var values: List[Int64]) -> Column[HeapRegion]:
@@ -153,6 +166,8 @@ def partition_batch(
         var highs = List[Int64](capacity=n)
         var floats = List[Float64](capacity=n)
         var metas = List[Int64](capacity=n)
+        var means = List[Float64](capacity=n)
+        var m2s = List[Float64](capacity=n)
         for r in range(n):
             ref cell = table.cells[rows[r] * na + i]
             counts.append(Int64(cell.count))
@@ -160,15 +175,15 @@ def partition_batch(
             highs.append((cell.value >> 64).cast[DType.int64]())
             floats.append(cell.fvalue)
             metas.append(_cell_meta(cell))
+            means.append(cell.mean)
+            m2s.append(cell.m2)
         builder.add_column(_int64_column(counts^))
         builder.add_column(_int64_column(lows^))
         builder.add_column(_int64_column(highs^))
-        builder.add_column(
-            Column.from_primitive[DType.float64](
-                PrimitiveArray[DType.float64].from_list(floats)
-            )
-        )
+        builder.add_column(_float64_column(floats^))
         builder.add_column(_int64_column(metas^))
+        builder.add_column(_float64_column(means^))
+        builder.add_column(_float64_column(m2s^))
     return builder.build(_run_schema(nc, na))
 
 
@@ -183,7 +198,7 @@ struct SpilledGroups(Movable):
     var cells: List[AggCell]
 
     def __init__(out self, ref batch: RecordBatch, nc: Int, na: Int) raises:
-        var expected = 1 + 2 * nc + 5 * na
+        var expected = 1 + 2 * nc + _CELL_COLUMNS * na
         if batch.num_columns() != expected:
             raise Error(
                 "pipeline_exec: a spilled group chunk has "
@@ -216,8 +231,10 @@ struct SpilledGroups(Movable):
         var highs = List[PrimitiveArray[DType.int64]]()
         var floats = List[PrimitiveArray[DType.float64]]()
         var metas = List[PrimitiveArray[DType.int64]]()
+        var means = List[PrimitiveArray[DType.float64]]()
+        var m2s = List[PrimitiveArray[DType.float64]]()
         for i in range(na):
-            var at = 1 + 2 * nc + 5 * i
+            var at = 1 + 2 * nc + _CELL_COLUMNS * i
             counts.append(batch.column_at(at).as_primitive[DType.int64]())
             lows.append(batch.column_at(at + 1).as_primitive[DType.int64]())
             highs.append(batch.column_at(at + 2).as_primitive[DType.int64]())
@@ -225,6 +242,8 @@ struct SpilledGroups(Movable):
                 batch.column_at(at + 3).as_primitive[DType.float64]()
             )
             metas.append(batch.column_at(at + 4).as_primitive[DType.int64]())
+            means.append(batch.column_at(at + 5).as_primitive[DType.float64]())
+            m2s.append(batch.column_at(at + 6).as_primitive[DType.float64]())
         for r in range(n):
             for i in range(na):
                 var cell = AggCell()
@@ -242,6 +261,8 @@ struct SpilledGroups(Movable):
                 cell.precision = Int((meta >> 16) & 0xFFFF)
                 var scale = ((meta >> 32) & 0xFFFFFFFF).cast[DType.int32]()
                 cell.scale = Int(scale)
+                cell.mean = means[i].get(r)
+                cell.m2 = m2s[i].get(r)
                 self.cells.append(cell^)
 
 

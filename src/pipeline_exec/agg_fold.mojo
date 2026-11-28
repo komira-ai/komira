@@ -15,6 +15,13 @@
 #   COUNT(DISTINCT x)
 #                  nothing on a worker; the merge of the workers' distinct
 #                  entries (`count_distinct`) sets the count of the merged cell
+#   STDDEV_SAMP(x), STDDEV_POP(x), VAR_SAMP(x), VAR_POP(x)
+#                  the count, the mean and the sum of squared distances from
+#                  it (`mean`, `m2`) of the values of x as DuckDB's DOUBLE
+#   MEDIAN(x), QUANTILE_CONT(x, q)
+#                  the count of the non-NULL values; the values themselves are
+#                  kept by the sink (`agg_values`), which writes the answer
+#                  into `fvalue` when it merges them
 #
 # The unscaled value of an integer column is the integer, of a DECIMAL128
 # column its 128-bit integer (the column's scale is kept beside it), and of a
@@ -42,6 +49,15 @@
 #              replaces the one kept only when it is strictly less (MIN) or
 #              greater (MAX), so -0.0 and 0.0 tie and the one met first stays.
 #
+# The variance family folds each value as DuckDB casts it to DOUBLE (an
+# integer converted, a DECIMAL128 converted and divided by 10 to its scale, a
+# FLOAT32 widened) with DuckDB's Welford update, in its order of operations
+# (`welford_step`), and `merge_cell` combines two cells with its parallel
+# update (`welford_merge`, Chan's), so one worker's answer is DuckDB's bits; a
+# merge of several workers' cells rounds in another order, and the last bits
+# can differ, as for a float SUM. A large mean and a small spread keep their
+# variance, which `sum(x * x) / n - mean * mean` would cancel away.
+#
 # What a fold refuses, by name:
 #   * a sum that leaves 128 bits (the check is on the wrapped result, as for
 #     any signed add: the operands share a sign the result does not). With
@@ -49,9 +65,11 @@
 #     the largest; the verdict can differ between groupings only when a partial
 #     sum leaves 128 bits while the total does not, and a total that left them
 #     is refused whatever the grouping;
-#   * SUM or AVG over DATE32, and every aggregate over a type that is not a
-#     signed integer, DECIMAL128, FLOAT32, FLOAT64 or DATE32 (COUNT takes
-#     any), naming the type, in the ungrouped and the grouped sinks alike;
+#   * SUM, AVG or a variance over DATE32, MEDIAN or QUANTILE_CONT over DATE32,
+#     DECIMAL128 or FLOAT32 (DuckDB's answer there keeps the input's type, not
+#     the DOUBLE the plan declares), and every aggregate over a type that is not a signed
+#     integer, DECIMAL128, FLOAT32, FLOAT64 or DATE32 (COUNT takes any),
+#     naming the type, in the ungrouped and the grouped sinks alike;
 #   * a column whose type or decimal scale differs from the one the cell saw.
 #
 # A grouped sink reads an argument once per morsel (`widen_column`): a signed
@@ -68,8 +86,14 @@ from plan_expr.agg_expr import (
     AGG_COUNT_DISTINCT,
     AGG_MAX,
     AGG_MEAN,
+    AGG_MEDIAN,
     AGG_MIN,
+    AGG_QUANTILE_CONT,
+    AGG_STDDEV_POP,
+    AGG_STDDEV_SAMP,
     AGG_SUM,
+    AGG_VAR_POP,
+    AGG_VAR_SAMP,
 )
 from scalar_arithmetic.decimal_arith import I128
 
@@ -90,7 +114,13 @@ struct AggCell(Copyable, Movable):
     var precision: Int
     var scale: Int
     # The float fold (`IN_FLOAT`): the sum, or the least or greatest value.
+    # MEDIAN and QUANTILE_CONT: the answer, written when the values are
+    # merged (`agg_values`).
     var fvalue: Float64
+    # The variance family (`is_welford`): the mean of the values folded and
+    # the sum of their squared distances from it, DuckDB's `dsquared`.
+    var mean: Float64
+    var m2: Float64
 
     def __init__(out self):
         self.count = 0
@@ -100,6 +130,46 @@ struct AggCell(Copyable, Movable):
         self.precision = 0
         self.scale = 0
         self.fvalue = 0.0
+        self.mean = 0.0
+        self.m2 = 0.0
+
+
+def is_welford(func: UInt8) -> Bool:
+    """Whether `func` is one of the variance family the sinks fold with
+    Welford's update: STDDEV_SAMP, STDDEV_POP, VAR_SAMP and VAR_POP."""
+    return (
+        func == AGG_STDDEV_SAMP
+        or func == AGG_STDDEV_POP
+        or func == AGG_VAR_SAMP
+        or func == AGG_VAR_POP
+    )
+
+
+def keeps_values(func: UInt8) -> Bool:
+    """Whether `func` keeps every value of its group (`agg_values`): MEDIAN
+    and QUANTILE_CONT."""
+    return func == AGG_MEDIAN or func == AGG_QUANTILE_CONT
+
+
+comptime SERVED_AGGREGATES = (
+    "SUM, COUNT, COUNT(DISTINCT), MIN, MAX, AVG, STDDEV_SAMP, STDDEV_POP,"
+    " VAR_SAMP, VAR_POP, MEDIAN and QUANTILE_CONT are"
+)
+"""The aggregates the sinks serve, as their refusal of another names them."""
+
+
+def sink_serves(func: UInt8) -> Bool:
+    """Whether the aggregation sinks fold `func`."""
+    return (
+        func == AGG_SUM
+        or func == AGG_COUNT
+        or func == AGG_COUNT_DISTINCT
+        or func == AGG_MIN
+        or func == AGG_MAX
+        or func == AGG_MEAN
+        or is_welford(func)
+        or keeps_values(func)
+    )
 
 
 def agg_name(func: UInt8) -> String:
@@ -116,6 +186,18 @@ def agg_name(func: UInt8) -> String:
         return "AVG"
     if func == AGG_COUNT_DISTINCT:
         return "COUNT(DISTINCT)"
+    if func == AGG_STDDEV_SAMP:
+        return "STDDEV_SAMP"
+    if func == AGG_STDDEV_POP:
+        return "STDDEV_POP"
+    if func == AGG_VAR_SAMP:
+        return "VAR_SAMP"
+    if func == AGG_VAR_POP:
+        return "VAR_POP"
+    if func == AGG_MEDIAN:
+        return "MEDIAN"
+    if func == AGG_QUANTILE_CONT:
+        return "QUANTILE_CONT"
     return "aggregate " + String(Int(func))
 
 
@@ -175,15 +257,50 @@ def _fstep(mut cell: AggCell, func: UInt8, v: Float64):
     cell.count += 1
 
 
+@always_inline
+def welford_step(mut cell: AggCell, x: Float64):
+    """Fold the double `x` into the variance state of `cell`, with the steps
+    and the order of DuckDB's STDDEV/VAR update."""
+    cell.count += 1
+    var mean_differential = (x - cell.mean) / Float64(cell.count)
+    var new_mean = cell.mean + mean_differential
+    var dsquared_increment = (x - new_mean) * (x - cell.mean)
+    cell.m2 = cell.m2 + dsquared_increment
+    cell.mean = new_mean
+
+
+def pow10_f64(scale: Int) -> Float64:
+    """10 to the power `scale` as a double: exact up to 22."""
+    var out = Float64(1)
+    for _ in range(scale):
+        out *= 10.0
+    return out
+
+
+@always_inline
+def as_double(ref cell: AggCell, v: I128) -> Float64:
+    """The unscaled value `v` of the column `cell` saw, as DuckDB casts it to
+    DOUBLE: an integer converted, a DECIMAL128 converted and divided by 10 to
+    its scale."""
+    var d = v.cast[DType.float64]()
+    if cell.kind == IN_DECIMAL and cell.scale > 0:
+        return d / pow10_f64(cell.scale)
+    return d
+
+
 def _fold_float[
     dtype: DType
 ](mut cell: AggCell, func: UInt8, ref col: Column[HeapRegion], rows: Int) raises:
     var arr = col.as_primitive[dtype]()
     var has_nulls = col.null_count() > 0
+    var welford = is_welford(func)
     for r in range(rows):
         if has_nulls and arr.is_null(r):
             continue
-        _fstep(cell, func, arr.get(r).cast[DType.float64]())
+        if welford:
+            welford_step(cell, arr.get(r).cast[DType.float64]())
+        else:
+            _fstep(cell, func, arr.get(r).cast[DType.float64]())
 
 
 def _fold_signed[
@@ -197,10 +314,14 @@ def _fold_signed[
 ) raises:
     var arr = col.as_primitive[dtype]()
     var has_nulls = col.null_count() > 0
+    var welford = is_welford(func)
     for r in range(rows):
         if has_nulls and arr.is_null(r):
             continue
-        _step(cell, func, arr.get(r).cast[DType.int128](), label)
+        if welford:
+            welford_step(cell, arr.get(r).cast[DType.float64]())
+        else:
+            _step(cell, func, arr.get(r).cast[DType.int128](), label)
 
 
 def _fold_decimal(
@@ -212,10 +333,15 @@ def _fold_decimal(
 ) raises:
     var arr = col.as_decimal128()
     var has_nulls = col.null_count() > 0
+    var welford = is_welford(func)
     for r in range(rows):
         if has_nulls and arr.is_null(r):
             continue
-        _step(cell, func, arr.get_i128(r), label)
+        if welford:
+            var d = as_double(cell, arr.get_i128(r))
+            welford_step(cell, d)
+        else:
+            _step(cell, func, arr.get_i128(r), label)
 
 
 def _kind_of(ref col: Column[HeapRegion], logical: ArrowType) -> UInt8:
@@ -264,15 +390,26 @@ def bind_column(
     ref col = batch.column_at(col_idx)
     var logical = batch.schema.field_arrow_type(col_idx)
     var kind = _kind_of(col, logical)
-    var sums = func == AGG_SUM or func == AGG_MEAN
-    if kind == IN_NONE or (kind == IN_DATE and sums):
+    var numeric = func != AGG_MIN and func != AGG_MAX
+    var values = keeps_values(func)
+    if (
+        kind == IN_NONE
+        or (kind == IN_DATE and numeric)
+        or (
+            values
+            and (kind == IN_DECIMAL or col.arrow_type == ArrowType.FLOAT32)
+        )
+    ):
         raise Error(
             "pipeline_exec: "
             + label
             + " is not served over this column type ("
             + String(col.arrow_type)
-            + "): SUM and AVG take signed integers, DECIMAL128, FLOAT32 and"
-            " FLOAT64, MIN and MAX also DATE32"
+            + "): SUM, AVG, STDDEV_SAMP, STDDEV_POP, VAR_SAMP and VAR_POP"
+            " take signed integers, DECIMAL128, FLOAT32 and FLOAT64; MIN and"
+            " MAX also DATE32; MEDIAN and QUANTILE_CONT signed integers and"
+            " FLOAT64 (over a DECIMAL128 or a FLOAT32 DuckDB's answer keeps"
+            " the input's type, not the DOUBLE the plan declares)"
         )
     out.kind = kind
     if kind == IN_DECIMAL:
@@ -330,6 +467,11 @@ def fold_column(
     var b = bind_column(func, batch, col_idx, label)
     adopt_bind(cell, b, label)
     if rows == 0:
+        return
+    if keeps_values(func):
+        # The values themselves are kept by the sink (`agg_values`); the
+        # cell counts them.
+        cell.count += rows - col.null_count()
         return
     if b.kind == IN_FLOAT:
         if b.arrow == ArrowType.FLOAT64:
@@ -460,6 +602,16 @@ def fold_wide(
         cell.count += 1
         return
     adopt_bind(cell, w.bind, label)
+    if keeps_values(func):
+        cell.count += 1
+        return
+    if is_welford(func):
+        if w.bind.kind == IN_FLOAT:
+            welford_step(cell, w.fvals[row])
+        else:
+            var d = as_double(cell, w.vals[row])
+            welford_step(cell, d)
+        return
     if w.bind.kind == IN_FLOAT:
         _fstep(cell, func, w.fvals[row])
         return
@@ -489,6 +641,13 @@ def merge_cell(
             )
     if other.count == 0:
         return
+    if is_welford(func):
+        welford_merge(into, other)
+        return
+    if keeps_values(func):
+        # The values are merged by the sink (`agg_values`).
+        into.count += other.count
+        return
     if into.kind == IN_FLOAT:
         if func == AGG_MIN:
             if into.count == 0 or _float_less(other.fvalue, into.fvalue):
@@ -516,4 +675,28 @@ def merge_cell(
                 "pipeline_exec: " + label + " left the 128-bit range"
             )
         into.value = n
+    into.count += other.count
+
+
+def welford_merge(mut into: AggCell, ref other: AggCell):
+    """Fold the variance state `other` into `into` with the steps and the
+    order of DuckDB's STDDEV/VAR combine (Chan's parallel update)."""
+    if other.count == 0:
+        return
+    if into.count == 0:
+        into.count = other.count
+        into.mean = other.mean
+        into.m2 = other.m2
+        return
+    var count = Float64(into.count + other.count)
+    var source_count = Float64(other.count)
+    var target_count = Float64(into.count)
+    var mean = (
+        source_count * other.mean + target_count * into.mean
+    ) / count
+    var delta = other.mean - into.mean
+    into.m2 = (
+        other.m2 + into.m2 + delta * delta * source_count * target_count / count
+    )
+    into.mean = mean
     into.count += other.count

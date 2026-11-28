@@ -28,13 +28,17 @@
 #   * A table whose very first step the pool denies is refused, not spilled
 #     (there is nothing to write), and nothing is written.
 #   * A sink with COUNT(DISTINCT) does not spill: it is refused as without a
-#     spill directory, and the refusal says why.
+#     spill directory, and the refusal says why. So does a sink with a MEDIAN.
+#   * A VAR_POP keeps its Welford state (count, mean, m2) through the spill:
+#     each group's equal values give 0.0 only if every partial's mean came
+#     back from disk.
 #   * The group limit holds: a worker table past it is refused, not spilled,
 #     and a partition of the merge past it is refused by name.
 #   * The partition of a group is the top four bits of its hash.
 #   * The chunk format (`group_spill`): a table's groups, NULL flags,
 #     128-bit values (negative ones included), doubles bit for bit (a NaN,
-#     -0.0, an infinity), decimal precision and
+#     -0.0, an infinity; the fold's double and the variance mean and m2),
+#     decimal precision and
 #     a negative scale come back from disk as they went in; a partition with
 #     no group writes no chunk; `spill_table` writes only the partitions from
 #     the one it is given; a chunk of the wrong shape and a read before any
@@ -81,7 +85,9 @@ from plan_expr.agg_expr import (
     AGG_MAX,
     AGG_MEAN,
     AGG_MIN,
+    AGG_MEDIAN,
     AGG_SUM,
+    AGG_VAR_POP,
     AggExpr,
 )
 from plan_expr.expr import Expr
@@ -125,6 +131,7 @@ def _data(distinct: Bool = False) raises -> AggSinkData:
     aggs.append(_agg(AGG_MAX, "v"))
     aggs.append(_agg(AGG_MEAN, "v"))
     aggs.append(_agg(AGG_SUM, "d"))
+    aggs.append(_agg(AGG_VAR_POP, "v"))
     var sb = SchemaBuilder()
     sb.add_field(Field("k1", ArrowType.INT64, True))
     sb.add_field(Field("id", ArrowType.INT64, True))
@@ -135,6 +142,7 @@ def _data(distinct: Bool = False) raises -> AggSinkData:
     sb.add_field(Field("mx", ArrowType.INT64, True))
     sb.add_field(Field("av", ArrowType.FLOAT64, True))
     sb.add_field(Field.decimal128("sd", 38, 2, True))
+    sb.add_field(Field("vp", ArrowType.FLOAT64, True))
     if distinct:
         aggs.append(_agg(AGG_COUNT_DISTINCT, "v"))
         sb.add_field(Field("dv", ArrowType.INT64, False))
@@ -185,7 +193,7 @@ def _key_text(r: Int) -> String:
 def _check(ref out: RecordBatch, rows: Int) raises:
     """Every row number r is one group (k1 of r, r) of PASSES rows."""
     assert_equal(out.num_rows(), rows, "number of groups")
-    assert_equal(out.num_columns(), 9)
+    assert_equal(out.num_columns(), 10)
     var seen = Dict[String, Bool]()
     var k1 = out.column_at(0).as_primitive[DType.int64]()
     var ids = out.column_at(1).as_primitive[DType.int64]()
@@ -196,6 +204,7 @@ def _check(ref out: RecordBatch, rows: Int) raises:
     var mx = out.column_at(6).as_primitive[DType.int64]()
     var av = out.column_at(7).as_primitive[DType.float64]()
     var sd = out.column_at(8).as_decimal128()
+    var vp = out.column_at(9).as_primitive[DType.float64]()
     for i in range(out.num_rows()):
         var r = Int(ids.get(i))
         assert_true(r >= 0 and r < rows, "unexpected id " + String(r))
@@ -224,6 +233,11 @@ def _check(ref out: RecordBatch, rows: Int) raises:
                 sd.get_i128(i) == I128(PASSES * d_unscaled(r)),
                 "SUM(d) of " + key,
             )
+        # The PASSES values of a group are equal, so VAR_POP is 0.0 only when
+        # each partial's mean came back from disk with it.
+        assert_equal(out.column_at(9).is_null_at(i), not valid, "VAR_POP(v)")
+        if valid:
+            assert_equal(vp.get(i), 0.0, "VAR_POP(v) of " + key)
 
 
 def test_spilled_tables_give_the_oracles_groups_on_any_worker_count() raises:
@@ -268,7 +282,7 @@ def test_with_room_for_the_tables_a_spill_directory_changes_nothing() raises:
     none.resize_worker_state(2)
     var empty = _combine_and_take(none, 2)
     assert_equal(empty.num_rows(), 0)
-    assert_equal(empty.num_columns(), 9)
+    assert_equal(empty.num_columns(), 10)
     assert_true(not exists(dir), "a spill that was not needed wrote files")
     assert_equal(pool.granted(), 0)
 
@@ -325,6 +339,42 @@ def test_count_distinct_does_not_spill_and_the_refusal_says_why() raises:
         plain_said = String(e)
     assert_true(plain_said.find("was denied") >= 0, plain_said)
     assert_true(plain_said.find("spill") < 0, plain_said)
+
+
+def test_a_median_does_not_spill_and_the_refusal_says_why() raises:
+    var keys = Slab[Expr]()
+    keys.append(Expr.col_ref("id"))
+    var aggs = Slab[AggExpr]()
+    aggs.append(_agg(AGG_MEDIAN, "v"))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    sb.add_field(Field("m", ArrowType.FLOAT64, True))
+    var dir = _dir("spill_median")
+    var sink = GroupAggSink(
+        grouped_agg_data(keys^, aggs^, sb.build()),
+        KEY_DTYPE_I64,
+        SegmentPool(1000),
+        0,
+        spill_dir=dir,
+    )
+    sink.resize_worker_state(1)
+    var said = String("")
+    # One row a morsel, so the group table outgrows the pool before the kept
+    # values do.
+    try:
+        for r in range(ROWS):
+            sink.consume(0, Morsel(group_batch(r, 1), r, 0))
+    except e:
+        said = String(e)
+    assert_true(said.find("for its group table") >= 0, said)
+    assert_true(
+        said.endswith(
+            "; a spill directory is set, and a MEDIAN or QUANTILE_CONT"
+            " aggregate does not spill"
+        ),
+        "the refusal was: " + said,
+    )
+    assert_true(not exists(dir))
 
 
 def _capped(max_groups: Int, dir: String) raises -> GroupAggSink:
@@ -403,6 +453,9 @@ def _table() raises -> GroupTable:
             b.fvalue = Float64(0) / Float64(0)
         if g == 4:
             b.fvalue = Float64.MAX * 2.0
+        # The variance state, bit for bit as well.
+        b.mean = doubles[(g + 1) % 5]
+        b.m2 = doubles[(g + 2) % 5]
     return t^
 
 
@@ -425,6 +478,16 @@ def _assert_groups_equal(
                 bitcast[DType.uint64](got.fvalue)
                 == bitcast[DType.uint64](want.fvalue),
                 "double bits",
+            )
+            assert_true(
+                bitcast[DType.uint64](got.mean)
+                == bitcast[DType.uint64](want.mean),
+                "mean bits",
+            )
+            assert_true(
+                bitcast[DType.uint64](got.m2)
+                == bitcast[DType.uint64](want.m2),
+                "m2 bits",
             )
             assert_equal(got.kind, want.kind, "kind")
             assert_true(got.arrow == want.arrow, "arrow type")

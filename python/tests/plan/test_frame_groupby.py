@@ -7,7 +7,8 @@ records the plan bytes it is given. Checked:
   FILTER of missing keys below the AGGREGATE (dropna=True only), the SORT by
   the keys above it, missing keys last (sort=True only), the CASE that makes a
   sum of nothing 0 (min_count=0 only), the casts of a boolean column, the
-  engine aggregate of each pandas reduction, and the plans of
+  engine aggregate of each pandas reduction (std and var by ddof: 1 is the
+  sample aggregate, 0 the population one), and the plans of
   drop_duplicates (a DISTINCT, or for keep=False an AGGREGATE with count = 1);
 - the output columns and types of every reduction, grouped and ungrouped, the
   frame's own reductions and `agg` among them;
@@ -262,6 +263,64 @@ def test_the_frame_reductions_are_one_row_aggregates_with_no_key_filter_or_sort(
     assert df[["x"]].agg("var")._plan == df[["x"]].var()._plan
 
 
+def test_the_median_of_a_float32_column_widens_it_to_float64_first():
+    # The engine reads a median's values as doubles and refuses a FLOAT32
+    # column by name; the frame's median is a float64, so the column is cast.
+    env = Env((("a", "int64"), ("f", "float32")))
+    got = env.df.groupby("a").median()
+    found = [a for a in _walk_aggs(got._plan)]
+    assert found == [Agg("median", (Cast(ColRef("f"), "float64"),))], found
+    # std and var fold FLOAT32 values themselves: no cast.
+    assert [a for a in _walk_aggs(env.df.groupby("a").std()._plan)] == [Agg("stddev_samp", (ColRef("f"),))]
+
+
+def _walk_aggs(node):
+    """Every Agg in a plan tree, in the order the tree lists them."""
+    out = []
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        if isinstance(n, Agg):
+            out.append(n)
+            continue
+        if isinstance(n, tuple):
+            stack.extend(reversed(n))
+            continue
+        for name in getattr(n, "__dataclass_fields__", {}):
+            stack.append(getattr(n, name))
+    return out
+
+
+def test_ddof_1_builds_the_sample_aggregates_and_ddof_0_the_population_ones():
+    env = Env()
+    df, g = env.df, env.df.groupby("a")
+    for how, sample, population in (("std", "stddev_samp", "stddev_pop"), ("var", "var_samp", "var_pop")):
+        for ddof, func in ((1, sample), (0, population)):
+            want = [agg(func, "x")]
+            assert _walk_aggs(getattr(df[["x"]], how)(ddof=ddof)._plan) == want, (how, ddof)
+            assert _walk_aggs(getattr(g["x"], how)(ddof=ddof)._plan) == want, (how, ddof)
+        # The default is the sample one, as in pandas.
+        assert getattr(df[["x"]], how)()._plan == getattr(df[["x"]], how)(ddof=1)._plan
+        assert getattr(df[["x"]], how)(ddof=0).dtypes == {"x": "float64"}
+    boolean = df[["ok"]].std(ddof=0)
+    assert _walk_aggs(boolean._plan) == [agg("stddev_pop", arg=Cast(ColRef("ok"), "float64"))]
+
+
+def test_a_ddof_that_is_neither_0_nor_1_is_refused_by_name_listing_both():
+    env = Env()
+    for how in ("std", "var"):
+        for target in (env.df[["x"]], env.df.groupby("a")["x"]):
+            for ddof in (2, -1, 5):
+                refuses(
+                    lambda: getattr(target, how)(ddof=ddof),
+                    UnsupportedOperation,
+                    f"{how}(ddof={ddof}) is not supported: use ddof=1, the sample {how}, "
+                    f"or ddof=0, the population {how}",
+                )
+        refuses(lambda: getattr(env.df[["x"]], how)(ddof=True), TypeError, f"{how} ddof must be an int, not bool")
+    assert env.stub.calls == []
+
+
 def test_a_groupby_over_a_sorted_frame_and_a_head_after_a_sorted_groupby():
     df = Env().df
     over_sort = df.sort_values("x").groupby("a")["x"].max()
@@ -383,8 +442,8 @@ def test_arguments_the_reductions_cannot_honour_are_refused_by_name():
     g = df.groupby("a")
     for how in ("std", "var"):
         for target in (g, df):
-            refuses(lambda: getattr(target, how)(ddof=0), UnsupportedOperation,
-                    f"{how}(ddof=0) is not supported: the sample one, ddof=1, is")
+            refuses(lambda: getattr(target, how)(ddof=2), UnsupportedOperation,
+                    f"{how}(ddof=2) is not supported: use ddof=1, the sample {how}, or ddof=0, the population {how}")
             refuses(lambda: getattr(target, how)(ddof=1.0), TypeError, f"{how} ddof must be an int, not float")
     for how in ("sum", "mean", "median", "std", "var", "min", "max"):
         message = (f"{how}(skipna=False) is missing for a column that holds a missing value, "

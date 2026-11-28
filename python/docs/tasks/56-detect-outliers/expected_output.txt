@@ -1,2 +1,5 @@
 id=8 total=95 z=2.60
 id=10 total=-40 z=-1.77
+q1=10.25 q3=12.0 iqr=1.75 fences=(7.625, 14.625)
+id=8 total=95
+id=10 total=-40

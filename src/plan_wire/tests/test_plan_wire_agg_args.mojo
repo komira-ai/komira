@@ -55,6 +55,7 @@ from arrow.arrow_types import ArrowType
 from arrow.schema import Field, Schema, SchemaBuilder
 from plan_expr.agg_expr import (
     AGG_UDF,
+    AGG_QUANTILE_CONT,
     AggExpr,
     AGG_COUNT,
     AGG_COUNT_IF,
@@ -63,6 +64,7 @@ from plan_expr.agg_expr import (
     agg_is_bivariate,
 )
 from plan_expr.expr import Expr, EXPR_COL_REF
+from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import LogicalPlan, ExprArray, AggExprArray
 from scan_source.pushdown_gate import PushdownGate
 from scan_source.scan_binding import (
@@ -125,16 +127,17 @@ def _aggregate(var ax: AggExprArray) raises -> LogicalPlan:
     return LogicalPlan.aggregate(gb^, ax^, _scan())
 
 
-def _every_fn_plan() raises -> LogicalPlan:
+def _every_fn_plan(with_quantile: Bool) raises -> LogicalPlan:
     """COUNT(*) first, then every engine tag 0..AGG_FN_WIRE_MEMBERS-1 but
-    AGG_UDF in order, each aliased `f<tag>` so the output columns are
+    AGG_UDF in order (and but AGG_QUANTILE_CONT unless `with_quantile`), each aliased `f<tag>` so the output columns are
     distinct.
 
     The argument per member is the shape that member reads
     (`_agg_arg_slots` in plan_wire_values.mojo): a bivariate member gets
     col(x) in slot 0 and col(y) in slot 1, two DIFFERENT columns so a swap is
     visible; COUNT_IF, BOOL_AND and BOOL_OR get the BOOL column; COUNT gets
-    `x`; every other unary member gets `y`."""
+    `x`; AGG_QUANTILE_CONT gets `y` and the FLOAT64 fraction 0.25 in slot 1;
+    every other unary member gets `y`."""
     var ax = AggExprArray()
     var none_expr: Optional[Expr] = None
     ax.append(AggExpr(AGG_COUNT, none_expr^, Optional(String("count_star"))))
@@ -145,6 +148,11 @@ def _every_fn_plan() raises -> LogicalPlan:
             # carrying the `UdfRef` list can hold; test_plan_wire_udf_plans.mojo
             # round-trips it. Left out, the frozen bytes below stay the bytes
             # of the members a plan without that list can carry.
+            continue
+        if tag == AGG_QUANTILE_CONT and not with_quantile:
+            # The frozen bytes below are the bytes of the members that existed
+            # when they were written; the quantile's own bytes are held by
+            # `test_quantile_cont_keeps_its_value_and_its_fraction`.
             continue
         var name = Optional(String("f") + String(i))
         if agg_is_bivariate(tag):
@@ -158,6 +166,15 @@ def _every_fn_plan() raises -> LogicalPlan:
             )
         elif tag == AGG_COUNT_IF or tag == AGG_BOOL_AND or tag == AGG_BOOL_OR:
             ax.append(AggExpr(tag, Optional(Expr.col_ref("flag")), name^))
+        elif tag == AGG_QUANTILE_CONT:
+            ax.append(
+                AggExpr(
+                    tag,
+                    Optional(Expr.col_ref("y")),
+                    Optional(Expr.literal(ScalarValue.from_float(0.25))),
+                    name^,
+                )
+            )
         elif tag == AGG_COUNT:
             ax.append(AggExpr(tag, Optional(Expr.col_ref("x")), name^))
         else:
@@ -306,7 +323,7 @@ def test_count_star_keeps_no_input() raises:
 
 
 def test_every_agg_fn_keeps_its_func_and_arguments() raises:
-    var plan = _every_fn_plan()
+    var plan = _every_fn_plan(True)
     assert_equal(
         len(plan.aggregate_data_ref().agg_exprs),
         AGG_FN_WIRE_MEMBERS,
@@ -319,6 +336,44 @@ def test_every_agg_fn_keeps_its_func_and_arguments() raises:
         String(plan),
         "every AggFn: the decoded plan renders differently",
     )
+
+
+def test_quantile_cont_keeps_its_value_and_its_fraction() raises:
+    """quantile_cont(y, 0.25) names the value in slot 0 and the FLOAT64
+    fraction in slot 1; the decoded plan has both, and the fraction is the
+    same number, so a decoder that read one slot would answer a different
+    quantile."""
+    var ax = AggExprArray()
+    ax.append(
+        AggExpr(
+            AGG_QUANTILE_CONT,
+            Optional(Expr.col_ref("y")),
+            Optional(Expr.literal(ScalarValue.from_float(0.25))),
+            Optional(String("q25")),
+        )
+    )
+    var plan = _aggregate(ax^)
+    var back = _round_trip(plan)
+    ref d = back.aggregate_data_ref()
+    assert_equal(len(d.agg_exprs), 1, "quantile_cont: one aggregate expected")
+    ref c = d.agg_exprs[0]
+    assert_equal(
+        Int(c.func),
+        Int(AGG_QUANTILE_CONT),
+        "quantile_cont decoded as another function: " + String(c),
+    )
+    assert_true(Bool(c.child), "quantile_cont lost its value slot")
+    assert_true(Bool(c.child1), "quantile_cont lost its fraction slot")
+    assert_equal(
+        c.child1.value().literal_value().float_val,
+        0.25,
+        "quantile_cont: the fraction changed on the wire",
+    )
+    assert_true(
+        not c.child2 and not c.child3,
+        "quantile_cont: a slot it does not read came back populated",
+    )
+    _assert_agg_slots(String("quantile_cont"), plan, back)
 
 
 # =============================================================================
@@ -397,7 +452,7 @@ def test_every_agg_fn_bytes_are_frozen() raises:
     it omits every field at its default (`has_child1: false` and the like), so
     it is the form a non-Mojo producer writes, and the decoder must find each
     argument in it too."""
-    var plan = _every_fn_plan()
+    var plan = _every_fn_plan(False)
     var bytes = plan_to_bytes(plan)
     print("GOLDEN-BEGIN " + _GOLDEN_NAME)
     print(_to_hex_lines(bytes), end="")
@@ -441,5 +496,6 @@ def main() raises:
     suite.test[test_count_of_a_column_keeps_its_input]()
     suite.test[test_count_star_keeps_no_input]()
     suite.test[test_every_agg_fn_keeps_its_func_and_arguments]()
+    suite.test[test_quantile_cont_keeps_its_value_and_its_fraction]()
     suite.test[test_every_agg_fn_bytes_are_frozen]()
     suite^.run()

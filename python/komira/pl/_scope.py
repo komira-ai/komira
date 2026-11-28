@@ -47,6 +47,8 @@ _POLARS_NAME = {
     "median": "median",
     "stddev_samp": "std",
     "var_samp": "var",
+    "stddev_pop": "std",
+    "var_pop": "var",
 }
 
 

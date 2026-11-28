@@ -160,6 +160,7 @@ enum AggFn {
   AGG_KURTOSIS = 36;
   AGG_KURTOSIS_POP = 37;
   AGG_UDF = 38;
+  AGG_QUANTILE_CONT = 39;
 }
 
 // ----------------------------------------------------------------------

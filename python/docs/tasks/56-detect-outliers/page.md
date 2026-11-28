@@ -1,6 +1,6 @@
 # How do I detect outliers?
 
-Flag the values far from the mean in SQL with a z-score; komira cannot yet compute the quartiles the interquartile-range rule needs.
+Flag the values far from the mean in SQL with a z-score, or outside the quartile fences with the interquartile-range rule, whose quartiles come from `Series.quantile`.
 
 <!-- include example.py -->
 ```python
@@ -15,11 +15,10 @@ Path("orders.csv").write_text(
 )
 
 # A z-score rule: flag a value more than 1.5 standard deviations from the mean.
-# The standard deviation is written as sqrt(avg(x*x) - avg(x)^2), the population form.
+# stddev_pop is the population standard deviation.
 query = """
 WITH stats AS (
-    SELECT avg(total) AS mean,
-           sqrt(avg(total * total) - avg(total) * avg(total)) AS sd
+    SELECT avg(total) AS mean, stddev_pop(total) AS sd
     FROM orders
 )
 SELECT id, total, (total - mean) / sd AS z
@@ -32,6 +31,17 @@ with komira.Session() as s:
     s.register_csv("orders", "orders.csv")
     for row in s.sql(query).to_arrow().to_pylist():
         print(f"id={row['id']} total={row['total']} z={row['z']:.2f}")
+
+# The interquartile-range rule: flag a value below Q1 - 1.5 * IQR or above
+# Q3 + 1.5 * IQR. Series.quantile runs at once and gives a float.
+df = komira.read_csv("orders.csv")
+q1, q3 = df["total"].quantile(0.25), df["total"].quantile(0.75)
+iqr = q3 - q1
+low, high = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+print(f"q1={q1} q3={q3} iqr={iqr} fences=({low}, {high})")
+outliers = df[(df["total"] < low) | (df["total"] > high)].sort_values("id")
+for row in outliers.materialize().to_arrow().to_pylist():
+    print(f"id={row['id']} total={row['total']}")
 ```
 
 Output:
@@ -40,19 +50,22 @@ Output:
 ```text
 id=8 total=95 z=2.60
 id=10 total=-40 z=-1.77
+q1=10.25 q3=12.0 iqr=1.75 fences=(7.625, 14.625)
+id=8 total=95
+id=10 total=-40
 ```
 
 ## Notes
 
-- The query joins each row to one row of statistics (`avg` and a standard deviation) and keeps the rows more than 1.5 standard deviations from the mean. The sample is small, so the cut-off is 1.5; a common choice on larger data is 3.
-- The standard deviation is written as `sqrt(avg(x * x) - avg(x) * avg(x))`, which is the population standard deviation. komira does not run `stddev`, `stddev_pop`, `var_pop` or `median` as aggregates yet, and refuses `quantile_cont`: komira-ai/komira#2367.
-- Without quartiles the interquartile-range rule (below Q1 - 1.5 * IQR or above Q3 + 1.5 * IQR) cannot be written. `probe_quantile.py` beside this page tries it with the pandas-shaped `Series.quantile` and must fail with the line in `probe_quantile.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
-- The mean is itself pulled by the outliers, so a large outlier can hide a smaller one; the rule here is a first look, not a verdict.
-- The pandas-shaped frame has `df.mean()`, but `df.std()` and `df.median()` fail at execute with the same aggregate refusal as SQL, and a column (`df["total"]`) has no `mean()`, `std()` or `quantile()`; so the statistics come from SQL.
+- The z-score query joins each row to one row of statistics (`avg` and `stddev_pop`) and keeps the rows more than 1.5 standard deviations from the mean. The sample is small, so the cut-off is 1.5; a common choice on larger data is 3. `stddev_pop` is the population standard deviation; `stddev_samp` (also `stddev`) is the sample one.
+- The interquartile-range rule takes the quartiles with `df["total"].quantile(0.25)` and `quantile(0.75)`: pandas' linear interpolation, which is SQL's `quantile_cont`. Each call runs a query at once and gives a Python float (NaN for a column with no values), so the fences are plain numbers that the filter then uses. The same quartiles in SQL are `quantile_cont(total, 0.25)` and `quantile_cont(total, 0.75)`.
+- `Series.quantile` takes one fraction from 0 to 1 and `interpolation="linear"`; a list of fractions and another interpolation are refused by name.
+- The mean is itself pulled by the outliers, so a large outlier can hide a smaller one; the quartiles are not, so the interquartile-range rule is the steadier of the two. Either is a first look, not a verdict.
+- The frame's `df.mean()`, `df.std()` and `df.median()` give one row each, as in the page on summary statistics.
 
 ## Related
 
-- How do I compute summary statistics of a column? (rank 24, works; no page yet)
+- [How do I compute summary statistics of a column?](../24-compute-summary-statistics-column/page.md) (rank 24, partial)
 - [How do I find (not drop) duplicate rows?](../57-find-duplicate-rows/page.md) (rank 57, works)
 - [How do I select columns and filter rows?](../2-select-columns-filter-rows/page.md) (rank 2, works)
 - [How do I validate data: nulls, uniqueness, ranges?](../59-validate-data-nulls-uniqueness-ranges/page.md) (rank 59, works)
