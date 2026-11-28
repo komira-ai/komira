@@ -54,6 +54,7 @@ comptime US_PER_DAY: Int64 = 86_400_000_000
 """Microseconds in a day: a DATE bound is `days * US_PER_DAY`."""
 
 comptime _GREGORIAN_CYCLE_MONTHS: Int = 4800
+"""400 years: the days in a month repeat with this period of month indices."""
 comptime _MAX_DAY: Int64 = Int64.MAX // US_PER_DAY
 """The last day whose midnight is a TIMESTAMP; its negation is the first."""
 comptime SERIES_TIMESTAMP_OVERFLOW: StaticString = (
@@ -62,7 +63,6 @@ comptime SERIES_TIMESTAMP_OVERFLOW: StaticString = (
 )
 """What a month-step series raises when a value it reaches, including the one
 after the last in range, is beyond the TIMESTAMP range, as DuckDB raises."""
-"""400 years: the days in a month repeat with this period of month indices."""
 
 
 struct SeriesSpec(Copyable, Movable):
