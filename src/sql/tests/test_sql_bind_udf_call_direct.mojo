@@ -191,7 +191,7 @@ def test_udf_refusals() raises:
     )
 
 
-comptime _NO_DOOR = "this test's caller has no way to declare one"
+comptime _NO_DOOR = "This test's caller has no way to declare one."
 
 
 def _no_door_catalog() raises -> SqlCatalog:
@@ -205,17 +205,15 @@ def test_a_catalog_with_no_declaration_door_refuses_with_its_sentence() raises:
     var cat = _no_door_catalog()
     assert_equal(
         _got_in(cat, "SELECT score(k, v) AS score FROM t"),
-        "ERR: SQL not supported: scalar function 'score'. No UDFs are declared"
-        " on this catalog either — this test's caller has no way to declare"
-        " one",
+        "ERR: SQL not supported: scalar function 'score'. It is not a"
+        " built-in. This test's caller has no way to declare one.",
     )
     # A name the engine refuses to lower: its row's reason, then the
     # catalog's sentence in place of the `catalog.declare_udf` remedy.
     assert_equal(
         _got_in(cat, "SELECT nextafter(v, 1.0) FROM t"),
         "ERR: " + sql_scalar_fn_spec("nextafter").reason
-        + " This name is declarable as a UDF, but this test's caller has no"
-        " way to declare one.",
+        + " This test's caller has no way to declare one.",
     )
     # A built-in's own refusal is unchanged.
     assert_equal(

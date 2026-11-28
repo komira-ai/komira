@@ -163,16 +163,14 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
                 udf.value(), sx, schema, scope, catalog, cte_scope, prebound
             )
         # A caller with no way to declare a UDF (libkomira's session) is never
-        # told to call `catalog.declare_udf`: its catalog says why instead.
+        # told to call `catalog.declare_udf`: its catalog's own sentence ends
+        # the refusal instead.
         ref no_door = catalog.udfs.no_declaration_door
         if spec.kind == FNK_REFUSED:
             # A DuckDB function this engine does not approximate, and no UDF
             # supplies it: the row's reason, plus how to supply it.
             if no_door:
-                raise Error(
-                    spec.reason + " This name is declarable as a UDF, but "
-                    + no_door.value() + "."
-                )
+                raise Error(spec.reason + " " + no_door.value())
             raise Error(
                 spec.reason
                 + " YOU CAN SUPPLY THIS FUNCTION YOURSELF: this name lowers"
@@ -186,12 +184,15 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
         # declared" and "yours is not among these" are different findings.
         var known = catalog.udfs.declared_names()
         if len(known) == 0:
-            var advice = String("declare one with `catalog.declare_udf(f)`")
             if no_door:
-                advice = no_door.value()
+                raise Error(
+                    "SQL not supported: scalar function '" + sx.text + "'."
+                    " It is not a built-in. " + no_door.value()
+                )
             raise Error(
                 "SQL not supported: scalar function '" + sx.text + "'."
-                " No UDFs are declared on this catalog either — " + advice
+                " No UDFs are declared on this catalog either — declare one"
+                " with `catalog.declare_udf(f)`"
             )
         var listed = String("")
         for i in range(len(known)):

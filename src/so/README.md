@@ -1048,12 +1048,14 @@ holds an engine, and `komira_sql_stream` runs SQL on it (cancelled and
 watched through a run handle with `komira_sql_stream_run`) and
 `komira_plan_stream` a plan, and writes it to a file when its envelope carries a
 write target, but no call runs a UDF yet (the plan door refuses an envelope
-with UDFs) and no call declares one to SQL (a query that calls a function that
-is neither a built-in nor declared, or one the engine refuses to lower, is
-refused at bind with a message ending "a komira session cannot declare a
-function to SQL yet" in place of the binder's advice to call
-`catalog.declare_udf`, which the C surface does not carry; the reasons of the
-refused aggregate names still describe that Mojo door); no session
+with UDFs). SQL on a session calls built-in functions only, by decision: no
+call declares a user function to SQL, and none will. A query that calls a
+function that is neither a built-in nor declared, or one the engine refuses to
+lower, is refused at bind with a message ending "SQL cannot call a Python
+function, by decision: ..." and naming `Result.to_pandas()`, in place of the
+binder's advice to call `catalog.declare_udf`, which the C surface does not
+carry (the reasons of the refused aggregate names still describe that Mojo
+door). No session
 options beyond the worker count and the memory budget (no spill directory); the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).
 The calls that run a query, ported from the earlier SDK, their result as an Arrow
 C stream, and the abort-prone paths the library does not refuse yet are described in

@@ -22,11 +22,14 @@ from .status import (
 )
 
 comptime _NO_SQL_UDF_DECLARATION = (
-    "a komira session cannot declare a function to SQL yet"
+    "SQL cannot call a Python function, by decision: write the computation"
+    " with built-in SQL functions, or run the query and apply the function to"
+    " its result in Python (`Result.to_pandas()`)."
 )
-"""Why a function name a session's SQL calls cannot be supplied as a UDF:
-the C surface has no call that declares one, so the binder's refusal of an
-unknown or refused function name ends with this instead of naming
+"""How the binder's refusal of an unknown or refused function name ends on a
+session. SQL on a session calls built-in functions only: the C surface has
+no call that declares a user function to SQL, and will not have one, so the
+refusal says so and names what the Python package does offer instead of
 `catalog.declare_udf`, which no caller of the C surface can reach."""
 
 

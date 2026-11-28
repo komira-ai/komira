@@ -236,7 +236,8 @@ a pandas-shaped and a polars-shaped DataFrame surface. What happens to each part
 | polars-shaped `komira.pl` (`col`, `lit`, lazy frames over the same plan builder) | | with the DataFrame surface, on the same plan builder and door as the pandas-shaped one | |
 | **the SQL-text route** (`_sql.py`: DataFrame operations rendered to SQL text and re-parsed) | | | dropped. A DataFrame becomes a plan, never SQL text; `sql()` is SQL the user wrote, and is not that route |
 | **the route switch**: `Session(plan_wire=...)` and the environment variable that chose the SQL-text route | | | dropped. There is one route per kind of input, so there is nothing to switch; and configuration is never an environment variable (rule S2) |
-| `@komira.udf` and `Session.declare_sql_udf` | | Python UDFs in zygote worker processes | the in-process `ctypes` callback the engine called per batch: Python UDFs run in worker processes |
+| `@komira.udf` | | Python UDFs in zygote worker processes, on frames | the in-process `ctypes` callback the engine called per batch: Python UDFs run in worker processes |
+| `Session.declare_sql_udf` | | | dropped, by decision: SQL does not call Python functions; a Python function is applied to a frame, and SQL naming one is refused by name |
 | Excel calls (`xl_*`), the second result door (`plan_bytes`), `sql_render` | | | not in the first release's ABI; a text rendering of a plan is a later, separate decision |
 | warming pyarrow before opening the library | | | the Arrow import goes through the PyCapsule interface or pyarrow's public C stream import; the load-order case it worked around is a test of the Arrow terminals pull request |
 

@@ -24,9 +24,9 @@
 # success leaves no error once the caller clears it; a call of a function
 # that is neither a built-in nor declared, and of a name the engine refuses to
 # lower, is refused at bind (SQL_NOT_SUPPORTED) with a message that ends by
-# saying a session cannot declare a function to SQL yet, in place of the
-# binder's advice to call `catalog.declare_udf`, which no caller of the C
-# surface can reach.
+# saying SQL cannot call a Python function, by decision, and what to do
+# instead, in place of the binder's advice to call `catalog.declare_udf`,
+# which no caller of the C surface can reach.
 from std.os import makedirs
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -411,7 +411,7 @@ def test_sql_result_success_records_no_error() raises:
     assert_equal(s.last_error_code(), String(""))
 
 
-def test_sql_calling_an_undeclared_function_says_a_session_cannot_declare_one() raises:
+def test_sql_calling_an_unknown_function_says_sql_cannot_call_python() raises:
     var s = Session()
     register_parquet(
         s, String("three"), _three_row_parquet(test_tmpdir() + "/udf_refusal.parquet")
@@ -420,9 +420,11 @@ def test_sql_calling_an_undeclared_function_says_a_session_cannot_declare_one() 
     assert_equal(
         unknown,
         String(
-            "bind: SQL not supported: scalar function 'score'. No UDFs are"
-            " declared on this catalog either — a komira session cannot"
-            " declare a function to SQL yet"
+            "bind: SQL not supported: scalar function 'score'. It is not a"
+            " built-in. SQL cannot call a Python function, by decision: write"
+            " the computation with built-in SQL functions, or run the query"
+            " and apply the function to its result in Python"
+            " (`Result.to_pandas()`)."
         ),
     )
     assert_equal(s.last_error(), unknown)
@@ -433,8 +435,9 @@ def test_sql_calling_an_undeclared_function_says_a_session_cannot_declare_one() 
     assert_equal(
         refused,
         "bind: " + sql_scalar_fn_spec(String("nextafter")).reason
-        + " This name is declarable as a UDF, but a komira session cannot"
-        " declare a function to SQL yet.",
+        + " SQL cannot call a Python function, by decision: write the"
+        " computation with built-in SQL functions, or run the query and apply"
+        " the function to its result in Python (`Result.to_pandas()`).",
     )
     assert_equal(s.last_error_step(), KOMIRA_STEP_BIND)
     assert_equal(s.last_error_code(), String("SQL_NOT_SUPPORTED"))
@@ -459,5 +462,5 @@ def main() raises:
     test_sql_result_refusal_names_its_step()
     test_sql_result_refusal_records_step_and_code()
     test_sql_result_success_records_no_error()
-    test_sql_calling_an_undeclared_function_says_a_session_cannot_declare_one()
+    test_sql_calling_an_unknown_function_says_sql_cannot_call_python()
     print("OK")

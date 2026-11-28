@@ -287,16 +287,17 @@ struct SqlUdfCatalog(Copyable, Movable):
     var _entries: List[SqlUdfEntry]
 
     var no_declaration_door: Optional[String]
-    """Why the caller of this catalog cannot declare a UDF, or None when it
-    can.
+    """What the binder says in place of `catalog.declare_udf` advice when the
+    caller of this catalog cannot declare a UDF, or None when it can.
 
     None (the default): the caller declares UDFs with
     `SqlCatalog.declare_udf`, and the binder's refusal of an unknown function
-    name, and of a name the engine refuses to lower, tells it to. A value: a
-    sentence saying why no UDF can be declared here, which those two refusals
-    give instead of their advice (a refused row's own reason is unchanged).
-    libkomira's session sets one (`so.session`): the Python and TypeScript
-    packages reach the binder through it, and neither has `declare_udf`.
+    name, and of a name the engine refuses to lower, tells it to. A value:
+    one or more whole sentences, ending with their full stop, that end those
+    two refusals instead of that advice (a refused row's own reason is
+    unchanged). libkomira's session sets one (`so.session`): the Python and
+    TypeScript packages reach the binder through it, and SQL there calls no
+    user function, by decision.
     It changes nothing else: `declare` still declares, and a declared UDF
     still resolves."""
 
