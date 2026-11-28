@@ -147,7 +147,6 @@
     "question": "How do I read many files matching a pattern into one table?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2385",
       "komira-ai/komira#2386"
     ]
   },

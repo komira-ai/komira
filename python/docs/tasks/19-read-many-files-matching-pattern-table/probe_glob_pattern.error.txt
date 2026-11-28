@@ -1,1 +1,0 @@
-BindError: bind: MmapRegion.open_readonly: open() failed for path 'sales/sales_*.csv' (errno not surfaced)

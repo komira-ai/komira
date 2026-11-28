@@ -66,7 +66,7 @@ Output:
 
 ## Notes
 
-- `FROM '<path>'` picks the reader from the extension (`.csv`, `.parquet`, `.json`, `.jsonl` or `.ndjson`; any other extension, such as `.tsv` or `.csv.gz`, is refused by name, so spell the reader out) and names the table after the file, so `FROM 'sales.csv'` is also `sales`. `read_csv('<path>')`, `read_parquet('<path>')` and `read_json('<path>')` say the same by name; `read_parquet` also takes a glob.
+- `FROM '<path>'` picks the reader from the extension (`.csv`, `.parquet`, `.json`, `.jsonl` or `.ndjson`; any other extension, such as `.tsv` or `.csv.gz`, is refused by name, so spell the reader out) and names the table after the file, so `FROM 'sales.csv'` is also `sales`. `read_csv('<path>')`, `read_parquet('<path>')` and `read_json('<path>')` say the same by name; each also takes a glob pattern (`FROM 'sales/*.csv'`), whose files read as one table.
 - A registered table is the same file under a name you choose; use it when a query reads the file more than once or joins it with another.
 - `AVG` over an integer column answers a float, and `MAX` an integer, as in the output above.
 - `Session.register(name, obj)` takes a komira DataFrame or `komira.pl.LazyFrame` (its plan runs then), or any object with the Arrow C stream interface (`__arrow_c_stream__`): a `pyarrow.Table`, `RecordBatch` or `RecordBatchReader`, and a pandas or polars DataFrame, which have it too. It is DuckDB's `register(name, obj)`.

@@ -21,6 +21,13 @@ back with Session.sql as pyarrow:
   call or from register_parquet and in another case, raises BindError with
   code TABLE_ALREADY_REGISTERED word for word, and the first table keeps
   answering with its rows;
+- a glob pattern registers every file it matches as one table: `peo?le.csv`
+  and `**/events.jsonl` (no folder below) each read their one file's rows,
+  as SQL's `read_csv` of the same pattern does; `people*.csv` matches
+  people.csv and people_pipe.csv, whose columns differ, and raises BindError
+  with code CSV_FILES_SCHEMA_MISMATCH naming both files; a pattern matching
+  nothing raises BindError with code CSV_GLOB_NO_MATCH or JSON_GLOB_NO_MATCH
+  and the absolute pattern word for word; none of the refused ones registers;
 - arguments of the wrong type or value raise TypeError or ValueError before
   the library is called, and a closed session raises KomiraError.
 
@@ -209,6 +216,35 @@ def main(args):
         got, _ = rows(s, "events")
         assert got == EVENTS, got
 
+        # A glob pattern: every file it matches, as one table.
+        assert s.register_csv("one_of", os.path.join(lib_dir, "peo?le.csv")) is None
+        got, _ = rows(s, "one_of")
+        assert got == PEOPLE, got
+        pattern = os.path.join(lib_dir, "peo?le.csv")
+        want = s.sql("SELECT * FROM read_csv('{}') ORDER BY id".format(pattern)).to_arrow()
+        assert want.to_pylist() == PEOPLE, want.to_pylist()
+        assert s.register_json("deep_j", os.path.join(lib_dir, "**", "events.jsonl")) is None
+        got, _ = rows(s, "deep_j")
+        assert got == EVENTS, got
+        both = os.path.join(lib_dir, "people*.csv")
+        e = raised(lambda: s.register_csv("both", both))
+        assert type(e) is komira.BindError and e.status == -3, repr(e)
+        assert (e.step, e.code) == ("bind", "CSV_FILES_SCHEMA_MISMATCH"), (e.step, e.code)
+        assert str(e).startswith("CSV_FILES_SCHEMA_MISMATCH: '{}' differs from '{}': ".format(pipe, people)), str(e)
+        none_csv = os.path.join(lib_dir, "nomatch_*.csv")
+        none_json = os.path.join(lib_dir, "nomatch_*.jsonl")
+        for call, code, pat in (
+            (lambda: s.register_csv("none", none_csv), "CSV_GLOB_NO_MATCH", none_csv),
+            (lambda: s.register_json("none_j", none_json), "JSON_GLOB_NO_MATCH", none_json),
+        ):
+            e = raised(call)
+            assert type(e) is komira.BindError and e.status == -3, repr(e)
+            assert (e.step, e.code) == ("bind", code), (e.step, e.code)
+            assert str(e) == "{}: no file matches '{}'".format(code, pat), str(e)
+        for table in ("both", "none", "none_j"):
+            e = raised(lambda: s.sql("SELECT * FROM {}".format(table)))
+            assert type(e) is komira.BindError and e.status == -3, (table, repr(e))
+
         # Arguments are checked before the library is called.
         for call in (s.register_csv, s.register_json):
             e = raised(lambda: call(b"t", people))
@@ -244,7 +280,7 @@ def main(args):
     for call in (lambda: s.register_csv("t", people), lambda: s.register_json("t", events)):
         e = raised(call)
         assert type(e) is KomiraError and str(e) == "the session is closed" and e.status is None, repr(e)
-    print("register_text: libkomira {} registers CSV and JSON files".format(komira.abi_version()))
+    print("register_text: libkomira {} registers CSV and JSON files and patterns".format(komira.abi_version()))
 
 
 if __name__ == "__main__":
