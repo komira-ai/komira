@@ -225,6 +225,21 @@ holds M1 and M4 to M8.
   ([docs/ci.md](docs/ci.md#the-macos-part-of-the-check)). The tests it runs are the welded tests of
   those libraries, the ones the Linux part runs, so it adds no slow test. Every other
   per-pull-request macOS job or target stays refused by B9.
+- **Shared lines.** Two pull requests that each add one entry must not touch the same line:
+  - A total that changes when a member is added is derived from what it counts (a comptime sum of
+    the constants it adds up, `len(...)` of the list in BUCK passed as a define), never written as a
+    literal, and no comment states such a count. A test asserts what the count protected (the
+    members agree with the other copy, nothing staged is lost), not the number.
+  - A comment that enumerates states what cannot go stale, or lists one entry per line; never a
+    sentence that grows.
+  - A list, dict, import block or `test_srcs` that changes add to holds one entry per line. A new
+    entry goes on its own line directly after the existing entry that sorts last before it (first
+    when none does): in a sorted block that is its sorted position, and a block that is not sorted
+    is not re-sorted to make room. Two entries that sort into the same gap still conflict; the
+    second to merge resolves it by keeping both lines.
+  - Order that has meaning stays as it is: dispatch tables, the slots of a variant, match arms,
+    `PERF-CRITICAL` blocks, and numbered vocabularies, where a new member takes the next free number
+    and the pull request says which numbers it took.
 - **B21 BLOCK.** Product constraints:
   - Query results equal DuckDB's for the same SQL. Departures only for Arrow representation limits
     (128-bit ints, infinite dates, uint64 mixed with signed), and they fail with a named error.

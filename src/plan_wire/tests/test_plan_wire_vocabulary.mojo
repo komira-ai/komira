@@ -138,12 +138,14 @@ def test_expr_tag_vocabulary_is_complete_against_engine_count() raises:
 
 
 def test_countless_space_totals_are_pinned() raises:
-    """A pin, and labelled as one.
+    """A pin per space, and labelled as one.
 
     `AGG_*`, `JOIN_*` and `SOURCE_VARIANT_*` have NO count constant in the
     engine, which is a drift hazard.
-    For those spaces the only in-Mojo tripwire available is a total, so here it
-    is. Adding a member to any of them turns this red and says which.
+    For those spaces the only in-Mojo tripwire available is a member count, so
+    here it is. Adding a member to any of them turns this red and says which.
+    The vocabulary's total is not pinned: it is the sum of the spaces'
+    constants, held by `test_published_total_is_the_sum_of_every_space`.
     """
     # ⚠ THIS PIN CANNOT SEE THE FAILURE THAT MATTERS, AND SAYING SO IS HALF ITS
     # VALUE. `PLAN_WIRE_SPACE_COUNT` is `len(SPACES)` — the size of the
@@ -154,15 +156,15 @@ def test_countless_space_totals_are_pinned() raises:
     # unregistered one is narrowed by the decoder with no check at all). Seeing
     # that needs a coverage check over the codec's import closure, not a total.
     #
-    # HOW THE TOTAL MOVES:
+    # HOW THE COUNTS MOVE:
     #   * A new member of an existing op space (`StringFn`, `UnaryOp`,
-    #     `ExtractField`, `AGG_*`, ...) moves the total by its member count and
-    #     leaves the SPACE COUNT unchanged.
+    #     `ExtractField`, `AGG_*`, ...) moves that space's `*_WIRE_MEMBERS` by
+    #     its member count and leaves the SPACE COUNT unchanged.
     #   * A new expr VARIANT whose payload is `{op, child}` / `{op, args}` is a
     #     member of TWO vocabularies: the `ExprTag` space grows by one AND a new
-    #     op space arrives, so the total moves by (ops + 1) and the space count
-    #     by one. A change that moved only one of the two would mean an expr tag
-    #     with no payload space, or a payload space no tag reaches.
+    #     op space arrives, so the members move by (ops + 1) and the space
+    #     count by one. A change that moved only one of the two would mean an
+    #     expr tag with no payload space, or a payload space no tag reaches.
     #   * A new expr variant whose payload is all VALUES (e.g. `EXPR_UDF_CALL`:
     #     a name, a handle, two `ArrowType`s and a child) joins the `ExprTag`
     #     space only. Moving the space count too would mean an invented enum.
@@ -170,13 +172,13 @@ def test_countless_space_totals_are_pinned() raises:
     #     (`to_hex` for `hex`, `fsum` / `sumkahan` for `kahan_sum`) shares its
     #     op and adds nothing.
     #
-    # ⚠ THE NUMBER IS DERIVED, NOT GUESSED: it is the generated
-    # `plan_wire_vocabulary.mojo`'s own published constant. A change that adds
-    # a member regenerates that file AND moves this literal in the same change,
-    # or this library's build goes red. If this line collides in a merge,
-    # ⛔ DO NOT PICK A SIDE — both sides' numbers are wrong; re-run the
-    # generator over the MERGED sources and read the constant.
-    assert_equal(PLAN_WIRE_VOCABULARY_MEMBERS, 359, "total published members")
+    # ⚠ NO TOTAL IS WRITTEN HERE. A literal total is a line every change that
+    # adds a member to ANY space edits, so two such changes collide on it.
+    # `PLAN_WIRE_VOCABULARY_MEMBERS` is derived from the spaces' constants;
+    # what a pinned total was there to catch is caught by
+    # `test_published_total_is_the_sum_of_every_space`, by the drive below and
+    # by test_plan_wire_vocabulary_names.mojo, which holds every space's
+    # members to protoc's reading of the .proto.
     assert_equal(AGG_FN_WIRE_MEMBERS, 38, "AGG_* has no engine count constant")
     assert_equal(PLAN_WIRE_SPACE_COUNT, 33, "enumerated tag spaces")
     # ArrowType has no engine count constant either, and it is the space LEG 2
@@ -192,6 +194,29 @@ def test_countless_space_totals_are_pinned() raises:
         SOURCE_VARIANT_TAG_WIRE_MEMBERS,
         10,
         "SOURCE_VARIANT_* has no engine count constant",
+    )
+
+
+def test_published_total_is_the_sum_of_every_space() raises:
+    """`PLAN_WIRE_VOCABULARY_MEMBERS` equals the members
+    `plan_wire_space_member_count` publishes, summed over every space index,
+    and every space publishes at least one member.
+
+    The total is the sum of the `*_WIRE_MEMBERS` constants and the per-space
+    count is a ladder of its own, so the two are separate copies of each
+    space's size. Catches: a space's constant moved without its
+    `plan_wire_space_member_count` row (or the reverse), a space left out of
+    the sum, a space counted twice in it.
+    """
+    var summed = 0
+    for space in range(PLAN_WIRE_SPACE_COUNT):
+        var members = plan_wire_space_member_count(space)
+        assert_true(members > 0, plan_wire_space_name(space) + ": publishes no member")
+        summed += members
+    assert_equal(
+        PLAN_WIRE_VOCABULARY_MEMBERS,
+        summed,
+        "the published total is the sum of every space's member count",
     )
 
 

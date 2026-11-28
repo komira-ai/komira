@@ -2,6 +2,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 load(":copy_cases.bzl", "copy_cases")
 
+# The test data below is a block per test (its cases, its oracle, its
+# *_TEST_DATA map) and one `test_data` entry per test. The existing blocks
+# and lists keep the order they were added in and are not re-sorted. A new
+# one is placed by name all the same: a new block directly after the block of
+# the test whose name sorts last before its own, and a new list or
+# `test_data` entry on its own line directly after the entry that sorts last
+# before it (first when none does), never at the end. Two changes that each
+# add a test then change different lines.
+
 # DuckDB's answers for test_run_sql_csv: each line of tests/csv/cases.sql runs
 # one query over the committed CSV files and writes its answer.
 _CSV_CASES = [
@@ -24,7 +33,13 @@ _CSV_CASES = [
     "header_only_count",
 ]
 
-_CSV_FILES = ["typed", "quoted", "nulls", "pipe", "header_only"]
+_CSV_FILES = [
+    "typed",
+    "quoted",
+    "nulls",
+    "pipe",
+    "header_only",
+]
 
 sql_oracle(
     name = "csv_oracle",

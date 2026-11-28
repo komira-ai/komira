@@ -212,9 +212,9 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): twenty-six exports, and nothing else
-# in the dynamic symbol table (`exports_exact`). Every context it creates owns
-# an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
+# libkomira.so (libkomira.dylib on macOS arm64): the exports `exports` below
+# lists, and nothing else in the dynamic symbol table (`exports_exact`).
+# Every context it creates owns an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
 # komira_sql_stream runs SQL on that engine and answers an Arrow C stream; the
 # C driver below (c_abi_check) reads those streams through komira.h.
 # komira_sql_stream_run is that call under a run handle (komira_run_new), whose

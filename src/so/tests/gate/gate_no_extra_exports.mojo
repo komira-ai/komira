@@ -1,7 +1,8 @@
-# The dynamic symbol table defines exactly the twenty-six exports, and nothing else.
+# The dynamic symbol table defines exactly the exports `_exports` lists (BUCK's
+# `exports`), and nothing else.
 #
 # A gate driver of //src/so:libkomira. It has no dependency. The
-# exports check proves the twenty-six names resolve; this proves no other name is
+# exports check proves those names resolve; this proves no other name is
 # defined. On Linux it reads ./libkomira.so as an ELF64 file, walks the
 # SHT_DYNSYM section and lists every defined symbol: an `@export` the BUCK
 # `exports` list omits, a symbol of a static C dependency, or a linker marker
@@ -67,35 +68,45 @@ def _defined_dynsyms(data: List[UInt8]) raises -> List[String]:
     return names^
 
 
-def _is_export(name: String) -> Bool:
-    return (
-        name == "komira_abi_version"
-        or name == "komira_ctx_new"
-        or name == "komira_ctx_free"
-        or name == "komira_last_error"
-        or name == "komira_last_error_code"
-        or name == "komira_last_error_step"
-        or name == "komira_register_parquet"
-        or name == "komira_parquet_schema"
-        or name == "komira_csv_binding"
-        or name == "komira_json_binding"
-        or name == "komira_plan_render"
-        or name == "komira_credential_add"
-        or name == "komira_credential_set"
-        or name == "komira_credential_seal"
-        or name == "komira_sql_stream"
-        or name == "komira_ctx_new_with_options"
-        or name == "komira_register_csv"
-        or name == "komira_register_json"
-        or name == "komira_run_new"
-        or name == "komira_run_free"
-        or name == "komira_run_cancel"
-        or name == "komira_run_progress"
-        or name == "komira_sql_stream_run"
-        or name == "komira_plan_stream"
-        or name == "komira_register_arrow_stream"
-        or name == "komira_add_sql_binding"
-    )
+def _exports() -> List[String]:
+    """The names BUCK's `exports` lists, one per line: the count the symbol
+    table is held to is the length of this list, so a new export adds a line
+    and edits no number."""
+    var names = List[String]()
+    names.append("komira_abi_version")
+    names.append("komira_ctx_new")
+    names.append("komira_ctx_free")
+    names.append("komira_last_error")
+    names.append("komira_last_error_code")
+    names.append("komira_last_error_step")
+    names.append("komira_register_parquet")
+    names.append("komira_parquet_schema")
+    names.append("komira_csv_binding")
+    names.append("komira_json_binding")
+    names.append("komira_plan_render")
+    names.append("komira_credential_add")
+    names.append("komira_credential_set")
+    names.append("komira_credential_seal")
+    names.append("komira_sql_stream")
+    names.append("komira_ctx_new_with_options")
+    names.append("komira_register_csv")
+    names.append("komira_register_json")
+    names.append("komira_run_new")
+    names.append("komira_run_free")
+    names.append("komira_run_cancel")
+    names.append("komira_run_progress")
+    names.append("komira_sql_stream_run")
+    names.append("komira_plan_stream")
+    names.append("komira_register_arrow_stream")
+    names.append("komira_add_sql_binding")
+    return names^
+
+
+def _is_export(name: String, exports: List[String]) -> Bool:
+    for i in range(len(exports)):
+        if exports[i] == name:
+            return True
+    return False
 
 
 def main() raises:
@@ -109,16 +120,22 @@ def main() raises:
                 print("UNEXPECTED EXPORT: " + String(name))
                 extra += 1
     else:
+        var exports = _exports()
         var names = _defined_dynsyms(Path(LIB).read_bytes())
         var seen = 0
         for name in names:
-            if _is_export(name):
+            if _is_export(name, exports):
                 seen += 1
             else:
                 print("UNEXPECTED EXPORT: " + name)
                 extra += 1
-        if seen != 26:
-            raise Error("expected 26 defined exports, the symbol table has " + String(seen))
+        if seen != len(exports):
+            raise Error(
+                "expected "
+                + String(len(exports))
+                + " defined exports, the symbol table has "
+                + String(seen)
+            )
     if extra != 0:
-        raise Error(String(extra) + " symbol(s) outside the twenty-six exports are defined")
+        raise Error(String(extra) + " symbol(s) outside the exports are defined")
     print("ok")

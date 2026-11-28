@@ -9,27 +9,52 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #
 # Two sets of members stand behind that seam. The fakes (`fake_support`,
 # `fake_members`, `fake_builder`, `fake_dispatch`) drive the scheduler in tests.
-# The real members are the sources `source_parquet`, `source_batch`,
-# `source_sink_output`, `source_csv` (a CSV file decoded at its bound column
-# types, served as a resident batch), `source_iceberg` (the planned files of
-# an Iceberg snapshot, with their deletes applied, served as a resident batch)
-# and `source_jsonl` (a JSONL file read at the plan's schema, served as a batch
-# source), the operators `op_filter`, `op_project`,
-# `op_limit` and `op_hash_probe` (the INNER, LEFT, RIGHT, FULL, SEMI, ANTI and
-# CROSS join probe over an index of the build rows; RIGHT and FULL owe their
-# unmatched build rows as a tail that `run_segment` pushes after the workers),
-# the sinks `sink_collect`, `sink_agg` (the ungrouped aggregation, over
-# `agg_fold` and `agg_output`, drawing memory from `segment_pool`; COUNT(DISTINCT) in
-# every aggregation sink is `count_distinct`), `sink_group_agg` (the same keyed by
-# fixed-width columns, its tables charged as they grow and, given a spill directory,
-# written to disk by hash partition when the pool refuses them: `group_spill`),
-# `sink_string_group_agg` (the same keyed by
-# strings, over `string_keys`' intern table; `string_harness` is its test table), `sink_sort`
-# (the in-memory sort and the top-N's range of its order, over `sort_nulls`,
-# `sort_range` and `op_sort`; `sort_harness` is its test table and oracle),
-# `sink_window` (window functions: the rows sorted by the partition and order keys
-# with one column per expression, over `op_window`'s kernel) and
-# `real_builder` that constructs them from a segment descriptor; the join is two
+# The real members, one per line and in sorted order within each kind (a new
+# member is a new line in its sorted place), with what each serves:
+#
+#   source  `source_batch`
+#   source  SOURCE_CONCAT            the outputs of the producers a spec names,
+#                                    concatenated into one batch; built in
+#                                    `real_builder`, with no module of its own
+#   source  `source_csv`             a CSV file decoded at its bound column
+#                                    types, served as a resident batch
+#   source  `source_iceberg`         the planned files of an Iceberg snapshot,
+#                                    with their deletes applied, served as a
+#                                    resident batch
+#   source  `source_jsonl`           a JSONL file read at the plan's schema,
+#                                    served as a batch source
+#   source  `source_parquet`
+#   source  `source_sink_output`
+#   op      `op_filter`
+#   op      `op_hash_probe`          the INNER, LEFT, RIGHT, FULL, SEMI, ANTI
+#                                    and CROSS join probe over an index of the
+#                                    build rows; RIGHT and FULL owe their
+#                                    unmatched build rows as a tail that
+#                                    `run_segment` pushes after the workers
+#   op      `op_limit`
+#   op      `op_project`
+#   sink    `sink_agg`               the ungrouped aggregation, over `agg_fold`
+#                                    and `agg_output`, drawing memory from
+#                                    `segment_pool`; COUNT(DISTINCT) in every
+#                                    aggregation sink is `count_distinct`
+#   sink    `sink_collect`
+#   sink    `sink_group_agg`         `sink_agg`'s aggregation keyed by
+#                                    fixed-width columns, its tables charged as
+#                                    they grow and, given a spill directory,
+#                                    written to disk by hash partition when the
+#                                    pool refuses them: `group_spill`
+#   sink    `sink_sort`              the in-memory sort and the top-N's range of
+#                                    its order, over `sort_nulls`, `sort_range`
+#                                    and `op_sort`; `sort_harness` is its test
+#                                    table and oracle
+#   sink    `sink_string_group_agg`  `sink_agg`'s aggregation keyed by strings,
+#                                    over `string_keys`' intern table;
+#                                    `string_harness` is its test table
+#   sink    `sink_window`            window functions: the rows sorted by the
+#                                    partition and order keys with one column
+#                                    per expression, over `op_window`'s kernel
+#
+# `real_builder` constructs them from a segment descriptor. The join is two
 # segments, a build side ending in `sink_collect` as SINK_HASH_BUILD and a probe
 # side whose chain carries `op_hash_probe` (`join_harness` writes join plans by
 # hand and is the oracle's nested-loop join); `plan_harness`

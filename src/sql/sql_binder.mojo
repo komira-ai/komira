@@ -18,6 +18,10 @@ from sql.sql_ast import (
 from sql.sql_bind_aggregate import (
     _bind_aggregate, _bind_projection,
 )
+from sql.sql_bind_corr_scalar import (
+    bind_correlated_scalar_body, refuse_grouped_correlated_scalar,
+    scalar_body_is_correlated, scalar_outer_of,
+)
 from sql.sql_bind_expr import _bind_scalar
 from sql.sql_bind_join import (
     _outer_join_kw, _bind_outer_join, _bind_keyed_join, _bind_semi_anti_join,
@@ -29,15 +33,11 @@ from sql.sql_bind_scope import (
     CteScope, _relation_scan, _build_bind_scope, _dedupe_join_right,
     _result_display_names, _result_rename_exprs, _visible_qualifiers,
 )
+from sql.sql_bind_set_op import _bind_select_with_union
 from sql.sql_bind_subquery import (
     _bind_scalar_subquery_body, _bind_correlated_subquery_body,
     _corr_outer_of, _not_in_lhs_is_null_free, _in_lhs_output_name,
 )
-from sql.sql_bind_corr_scalar import (
-    bind_correlated_scalar_body, refuse_grouped_correlated_scalar,
-    scalar_body_is_correlated, scalar_outer_of,
-)
-from sql.sql_bind_set_op import _bind_select_with_union
 from sql.sql_bind_window_order import (
     _has_window, _bind_window_projection, _order_key_name, _OK_COLUMN, _OK_OUTPUT,
     _classify_order_keys, _order_output_column, _bind_order,

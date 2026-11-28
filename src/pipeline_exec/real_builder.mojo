@@ -259,10 +259,9 @@ struct RealBuilder[
     filter_o: Origin[mut=True],
     R: ScanFsOpener = LocalOnlyScanFs,
 ](SegmentBuilder):
-    """Builds the real members of a segment: Parquet (local, or on the store
-    `R` opens), batch, sink-output, CSV, concatenation and JSONL sources;
-    filter, project, limit and join probe operators; the collect, aggregation,
-    sort, window and hash build sinks."""
+    """Builds the real members of a segment: each source, operator and sink
+    the table in this file's header lists, a Parquet source over the local
+    file system or over the store `R` opens."""
 
     comptime ParquetArm = SourceVariant[
         LocalParquetSource[Self.cache_o, Self.pool_o, Self.filter_o],

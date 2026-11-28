@@ -66,11 +66,11 @@
 #   * it lowers to a node this binder already builds -> ONE LINE here, and
 #     NOTHING in the `sql_bind_*` modules.
 #   * it is a pure binder DESUGAR (the route most functions not yet served
-#     will take) -> ONE LINE here naming a new `DSG_*`, plus one new `_bind_*`
-#     helper function APPENDED to the desugar helper modules
-#     and one line in the `FNK_DESUGAR` switch of the scalar-call binder's
-#     `_bind_scalar_call`. Two changes adding two desugars append two
-#     DIFFERENT functions and two DIFFERENT rows; they do not collide.
+#     will take) -> ONE LINE here naming a new `DSG_*`, one `_bind_*` helper
+#     in a desugar helper module after the helper that sorts last before it,
+#     and one line in the `FNK_DESUGAR` switch of `_bind_scalar_call`; each
+#     name it imports on its own line. Two such changes still both take the
+#     next free `DSG_*` number: the second to merge renumbers its own.
 #   * it is a real DuckDB function this engine deliberately does NOT serve, or
 #     one it CANNOT serve yet -> ONE LINE here with `FNK_REFUSED` and the
 #     measured reason. A refusal whose reason lives only in a docstring is a

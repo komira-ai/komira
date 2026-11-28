@@ -8,16 +8,19 @@
 # missing or extra row, rows in another order, another column name); a
 # refusal that is not listed, or a listed one komira now answers or words
 # otherwise; a case staged without its answer or an answer without its case;
-# a corpus staged short (the count of cases is pinned); and a runner that
-# reports nothing when one answer is wrong.
+# a corpus staged short (it must hold every file of cases/); and a runner
+# that reports nothing when one answer is wrong.
 
+from std.sys.defines import get_defined_int
 from std.testing import TestSuite, assert_equal, assert_true
 
 from sql_e2e import check_corpus, load_corpus, open_session
 
-# `ls src/tests/e2e/sql_e2e/cases/*.sql | wc -l`; BUCK stages each with its
-# answer, so a case lost on the way fails here.
-comptime _CASES = 128
+# The number of files under cases/, which BUCK counts (`len(_CASES)`) and
+# gives as the define SQL_E2E_CASES. BUCK stages each case with its answer, so
+# a case lost on the way fails here, and a change that adds a case edits no
+# count.
+comptime _CASES = get_defined_int["SQL_E2E_CASES"]()
 
 # A case whose answer is one row starting with count(*) of `nulls`, 5000.
 comptime _COUNTS_CASE = "aggregate_counts"

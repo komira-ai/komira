@@ -58,9 +58,6 @@ in the generator. A repository lint fails if you do.
 comptime PLAN_WIRE_UNSPECIFIED_VALUE: Int32 = 0
 """Wire 0, in every space. Never a valid tag."""
 
-comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 359
-"""Total published members across all 33 spaces. A drift tripwire a test can pin."""
-
 comptime PLAN_WIRE_SPACE_COUNT: Int = 33
 """Number of enumerated tag spaces the vocabulary publishes."""
 
@@ -4211,6 +4208,28 @@ comptime PLAN_WIRE_SPACE_PARAM_TAG: Int = 29
 comptime PLAN_WIRE_SPACE_PUSHDOWN_GATE_MODE: Int = 30
 comptime PLAN_WIRE_SPACE_SNAPSHOT_POLICY: Int = 31
 comptime PLAN_WIRE_SPACE_JOIN_BUILD_SIDE: Int = 32
+
+comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = (
+    PLAN_TAG_WIRE_MEMBERS + EXPR_TAG_WIRE_MEMBERS + AGG_FN_WIRE_MEMBERS
+    + WINDOW_FN_WIRE_MEMBERS + FRAME_UNITS_WIRE_MEMBERS
+    + FRAME_BOUND_WIRE_MEMBERS + JOIN_TYPE_WIRE_MEMBERS
+    + JOIN_ALGO_WIRE_MEMBERS + ASOF_DIRECTION_WIRE_MEMBERS
+    + ASOF_TOLERANCE_KIND_WIRE_MEMBERS + CORRELATED_KIND_WIRE_MEMBERS
+    + SOURCE_TYPE_WIRE_MEMBERS + SOURCE_ORIENTATION_WIRE_MEMBERS
+    + SOURCE_VARIANT_TAG_WIRE_MEMBERS + BINARY_OP_WIRE_MEMBERS
+    + UNARY_OP_WIRE_MEMBERS + STRING_OP_WIRE_MEMBERS + STRING_FN_WIRE_MEMBERS
+    + STRING_FN_N_WIRE_MEMBERS + COL_SIDE_WIRE_MEMBERS + MATH_FN1_WIRE_MEMBERS
+    + MATH_FN2_WIRE_MEMBERS + EXTRACT_FIELD_WIRE_MEMBERS
+    + REGEXP_OP_WIRE_MEMBERS + ARROW_TYPE_WIRE_MEMBERS
+    + WRITE_FORMAT_WIRE_MEMBERS + WRITE_COMPRESSION_WIRE_MEMBERS
+    + SCALAR_KIND_WIRE_MEMBERS + SCALAR_TIME_UNIT_WIRE_MEMBERS
+    + PARAM_TAG_WIRE_MEMBERS + PUSHDOWN_GATE_MODE_WIRE_MEMBERS
+    + SNAPSHOT_POLICY_WIRE_MEMBERS + JOIN_BUILD_SIDE_WIRE_MEMBERS
+)
+"""Total published members: the sum of every space's `*_WIRE_MEMBERS`, so a
+member added to a space moves only that space's constant. Held by
+tests/test_plan_wire_vocabulary.mojo to the drive and to
+`plan_wire_space_member_count`."""
 
 
 def write_plan_wire_space_name[W: Writer](mut writer: W, space: Int):
