@@ -46,6 +46,9 @@
 #      Avro arms, with the fingerprint of the source built with the stat
 #      mtime.
 #      (mutants: the avro arm left to the JSON arm; `mtime_ns` left 0)
+#  12. avro_tvf_schema refuses a glob (`*`, `?`, `[`) and a URL by name,
+#      before any file is opened: read_avro reads one local file. The exact
+#      message is compared, so the path and the reason both reach the user.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -389,6 +392,29 @@ def test_json_and_avro_scans_carry_mtime() raises:
     assert_true(
         asource.fingerprint() != unpinned.fingerprint(),
         "a leaf with mtime 0 is a different source",
+    )
+
+
+def _avro_bind_refusal(path: String) -> String:
+    try:
+        _ = avro_tvf_schema(path)
+    except e:
+        return String(e)
+    return String("(bound)")
+
+
+def test_avro_refuses_a_glob_and_a_url_by_name() raises:
+    var globs: List[String] = ["d/*.avro", "d/part?.avro", "d/part[12].avro"]
+    for i in range(len(globs)):
+        assert_equal(
+            _avro_bind_refusal(globs[i]),
+            "SQL not supported: read_avro('" + globs[i] + "') names a glob;"
+            + " read_avro reads one local file, not a glob or a list of files",
+        )
+    assert_equal(
+        _avro_bind_refusal("s3://bucket/f.avro"),
+        "SQL not supported: read_avro('s3://bucket/f.avro') names a URL;"
+        + " read_avro reads one local file",
     )
 
 

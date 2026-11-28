@@ -239,7 +239,7 @@ def test_render_prints_the_number_of_a_tag_it_has_no_name_for() raises:
     segments.append(
         _seg(
             0,
-            UInt8(8),
+            UInt8(99),
             SourceSpecPod(),
             ops^,
             SINK_COLLECT,
@@ -253,7 +253,7 @@ def test_render_prints_the_number_of_a_tag_it_has_no_name_for() raises:
     var plan = _plan_of(segments^, 0)
     var expected = String("ir_version ") + String(PHYSICAL_PLAN_IR_VERSION) + "\n"
     expected += "segment 0\n"
-    expected += "  source: SOURCE_8 from=\n"
+    expected += "  source: SOURCE_99 from=\n"
     expected += "  op 0: OP_77\n"
     expected += "  sink: (SINK_COLLECT, NONE, COLUMNAR) param=-1 state=0\n"
     expected += "  deps: 5/E9\n"

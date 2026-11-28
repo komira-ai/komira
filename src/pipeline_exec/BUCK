@@ -12,9 +12,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # The real members are the sources `source_parquet`, `source_batch`,
 # `source_sink_output`, `source_csv` (a CSV file decoded at its bound column
 # types, served as a resident batch), `source_iceberg` (the planned files of
-# an Iceberg snapshot, with their deletes applied, served as a resident batch)
-# and `source_jsonl` (a JSONL file read at the plan's schema, served as a batch
-# source), the operators `op_filter`, `op_project`,
+# an Iceberg snapshot, with their deletes applied, served as a resident batch),
+# `source_jsonl` (a JSONL file read at the plan's schema, served as a batch
+# source) and `source_avro` (the columns a spec names of one Avro file, its
+# column types checked first, served as a resident batch), the operators
+# `op_filter`, `op_project`,
 # `op_limit` and `op_hash_probe` (the INNER, LEFT, RIGHT, FULL, SEMI, ANTI and
 # CROSS join probe over an index of the build rows; RIGHT and FULL owe their
 # unmatched build rows as a tail that `run_segment` pushes after the workers),
@@ -115,6 +117,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 missing file and no path refused naming the
 #                                 file; through run_plan with a filter and a
 #                                 projection, on one worker and on three.
+# test_source_avro                the Avro source built from a spec: the spec's
+#                                 columns in its order, a NULL union branch, an
+#                                 unread column dropped, a spec of no column, a
+#                                 file of no block; every column type outside
+#                                 the envelope refused by name; a missing or
+#                                 mistyped column, a missing file, a file that
+#                                 is not an OCF, a block that does not decode
+#                                 and no path refused naming the file; through
+#                                 run_plan with a filter and a projection, on
+#                                 one worker and on three.
 # test_real_plan                  hand-built plans end to end: scan, filter,
 #                                 project and limit; a segment reading another's
 #                                 output; what the builder refuses.
@@ -406,6 +418,7 @@ mojo_library(
         "tests/test_sort_keys.mojo",
         "tests/test_sort_plan.mojo",
         "tests/test_sort_plan_concurrent.mojo",
+        "tests/test_source_avro.mojo",
         "tests/test_source_csv.mojo",
         "tests/test_source_iceberg.mojo",
         "tests/test_source_jsonl.mojo",

@@ -24,6 +24,7 @@ from physical_plan.physical_plan import (
     SOURCE_UDF_STEP,
     SOURCE_ICEBERG,
     SOURCE_JSONL,
+    SOURCE_AVRO,
     OP_FILTER,
     OP_PROJECT,
     OP_LIMIT,
@@ -58,6 +59,8 @@ def _source_name(kind: UInt8) -> String:
         return "SOURCE_ICEBERG"
     if kind == SOURCE_JSONL:
         return "SOURCE_JSONL"
+    if kind == SOURCE_AVRO:
+        return "SOURCE_AVRO"
     return "SOURCE_" + String(Int(kind))
 
 
@@ -260,6 +263,15 @@ def _segment_text(seg: SegmentDescPod) -> String:
                 out += ", "
             out += s.jsonl_schema.field_name(i) + ":"
             out += String(s.jsonl_schema.field_arrow_type(i))
+        out += "]"
+    elif seg.source_kind == SOURCE_AVRO:
+        ref s = seg.source_spec
+        out += " path=" + s.avro_path + " columns=["
+        for i in range(s.avro_schema.num_columns()):
+            if i > 0:
+                out += ", "
+            out += s.avro_schema.field_name(i) + ":"
+            out += String(s.avro_schema.field_arrow_type(i))
         out += "]"
     else:
         out += " from="

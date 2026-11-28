@@ -30,6 +30,10 @@
 #            SOURCE_JSONL         the batches the spec's file is read into at
 #                                 the spec's schema, served as a `BatchSource`
 #                                 (`source_jsonl`)
+#            SOURCE_AVRO          the spec's columns of one Avro file, decoded
+#                                 at the header's schema after its column
+#                                 types are checked, served as a
+#                                 `BatchSource` (`source_avro`)
 #   op       OP_FILTER            `FilterOp`  (`op_filter`)
 #            OP_PROJECT           `MapOp`     (`op_project`)
 #            OP_LIMIT             `LimitOp`   (`op_limit`)
@@ -168,6 +172,7 @@ from physical_plan.physical_plan import (
     SOURCE_CSV,
     SOURCE_ICEBERG,
     SOURCE_JSONL,
+    SOURCE_AVRO,
     SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
 )
@@ -195,6 +200,7 @@ from .source_batch import BatchSource
 from .source_csv import build_csv_source
 from .source_iceberg import build_iceberg_source
 from .source_jsonl import build_jsonl_source
+from .source_avro import build_avro_source
 from .source_parquet import (
     LocalOnlyScanFs,
     LocalParquetSource,
@@ -260,7 +266,7 @@ struct RealBuilder[
     R: ScanFsOpener = LocalOnlyScanFs,
 ](SegmentBuilder):
     """Builds the real members of a segment: Parquet (local, or on the store
-    `R` opens), batch, sink-output, CSV, concatenation and JSONL sources;
+    `R` opens), batch, sink-output, CSV, concatenation, JSONL and Avro sources;
     filter, project, limit and join probe operators; the collect, aggregation,
     sort, window and hash build sinks."""
 
@@ -525,6 +531,8 @@ struct RealBuilder[
             return Self.Source.second(build_iceberg_source(spec, morsel_rows))
         if desc.source_kind == SOURCE_JSONL:
             return Self.Source.second(build_jsonl_source(spec, morsel_rows))
+        if desc.source_kind == SOURCE_AVRO:
+            return Self.Source.second(build_avro_source(spec, morsel_rows))
         if desc.source_kind == SOURCE_SINK_OUTPUT:
             if len(spec.dep_seg_ids) != 1:
                 raise Error(
@@ -573,8 +581,8 @@ struct RealBuilder[
             + " of segment "
             + String(desc.seg_id)
             + " is not served (SOURCE_PARQUET, SOURCE_BATCH,"
-            " SOURCE_SINK_OUTPUT, SOURCE_CSV, SOURCE_ICEBERG, SOURCE_CONCAT and"
-            " SOURCE_JSONL are)"
+            " SOURCE_SINK_OUTPUT, SOURCE_CSV, SOURCE_ICEBERG, SOURCE_CONCAT,"
+            " SOURCE_JSONL and SOURCE_AVRO are)"
         )
 
     def build_op(

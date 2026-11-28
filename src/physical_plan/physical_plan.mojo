@@ -91,9 +91,12 @@ from physical_plan.sink_data import (
 #   21: `TopNSinkData.offset` — the rows of the sort order a top-N skips
 #       before the `n` it keeps (LIMIT n OFFSET m over a sort). 0 is the plain
 #       top-N.
+#   22: `SOURCE_AVRO` and `SourceSpecPod.avro_path` / `avro_schema` -- a
+#       segment that reads one local Avro object container file and delivers
+#       a stated subset of its columns.
 #   Retired `MorselOp` tag values (4-13) are not reused.
 
-comptime PHYSICAL_PLAN_IR_VERSION: Int = 21
+comptime PHYSICAL_PLAN_IR_VERSION: Int = 22
 
 
 # =============================================================================
@@ -239,6 +242,7 @@ comptime SOURCE_CSV: UInt8 = 4         # Read one local CSV file
 comptime SOURCE_UDF_STEP: UInt8 = 5    # A STEP user function, run once
 comptime SOURCE_ICEBERG: UInt8 = 6     # Read the planned files of one Iceberg snapshot
 comptime SOURCE_JSONL: UInt8 = 7       # Read one newline-delimited JSON file
+comptime SOURCE_AVRO: UInt8 = 8        # Read one local Avro object container file
 
 # MorselOp tags
 comptime OP_FILTER: UInt8 = 0          # Predicate filter (SV-based)
@@ -553,7 +557,7 @@ comptime KEY_DTYPE_COMPOSITE: UInt8 = 9
 
 
 struct SourceSpecPod(Movable):
-    """POD source spec — the closed 8-kind `SOURCE_*` vocabulary as an
+    """POD source spec — the closed 9-kind `SOURCE_*` vocabulary as an
     INLINE descriptor field (source symmetry: the source set is bounded and
     is NOT the growth axis a new SINK kind widens, so it stays inline, not erased).
 
@@ -575,6 +579,8 @@ struct SourceSpecPod(Movable):
         the bound columns (`iceberg_scan_spec`).
       * SOURCE_JSONL: `jsonl_path` + `jsonl_schema` (the keys read, in the
         order the source delivers them, each at the type it is read as).
+      * SOURCE_AVRO: `avro_path` + `avro_schema` (the columns delivered, in
+        order, each at the type the file's header gives it).
 
     Every field is inert: `String`, `Optional[List[String]]`, `Optional[Expr]`,
     `List[Int]`, `List[Field]`, `List[List[String]]`, `Int`, `Bool`, `Schema`,
@@ -649,6 +655,12 @@ struct SourceSpecPod(Movable):
     reads, in order, at the type the key's values are read as. A key the schema
     does not name is skipped; a key a line lacks reads NULL. The schema is the
     one the plan was bound at, so the file is never inferred again."""
+    var avro_path: String                        # SOURCE_AVRO
+    var avro_schema: Schema
+    """SOURCE_AVRO ONLY. The columns the source delivers, in order: a subset
+    of the file's columns, each at the type the plan bound it at (the one the
+    file's header gives it). A column of the file the schema does not name is
+    decoded and dropped."""
 
     def __init__(out self):
         """Empty spec (SOURCE_SINK_OUTPUT/CONCAT default: fill dep_seg_ids)."""
@@ -667,6 +679,8 @@ struct SourceSpecPod(Movable):
         self.iceberg_spec = IcebergScanSpec()
         self.jsonl_path = String("")
         self.jsonl_schema = Schema()
+        self.avro_path = String("")
+        self.avro_schema = Schema()
 
     @staticmethod
     def parquet(
@@ -762,6 +776,15 @@ struct SourceSpecPod(Movable):
         s.jsonl_schema = schema^
         return s^
 
+    @staticmethod
+    def avro(var path: String, var schema: Schema) -> SourceSpecPod:
+        """Mint the SOURCE_AVRO arm: the Avro file at `path`, delivering the
+        columns of `schema`."""
+        var s = SourceSpecPod()
+        s.avro_path = path^
+        s.avro_schema = schema^
+        return s^
+
     # PORT(1.0.0): explicit destructor breaks the non-co-inductive
     # Deinitable check on this struct's recursive self-reference.
     # Field destructors still run (verified); ownership unchanged.
@@ -790,7 +813,7 @@ struct SegmentDescPod(Movable):
     var seg_id: Int                     # dense id; index into the runtime's per-seg tables
 
     # ---- SOURCE (tagged POD spec) ----
-    var source_kind: UInt8              # SOURCE_PARQUET | SOURCE_BATCH | SOURCE_SINK_OUTPUT | SOURCE_CONCAT | SOURCE_CSV | SOURCE_UDF_STEP | SOURCE_ICEBERG | SOURCE_JSONL
+    var source_kind: UInt8              # SOURCE_PARQUET | SOURCE_BATCH | SOURCE_SINK_OUTPUT | SOURCE_CONCAT | SOURCE_CSV | SOURCE_UDF_STEP | SOURCE_ICEBERG | SOURCE_JSONL | SOURCE_AVRO
     var source_spec: SourceSpecPod
 
     # ---- OP CHAIN (the LANDED closed tagged union; runtime-N, no comptime over N) ----

@@ -366,13 +366,12 @@ def _avro_binding(var avro: AvroSource) -> ScanBinding:
     ⚠ THE FINGERPRINT IS TAKEN FROM THE CONCRETE SOURCE, NOT RECOMPUTED — the
     same contract `_orc_binding` and `_arrow_binding` document.
 
-    ⚠ `orientation = SCAN_ORIENTATION_ROW`. Avro OCF is row-oriented on disk
-    and its reader decodes each record's fields DIRECTLY into a `RowBlock`, so
-    the scan belongs to the row execution hierarchy. The ladder in
+    ⚠ `orientation = SCAN_ORIENTATION_ROW`. Avro OCF is row-oriented on disk,
+    so the scan belongs to the row execution hierarchy. The ladder in
     `ScanData.__init__` auto-promotes for CSV / NDJSON only, so without this
     declaration an Avro scan built without an explicit `source_kind` would come
     out COLUMNAR. The declaration decides: the two production call sites
-    (`engine_context.read_avro_row_streaming`, `AvroReader.build_scan_plan`)
+    (`sql_tvf_bind._avro_tvf_scan`, `AvroReader.build_scan_plan`)
     pass NOTHING and get ROW from the kind.
 
     THE PARAMS ARE EXACTLY WHAT THE KIND HAS, AND NOTHING MORE — just `path`.
@@ -1344,13 +1343,13 @@ struct SourceVariant(Movable, Copyable, Deinitable):
     def __init__(out self, var avro: AvroSource):
         """Builds a `komira.avro` binding (tag `SOURCE_VARIANT_AVRO`).
 
-        The Avro arm is the genuine ROW source — the row-streaming producer
-        dispatch decodes each OCF record DIRECTLY into a RowBlock (no col->row
-        bridge), and per-codec dispatch (null/snappy/...) happens INSIDE the
-        OCF reader at decode time.
+        The Avro arm declares the ROW orientation; lowering cuts its scan into
+        a SOURCE_AVRO segment (`lowering.cut_scan_avro`), whose source decodes
+        the file with the OCF reader, codec dispatch (null/snappy/...)
+        included (`pipeline_exec.source_avro`).
 
         The ROW orientation exists in exactly one place, the kind: the
-        production callers (`engine_context.read_avro_row_streaming`,
+        production callers (`sql_tvf_bind._avro_tvf_scan`,
         `AvroReader.build_scan_plan`) pass no `source_kind`, and
         `ScanData.__init__`'s auto-promotion covers SOURCE_CSV / SOURCE_NDJSON
         only, so without the declaration an Avro scan would derive COLUMNAR.

@@ -9,6 +9,7 @@ record batches:
 
 - over Parquet files;
 - over CSV files named by `read_csv` (plain or `.gz`, `.zst`, `.lz4`);
+- over one local Avro object container file named by `read_avro`;
 - over local Iceberg tables (`iceberg_scan`, or a table registered from a
   catalog).
 
@@ -76,6 +77,54 @@ var catalog = StorageBasedCatalog()
 catalog.register("db", "orders", "/warehouse/db/orders/metadata/v3.metadata.json")
 register_iceberg_table(ctx, "orders", catalog, "db", "orders")
 var outcome = run_sql(ctx, "SELECT id FROM orders WHERE id < 10")
+```
+
+**Avro files.** `SELECT ... FROM read_avro('<path>')` reads one local Avro
+object container file, as DuckDB's `avro` extension does. The columns and
+their types are the writer schema in the file's header, read when the query is
+bound; every codec of the `avro` package is read (null, deflate, snappy,
+bzip2, xz, zstandard). A `["null", T]` union is a nullable `T` column. The
+function takes no option: DuckDB's one option, `filename`, is refused at
+`parse` with the rest. A glob, a list of files and a URL are refused by name.
+A column that is an enum, a nested record, an array, a map, any other union,
+a duration, a uuid or a nanosecond timestamp is refused by name at `execute`,
+naming the column and the file (`pipeline_exec.source_avro`): DuckDB reads
+those as types the plan does not carry yet. A timestamp with the adjust-to-UTC
+flag reads unzoned, where DuckDB reads it zoned. No filter is pushed into the
+read, as in DuckDB; the file is decoded whole before the first morsel.
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from std.tempfile import mkdtemp
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.primitive_array import PrimitiveArray
+from arrow.record_batch import RecordBatchBuilder
+from arrow.schema import Field, SchemaBuilder
+from arrow.string_array import StringArray
+from avro import AVRO_CODEC_DEFLATE, AvroWriterOptions, write_avro_file
+from sdk_exec.engine_context import EngineContext
+from sdk_exec.engine_options import EngineOptions
+from sdk_exec.engine_sql import run_sql
+
+var sb = SchemaBuilder()
+sb.add_field(Field("id", ArrowType.INT64, False))
+sb.add_field(Field("name", ArrowType.STRING, False))
+var ids: List[Int64] = [1, 2, 3, 4, 5]
+var names: List[String] = ["pen", "ink", "cap", "nib", "pad"]
+var builder = RecordBatchBuilder.with_capacity(2)
+builder.add_column(Column.from_primitive[DType.int64](PrimitiveArray[DType.int64].from_list(ids)))
+builder.add_column(Column.from_string(StringArray.from_strings(names)))
+var dir = mkdtemp(prefix="komira_avro_readme_")
+write_avro_file(builder.build(sb.build()), dir + "/data.avro", AvroWriterOptions(AVRO_CODEC_DEFLATE))
+
+var ctx = EngineContext(EngineOptions(worker_count=1))
+var out = run_sql(ctx, "SELECT id, name FROM read_avro('" + dir + "/data.avro') WHERE id > 3 ORDER BY id")
+assert_equal(out.batches[0].num_rows(), 2)
+assert_equal(Int(out.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 4)
+assert_equal(out.batches[0].column_at(1).as_string().get(1), "pad")
+var glob = run_sql(ctx, "SELECT * FROM read_avro('" + dir + "/*.avro')")
+assert_equal(glob.refusal.value().step, "bind")
 ```
 
 **COPY ... TO a local Parquet, CSV or JSON file.** `COPY <table> TO '<path>'`
@@ -410,7 +459,9 @@ together, since the result is returned whole. `run_sql` serves the plans `loweri
 scans of one local file with a header row (decoded whole before the first
 morsel; `header=false` is refused at lowering, because the reader would name
 the columns `col_0`, `col_1`, ... where DuckDB names them `column0`,
-`column1`, ...), the one-row relation a SELECT with no FROM reads (an integer
+`column1`, ...), `read_avro` scans of one local Avro file (decoded whole
+before the first morsel; the column types it refuses are listed under Avro
+files above), the one-row relation a SELECT with no FROM reads (an integer
 literal of the result's SELECT list or of a UNION ALL branch's is INT32 when it fits, as in DuckDB; an
 integer literal anywhere else, `1 + 1` included, is still INT64), filter,
 projection, limit (with or without an offset), aggregation, distinct, sort and

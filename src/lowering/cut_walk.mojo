@@ -6,8 +6,8 @@
 #
 #   source    PLAN_SCAN: opens a pipeline (SOURCE_PARQUET, SOURCE_BATCH for
 #             an in-memory scan, SOURCE_CSV, SOURCE_ICEBERG for an Iceberg
-#             table scan, or SOURCE_JSONL for one JSON Lines file;
-#             `cut_scan`); PLAN_STEP, a user function run once, opens
+#             table scan, SOURCE_JSONL for one JSON Lines file, or
+#             SOURCE_AVRO for one Avro file; `cut_scan`); PLAN_STEP, a user function run once, opens
 #             one whose source is SOURCE_UDF_STEP (`cut_step`);
 #   streaming PLAN_FILTER, PLAN_PROJECT, PLAN_LIMIT, and PLAN_MAP_BATCHES (an
 #             ungrouped frame, OP_UDF_FRAME): appended to the open pipeline's

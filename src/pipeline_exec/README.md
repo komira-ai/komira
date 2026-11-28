@@ -105,6 +105,19 @@ Import each module by name; the package root exports nothing.
   each, a `.jsonl.gz`/`.zst`/`.lz4` (and `.ndjson`, `.json`) file decompressed
   whole. The batches are served as a `BatchSource`; a file of no row is one
   empty batch at the schema. A read that fails names the file.
+- `source_avro`: `build_avro_source` reads the Avro object container file a
+  SOURCE_AVRO spec names. It first checks the writer schema in the file's
+  header: a column that is an enum, a nested record, an array, a map, a union
+  other than `["null", T]`, a duration, a uuid or a nanosecond timestamp is
+  refused, naming the column and the file, with the decoder's token
+  (`AvroDecodeError.UNSUPPORTED_FIELD_KIND`, `UNSUPPORTED_UNION`,
+  `UNSUPPORTED_COLUMN_TYPE`). It then decodes the file with
+  `avro.parallel_driver.read_avro_bytes_parallel` (on the building thread:
+  the builder holds no dispatcher) and serves the columns the spec names, in
+  its order, as a `BatchSource`; a column the file lacks or holds at another
+  type is `AVRO_SOURCE_SCHEMA_MISMATCH`, a spec of no column keeps the row
+  count, and a file of no row is one empty batch at the spec's schema. A read
+  or decode that fails names the file.
 - `op_filter`, `op_project`, `op_limit`: the operators. A filter evaluates its
   predicate and records the rows it keeps as the batch's selection mask instead
   of gathering them; all rows kept leaves no mask, none kept is FILTERED_EMPTY,
@@ -382,7 +395,7 @@ Import each module by name; the package root exports nothing.
   they decided are in `docs/design/lowering_and_pipeline.md` (section 4.3).
 - `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
   serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CSV,
-  SOURCE_ICEBERG, SOURCE_JSONL, SOURCE_CONCAT (a UNION ALL: it takes the output of every producer the spec
+  SOURCE_ICEBERG, SOURCE_JSONL, SOURCE_AVRO, SOURCE_CONCAT (a UNION ALL: it takes the output of every producer the spec
   names, after checking each is a dependency, and concatenates them in the
   spec's order into one batch it serves as a `SinkOutputSource`, with each
   column nullable when any producer's is; a concatenation of no segment is
