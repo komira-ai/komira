@@ -37,14 +37,16 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
   the same columns. `astype` casts through
   komira/_cast.py. `tail` takes the last rows of a sorted frame as a TOPN by
   the reversed keys, sorted back. `komira.concat` is a union of frames of one
-  schema, checked in komira/_verbs.py before it is built.
+  schema, checked in komira/_verbs.py before it is built. `melt` (and
+  `komira.melt`) is a union of one projection per value column
+  (komira/_unpivot.py), its arguments checked in komira/_verbs.py.
 - Row order (section 7): a sort makes a frame ordered; a filter, a projection
   that keeps the sort keys, an `assign`, `fillna`, `astype` or `rename` that
   changes none of them, a `dropna` and `head`
   keep it ordered, the builder placing filters and projections under the sort
   and a limit above it, and a sort above a limit when a verb comes after one.
   `tail` of a sorted frame is sorted. A reduction, `isna`, `notna`,
-  `drop_duplicates`, `concat` and `merge` give an unordered frame, except that
+  `drop_duplicates`, `concat`, `melt` and `merge` give an unordered frame, except that
   `groupby(sort=True)` and `merge(sort=True)` sort by their keys; a semi or
   anti join keeps the order, as a filter does.
 - The write terminals `to_parquet`, `to_csv` and `to_json(orient="records",
@@ -76,7 +78,7 @@ from ._windows import Windows, merged
 if TYPE_CHECKING:
     from .plan.v1 import plan_pb2
 
-__all__ = ["DataFrame", "concat", "read_csv", "read_json", "read_parquet"]
+__all__ = ["DataFrame", "concat", "melt", "read_csv", "read_json", "read_parquet"]
 
 _TERMINAL = "run it with .materialize() and read the Result"
 
@@ -872,6 +874,25 @@ class DataFrame:
             self, right, how, on, left_on, right_on, left_index, right_index, sort, suffixes, indicator, validate
         )
 
+    def melt(
+        self,
+        id_vars: object = None,
+        value_vars: object = None,
+        var_name: str | None = None,
+        value_name: str = "value",
+        col_level: object = None,
+        ignore_index: bool = True,
+    ) -> DataFrame:
+        """The frame from wide to long, as pandas' `melt`: the `id_vars`
+        columns, then `var_name` ("variable" when None) holding a value
+        column's name, then `value_name` holding its value, one block of rows
+        per column of `value_vars` (every column not in `id_vars` when None),
+        missing values kept. The value columns are of one type. The plan is a
+        union of one projection per value column, its inputs in the order of
+        `value_vars`; the answer has no promised row order, so sort it
+        (komira/_verbs.py says what is refused)."""
+        return _verbs.melt_frame(self, id_vars, value_vars, var_name, value_name, col_level, ignore_index)
+
     def copy(self, deep: bool = True) -> DataFrame:
         """An equal frame: the same plan, on the same session. `deep` is
         accepted and changes nothing, since a plan holds no rows."""
@@ -1017,7 +1038,7 @@ class DataFrame:
         )
 
 
-# ---- concat ---------------------------------------------------------------
+# ---- concat and melt -------------------------------------------------------
 
 
 def concat(
@@ -1054,6 +1075,19 @@ def concat(
         sort=sort,
         copy=copy,
     )
+
+
+def melt(
+    frame: DataFrame,
+    id_vars: object = None,
+    value_vars: object = None,
+    var_name: str | None = None,
+    value_name: str = "value",
+    col_level: object = None,
+    ignore_index: bool = True,
+) -> DataFrame:
+    """pandas' `melt(frame, ...)`: the same as `frame.melt(...)`."""
+    return _verbs.melt_frame(frame, id_vars, value_vars, var_name, value_name, col_level, ignore_index)
 
 
 # ---- readers -------------------------------------------------------------

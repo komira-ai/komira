@@ -4,7 +4,7 @@
 array or an Arrow stream raise `UnsupportedOperation` naming `materialize()`.
 No attribute is a column: `df.value` raises `AttributeError` saying to write
 `df["value"]`, and a pandas name komira does not have (`df.loc`, `df.query`,
-`komira.melt`, ...) raises `AttributeError` saying why and what to write
+`komira.crosstab`, ...) raises `AttributeError` saying why and what to write
 instead. `sort_values(inplace=True)`, a stable sort, `head(-n)` and `df[0:5]`
 raise `UnsupportedOperation`.
 

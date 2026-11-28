@@ -1,12 +1,13 @@
 # How do I melt (unpivot) wide data to long?
 
-Stack one `SELECT` per column with `UNION ALL` in SQL, or `komira.concat` one frame per column on the pandas-shaped frame; komira has no `UNPIVOT` or `melt` yet.
+Call `df.melt(id_vars=..., var_name=..., value_name=...)` on the pandas-shaped frame or `lf.unpivot(on, index=..., variable_name=..., value_name=...)` on `komira.pl`, which name the columns once; in SQL, stack one `SELECT` per column with `UNION ALL`, since komira has no `UNPIVOT` yet.
 
 <!-- include example.py -->
 ```python
 from pathlib import Path
 
 import komira
+from komira import pl
 
 Path("scores.csv").write_text(
     "name,q1,q2,q3\n"
@@ -26,14 +27,18 @@ with komira.Session() as s:
     )
     print(long.to_arrow().to_pylist())
 
-# pandas-shaped: one frame per column, stacked with concat.
+# pandas-shaped: melt, every column not in id_vars becoming rows.
 df = komira.read_csv("scores.csv")
-parts = [
-    df.assign(quarter=col, score=df[col])[["name", "quarter", "score"]]
-    for col in ["q1", "q2", "q3"]
-]
-long = komira.concat(parts)
-print(long.dropna(subset=["score"]).sort_values(["name", "quarter"]).materialize().to_arrow().to_pylist())
+long = df.melt(id_vars=["name"], var_name="quarter", value_name="score")
+print(long.sort_values(["name", "quarter"]).materialize().to_arrow().to_pylist())
+
+# polars-shaped: unpivot, the same with polars' names.
+lf = pl.scan_csv("scores.csv")
+long = lf.unpivot(["q1", "q2", "q3"], index="name", variable_name="quarter", value_name="score")
+print(long.sort("name", "quarter").collect().to_arrow().to_pylist())
+
+# Without the missing scores: drop the rows whose score is missing.
+print(long.drop_nulls("score").sort("name", "quarter").collect().to_arrow().to_pylist())
 ```
 
 Output:
@@ -41,15 +46,18 @@ Output:
 <!-- include expected_output.txt -->
 ```text
 [{'name': 'Ana', 'quarter': 'q1', 'score': 10}, {'name': 'Ana', 'quarter': 'q2', 'score': 20}, {'name': 'Ana', 'quarter': 'q3', 'score': 30}, {'name': 'Bo', 'quarter': 'q1', 'score': 5}, {'name': 'Bo', 'quarter': 'q2', 'score': None}, {'name': 'Bo', 'quarter': 'q3', 'score': 7}, {'name': 'Cy', 'quarter': 'q1', 'score': 1}, {'name': 'Cy', 'quarter': 'q2', 'score': 2}, {'name': 'Cy', 'quarter': 'q3', 'score': 3}]
+[{'name': 'Ana', 'quarter': 'q1', 'score': 10}, {'name': 'Ana', 'quarter': 'q2', 'score': 20}, {'name': 'Ana', 'quarter': 'q3', 'score': 30}, {'name': 'Bo', 'quarter': 'q1', 'score': 5}, {'name': 'Bo', 'quarter': 'q2', 'score': None}, {'name': 'Bo', 'quarter': 'q3', 'score': 7}, {'name': 'Cy', 'quarter': 'q1', 'score': 1}, {'name': 'Cy', 'quarter': 'q2', 'score': 2}, {'name': 'Cy', 'quarter': 'q3', 'score': 3}]
+[{'name': 'Ana', 'quarter': 'q1', 'score': 10}, {'name': 'Ana', 'quarter': 'q2', 'score': 20}, {'name': 'Ana', 'quarter': 'q3', 'score': 30}, {'name': 'Bo', 'quarter': 'q1', 'score': 5}, {'name': 'Bo', 'quarter': 'q2', 'score': None}, {'name': 'Bo', 'quarter': 'q3', 'score': 7}, {'name': 'Cy', 'quarter': 'q1', 'score': 1}, {'name': 'Cy', 'quarter': 'q2', 'score': 2}, {'name': 'Cy', 'quarter': 'q3', 'score': 3}]
 [{'name': 'Ana', 'quarter': 'q1', 'score': 10}, {'name': 'Ana', 'quarter': 'q2', 'score': 20}, {'name': 'Ana', 'quarter': 'q3', 'score': 30}, {'name': 'Bo', 'quarter': 'q1', 'score': 5}, {'name': 'Bo', 'quarter': 'q3', 'score': 7}, {'name': 'Cy', 'quarter': 'q1', 'score': 1}, {'name': 'Cy', 'quarter': 'q2', 'score': 2}, {'name': 'Cy', 'quarter': 'q3', 'score': 3}]
 ```
 
 ## Notes
 
-- Each wide column becomes one `SELECT name, '<column>' AS quarter, <column> AS score`; the label is a literal you write, so the column list is spelled out in the query.
-- A missing value stays a row with a NULL score (`Bo`, `q2`). The pandas-shaped form drops those rows with `dropna(subset=["score"])`, which `UNION ALL` leaves to a `WHERE score IS NOT NULL`.
-- komira has no `UNPIVOT` clause and no `melt` that takes the column names, so the column list cannot be given once: komira-ai/komira#2399 (SQL) and komira-ai/komira#2400 (the frames). `probe_unpivot.py` (SQL) and `probe_melt.py` (pandas-shaped) beside this page try those forms and must fail with the lines in `probe_unpivot.error.txt` and `probe_melt.error.txt`. The day one of them runs, this page's check goes red, and the page and the catalogue status change with it.
-- Rows come back in no promised order unless the query sorts them: add `ORDER BY` or `sort_values`.
+- `melt` turns every column not in `id_vars` into rows when `value_vars` is left out; `unpivot` does the same for every column not in `index` when `on` is None. The new columns are named `variable` and `value` unless `var_name` and `value_name` (`variable_name` and `value_name` in `komira.pl`) say otherwise. `komira.melt(df, ...)` is the same as `df.melt(...)`.
+- The melted columns must be of one type: pandas would make an object column of an int and a float, and polars would cast them to a common type, while komira refuses them by name; cast them first with `astype` or `cast`.
+- A missing value stays a row with a missing score (`Bo`, `q2`), as in pandas and polars. Drop those rows with `dropna(subset=["score"])` or `drop_nulls("score")`, or in SQL with `WHERE score IS NOT NULL`.
+- In SQL the label of each column is a literal you write, so the column list is spelled out in the query: komira has no `UNPIVOT` clause yet (komira-ai/komira#2399). `probe_unpivot.py` beside this page tries it and must fail with the line in `probe_unpivot.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
+- Rows come back in no promised order unless the query sorts them: add `ORDER BY`, `sort_values` or `sort`.
 
 ## Related
 

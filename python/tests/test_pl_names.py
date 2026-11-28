@@ -9,6 +9,7 @@ tables of dataframe_surface_verbs.md), with no library and no plan modules:
   `LazyGroupBy`, `ExprDateTimeNameSpace`),
   `hasattr` is False and the `AttributeError` message equals the table's text
   word for word;
+- `unpivot` is a verb of a frame, in no table;
 - a name in no table raises Python's own message, and a name starting with
   `_` a bare `AttributeError` (so `_repr_html_` and other probes find
   nothing);
@@ -76,7 +77,6 @@ FRAME_TABLE = {
     "to_arrow": PLAN,
     "fetch": PLAN,
     "with_column": "with_column() is not a polars verb; use with_columns()",
-    "unpivot": ".unpivot() is not supported yet: the plan has no node for it",
     "explode": ".explode() is not supported yet: the plan has no node for it",
     "cache": RUNS.format("cache"),
     "profile": RUNS.format("profile"),
@@ -144,6 +144,7 @@ def test_frame_refusal_table_and_python_message():
         assert not hasattr(lf, name), name
         refused(lambda: getattr(lf, name), AttributeError, message)
     refused(lambda: lf.pivot, AttributeError, "'LazyFrame' object has no attribute 'pivot'")
+    assert callable(lf.unpivot) and "unpivot" in dir(lf)
     assert not hasattr(lf, "_repr_html_")
     refused(lambda: lf._repr_html_, AttributeError, "_repr_html_")
 

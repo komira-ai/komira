@@ -28,6 +28,7 @@ again. The install test runs this program on the installed wheel.
 - [Missing values](missing_values.md): `fillna`, `dropna`, `isna`, `notna` (newer than 0.1.1623).
 - [Names and types](names_and_types.md): `rename`, `add_prefix`, `add_suffix`, `astype` (newer than 0.1.1623).
 - [tail and concat](tail_and_concat.md) (newer than 0.1.1623).
+- [melt](melt.md): wide columns into long rows (newer than 0.1.1623).
 - [Series](series.md): the operators of a column, with the
   [`.str`](str_accessor.md) and [`.dt`](dt_accessor.md) accessors
   (newer than 0.1.1623).

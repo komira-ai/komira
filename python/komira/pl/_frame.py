@@ -16,7 +16,7 @@ Row order (rules section 7): `sort` makes a frame ordered; `filter`, a
 projection that keeps every sort key, `rename`, `head`, `limit`, `slice` and
 `tail` keep it ordered, and the plan's root stays a sort (a filter or projection goes
 below it, a limit above it; over a limit, the sort is written again on top).
-Every other verb makes the frame unordered. `tail` and `slice` with an offset
+Every other verb makes the frame unordered, `unpivot` too. `tail` and `slice` with an offset
 need an ordered frame.
 
 The sinks, `sink_csv`, `sink_parquet` and `sink_ndjson`, run the plan once with
@@ -537,6 +537,73 @@ class LazyFrame:
         kept = filter_(_window.windowed(base, windows), Compare("eq", ref, Lit(1)))
         return self._with(Project(kept, tuple((c, ColRef(c)) for c in base.columns)), None)
 
+    def unpivot(
+        self,
+        on: str | list[str] | tuple[str, ...] | None = None,
+        *,
+        index: str | list[str] | tuple[str, ...] | None = None,
+        variable_name: str | None = None,
+        value_name: str | None = None,
+    ) -> LazyFrame:
+        """The frame from wide to long, as polars' `unpivot`: the `index`
+        columns, then `variable_name` ("variable" when None) holding a column
+        of `on`'s name, then `value_name` ("value" when None) holding its
+        value, the rows of each column of `on` (every column not in `index`
+        when None), nulls kept. The columns of `on` are of one type (polars
+        would cast them to a supertype). The plan is a union of one projection
+        per column of `on`, in its order (komira/_unpivot.py); the frame is
+        unordered, as polars leaves the row order unspecified.
+
+        Columns are named by str; a selector or an expression is a
+        `TypeError`. Refused by name: a column named twice, or in both `on`
+        and `index`, an `on` of no column (polars gives no rows and a value
+        column of type Null), and an output name used twice (`ValueError`)."""
+        ids = _names_of("unpivot", (index,)) if index is not None else []
+        named = None if on is None else _names_of("unpivot", (on,))
+        for label, names in (("index", ids), ("on", named or [])):
+            require_columns(names, self._plan.columns)
+            twice = sorted({n for n in names if names.count(n) > 1})
+            if twice:
+                raise UnsupportedOperation(
+                    f"unpivot: {label} names the column '{twice[0]}' twice; name each column once"
+                )
+        both = [n for n in named or [] if n in ids]
+        if both:
+            raise UnsupportedOperation(
+                f"unpivot: the column '{both[0]}' is in both on and index; a column is either "
+                "unpivoted or kept beside the values"
+            )
+        values = [c for c in self._plan.columns if c not in ids] if named is None else named
+        if not values:
+            raise UnsupportedOperation(
+                "unpivot: on names no column, and polars would give no rows and a value column of "
+                "type Null, which a komira.pl frame cannot hold; name at least one column"
+            )
+        variable = _out_name("variable_name", variable_name, "variable")
+        value = _out_name("value_name", value_name, "value")
+        out = ids + [variable, value]
+        for name in out:
+            if out.count(name) > 1:
+                raise ValueError(
+                    f"unpivot: the output name '{name}' is given to more than one column; "
+                    "pick another variable_name or value_name"
+                )
+        from komira._unpivot import unpivot_plan
+
+        from ._schema import arrow_type
+
+        plan = unpivot_plan(
+            self._plan,
+            self._wire_fields(),
+            ids,
+            values,
+            variable,
+            value,
+            verb="unpivot",
+            type_text=lambda f: str(arrow_type(f)),
+        )
+        return self._with(plan, None)
+
     def head(self, n: int = 5) -> LazyFrame:
         """The first `n` rows of an ordered frame; of an unordered one, some
         `n` rows (rules section 7)."""
@@ -734,6 +801,14 @@ def _names_of(verb: str, values: tuple) -> list[str]:
                 raise TypeError(f"{verb} takes column names, not {type(name).__name__}")
             out.append(name)
     return out
+
+
+def _out_name(what: str, value: object, default: str) -> str:
+    if value is None:
+        return default
+    if not isinstance(value, str):
+        raise TypeError(f"unpivot: {what} must be a str, not {type(value).__name__}")
+    return value
 
 
 def _per_key(verb: str, what: str, value, count: int) -> list[bool]:

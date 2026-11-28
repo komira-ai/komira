@@ -7,7 +7,8 @@ as Arrow (pyarrow). `Session.add_sql_binding` binds a SQL name to a
 `files` source: Parquet objects of `s3://` or Azure, read with a named
 credential (`AwsKeys`, `AzureKey`, `AzureSas`, ...). The pandas-shaped `DataFrame` reads the same files
 (`read_parquet`, `read_csv`, `read_json`), groups and reduces them
-(`groupby`, `agg`), stacks frames (`concat`), and builds a plan that runs, with no SQL, at
+(`groupby`, `agg`), stacks frames (`concat`), melts wide columns into long
+rows (`melt`), and builds a plan that runs, with no SQL, at
 `materialize()` (docs/design/dataframe_surface.md). The public names
 are exactly `__all__`; every other module is private
 (docs/design/python_package.md). Importing the package does not load the
@@ -38,7 +39,7 @@ from ._errors import (
     UnsupportedCpuError,
     UnsupportedOperation,
 )
-from ._frame import DataFrame, concat, read_csv, read_json, read_parquet
+from ._frame import DataFrame, concat, melt, read_csv, read_json, read_parquet
 from ._groupby import GroupBy
 from ._refusals import MODULE as _MODULE_REFUSALS
 from ._refusals import refused as _refused
@@ -96,6 +97,7 @@ __all__ = [
     "abi_version",
     "concat",
     "files",
+    "melt",
     "read_csv",
     "read_json",
     "read_parquet",
