@@ -318,19 +318,25 @@ The rules that follow from this:
   - The library's default choice is accepted, and the skin returns any one of the tied rows. This is a
     departure from pandas' `keep="first"`, listed for users. polars' default `keep="any"` already
     promises no particular row.
-  - An explicit choice that needs row order is refused: `keep="first"` and `keep="last"` in polars, and
-    `keep="last"` in pandas. So are the choices that need a window first: `keep=False` in
-    `drop_duplicates`, and `keep="all"` in `nlargest`.
-  - The polars skin builds `unique(subset=...)` over fewer than every column with a window: the rows
-    numbered 1 by `ROW_NUMBER` over each value of the subset (`keep="any"`). Its `keep="none"` keeps
-    the rows whose count over their value is 1, a window too. A null is a value of its own, as in
-    polars.
+  - An explicit choice that needs row order is refused: `keep="first"` and `keep="last"` in polars.
+    So is `keep="all"` in `nlargest`, which needs a window first.
+  - pandas `drop_duplicates(subset=...)` and `duplicated(subset)` accept `keep="first"` and
+    `keep="last"`, and both keep any one row of each value: neither is the first or the last row,
+    since the plan has no row order. This is a listed departure from pandas, the same as polars'
+    `keep="any"`. `keep=False` makes no choice: it keeps (or marks) every row of a value that more
+    than one row has, as in pandas.
+  - Both skins build a `subset` of fewer than every column with a window, as no plan node takes a
+    DISTINCT over a column list: the rows numbered 1 by `ROW_NUMBER` over each value of the subset
+    (polars `keep="any"`, pandas `keep="first"` and `"last"`), or the rows whose count over their
+    value is 1 (polars `keep="none"`, pandas `keep=False`), the count reading a column of the
+    literal 1. pandas `duplicated` is that window compared `> 1`, a bool `Series` of the frame. A
+    null is a value of its own, as in both libraries. A key of a type the window sink does not sort
+    is refused when the plan runs (`LOWERING_WINDOW_UNSERVED`).
   - Over whole rows (no `subset`, or one that names every column) no choice is made, since equal rows
     are the same row. So pandas `drop_duplicates()` answers `keep="first"` and `keep="last"` alike
-    with a DISTINCT, and `keep=False` with an AGGREGATE by every column whose `count(*)` is 1. The
-    pandas skin does not build `drop_duplicates(subset=...)` over fewer columns yet: neither the plan
-    encoder nor lowering takes a DISTINCT over a column list, so the verb refuses it, naming
-    `df[subset].drop_duplicates()`.
+    with a DISTINCT, and `keep=False` with an AGGREGATE by every column whose `count(*)` is 1.
+  - pandas `Series.unique()` gives an array of the values, which needs the rows; it is refused by
+    name, naming `df[[column]].drop_duplicates()`.
 - `sort(maintain_order=True)`, `sort_values(kind="stable")` and `unique(maintain_order=True)` are
   refused. No sort in the plan is stable.
 
@@ -581,7 +587,7 @@ package design). D4 to D18 are this design's own.
 | D13 | attributes | `DataFrame.__getattr__` made any unknown name a column; `df.x` was the column `x` | no attribute is a column; `__getattr__` only raises `AttributeError` (section 5) | `hasattr` raised, a column hid behind a verb of its name, and a verb added later would change what an attribute meant |
 | D14 | engine limits | some were checked in Python (NULL placement, `head(0)`) | refused by the engine at the terminal, with its step and code (section 6) | the Python checks went stale when the engine moved |
 | D15 | `len(df)` and `bool(df)` | ran the query | raise `UnsupportedOperation` naming the terminal (section 2) | no dunder runs a query |
-| D16 | ties chosen by row order | `drop_duplicates(subset=...)` was refused | the library's default is accepted and returns any tied row; an explicit order-dependent choice is refused (section 7) | the default asks a question the plan can answer, with a listed departure |
+| D16 | ties chosen by row order | `drop_duplicates(subset=...)` was refused | the library's default is accepted and returns any tied row (pandas `drop_duplicates(subset)` and `duplicated` take `keep="first"` and `"last"` as that default); an explicit order-dependent choice is refused (section 7) | the default asks a question the plan can answer, with a listed departure |
 | D17 | verbs the earlier SDK lacked | absent: `with_columns`/`assign` over the Mojo builder's rules, `rename`, `dropna`/`drop_nulls`, `concat`, `fillna`, `astype`/`cast`, `value_counts`, `nlargest`/`top_k`, `tail`, `merge_asof`/`join_asof`, `from_arrow`, binding a frame by name (`add_sql_binding`) | carried from the Mojo builders where one exists (section 9), with rulings 14 and 15 | the Python skins lacked the verbs the Mojo surface has |
 | D18 | where the matrix tests live | no matrix | `src/tests/e2e/pandas_e2e` and `polars_e2e` (section 10) | the matrix lint's package rule |
 
