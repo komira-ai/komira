@@ -56,4 +56,4 @@ mar.csv -> mar.parquet 1 rows
 - [How do I read a Parquet file?](../15-read-parquet-file/page.md) (rank 15, works)
 - [How do I concatenate (stack) tables with the same columns?](../18-concatenate-tables-same-columns/page.md) (rank 18, works)
 - [How do I read many files matching a pattern into one table?](../19-read-many-files-matching-pattern-table/page.md) (rank 19, partial)
-- [How do I write a table to Parquet?](../27-write-table-parquet/page.md) (rank 27, partial)
+- [How do I write a table to Parquet?](../27-write-table-parquet/page.md) (rank 27, works)

@@ -433,6 +433,7 @@ def test_the_source_scan_reads_every_file_of_komira_pl():
         "_names.py",
         "_schema.py",
         "_scope.py",
+        "_sink.py",
         "_types.py",
         "_window.py",
     ], names
