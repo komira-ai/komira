@@ -15,8 +15,9 @@
 # read twice (and over a union of the reads) and a join with a window on its
 # left side beside a CTE read twice, with NULL keys, tied order keys and the
 # empty string, on one and three workers, each column of its documented type;
-# every case is run, sum, avg, min and max over an INTEGER among them; a DATE
-# partition key, a DECIMAL order key and a float default over a BIGINT lag are
+# every case is run, sum, avg, min and max over an INTEGER among them; a
+# DECIMAL order key, and windows over the groups of a GROUP BY ordered by an
+# aggregate; a DATE partition key and a float default over a BIGINT lag are
 # LOWERING_WINDOW_UNSERVED refusals at step lower.
 #
 # The pinned DuckDB writes the table (tests/window/data.sql: 5000 rows in five
@@ -33,7 +34,8 @@
 # the documented result types give it (ranking functions, count and a sum of a
 # BIGINT INT64, avg, percent_rank, cume_dist and a sum of a DOUBLE FLOAT64,
 # lag, lead, first_value, last_value, nth_value, min and max the argument's
-# type), which the comparison by value alone would not see.
+# type, an integer sum computed by a GROUP BY DECIMAL128), which the
+# comparison by value alone would not see.
 #
 #   test_ranking_functions_equal_duckdb      row_number per INTEGER and per
 #                                            VARCHAR partition (ascending and
@@ -74,13 +76,27 @@
 #                                            one over a union of the reads),
 #                                            and a join whose left side is a
 #                                            window while a CTE is read twice.
+#   test_windows_over_groups_and_decimal_keys_equal_duckdb
+#                                            rank over a DECIMAL(12, 2) order
+#                                            key with NULLs and ties; in a
+#                                            GROUP BY, rank ordered by
+#                                            count(*) DESC with a tie-break,
+#                                            dense_rank ordered by an INTEGER
+#                                            sum written in the OVER clause
+#                                            (a DECIMAL(38, 0) key) beside the
+#                                            same sum selected, rank over the
+#                                            sum computed in a subquery per
+#                                            VARCHAR partition (NULL and the
+#                                            empty string included), rank per
+#                                            BOOLEAN partition ordered by a
+#                                            BIGINT sum, and row_number and
+#                                            count(*) OVER () beside a HAVING.
 #   test_every_case_is_run                   each case of cases.sql belongs to
 #                                            one of the tests above.
 #   test_unserved_windows_are_named_refusals_at_lower
-#                                            a DATE partition key, a DECIMAL
-#                                            order key and a float default over
-#                                            a BIGINT lag are refused at step
-#                                            lower with a
+#                                            a DATE partition key and a float
+#                                            default over a BIGINT lag are
+#                                            refused at step lower with a
 #                                            LOWERING_WINDOW_UNSERVED reason.
 #
 # Every case runs on one worker and on three. Explicit ROWS and RANGE frames
@@ -166,6 +182,10 @@ def _column_type(name: String) -> ArrowType:
     # lag, lead and first_value of a VARCHAR.
     if name == "lt" or name == "ldt" or name == "ft":
         return ArrowType.STRING
+    # The DECIMAL(12, 2) column, and an INTEGER sum computed by a GROUP BY
+    # (DuckDB's HUGEINT is DECIMAL(38, 0) here).
+    if name == "m" or name == "units":
+        return ArrowType.DECIMAL128
     return ArrowType.NULL
 
 
@@ -299,6 +319,17 @@ def _shared() -> List[String]:
     return out^
 
 
+def _grouped() -> List[String]:
+    var out = List[String]()
+    out.append("rank_decimal_m")
+    out.append("group_rank_by_count")
+    out.append("group_rank_by_sum")
+    out.append("subquery_rank_by_sum")
+    out.append("group_partition_rank_by_sum")
+    out.append("group_windows_having")
+    return out^
+
+
 def test_ranking_functions_equal_duckdb() raises:
     _check_all(_ranking())
 
@@ -324,6 +355,10 @@ def test_windows_with_shared_subplans_equal_duckdb() raises:
     _check_all(_shared())
 
 
+def test_windows_over_groups_and_decimal_keys_equal_duckdb() raises:
+    _check_all(_grouped())
+
+
 def test_every_case_is_run() raises:
     var known = _ranking()
     known.extend(_lag_lead())
@@ -332,6 +367,7 @@ def test_every_case_is_run() raises:
     known.extend(_shapes())
     known.extend(_ordered())
     known.extend(_shared())
+    known.extend(_grouped())
     var cases = _cases()
     assert_equal(len(cases), len(known), "cases in cases.sql")
     for i in range(len(cases)):
@@ -363,11 +399,6 @@ def _refusals() -> List[_Refusal]:
         "a DATE partition key",
         "SELECT id, row_number() OVER (PARTITION BY d ORDER BY id) AS rn " + t,
         "the PARTITION BY key 'd' has type date32, which the window's sort does not order",
-    ))
-    out.append(_Refusal(
-        "a DECIMAL order key",
-        "SELECT id, rank() OVER (PARTITION BY g ORDER BY m) AS rk " + t,
-        "the ORDER BY key 'm' has type decimal128, which the window's sort does not order",
     ))
     out.append(_Refusal(
         "a float default over a BIGINT lag",

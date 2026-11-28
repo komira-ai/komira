@@ -791,7 +791,7 @@ The type of every result column is in [the result-type table](query_semantics_ty
 
 - **Rule.** For PARTITION BY (windows and PARTITION_TOPN), NULL equals NULL: all rows whose partition key is NULL form one partition, as in grouping (§2.4). Multi-column keys compare column by column under the same rule, and float keys follow §2.6.
 - **DuckDB.** PARTITION BY groups rows like GROUP BY, NULLs together (DuckDB documentation, "window functions"; the oracle confirms).
-- **Current behaviour.** Served through `run_sql` for INT64, INT32, FLOAT64, BOOL and STRING partition keys; a NULL key is one partition (`test_run_sql_window` compares an INTEGER and a VARCHAR key with NULLs against DuckDB). Another key type (DATE, DECIMAL, timestamps, 8 and 16-bit integers) is refused by name at `lower`.
+- **Current behaviour.** Served through `run_sql` for INT64, INT32, FLOAT64, DECIMAL128, BOOL and STRING partition and order keys; a NULL key is one partition (`test_run_sql_window` compares an INTEGER, a VARCHAR and a BOOLEAN key with NULLs, and a DECIMAL order key, against DuckDB). DECIMAL128 is also the type of an integer `sum()` (§8.2), so a window can order the groups of a GROUP BY by one. Another key type (DATE, timestamps, 8 and 16-bit integers) is refused by name at `lower`.
 - **Mark.** MATCHES.
 
 ### 9.10 FIRST_VALUE, LAST_VALUE and NTH_VALUE over NULLs

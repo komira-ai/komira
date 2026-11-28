@@ -25,7 +25,12 @@ from arrow.primitive_array import PrimitiveArray
 from arrow.arrow_types import ArrowType
 from column_kernels.compiler_helpers import gather_batch_by_sort_indices
 
-from .sort import sort_indices_int32, sort_indices_int64, sort_indices_float64
+from .sort import (
+    sort_indices_float64,
+    sort_indices_int128,
+    sort_indices_int32,
+    sort_indices_int64,
+)
 from .sort_string import sort_indices_string
 from .sort_lex import sort_batch_lex
 from .sort_nested import sort_indices_nested
@@ -73,8 +78,8 @@ def sort_batch_by_keys(
     in O(K * N log N) time, the same order Arrow's `lexsort_to_indices`
     produces.
 
-    Supported key column types: INT32, INT64, FLOAT64, BOOL, DICTIONARY,
-    numeric-dict, STRING/BINARY and the nested types. Raises on unsupported
+    Supported key column types: INT32, INT64, FLOAT64, DECIMAL128, BOOL,
+    DICTIONARY, numeric-dict, STRING/BINARY and the nested types. Raises on unsupported
     types so the error surfaces at the sort site instead of producing silently
     wrong output.
 
@@ -146,6 +151,19 @@ def sort_batch_by_keys(
         elif key_col.arrow_type == ArrowType.INT32:
             var arr = key_col.as_primitive[DType.int32]()
             sort_idx = sort_indices_int32(arr, desc)
+        elif key_col.arrow_type == ArrowType.DECIMAL128:
+            # Every value of one DECIMAL128 column has the column's scale, so
+            # signed int128 order of the unscaled values is decimal order: the
+            # comparator the single-key sort (`sort_topn_sink`) uses. An
+            # integer SUM is DECIMAL(38, 0) (DuckDB's HUGEINT), which is how
+            # a window comes to order by one.
+            var darr = key_col.as_decimal128()
+            var dvals = List[Scalar[DType.int128]](capacity=darr.length)
+            for r in range(darr.length):
+                dvals.append(darr.get_i128(r))
+            sort_idx = sort_indices_int128(
+                PrimitiveArray[DType.int128].from_list(dvals), desc
+            )
         elif key_col.is_numeric_dict():
             # A NUMERIC dict sort key must order by VALUE, not
             # code — the string-dict int32-index shortcut below is sound only

@@ -41,7 +41,9 @@ from sql.sql_bind_window_order import (
     _OK_COLUMN, _OK_OUTPUT, _bind_order, _bind_window_projection,
     _classify_order_keys, _has_window, _order_key_name, _order_output_column,
 )
+from sql.sql_bind_window_group import _bind_grouped_windows
 from sql.sql_catalog import SqlCatalog
+from sql.sql_window_keys import _select_is_grouped
 from sql.sql_parser import parse_sql
 from sql.sql_token import tokenize
 
@@ -137,12 +139,10 @@ def _select(stmt: SelectStmt, cat: SqlCatalog, int32_literals: Bool = False) rai
         order_expr_names,
     )
     if has_window:
-        if has_agg or grouped:
-            raise Error(
-                "SQL not supported: a window function combined with GROUP BY /"
-                " aggregation in the same SELECT"
-            )
-        plan = _bind_window_projection(stmt, schema, scope, plan^, cat, cte, prebound)
+        if _select_is_grouped(stmt):
+            plan = _bind_grouped_windows(stmt, schema, scope, plan^, cat, cte, prebound)
+        else:
+            plan = _bind_window_projection(stmt, schema, scope, plan^, cat, cte, prebound)
     elif has_agg or grouped:
         plan = _bind_aggregate(
             stmt, schema, scope, plan^, cat, cte, prebound, order_names,
@@ -432,7 +432,7 @@ def test_grouped_select_list_refusals() raises:
     )
     _check(
         "SELECT rank() OVER (ORDER BY k) AS r FROM t GROUP BY 1",
-        "ERR: SQL not supported: a window function combined with GROUP BY / aggregation in the same SELECT"
+        "ERR: SQL bind error: GROUP BY clause cannot contain window functions"
     )
     _check(
         "SELECT k FROM t GROUP BY rank() OVER (ORDER BY k)",

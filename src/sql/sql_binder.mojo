@@ -42,7 +42,9 @@ from sql.sql_bind_window_order import (
     _has_window, _bind_window_projection, _order_key_name, _OK_COLUMN, _OK_OUTPUT,
     _classify_order_keys, _order_output_column, _bind_order,
 )
+from sql.sql_bind_window_group import _bind_grouped_windows
 from sql.sql_catalog import SqlCatalog
+from sql.sql_window_keys import _select_is_grouped
 
 
 struct BoundStatement(Movable):
@@ -446,15 +448,13 @@ def _bind_select(
     )
 
     if has_window:
-        # Window functions build PARTITION BY node(s) then a Project. They are
-        # refused beside GROUP BY / aggregation in the same SELECT (a window
-        # over an aggregate needs a two-stage plan this binder does not build).
-        if has_agg or group_present:
-            raise Error(
-                "SQL not supported: a window function combined with GROUP BY /"
-                + " aggregation in the same SELECT"
-            )
-        plan = _bind_window_projection(stmt, schema, scope, plan^, catalog, cte_scope, prebound)
+        # Window functions build PARTITION BY node(s) then a Project. In a
+        # SELECT that aggregates they run over the groups: an aggregate first,
+        # then the windows over its output (`_bind_grouped_windows`).
+        if _select_is_grouped(stmt):
+            plan = _bind_grouped_windows(stmt, schema, scope, plan^, catalog, cte_scope, prebound)
+        else:
+            plan = _bind_window_projection(stmt, schema, scope, plan^, catalog, cte_scope, prebound)
     elif has_agg or group_present:
         # A bare integer literal beside an aggregate (`SELECT 1 AS one,
         # count(*) FROM t`) is INT32 on the same terms as in a projection.

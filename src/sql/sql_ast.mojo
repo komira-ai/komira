@@ -857,6 +857,14 @@ struct SqlWindowData(Copyable, Movable):
     var partition_qual: List[String]  # parallel to `partition_by`
     var order_qual: List[String]  # parallel to `order_by`
     var nulls_first: List[Optional[Bool]]  # parallel to `order_by`
+    # A COMPUTED KEY (`ORDER BY count(*) DESC`) is not a column: its expression
+    # is parked in the enclosing `SelectStmt.window_keys`, and these hold its
+    # index there (-1 for a plain column key), parallel to `partition_by` /
+    # `order_by`. The key's NAME is then the hidden `__window_key_<n>`, its
+    # qualifier "". Indices, not expressions, so the AST stays acyclic
+    # through the window node, as the subquery side-table keeps it acyclic.
+    var partition_key_expr: List[Int]
+    var order_key_expr: List[Int]
 
     def __init__(
         out self,
@@ -878,6 +886,12 @@ struct SqlWindowData(Copyable, Movable):
         self.nulls_first = List[Optional[Bool]]()
         for _ in range(len(order_by)):
             self.nulls_first.append(Optional[Bool](None))
+        self.partition_key_expr = List[Int]()
+        for _ in range(len(partition_by)):
+            self.partition_key_expr.append(-1)
+        self.order_key_expr = List[Int]()
+        for _ in range(len(order_by)):
+            self.order_key_expr.append(-1)
         self.partition_by = partition_by^
         self.order_by = order_by^
         self.descending = descending^
@@ -1478,6 +1492,13 @@ struct SelectStmt(Movable):
     # therefore walked ITERATIVELY from the root's table rather than
     # recursively through each branch — see `_union_all_branch_chain`.
     var union_all_idx: Int
+    # The computed window keys of this SELECT (`rank() OVER (ORDER BY
+    # count(*) DESC)`), indexed by `SqlWindowData.partition_key_expr` /
+    # `order_key_expr`. The parser keeps them only in a SELECT that
+    # aggregates (`sql_window_keys._select_is_grouped`), where the binder
+    # evaluates them with
+    # the groups; anywhere else a computed key is refused at parse.
+    var window_keys: Slab[SqlExpr]
 
     def __init__(out self):
         self.select_items = Slab[SelectItem]()
@@ -1493,6 +1514,8 @@ struct SelectStmt(Movable):
         self.subqueries = Slab[SubqueryDef]()
         self.distinct = False
         self.union_all_idx = -1
+        self.window_keys = Slab[SqlExpr]()
+
 
 
 struct CteDef(Movable):

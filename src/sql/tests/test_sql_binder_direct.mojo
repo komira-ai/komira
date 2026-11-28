@@ -16,7 +16,8 @@
 #   6. A CTE name used twice, a derived-table column list of the wrong length,
 #      a UNION ALL whose branches differ in column count or have no common
 #      type, `SELECT *`
-#      with no FROM, a window beside GROUP BY, a DISTINCT over two items of
+#      with no FROM, a window beside GROUP BY over a column that is not a
+#      group key, a DISTINCT over two items of
 #      one name and OFFSET without LIMIT are each refused by name; a
 #      derived-table column list renames the columns; LIMIT with OFFSET binds
 #      a row window.
@@ -205,9 +206,11 @@ def test_union_all_branches_must_agree() raises:
 
 def test_select_shape_refusals() raises:
     _err_starts("SELECT *", "SQL bind error: * expression without FROM clause")
+    # A window beside GROUP BY runs over the groups, so the column it sums
+    # must be a group key, as a SELECT item must.
     _err_starts(
         "SELECT k, sum(v) OVER (PARTITION BY k) FROM t GROUP BY k",
-        "SQL not supported: a window function combined with GROUP BY",
+        "SQL bind error: SELECT column 'v' must appear in GROUP BY",
     )
     _err_starts(
         "SELECT DISTINCT t.k AS k, u.k AS k FROM t, u",

@@ -41,3 +41,13 @@ COPY (WITH w AS (SELECT id, g, row_number() OVER (PARTITION BY g ORDER BY id) AS
 COPY (WITH c AS (SELECT g, max(v) AS mxv FROM read_parquet('win.parquet') GROUP BY g) SELECT g, mxv, rank() OVER (ORDER BY mxv) AS rk FROM c UNION ALL SELECT g, mxv, dense_rank() OVER (ORDER BY g) AS rk FROM c) TO 'cte_window_over_group.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (WITH c AS (SELECT g, max(v) AS mxv FROM read_parquet('win.parquet') GROUP BY g) SELECT g, mxv, rank() OVER (ORDER BY mxv) AS rk FROM (SELECT g, mxv FROM c UNION ALL SELECT g, mxv FROM c) u) TO 'cte_window_over_union.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (WITH c AS (SELECT g, max(v) AS mxv FROM read_parquet('win.parquet') GROUP BY g) SELECT w.id, w.rn, a.mxv FROM (SELECT id, g, row_number() OVER (PARTITION BY g ORDER BY id) AS rn FROM read_parquet('win.parquet')) w JOIN c a ON w.g = a.g UNION ALL SELECT mxv AS id, mxv AS rn, mxv FROM c) TO 'cte_window_join_shared.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+-- A DECIMAL order key, and windows over the groups of a GROUP BY: ranked by
+-- count(*) and by an integer sum (DuckDB's HUGEINT, a DECIMAL(38, 0) here)
+-- written in the OVER clause, the same sum computed in a subquery, a sum key
+-- beside a BOOLEAN partition key, and windows beside a HAVING.
+COPY (SELECT id, g, m, rank() OVER (PARTITION BY g ORDER BY m) AS rk FROM read_parquet('win.parquet')) TO 'rank_decimal_m.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT g, count(*) AS cnt, rank() OVER (ORDER BY count(*) DESC, g) AS rk FROM read_parquet('win.parquet') GROUP BY g) TO 'group_rank_by_count.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT s, sum(i) AS units, dense_rank() OVER (ORDER BY sum(i) DESC) AS dr FROM read_parquet('win.parquet') GROUP BY s) TO 'group_rank_by_sum.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT s, g, units, rank() OVER (PARTITION BY s ORDER BY units DESC, g) AS rk FROM (SELECT s, g, sum(i) AS units FROM read_parquet('win.parquet') GROUP BY s, g) t) TO 'subquery_rank_by_sum.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT b, g, rank() OVER (PARTITION BY b ORDER BY sum(v) DESC, g) AS rk FROM read_parquet('win.parquet') GROUP BY b, g) TO 'group_partition_rank_by_sum.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT g, count(*) AS cnt, row_number() OVER (ORDER BY g) AS rn, count(*) OVER () AS cnv FROM read_parquet('win.parquet') GROUP BY g HAVING count(*) > 600) TO 'group_windows_having.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

@@ -39,6 +39,7 @@ from .sql_token import (
 )
 from .sql_fn_table import CAST_DESUGAR_NAME as _CAST_DESUGAR_NAME, TRY_CAST_DESUGAR_NAME as _TRY_CAST_DESUGAR_NAME
 from .sql_fn_table import POSITION_IN_DESUGAR_NAME as _POSITION_IN_DESUGAR_NAME
+from .sql_window_keys import _select_is_grouped, _window_key_name
 from .sql_tvf_options import (
     TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO, TVF_ICEBERG,
     hive_partitioning_value, _replacement_scan_kind, _file_stem,
@@ -108,6 +109,12 @@ struct _Parser(Movable):
     # How many nested constructs the parser is inside right now
     # (`sql_nesting`).
     var nesting: Int
+    # The computed window keys of the CURRENT SELECT level, and the refusal
+    # each gets if that SELECT turns out not to aggregate. Saved / reset /
+    # restored by `_parse_select_stmt`, which hands the keys to its
+    # `SelectStmt.window_keys`; see `_parse_window_col`.
+    var window_keys: Slab[SqlExpr]
+    var window_key_refusals: List[String]
 
     def __init__(out self, var tokens: List[Token]):
         self.tokens = tokens^
@@ -115,6 +122,8 @@ struct _Parser(Movable):
         self.subqueries = Slab[SubqueryDef]()
         self.unnamed_derived = 0
         self.nesting = 0
+        self.window_keys = Slab[SqlExpr]()
+        self.window_key_refusals = List[String]()
 
     @always_inline
     def _kind(self) -> UInt8:
@@ -649,6 +658,11 @@ struct _Parser(Movable):
         # SELECT starts its own count and the enclosing one resumes after it.
         var outer_unnamed = self.unnamed_derived
         self.unnamed_derived = 0
+        # Computed window keys belong to the SELECT level they are written in.
+        var outer_keys = Slab[SqlExpr]()
+        swap(outer_keys, self.window_keys)
+        var outer_key_refusals = List[String]()
+        swap(outer_key_refusals, self.window_key_refusals)
         self._expect_kw("select")
         # SELECT DISTINCT ... — a row-level distinct over the SELECT output.
         # `distinct` here is at the top of the SELECT list, DISTINCT from the
@@ -954,6 +968,14 @@ struct _Parser(Movable):
         # missing ')' one level up, in a nested SELECT).
         self._refuse_unsupported_clause()
         self.unnamed_derived = outer_unnamed
+        # A computed window key is served only where the SELECT aggregates
+        # (the window then runs over the groups); elsewhere it is refused here,
+        # once the whole SELECT is known.
+        swap(stmt.window_keys, self.window_keys)
+        if len(stmt.window_keys) > 0 and not _select_is_grouped(stmt):
+            raise Error(self.window_key_refusals[0])
+        swap(self.window_keys, outer_keys)
+        swap(self.window_key_refusals, outer_key_refusals)
         # A nested SELECT body ends at ')' (CTE) or the top-level trailing
         # ';'/EOF — the caller (parse / _parse_with_clause) consumes those.
         return stmt^
@@ -3240,8 +3262,8 @@ struct _Parser(Movable):
         """Parse `OVER ( [PARTITION BY col, ...]
         [ORDER BY col [ASC|DESC] [NULLS FIRST|LAST], ...] [ROWS|RANGE <frame>] )` — the `over` keyword is at the current position.
         Returns the fully-populated `SqlWindowData` (function + arg + keys + frame).
-        Partition / order operands are column names only (the corpus never orders a
-        window by an expression)."""
+        A partition / order operand is a column name, or a computed key that
+        `_parse_window_col` parks in `window_keys`."""
         self._expect_kw("over")
         # ⛔ A NAMED WINDOW IS USED BEFORE IT IS DEFINED, so the `WINDOW`
         # clause refusal in `_refuse_unserved_clause_word` cannot see the
@@ -3270,13 +3292,17 @@ struct _Parser(Movable):
         var pqual = List[String]()
         var oqual = List[String]()
         var nfirst = List[Optional[Bool]]()
+        var pexpr = List[Int]()
+        var oexpr = List[Int]()
         if self._is_kw("partition"):
             self._advance()
             self._expect_kw("by")
             while True:
                 var pq = String("")
-                pby.append(self._parse_window_col(String("PARTITION BY"), pq))
+                var pe = -1
+                pby.append(self._parse_window_col(String("PARTITION BY"), pq, pe))
                 pqual.append(pq^)
+                pexpr.append(pe)
                 if self._kind() == TK_COMMA:
                     self._advance()
                     continue
@@ -3286,8 +3312,10 @@ struct _Parser(Movable):
             self._expect_kw("by")
             while True:
                 var oq = String("")
-                var c = self._parse_window_col(String("ORDER BY"), oq)
+                var oe = -1
+                var c = self._parse_window_col(String("ORDER BY"), oq, oe)
                 oqual.append(oq^)
+                oexpr.append(oe)
                 var d = False
                 if self._is_kw("asc"):
                     self._advance()
@@ -3319,6 +3347,8 @@ struct _Parser(Movable):
         w.partition_qual = pqual^
         w.order_qual = oqual^
         w.nulls_first = nfirst^
+        w.partition_key_expr = pexpr^
+        w.order_key_expr = oexpr^
         if self._is_kw("rows") or self._is_kw("range"):
             self._parse_frame(w)
         self._expect(TK_RPAREN, "')' to close the OVER clause")
@@ -3339,34 +3369,34 @@ struct _Parser(Movable):
             " inline in each OVER (...), e.g. `OVER (PARTITION BY k ORDER BY t)`."
         )
 
-    def _parse_window_col(mut self, clause: String, mut qual: String) raises -> String:
-        """Parse a column reference `ident [. ident]` inside an OVER clause and
-        return its (last-component) name; its qualifier goes to `qual` ("" when
-        none was written). ⛔ Dropping the qualifier here would make
-        `PARTITION BY Q.k`, over a join whose sides share a column name, read
-        the LEFT `k` — a silent wrong answer (see `SqlWindowData.partition_qual`). `clause`
-        is "PARTITION BY" or "ORDER BY", and exists ONLY so the refusal below can
-        name the clause the reader actually wrote.
+    def _parse_window_col(
+        mut self, clause: String, mut qual: String, mut key_expr: Int
+    ) raises -> String:
+        """Parse one key inside an OVER clause: a column reference `ident [.
+        ident]`, whose (last-component) name is returned with its qualifier in
+        `qual` ("" when none was written), or a computed key that starts as a
+        call, `count(*)` or `sum(q) / count(*)`. ⛔ Dropping the qualifier here
+        would make `PARTITION BY Q.k`, over a join whose sides share a column
+        name, read the LEFT `k` — a silent wrong answer (see
+        `SqlWindowData.partition_qual`). `clause` is "PARTITION BY" or "ORDER
+        BY", and exists ONLY so the refusal below can name the clause the
+        reader actually wrote.
 
-        ⛔⛔ THE `(` CHECK IS A SEMANTIC REFUSAL, NOT A TOKEN EXPECTATION, AND
-        THAT IS THE WHOLE POINT. Without it `OVER (PARTITION BY affine(g))` would
-        consume `affine` as the key, find `(` where it wants `,`/ORDER/ROWS/`)`,
-        and die in `_parse_over_clause` with "SQL syntax error: expected ')' to
-        close the OVER clause" — a message about PARENTHESES for a query whose
-        parentheses are perfectly balanced. `OVER (PARTITION BY g)` parses and
-        answers, so the reader would be sent hunting a typo that does not
-        exist.
-
-        ⚠ IT IS RAISED HERE, IN THE PARSER, BECAUSE NOTHING DOWNSTREAM CAN SEE
-        IT. `SqlWindowData` carries partition / order keys as plain `String`
-        column names and holds no `SqlExpr` at all — deliberately, so the AST
-        stays acyclic through SX_WINDOW — so a computed key has no representation
-        to hand the binder. Giving one is a CAPABILITY change; this is only the
-        message. A `(` after an identifier is unambiguous here: the token after a
-        window key is always `,`, ORDER, ROWS, RANGE or `)`.
+        A COMPUTED KEY is recognised by the `(` after its first identifier (the
+        token after a column key is always `,`, ORDER, ROWS, RANGE, ASC, DESC,
+        NULLS or `)`). It is parsed from that identifier as a whole expression
+        and appended to `window_keys`; `key_expr` gets its index there, `qual`
+        is "", and the name returned is its hidden `_window_key_name`. The
+        window holds only that index, so the AST stays acyclic through
+        SX_WINDOW. The key is served where the SELECT aggregates; elsewhere
+        `_parse_select_stmt` raises the refusal recorded here, which names the
+        clause and the call. Without that refusal `OVER (PARTITION BY
+        affine(g))` would die in `_parse_over_clause` with "expected ')' to
+        close the OVER clause", a message about parentheses that are balanced.
         """
         if self._kind() != TK_IDENT:
             raise Error("SQL syntax error: expected a column name in the OVER clause")
+        var start = self.pos
         var nm = String(self.tokens[self.pos].text)
         self._advance()
         if self._kind() == TK_DOT:
@@ -3377,11 +3407,17 @@ struct _Parser(Movable):
             nm = String(self.tokens[self.pos].text)
             self._advance()
         if self._kind() == TK_LPAREN:
-            raise Error(
+            self.window_key_refusals.append(
                 "SQL not supported: a window " + clause + " key must be a plain"
                 + " column reference (e.g. `OVER (" + clause + " g)`) — `" + nm
                 + "(...)` computes the key, which this engine cannot lower yet"
             )
+            self.pos = start
+            var e = self._parse_expr()
+            key_expr = len(self.window_keys)
+            self.window_keys.append(e^)
+            qual = String("")
+            return _window_key_name(key_expr)
         return nm
 
     def _parse_frame(mut self, mut w: SqlWindowData) raises:
