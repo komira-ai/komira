@@ -17,13 +17,14 @@ from plan_expr.scalar_desugar import (
 from plan_expr.scalar_value import ScalarValue
 from plan_expr.temporal_delta import date_diff_of, date_sub_of
 from sql.sql_ast import (
-    SX_DATE, SX_STRING, SqlExpr,
+    SX_DATE, SX_INTERVAL, SX_STRING, SqlExpr,
 )
 from sql.sql_bind_cast import _bound_expr_is_string
 from sql.sql_bind_expr import (
     _bound_expr_is_float, _promote_int_literal_to_float, _bind_scalar,
 )
 from sql.sql_bind_fn_args import _date_diff_days
+from sql.sql_bind_interval import bind_date_shift
 from sql.sql_bind_scope import (
     CteScope, _date_to_days, BindScope,
 )
@@ -388,6 +389,28 @@ def _bind_date_diff(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlC
         # Both operands constant -> one INT64 literal, folded at bind time.
         return Expr.literal(ScalarValue.from_int64(_date_diff_days(sx)))
     return _bind_date_delta(sx, String("date_diff"), unit, schema, scope, catalog, cte_scope, prebound)
+
+
+def _bind_date_add(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:
+    """`date_add(date, INTERVAL '<n>' <unit>)`: the same lowering as
+    `date + INTERVAL '<n>' <unit>` (`bind_date_shift`). The second argument is
+    read as the INTERVAL literal it is and never bound as a value; anything
+    else there (DuckDB also takes an integer day count) is refused by name."""
+    ref args = sx._call.value().args
+    if len(args) != 2:
+        raise Error(
+            "SQL bind error: date_add expects 2 arguments (date, INTERVAL"
+            " '<n>' <unit>)"
+        )
+    if args[1].tag != SX_INTERVAL:
+        raise Error(
+            "SQL not supported: date_add(date, x) needs its second argument"
+            " to be an INTERVAL literal, `INTERVAL '<n>' <unit>`; a number of"
+            " days or any other expression is not served (write `date + n`"
+            " for a day count)"
+        )
+    var date = _bind_scalar(args[0], schema, scope, catalog, cte_scope, prebound)
+    return bind_date_shift(args[1], False, date^, schema)
 
 
 def _bind_date_sub(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:

@@ -61,6 +61,7 @@ from dispatch_project.compute_project_routes import (
     _expr_has_domain_checked_math,
     _expr_is_strict_null_propagating,
     _is_cast_output,
+    _is_date_add_output,
     _is_extract_output,
     _is_nested_extract_output,
     _is_null_test_output,
@@ -299,6 +300,10 @@ def test_nested_and_temporal_extract_outputs() raises:
     assert_true(_is_extract_output(Expr.year(_c("k"))))
     assert_true(_is_extract_output(_a(Expr.year(_c("k")))))
     assert_false(_is_extract_output(_c("k")))
+    assert_true(_is_date_add_output(Expr.date_add(0, 7, _c("k"))))
+    assert_true(_is_date_add_output(_a(Expr.date_add(1, 0, _c("k")))))
+    assert_false(_is_date_add_output(_c("k")))
+    assert_false(_is_date_add_output(_a(_c("k"))))
 
 
 # =============================================================================
@@ -428,6 +433,7 @@ def test_every_output_predicate_matches_under_two_aliases() raises:
     assert_true(_is_num_typepres_output(_a(_a(Expr.unary(UN_ABS, _c("k"))))))
     assert_true(_is_nested_extract_output(_a(_a(Expr.map_get(_c("s"), _li(1))))))
     assert_true(_is_extract_output(_a(_a(Expr.year(_c("k"))))))
+    assert_true(_is_date_add_output(_a(_a(Expr.date_add(0, 7, _c("k"))))))
     # Two aliases over a node outside each family still do not match.
     assert_false(Bool(_when_expr_ref(_a(_a(_c("k"))))))
     assert_false(is_literal_output_expr(_a(_a(_c("k")))))

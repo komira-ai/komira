@@ -330,6 +330,35 @@ def test_a_case_under_two_aliases_keeps_its_null() raises:
     assert_true(one.column_as_primitive_int64(0).is_null(2))
 
 
+def test_a_date_add_output_is_a_date32_column_from_the_column_evaluator() raises:
+    """`dt + 7` and `dt + INTERVAL '1' MONTH`-style shifts are DATE32 outputs
+    no walker family produces. Day 31 (1970-02-01) plus 7 days is 38, plus one
+    month is 59 (1970-03-01); a declared type other than DATE32 declines."""
+    var out = _served(Expr.date_add(0, 7, _c("dt")), ArrowType.DATE32)
+    var col = out.column_as_primitive_int32(0)
+    assert_equal(Int(col.get(0)), 7)
+    assert_equal(Int(col.get(1)), 38)
+    assert_equal(Int(col.get(3)), 9211)
+    out = _served(_a(Expr.date_add(1, 0, _c("dt"))), ArrowType.DATE32)
+    assert_equal(Int(out.column_as_primitive_int32(0).get(1)), 59)
+    out = _served(_a2(Expr.date_add(0, -1, _c("dt"))), ArrowType.DATE32)
+    assert_equal(Int(out.column_as_primitive_int32(0).get(0)), -1)
+    _declined(Expr.date_add(0, 7, _c("dt")), ArrowType.INT32)
+
+
+def test_a_cast_of_date_add_to_timestamp_us_is_served_at_midnight() raises:
+    """`CAST(dt + 1 day AS TIMESTAMP)` takes the cast route and conforms to a
+    declared TIMESTAMP_US: day 31 plus one is day 32 at midnight."""
+    var e = Expr.cast_to_arrow(Expr.date_add(0, 1, _c("dt")), ArrowType.TIMESTAMP_US)
+    var out = _served(e^, ArrowType.TIMESTAMP_US)
+    var col = out.column_as_primitive_int64(0)
+    assert_equal(Int(col.get(1)), 32 * 86_400_000_000)
+    assert_equal(Int(col.get(3)), 9205 * 86_400_000_000)
+    var aliased = _a(Expr.cast_to_arrow(Expr.date_add(0, 1, _c("dt")), ArrowType.TIMESTAMP_US))
+    out = _served(aliased^, ArrowType.TIMESTAMP_US)
+    assert_equal(Int(out.column_as_primitive_int64(0).get(0)), 86_400_000_000)
+
+
 def test_every_column_arm_serves_its_output_under_two_aliases() raises:
     """Each family the walkers cannot build, under two aliases, is served
     with the value it has at the top. Mutant (red): any one of the

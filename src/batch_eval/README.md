@@ -95,7 +95,7 @@ onto the batch first, and a call whose column is missing is refused by name.
 | --- | --- |
 | `evaluate` | the public entry points |
 | `eval_column` | `_eval_column_expr`, the projection ladder over the `EXPR_*` tags |
-| `project_access`, `project_ops`, `project_cast`, `project_string`, `project_string_n` | its large arms |
+| `project_access`, `project_ops`, `project_cast`, `project_date_add`, `project_string`, `project_string_n` | its large arms |
 | `column_compare`, `column_arith`, `column_decimal` | comparison under numeric promotion, column-scalar arithmetic, DECIMAL128 and temporal typing and casts |
 | `string_metrics`, `string_bytes` | byte-level string measures and transforms |
 | `eval_predicate` | `_eval_predicate`, the predicate ladder |

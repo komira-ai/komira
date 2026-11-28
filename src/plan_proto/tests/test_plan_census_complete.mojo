@@ -94,6 +94,7 @@ from plan_proto.plan import (
     WireCseRefNode,
     WireDistinctNode,
     WireExpr,
+    WireDateAdd,
     WireExtract,
     WireField,
     WireFilterNode,
@@ -422,6 +423,8 @@ def _fields_of(message: String) raises -> _Shape:
         return _vocabulary[WireWhen]()
     elif message == "WireAggFn":
         return _vocabulary[WireAggFn]()
+    elif message == "WireDateAdd":
+        return _vocabulary[WireDateAdd]()
     elif message == "WireExtract":
         return _vocabulary[WireExtract]()
     elif message == "WireMathFn":

@@ -227,9 +227,9 @@ def _bind_corr_scalar(
     if sx.tag == SX_BINARY:
         var ivl_side = interval_operand_side(sx)
         if ivl_side == 2:
-            return interval_date_fold(sx, _bind_corr_scalar(sx._binary.value().left[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound))
+            return interval_date_fold(sx, _bind_corr_scalar(sx._binary.value().left[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound), inner_schema)
         if ivl_side == 1:
-            return interval_date_fold(sx, _bind_corr_scalar(sx._binary.value().right[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound))
+            return interval_date_fold(sx, _bind_corr_scalar(sx._binary.value().right[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound), inner_schema)
         if _is_null_comparison(sx):
             if sx._binary.value().left[].tag != SX_NULL:
                 return _null_comparison(sx.op, _bind_corr_scalar(sx._binary.value().left[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound))

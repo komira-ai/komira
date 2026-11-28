@@ -93,6 +93,7 @@ from plan_expr.expr import (
     EXPR_COL_IDX,
     EXPR_COL_REF,
     EXPR_CORRELATED_SUBQUERY,
+    EXPR_DATE_ADD,
     EXPR_EXTRACT,
     EXPR_IN_LIST,
     EXPR_JSON_EXTRACT,
@@ -250,6 +251,10 @@ def expr_carries_correlated_subquery(expr: Expr) raises -> Bool:
         if not expr._extract:
             return False
         return expr_carries_correlated_subquery(expr.extract_child_ref())
+    if tag == EXPR_DATE_ADD:
+        if not expr._date_add:
+            return False
+        return expr_carries_correlated_subquery(expr.date_add_child_ref())
     if tag == EXPR_MATH_FN:
         if not expr._math_fn:
             return False

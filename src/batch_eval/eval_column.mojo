@@ -32,6 +32,7 @@ from plan_expr.expr import (
     EXPR_BINARY_OP,
     EXPR_CAST,
     EXPR_COL_REF,
+    EXPR_DATE_ADD,
     EXPR_EXTRACT,
     EXPR_IN_LIST,
     EXPR_JSON_EXTRACT,
@@ -64,6 +65,7 @@ from .project_access import (
     _project_struct_field_idx,
 )
 from .project_cast import _project_cast
+from .project_date_add import _project_date_add
 from .project_ops import _project_binary_op, _project_unary_op
 from .project_string import (
     _project_regexp,
@@ -97,7 +99,7 @@ def _eval_column_expr(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegio
     next one cannot arrive unmeasured.
 
     # DERIVED FACTS — re-derive with the gate, never hand-count.
-    # arms: 22
+    # arms: 23
     # unwalked: EXPR_BETWEEN EXPR_COL_IDX EXPR_CORRELATED_SUBQUERY EXPR_SORT_KEY EXPR_WINDOW_FN
 
     `EXPR_COL_IDX` is handled inside the EXPR_COL_REF arm via
@@ -130,6 +132,9 @@ def _eval_column_expr(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegio
 
     elif expr.tag == EXPR_EXTRACT:
         return _project_extract(expr, batch)
+
+    elif expr.tag == EXPR_DATE_ADD:
+        return _project_date_add(expr, batch)
 
     elif expr.tag == EXPR_MATH_FN:
         # unary scalar math

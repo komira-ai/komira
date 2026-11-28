@@ -24,6 +24,7 @@ mojo_library(
         "tests/test_plan_wire_agg_args.mojo",
         "tests/test_plan_wire_codec_encode_refusals.mojo",
         "tests/test_plan_wire_codec_tampered_wire.mojo",
+        "tests/test_plan_wire_date_add.mojo",
         "tests/test_plan_wire_expr_goldens.mojo",
         "tests/test_plan_wire_expr_goldens_fns.mojo",
         "tests/test_plan_wire_golden_bytes.mojo",
@@ -53,6 +54,10 @@ mojo_library(
         "tests/test_plan_wire_agg_args.mojo": [
             "tests/fixtures/golden/aggregate_every_fn.hex",
             "tests/fixtures/golden/aggregate_every_fn.canonical.hex",
+        ],
+        "tests/test_plan_wire_date_add.mojo": [
+            "tests/fixtures/golden/date_add.hex",
+            "tests/fixtures/golden/date_add.canonical.hex",
         ],
         "tests/test_plan_wire_expr_goldens.mojo": glob(["tests/fixtures/golden/expr_*.hex"]),
         "tests/test_plan_wire_expr_goldens_fns.mojo": glob(["tests/fixtures/golden/expr_*.hex"]),
@@ -111,7 +116,8 @@ _PLAN_PROTO = ["//src/plan_proto:plan_proto_gen"]
 # tests/test_plan_wire_expr_goldens_fns.mojo; the `rel_*` goldens (plans of
 # every relational node the Python plan encoder writes, which python/tests holds
 # that encoder's bytes to) by tests/test_plan_wire_rel_goldens.mojo and
-# tests/test_plan_wire_rel_goldens_join.mojo; the `udf_*` goldens (plans that
+# tests/test_plan_wire_rel_goldens_join.mojo; the `date_add` golden (a plan of
+# date_add expressions) by tests/test_plan_wire_date_add.mojo; the `udf_*` goldens (plans that
 # call user functions, which python/tests holds the Python plan encoder's bytes
 # to) by tests/test_plan_wire_udf_goldens.mojo; every other golden by
 # tests/test_plan_wire_golden_bytes.mojo.
@@ -120,6 +126,7 @@ _GOLDEN = [
     "aggregate_every_fn",
     "asof_join",
     "correlated_subquery",
+    "date_add",
     "distinct",
     "expr_cast_when",
     "expr_literals",

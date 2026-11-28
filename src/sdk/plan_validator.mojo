@@ -39,6 +39,7 @@ from plan_expr.expr import (
     EXPR_STRUCT_FIELD_IDX,
     EXPR_MAP_GET,
     EXPR_JSON_EXTRACT,
+    EXPR_DATE_ADD,
     EXPR_EXTRACT,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
@@ -906,6 +907,10 @@ def _validate_expr_columns(
 
     elif expr.tag == EXPR_EXTRACT:
         _validate_expr_columns(expr.extract_child_ref(), schema, context, report)
+
+    elif expr.tag == EXPR_DATE_ADD:
+        # months / days are plan constants; only the child carries references.
+        _validate_expr_columns(expr.date_add_child_ref(), schema, context, report)
 
     elif expr.tag == EXPR_MATH_FN:
         _validate_expr_columns(expr.math_fn_child_ref(), schema, context, report)

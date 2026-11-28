@@ -25,7 +25,7 @@ from sql.sql_bind_fn_args import (
 )
 from sql.sql_bind_fn_nested import (
     _bind_json_extract, _bind_struct_extract, _bind_map_get, _bind_date_diff,
-    _bind_date_sub, _bind_even, _bind_fdiv_fmod, _bind_nullif, _bind_days_in_month,
+    _bind_date_add, _bind_date_sub, _bind_even, _bind_fdiv_fmod, _bind_nullif, _bind_days_in_month,
 )
 from sql.sql_bind_ops import _bind_sql_division
 from sql.sql_bind_scope import (
@@ -35,7 +35,7 @@ from sql.sql_bind_timestamp import _bind_make_timestamp_epoch
 from sql.sql_catalog import SqlCatalog
 from sql.sql_fn_table import (
     CONST_FALSE, CONST_INT_ZERO, CONST_TRUE, CONST_USER, DSG_CAST, DSG_CENTURY,
-    DSG_COALESCE, DSG_DATE_DIFF, DSG_DATE_PART, DSG_DATE_SUB, DSG_DATE_TRUNC,
+    DSG_COALESCE, DSG_DATE_ADD, DSG_DATE_DIFF, DSG_DATE_PART, DSG_DATE_SUB, DSG_DATE_TRUNC,
     DSG_DAYS_IN_MONTH, DSG_DECADE, DSG_ERA, DSG_EVEN, DSG_FDIV, DSG_FMOD, DSG_GREATEST,
     DSG_IFNULL, DSG_ISFINITE, DSG_ISINF, DSG_ISNAN, DSG_JSON_EXTRACT,
     DSG_JSON_EXTRACT_TEXT, DSG_LEAST, DSG_LEFT, DSG_MAKE_TS_MS, DSG_MAKE_TS_NS,
@@ -329,6 +329,10 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
         # unit 'day' fold to an INT64 at bind time; anything else is lowered
         # by plan_expr.temporal_delta over two DATEs or two TIMESTAMPs.
         return _bind_date_diff(sx, schema, scope, catalog, cte_scope, prebound)
+    if dsg_op == DSG_DATE_ADD:
+        # `date_add(date, INTERVAL '<n>' <unit>)`: the interval argument is a
+        # literal read by the lowering itself, never bound as a value.
+        return _bind_date_add(sx, schema, scope, catalog, cte_scope, prebound)
     if dsg_op == DSG_COALESCE or dsg_op == DSG_IFNULL:
         return _bind_coalesce(sx, dsg_op, schema, scope, catalog, cte_scope, prebound)
     if dsg_op == DSG_GREATEST or dsg_op == DSG_LEAST:

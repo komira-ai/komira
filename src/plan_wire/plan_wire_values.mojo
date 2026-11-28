@@ -233,6 +233,7 @@ from plan_expr.expr import (
     EXPR_MAP_GET,
     EXPR_JSON_EXTRACT,
     EXPR_EXTRACT,
+    EXPR_DATE_ADD,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
     EXPR_SUBSTRING,
@@ -2207,6 +2208,11 @@ def _check_expr(
     elif expr.tag == EXPR_EXTRACT:
         _check_expr(
             expr.extract_child_ref(), schema, left, right, sided_scope,
+            where, _child_pos(pos, expr, False),
+        )
+    elif expr.tag == EXPR_DATE_ADD:
+        _check_expr(
+            expr.date_add_child_ref(), schema, left, right, sided_scope,
             where, _child_pos(pos, expr, False),
         )
     elif expr.tag == EXPR_MATH_FN:

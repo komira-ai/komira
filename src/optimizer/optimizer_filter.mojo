@@ -27,6 +27,7 @@ from plan_expr.expr import (
     EXPR_STRING_OP,
     EXPR_REGEXP,
     EXPR_STRING_FN,
+    EXPR_DATE_ADD,
     EXPR_STRING_FN_N,
     EXPR_UDF_CALL,
     BIN_AND,
@@ -719,6 +720,11 @@ def _predicate_refs_in_schema(expr: Expr, schema: Schema) -> Bool:
         # A `STRFN_*` node carries its column refs ONLY in the child; the op is
         # a plan-literal.
         return _predicate_refs_in_schema(expr.string_fn_child_ref(), schema)
+
+    elif expr.tag == EXPR_DATE_ADD:
+        # `WHERE d + INTERVAL 1 DAY > ts` references only the child column;
+        # the months / days are plan constants.
+        return _predicate_refs_in_schema(expr.date_add_child_ref(), schema)
 
     elif expr.tag == EXPR_STRING_FN_N:
         # Added on 2026-09-03. ⚠ THE FOLD IS `and` OVER EVERY

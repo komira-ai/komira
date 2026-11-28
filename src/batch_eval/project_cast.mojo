@@ -26,6 +26,7 @@ from kernels.cast_to_varchar_kernels import (
     cast_string_to_int32,
     cast_string_to_int64,
 )
+from kernels.date_add import date32_to_timestamp_us
 from plan_expr.expr import Expr
 
 from .cast_bool import _cast_from_bool, _cast_to_bool, _is_bool_cast_numeric
@@ -291,6 +292,16 @@ def _project_cast(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion]:
     # `target_arrow` (the Arrow logical type carrier). Same SIMD shape as the forward
     # direction (relabel) + an `eval_mul_scalar` / `eval_div_scalar`
     # for the unit conversion.
+    elif src_at == ArrowType.DATE32 and target_arrow == ArrowType.TIMESTAMP_US:
+        # DATE32 -> TIMESTAMP_US: midnight of each day, in microseconds. It
+        # sits above the DATE32 -> INT64 arm because `cast_to_arrow` gives a
+        # timestamp target the physical INT64 dtype, which that arm would
+        # otherwise take and answer a bare INT64 widening. A day count whose
+        # microseconds do not fit Int64 raises; NULL stays NULL.
+        var us = date32_to_timestamp_us(child_col.as_primitive[DType.int32]())
+        var us_col = Column.from_primitive[DType.int64](us^)
+        us_col.arrow_type = ArrowType.TIMESTAMP_US
+        return us_col^
     elif src_at == ArrowType.DATE32 and target == DType.int32:
         # forward: DATE32 -> INT32 (relabel only)
         var c = child_col^

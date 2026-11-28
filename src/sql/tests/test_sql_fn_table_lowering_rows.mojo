@@ -2,7 +2,7 @@
 # Row pins: every LOWERING row of sql_scalar_fn_spec, one call per spelling
 # =============================================================================
 #
-# What it proves: each of the 191 spellings on the table's 160 lowering rows
+# What it proves: each of the 192 spellings on the table's 161 lowering rows
 # (every kind except FNK_REFUSED) resolves to its row's kind, op and
 # inclusive arity, claims the name (`lowers_to_a_node` True) and carries no
 # reason. Every alias of a row is called, so every `name == ...` operand of
@@ -120,6 +120,7 @@ from sql.sql_fn_table import (
     DSG_CAST,
     DSG_CENTURY,
     DSG_COALESCE,
+    DSG_DATE_ADD,
     DSG_DATE_DIFF,
     DSG_DATE_PART,
     DSG_DATE_SUB,
@@ -332,6 +333,7 @@ def test_lowering_rows_3() raises:
     _lowers("yearweek", FNK_EXTRACT_FIELD, EXTRACT_YEARWEEK, 1, 1)
     _lowers("millisecond", FNK_EXTRACT_FIELD, EXTRACT_MILLISECOND, 1, 1)
     _lowers("microsecond", FNK_EXTRACT_FIELD, EXTRACT_MICROSECOND, 1, 1)
+    _lowers("date_add", FNK_DESUGAR, DSG_DATE_ADD, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     _lowers("date_diff", FNK_DESUGAR, DSG_DATE_DIFF, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     _lowers("datediff", FNK_DESUGAR, DSG_DATE_DIFF, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     _lowers("coalesce", FNK_DESUGAR, DSG_COALESCE, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)

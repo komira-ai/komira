@@ -26,7 +26,7 @@ from sql.sql_bind_interval import (
     INTERVAL_STANDALONE_REFUSAL, interval_date_fold, interval_operand_side,
 )
 from sql.sql_ast import (
-    SXAGG_COUNT, SXLIKE_ILIKE, SXOP_DIV, SXOP_IDIV, SXOP_MOD, SXUN_NEGATE, SX_AGG,
+    SXAGG_COUNT, SXLIKE_ILIKE, SXOP_ADD, SXOP_DIV, SXOP_IDIV, SXOP_MOD, SXOP_SUB, SXUN_NEGATE, SX_AGG,
     SX_BINARY, SX_INTERVAL, SX_BOOL, SX_CALL, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT, SX_LIKE, SX_NULL,
     SX_STAR, SX_STRING, SX_SUBQUERY, SX_TIMESTAMP, SX_UNARY, SqlExpr, TSLIT_AWARE,
     sql_call_is_aggregate,
@@ -588,9 +588,9 @@ def _extract_and_bind_post_agg(
     if sx.tag == SX_BINARY:
         var ivl_side = interval_operand_side(sx)
         if ivl_side == 2:
-            return interval_date_fold(sx, _extract_and_bind_post_agg(sx._binary.value().left[], input_schema, scope, group_names, agg_out_names, agg_exprs, agg_counter, catalog, cte_scope, prebound))
+            return interval_date_fold(sx, _extract_and_bind_post_agg(sx._binary.value().left[], input_schema, scope, group_names, agg_out_names, agg_exprs, agg_counter, catalog, cte_scope, prebound), _post_agg_typing_schema(input_schema, agg_exprs))
         if ivl_side == 1:
-            return interval_date_fold(sx, _extract_and_bind_post_agg(sx._binary.value().right[], input_schema, scope, group_names, agg_out_names, agg_exprs, agg_counter, catalog, cte_scope, prebound))
+            return interval_date_fold(sx, _extract_and_bind_post_agg(sx._binary.value().right[], input_schema, scope, group_names, agg_out_names, agg_exprs, agg_counter, catalog, cte_scope, prebound), _post_agg_typing_schema(input_schema, agg_exprs))
         if _is_null_comparison(sx):
             if sx._binary.value().left[].tag != SX_NULL:
                 return _null_comparison(sx.op, _extract_and_bind_post_agg(
@@ -615,10 +615,11 @@ def _extract_and_bind_post_agg(
         var rhs = _extract_and_bind_post_agg(
             sx._binary.value().right[], input_schema, scope, group_names, agg_out_names, agg_exprs, agg_counter, catalog, cte_scope, prebound
         )
-        if sx.op == SXOP_DIV or sx.op == SXOP_IDIV:
+        if sx.op == SXOP_DIV or sx.op == SXOP_IDIV or sx.op == SXOP_ADD or sx.op == SXOP_SUB:
             # Typed after both operands are bound: binding them appended their
             # aggregates to `agg_exprs`, so `sum(a) / count(*)` finds two
-            # int64 outputs (cast) and `sum(f) / sum(g)` two float64s (no cast).
+            # int64 outputs (cast) and `sum(f) / sum(g)` two float64s (no cast),
+            # and `max(d) + 7` finds a DATE output.
             return _bind_sql_operator(
                 sx.op, lhs^, rhs^, _post_agg_typing_schema(input_schema, agg_exprs)
             )

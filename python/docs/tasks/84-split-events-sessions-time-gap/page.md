@@ -84,7 +84,7 @@ Output:
 
 - The gap is measured in seconds: `date_diff('second', <start>, ts)` counts whole seconds from a fixed start time, so a gap of exactly 1800 seconds stays in the session (user 2, 12:00:00 to 12:30:00) and 1801 seconds starts a new one (user 2, 13:00:01).
 - Every step is its own CTE because a window function takes plain columns: `lag` reads `secs`, the `CASE` flag reads `prev_secs`, and the running `sum` reads the flag. `lag` runs on the seconds and not on `ts` itself, because komira's `lag` and `lead` serve integer, float and text columns and not timestamps yet.
-- `ts - prev > INTERVAL '30 minutes'` is not served: komira has no interval value, only a constant date plus or minus an interval. Compare seconds as above.
+- `ts - prev > INTERVAL '30 minutes'` is not served: komira has no interval value, only a date (a constant or a column) plus or minus a constant interval. Compare seconds as above.
 - The timestamps must be a timestamp column, as Parquet and Arrow give. A CSV file with `YYYY-MM-DD HH:MM:SS` text reads that column as text, which `date_diff` refuses by name.
 - The first event of each user has no previous event (`lag` is NULL), so it starts session 1.
 - Sessions are numbered per user from 1. Sort the result with `ORDER BY`: rows come back in no promised order otherwise.
@@ -96,5 +96,5 @@ Output:
 - [How do I compute a running total per group?](../48-compute-running-total-per-group/page.md) (rank 48, works)
 - [How do I rank rows within a group?](../49-rank-rows-within-group/page.md) (rank 49, works)
 - How do I filter rows by a date range? (rank 83, works)
-- How do I add days to a date or take the difference between dates? (rank 79, partial; no page yet)
+- How do I add days to a date or take the difference between dates? (rank 79, works)
 - [How do I read a Parquet file?](../15-read-parquet-file/page.md) (rank 15, works)

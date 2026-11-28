@@ -218,6 +218,43 @@ _EXPR_BESIDE_AGG_TEST_DATA = {
 
 _EXPR_BESIDE_AGG_TEST_DATA.update({c + ".tsv": ":expr_beside_agg_oracle[" + c + ".tsv]" for c in _EXPR_BESIDE_AGG_CASES})
 
+# DuckDB's table and answers for test_run_sql_date_shift:
+# tests/date_shift/data.sql writes orders.parquet (two DATE columns), and each
+# line of tests/date_shift/cases.sql shifts a DATE column by an INTERVAL or by
+# an integer and writes DuckDB's answer.
+_DATE_SHIFT_CASES = [
+    "plus_days_interval",
+    "plus_month_clamps",
+    "minus_year_clamps",
+    "minus_month_interval",
+    "interval_on_left",
+    "date_add_form",
+    "negative_count_interval",
+    "interval_chain",
+    "plus_integer",
+    "minus_integer",
+    "integer_on_left",
+    "negative_integer",
+    "probe_ship_after_a_week",
+    "filter_on_integer_shift",
+]
+
+sql_oracle(
+    name = "date_shift_oracle",
+    srcs = [
+        "tests/date_shift/data.sql",
+        "tests/date_shift/cases.sql",
+    ],
+    outputs = ["orders.parquet"] + [c + ".tsv" for c in _DATE_SHIFT_CASES],
+)
+
+_DATE_SHIFT_TEST_DATA = {
+    "cases.sql": "tests/date_shift/cases.sql",
+    "orders.parquet": ":date_shift_oracle[orders.parquet]",
+}
+
+_DATE_SHIFT_TEST_DATA.update({c + ".tsv": ":date_shift_oracle[" + c + ".tsv]" for c in _DATE_SHIFT_CASES})
+
 # The cases of komira_sql_conformance's order_by_limit corpus with a LIMIT or an
 # OFFSET: test_run_sql_topn runs each SELECT and holds it to DuckDB's answer.
 _TOPN_CASES = [
@@ -824,6 +861,7 @@ mojo_library(
         "tests/test_run_sql_correlated.mojo": _CORRELATED_TEST_DATA,
         "tests/test_run_sql_csv.mojo": _CSV_TEST_DATA,
         "tests/test_run_sql_cte.mojo": _CTE_TEST_DATA,
+        "tests/test_run_sql_date_shift.mojo": _DATE_SHIFT_TEST_DATA,
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,
         "tests/test_run_sql_expr_beside_agg.mojo": _EXPR_BESIDE_AGG_TEST_DATA,
         "tests/test_run_sql_topn.mojo": _TOPN_TEST_DATA,

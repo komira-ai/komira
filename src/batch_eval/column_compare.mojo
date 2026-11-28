@@ -24,6 +24,7 @@ from kernels.comparison_kleene import (
     eval_col_ne_nullable,
     kleene_cmp_finalize,
 )
+from kernels.date_add import date32_to_timestamp_us
 from plan_expr.expr import (
     BIN_EQ,
     BIN_GE,
@@ -506,7 +507,10 @@ def _eval_col_vs_col_promoted(
                                       above `_cmp_widen_to_float64`)
       - FLOAT32 ⊕ INT32    → FLOAT32 (cast int32 → float32; LOSSY, same rule)
       - INT64   ⊕ INT32    → INT64   (cast int32 → int64)
-      - same-type ⊕ same-type → no cast; delegate directly
+      - DATE32 ⊕ TIMESTAMP_US (either order) → INT64 (date widened to the
+                                      microsecond of its midnight)
+      - same-type ⊕ same-type → no cast; delegate directly (DATE32 and
+                                      TIMESTAMP_US included)
       - any numeric ⊕ STRING (or other) → Error
 
     ⛔ THE TWO FLOAT DIRECTIONS ARE NOT ONE RULE. A pair with a FLOAT64 on it
@@ -555,11 +559,40 @@ def _eval_col_vs_col_promoted(
             # A computed DECIMAL against another DECIMAL (`dec >= dec * 2`):
             # scale-aligned and exact, see `_cmp_decimal_mixed`.
             return _cmp_decimal_mixed(left_col^, right_col^, op)
+        elif lt == ArrowType.DATE32:
+            # Two dates (`ship_date > order_date + 7`): days compare as Int32.
+            return _col_cmp_nullable[DType.int32](
+                left_col.as_primitive[DType.int32](),
+                right_col.as_primitive[DType.int32](),
+                op,
+            )
+        elif lt == ArrowType.TIMESTAMP_US:
+            return _col_cmp_nullable[DType.int64](
+                left_col.as_primitive[DType.int64](),
+                right_col.as_primitive[DType.int64](),
+                op,
+            )
         else:
             raise Error(
                 "_eval_col_vs_col_promoted: unsupported same-type pair: "
                 + String(lt)
             )
+
+    # A DATE against a TIMESTAMP_US, in either order: the date is read as
+    # midnight of that day (days widened to microseconds), the way DuckDB
+    # casts a DATE to a TIMESTAMP, and the pair compares as Int64.
+    if lt == ArrowType.DATE32 and rt == ArrowType.TIMESTAMP_US:
+        return _col_cmp_nullable[DType.int64](
+            date32_to_timestamp_us(left_col.as_primitive[DType.int32]()),
+            right_col.as_primitive[DType.int64](),
+            op,
+        )
+    if lt == ArrowType.TIMESTAMP_US and rt == ArrowType.DATE32:
+        return _col_cmp_nullable[DType.int64](
+            left_col.as_primitive[DType.int64](),
+            date32_to_timestamp_us(right_col.as_primitive[DType.int32]()),
+            op,
+        )
 
     var l_is_int = lt == ArrowType.INT64 or lt == ArrowType.INT32
     var r_is_int = rt == ArrowType.INT64 or rt == ArrowType.INT32

@@ -578,6 +578,8 @@ def test_one_child_expressions_descend_their_child() raises:
         _subq(32),
     )
     _walk_expr(e14, 1, 32)
+    var e15 = Expr.date_add(1, 2, _subq(64))
+    _walk_expr(e15, 1, 64)
 
 
 def test_n_child_string_fn_walks_every_argument() raises:

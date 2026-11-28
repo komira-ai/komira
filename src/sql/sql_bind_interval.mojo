@@ -1,23 +1,33 @@
 # =============================================================================
 # sql/sql_bind_interval.mojo
-#   `INTERVAL '<n>' <unit>` at bind time: a constant DATE +/- a constant
-#   INTERVAL folds to a DATE constant. There is no INTERVAL value in the bound
-#   plan; the only legal home of an `SX_INTERVAL` node is the operand of that
-#   one addition or subtraction.
+#   `INTERVAL '<n>' <unit>` at bind time. The interval is a constant pair of
+#   calendar months and days (`IntervalConst`); there is no INTERVAL value or
+#   type in the bound plan, and the only legal home of an `SX_INTERVAL` node is
+#   the operand of one addition or subtraction with a DATE:
+#     - a constant DATE +/- INTERVAL folds to a DATE constant;
+#     - a DATE-typed expression +/- INTERVAL binds to a DATE32 `DateAdd` node
+#       cast to TIMESTAMP (DuckDB answers `DATE +/- INTERVAL` as a TIMESTAMP at
+#       midnight, whatever the unit), a chain of intervals nesting one
+#       `DateAdd` per interval under that one cast;
+#     - `date_add(date, INTERVAL ...)` shares that lowering (`bind_date_add_interval`).
 # =============================================================================
 
+from arrow.arrow_types import ArrowType
+from arrow.schema import Schema
 from plan_expr.expr import Expr
 from plan_expr.scalar_value import ScalarValue
 from sql.sql_ast import (
     SXIVL_DAY, SXIVL_MONTH, SXIVL_WEEK, SXIVL_YEAR, SXOP_ADD, SXOP_SUB,
     SX_BINARY, SX_INTERVAL, SqlExpr,
 )
+from sql.sql_bind_ops import _operand_type
 
 comptime INTERVAL_STANDALONE_REFUSAL: String = (
-    "SQL not supported: an INTERVAL value is only accepted as the right"
-    " operand of `<constant DATE> + INTERVAL '<n>' <unit>` / `<constant DATE>"
-    " - INTERVAL '<n>' <unit>` (or `INTERVAL ... + <constant DATE>`); it is"
-    " folded into a DATE at bind time and the plan has no INTERVAL type"
+    "SQL not supported: an INTERVAL value is only accepted as the other"
+    " operand of `<DATE> + INTERVAL '<n>' <unit>` / `<DATE> - INTERVAL '<n>'"
+    " <unit>` / `INTERVAL '<n>' <unit> + <DATE>`, or as the second argument"
+    " of `date_add(<DATE>, INTERVAL '<n>' <unit>)`; it is folded into the"
+    " DATE shift at bind time and the plan has no INTERVAL type"
 )
 
 comptime _MIN_YEAR: Int = 1
@@ -117,30 +127,113 @@ def interval_operand_side(sx: SqlExpr) -> Int:
         return 1
     return 0
 
+struct IntervalConst(Copyable, Movable):
+    """An `INTERVAL '<n>' <unit>` as the bind-time constant pair a DATE is
+    shifted by: calendar `months` (YEAR is 12 months), then `days` (WEEK is 7
+    days). Each fits Int32, the width of a `DateAdd` payload."""
 
-def interval_date_fold(sx: SqlExpr, var date_side: Expr) raises -> Expr:
-    """Fold `date_side +/- INTERVAL` (the `interval_operand_side` shapes) into
-    a DATE literal. `date_side` is the bound non-INTERVAL operand: anything
-    but a DATE literal is refused by name."""
-    var which = interval_operand_side(sx)
-    ref b = sx._binary.value()
-    var n: Int
-    var unit: UInt8
-    if which == 2:
-        n = Int(b.right[].int_val)
-        unit = b.right[].op
+    var months: Int
+    var days: Int
+
+    def __init__(out self, months: Int, days: Int):
+        self.months = months
+        self.days = days
+
+
+def interval_const(node: SqlExpr, negate: Bool) raises -> IntervalConst:
+    """The months and days of the `SX_INTERVAL` `node`, negated when `negate`
+    (`DATE - INTERVAL`). Raises by name when either count does not fit Int32,
+    so no valid DATE could be shifted by it."""
+    var n = Int(node.int_val)
+    if negate:
+        n = -n
+    var unit = node.op
+    var months = 0
+    var days = 0
+    var name: String
+    if unit == SXIVL_YEAR:
+        months = n * 12
+        name = "YEAR"
+    elif unit == SXIVL_MONTH:
+        months = n
+        name = "MONTH"
+    elif unit == SXIVL_WEEK:
+        days = n * 7
+        name = "WEEK"
     else:
-        n = Int(b.left[].int_val)
-        unit = b.left[].op
-    if not date_side.is_literal() or not date_side.literal_value().is_date32():
+        days = n
+        name = "DAY"
+    if months < -2147483648 or months > 2147483647 or days < -2147483648 or days > 2147483647:
         raise Error(
-            "SQL not supported: DATE +/- INTERVAL needs a constant DATE"
-            " (`DATE 'YYYY-MM-DD'`, possibly already shifted by another"
-            " INTERVAL); a column or other non-constant operand is refused"
-            " because the INTERVAL is folded at bind time"
+            "SQL not supported: INTERVAL '" + String(Int(node.int_val)) + "' "
+            + name + " is beyond the range of a DATE shift (" + String(months)
+            + " months and " + String(days) + " days must each fit 32 bits)"
         )
+    return IntervalConst(months, days)
+
+
+def _interval_operand_refusal(t: ArrowType) -> String:
+    return (
+        "SQL not supported: `+/- INTERVAL` needs a DATE operand but this one"
+        " is " + String(t) + " (a TIMESTAMP, string or number plus an"
+        " INTERVAL is not served; cast it to DATE or write the shift on a"
+        " DATE column)"
+    )
+
+
+def date_shift_by_interval(
+    var date_side: Expr, c: IntervalConst, typing: Schema
+) raises -> Expr:
+    """`date_side` shifted by the constant interval `c`, as DuckDB answers
+    `DATE +/- INTERVAL`: a TIMESTAMP at midnight, always. A DATE-typed
+    `date_side` becomes `CAST(DateAdd(months, days, date_side) AS TIMESTAMP)`.
+    A `date_side` that is already such a cast (a chain `d + INTERVAL .. +
+    INTERVAL ..`) gets one more `DateAdd` under the same cast. Any other type
+    is refused by name."""
+    if (
+        date_side.is_cast()
+        and date_side.cast_target_arrow() == ArrowType.TIMESTAMP_US
+        and date_side.cast_child_ref().is_date_add()
+    ):
+        return Expr.cast_to_arrow(
+            Expr.date_add(
+                Int32(c.months), Int32(c.days), date_side.cast_child_ref().copy()
+            ),
+            ArrowType.TIMESTAMP_US,
+        )
+    var t = _operand_type(date_side, typing)
+    if t != ArrowType.DATE32:
+        raise Error(_interval_operand_refusal(t))
+    return Expr.cast_to_arrow(
+        Expr.date_add(Int32(c.months), Int32(c.days), date_side^),
+        ArrowType.TIMESTAMP_US,
+    )
+
+
+def interval_date_fold(
+    sx: SqlExpr, var date_side: Expr, typing: Schema
+) raises -> Expr:
+    """Bind `date_side +/- INTERVAL` (the `interval_operand_side` shapes).
+    `date_side` is the bound non-INTERVAL operand. A DATE literal folds to a
+    DATE literal; any other operand goes to `date_shift_by_interval`, typed
+    over `typing`."""
+    var negate = interval_operand_side(sx) == 2 and sx.op == SXOP_SUB
+    if interval_operand_side(sx) == 2:
+        return bind_date_shift(sx._binary.value().right[], negate, date_side^, typing)
+    return bind_date_shift(sx._binary.value().left[], negate, date_side^, typing)
+
+
+def bind_date_shift(
+    node: SqlExpr, negate: Bool, var date_side: Expr, typing: Schema
+) raises -> Expr:
+    if not date_side.is_literal() or not date_side.literal_value().is_date32():
+        return date_shift_by_interval(
+            date_side^, interval_const(node, negate), typing
+        )
+    var n = Int(node.int_val)
+    var unit = node.op
     var base = Int(date_side.literal_value().date32_val)
-    if which == 2 and sx.op == SXOP_SUB:
+    if negate:
         n = -n
     var out: Int
     if unit == SXIVL_YEAR:
@@ -149,8 +242,6 @@ def interval_date_fold(sx: SqlExpr, var date_side: Expr) raises -> Expr:
         out = date_add_months(base, n)
     elif unit == SXIVL_WEEK:
         out = date_add_days(base, n * 7)
-    elif unit == SXIVL_DAY:
-        out = date_add_days(base, n)
     else:
-        raise Error(INTERVAL_STANDALONE_REFUSAL)
+        out = date_add_days(base, n)
     return Expr.literal(ScalarValue.date32(Int32(out)))

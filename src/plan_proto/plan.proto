@@ -699,6 +699,18 @@ message WireExtract {
   WireExpr child = 2;
 }
 
+// `DateAddData` — `EXPR_DATE_ADD`, a DATE32 column moved by calendar months
+// (the day of month clamped to the month's last day) and THEN by days. SQL
+// `date_col + INTERVAL ...` and `date_col +/- n` lower to it.
+message WireDateAdd {
+  WireExpr child = 1;
+  // Calendar months to add; negative subtracts. Zero is a meaningful value
+  // (a days-only shift), and proto3 omits it from the bytes.
+  int32 months = 2;
+  // Days to add after the month step; negative subtracts.
+  int32 days = 3;
+}
+
 // `MathFnData` — `EXPR_MATH_FN`, UNARY scalar math (sin / cos / sqrt / asin /
 // radians). Always FLOAT64 out, null in -> null out.
 message WireMathFn {
@@ -1155,6 +1167,9 @@ message WireExpr {
     // Field 27, ARM 26. The design's arm for a UDF call by `UdfRef` index
     // (optimized_plan_udfs.md §10.4).
     WireUdfApply udf_apply = 27;
+    // Field 28, ARM 27. APPENDED: a reader that predates it skips the unknown
+    // field and refuses the node as having no arm set.
+    WireDateAdd date_add = 28;
   }
 }
 

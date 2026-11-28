@@ -46,7 +46,7 @@
 #   test_a_call_is_found_under_every_expression_container
 #       a call hidden under each container the walk descends (unary, cast,
 #       string op, regexp, substring, string fn, registered call, extract,
-#       math fn, aggregate fn, IN list, struct field, struct field index,
+#       date add, math fn, aggregate fn, IN list, struct field, struct field index,
 #       JSON extract, n-ary string fn, binary, binary math, map get, the three
 #       slots of a CASE) refuses the filter that holds it, and the same
 #       expressions with no call lower; a tag the walk does not model is
@@ -538,6 +538,7 @@ def _hidden_in(var call: Expr) raises -> List[Expr]:
     out.append(Expr.string_fn(STRFN_UPPER, call.copy()))
     out.append(Expr.udf_call(String("affine"), Optional[Int](7), ArrowType.INT64, ArrowType.INT64, call.copy()))
     out.append(Expr.extract(EXTRACT_YEAR, call.copy()))
+    out.append(Expr.date_add(1, 2, call.copy()))
     out.append(Expr.math_fn(MATH_SQRT, call.copy()))
     out.append(Expr.agg_fn(AGG_SUM, call.copy()))
     var values = List[ScalarValue]()

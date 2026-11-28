@@ -92,7 +92,10 @@ from plan_expr.expr import Expr, BIN_ADD, BIN_GT
 from plan_ir.expr_udf_sites import udf_call_column_key
 from plan_expr.scalar_value import ScalarValue
 from batch_eval.conjunction import (evaluate_filter_narrowed)
-from batch_eval.predicate_null_scope import (_compute_predicate_input_validity)
+from batch_eval.predicate_null_scope import (
+    _compute_predicate_input_validity,
+    predicate_null_scope_unhandled_tag,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -496,6 +499,34 @@ def test_the_conservative_branch_IS_correct_when_it_is_reached_directly(
     _ = pred^
 
 
+def test_a_date_add_predicate_scopes_to_its_child_column_only() raises:
+    """`date_add(unrelated, 1 month, 2 days) > 100` is scoped to `unrelated`
+    alone: the walk derives the whole scope (no unhandled tag), and the
+    input validity is cleared exactly at that column's NULL rows 2 and 4,
+    never at the UDF output column's rows 1 and 6."""
+    var batch = _batch(True)
+    var pred = Expr.binary(
+        BIN_GT,
+        Expr.date_add(1, 2, Expr.col_ref("unrelated")),
+        Expr.literal(ScalarValue.from_int64(_THRESHOLD)),
+    )
+    assert_equal(predicate_null_scope_unhandled_tag(pred, batch.schema), -1)
+    var iv = _compute_predicate_input_validity(pred, batch)
+    assert_true(iv.__bool__(), "the child column's validity must be named")
+    ref bits = iv.value()
+    for i in range(_N):
+        var want_valid = i != 2 and i != 4
+        assert_equal(
+            bits.test(i),
+            want_valid,
+            "date_add scopes to its child column's validity only (bit "
+            + String(i)
+            + ")",
+        )
+    _ = batch^
+    _ = pred^
+
+
 def main() raises:
     var ts = TestSuite()
     ts.test[test_the_walk_names_the_UDFs_OWN_OUTPUT_COLUMN_and_no_other]()
@@ -508,5 +539,6 @@ def main() raises:
         test_end_to_end_an_ARITHMETIC_WRAPPED_udf_call_keeps_the_same_rows
     ]()
     ts.test[test_an_UNRESOLVABLE_UDF_KEY_never_reaches_the_conservative_branch]()
+    ts.test[test_a_date_add_predicate_scopes_to_its_child_column_only]()
     ts.test[test_the_conservative_branch_IS_correct_when_it_is_reached_directly]()
     ts^.run()

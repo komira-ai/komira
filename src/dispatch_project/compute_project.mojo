@@ -76,6 +76,7 @@ from .compute_project_routes import (
     _expr_has_domain_checked_math,
     _expr_is_strict_null_propagating,
     _is_cast_output,
+    _is_date_add_output,
     _is_extract_output,
     _is_nested_extract_output,
     _is_null_test_output,
@@ -491,6 +492,18 @@ def _eval_project_exprs_impl[
             tm_field.nullable = Bool(tm_col._validity)
             rbb.add_column(tm_col^)
             sb.add_field(tm_field^)
+            continue
+
+        # A date moved by constant months and days (`d + 7`). The output is a
+        # DATE32, which no walker family produces; the field is read off the
+        # produced column, whose kernel keeps the operand's validity.
+        if _is_date_add_output(e):
+            var da_col = _eval_column_expr(e, batch)
+            if not _column_conforms(da_col, declared_at, n_rows):
+                return None
+            var da_nullable = Bool(da_col._validity)
+            rbb.add_column(da_col^)
+            sb.add_field(Field(out_name, declared_at, da_nullable))
             continue
 
         # IS [NOT] NULL over any operand type. The produced column carries a

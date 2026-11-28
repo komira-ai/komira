@@ -255,36 +255,49 @@ Nothing is optimized, lowered or run.
 
 `INTERVAL '<n>' <unit>` (also `INTERVAL <n> <unit>`) parses to an `SX_INTERVAL`
 node holding a signed count (magnitude at most 10^9) and a unit. The units
-accepted are YEAR, MONTH, WEEK and DAY, singular or plural. The binder folds
-`<constant DATE> + INTERVAL`, `<constant DATE> - INTERVAL` and
-`INTERVAL + <constant DATE>` into a `date32` literal while binding
-(`sql_bind_interval`), in the WHERE, correlated-subquery, aggregate and
-select-list binders alike, so `date '1998-12-01' - interval '90' day` and
-the nine intervals in the TPC-H queries bind: Q1 `- interval '90' day`;
-Q4, Q10 and Q15 `+ interval '3' month`; Q14 `+ interval '1' month`; Q5, Q6,
-Q12 and Q20 `+ interval '1' year`. The plan has no INTERVAL
-type and no INTERVAL value ever reaches it. Chains fold left to right
-(`date '1994-01-01' + interval '1' year - interval '1' day`).
+accepted are YEAR, MONTH, WEEK and DAY, singular or plural. The binder reads
+the node as a constant pair of calendar months and days (`IntervalConst`: a
+year is 12 months, a week 7 days); there is no INTERVAL value or type in the
+plan. A constant DATE `+ INTERVAL`, `- INTERVAL` and `INTERVAL + <constant
+DATE>` fold into a `date32` literal while binding (`sql_bind_interval`), in the
+WHERE, correlated-subquery, aggregate and select-list binders alike, so `date
+'1998-12-01' - interval '90' day` and the nine intervals in the TPC-H queries
+bind: Q1 `- interval '90' day`; Q4, Q10 and Q15 `+ interval '3' month`; Q14
+`+ interval '1' month`; Q5, Q6, Q12 and Q20 `+ interval '1' year`. Chains fold
+left to right (`date '1994-01-01' + interval '1' year - interval '1' day`).
+
+A DATE column or other DATE-typed expression takes the same forms, `d +
+INTERVAL`, `d - INTERVAL`, `INTERVAL + d` and `date_add(d, INTERVAL ...)`, and
+binds to a `DateAdd(months, days, d)` node cast to TIMESTAMP: DuckDB answers
+`DATE +/- INTERVAL` as a TIMESTAMP at midnight whatever the unit. A chain
+nests one `DateAdd` per interval under one cast. `d + n`, `n + d` and `d - n`
+for an integer constant n bind to `DateAdd(0, +/-n, d)` and stay a DATE; a
+constant DATE with an integer folds to a DATE literal. A DATE plus an integer
+column, `n - d`, and a DATE with any other type are refused by name.
 
 Month and year arithmetic clamps the day to the end of the target month, as
 PostgreSQL and DuckDB do: 31 Jan + 1 month is 28 Feb (29 in a leap year),
-29 Feb + 1 year is 28 Feb, 31 Mar - 1 month is 29 Feb in a leap year. A year
-is 12 months, a week 7 days. A clamped day is not restored by the next step
-of a chain (31 Jan + 1 month + 1 month is 29 Mar in 2024). A result outside
-years 1 to 9999 is refused.
+29 Feb + 1 year is 28 Feb, 31 Mar - 1 month is 29 Feb in a leap year. A clamped
+day is not restored by the next step of a chain (31 Jan + 1 month + 1 month is
+29 Mar in 2024). A constant DATE result outside years 1 to 9999 is refused at
+bind time; a shifted column is checked when it runs, against the 32-bit day
+range of a DATE (and the 64-bit microsecond range of the TIMESTAMP it is cast
+to).
 
 Refused by name: a unit outside the accepted four (QUARTER, HOUR, MINUTE,
 SECOND, MILLISECOND, and the rest), a unit written inside the string
-(`'3 month'`), a non-integer or oversize count, a missing unit, a non-constant
-DATE operand (`col + interval '1' day`; the interval is folded at bind time,
-so a column cannot take it), a TIMESTAMP or string operand, and an INTERVAL
-anywhere else (a projection, a comparison, `INTERVAL - DATE`, `INTERVAL * n`,
-`INTERVAL + INTERVAL`). Because the fold happens in the expression binder, ORDER BY and GROUP BY see
-a constant expression like `1 + 1`, which they already accept, and not a bare
-date literal, which ORDER BY refuses as a constant key. A count
-may be signed and unquoted (`interval -3 day`). One difference from DuckDB: its `DATE + INTERVAL` is
-a TIMESTAMP, here the result stays a DATE; a comparison against a DATE column
-gives the same rows.
+(`'3 month'`), a non-integer or oversize count, a missing unit, a count that
+is an expression or a column (`INTERVAL (x) DAY`, `INTERVAL col DAY`), a
+count whose months or days do not fit 32 bits, a TIMESTAMP, string or number
+operand of `+/- INTERVAL`, a second argument of `date_add` that is not an
+INTERVAL literal, and an INTERVAL anywhere else (a projection, a comparison,
+`INTERVAL - DATE`, `INTERVAL * n`, `INTERVAL + INTERVAL`). Because the fold
+happens in the expression binder, ORDER BY and GROUP BY see a constant
+expression like `1 + 1`, which they already accept, and not a bare date
+literal, which ORDER BY refuses as a constant key. A count may be signed and
+unquoted (`interval -3 day`). One difference from DuckDB: its constant `DATE +
+INTERVAL` is a TIMESTAMP, here a constant DATE stays a DATE; a comparison
+against a DATE column gives the same rows.
 
 ## Examples
 

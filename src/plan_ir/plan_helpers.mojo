@@ -53,6 +53,7 @@ from plan_expr.expr import (
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
     EXPR_UDF_CALL,
+    EXPR_DATE_ADD,
     EXPR_EXTRACT,
     EXPR_JSON_EXTRACT,
     EXPR_STRUCT_FIELD,
@@ -866,6 +867,15 @@ def _expr_fingerprint(expr: Expr) -> String:
         # to the year value.
         var child_fp = _expr_fingerprint(expr.extract_child_ref())
         return "X:" + String(Int(expr.extract_unit())) + "(" + child_fp + ")"
+    elif expr.tag == EXPR_DATE_ADD:
+        # The shift (months, days) and the child are the whole identity:
+        # `d + INTERVAL 1 MONTH` and `d + INTERVAL 1 DAY` differ only in the
+        # two constants and must never merge.
+        var child_fp = _expr_fingerprint(expr.date_add_child_ref())
+        return (
+            "DA:" + String(Int(expr.date_add_months())) + ":"
+            + String(Int(expr.date_add_days())) + "(" + child_fp + ")"
+        )
     elif expr.tag == EXPR_REGEXP:
         # CSE-FINGERPRINT-COMPLETENESS ★R3: op + pattern +
         # replacement + flags + group + group_name are ALL identity.

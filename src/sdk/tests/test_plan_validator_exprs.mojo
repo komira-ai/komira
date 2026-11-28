@@ -97,6 +97,7 @@ def test_one_child_kinds() raises:
     _bad(Expr.substring(_c("nope"), 1, 2), "substring")
     _bad(Expr.upper(_c("nope")), "string_fn")
     _bad(Expr.year(_c("nope")), "extract")
+    _bad(Expr.date_add(1, 2, _c("nope")), "date_add")
     _bad(Expr.sqrt(_c("nope")), "math_fn")
     var vals = List[ScalarValue]()
     vals.append(ScalarValue.from_int(1))

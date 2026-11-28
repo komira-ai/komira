@@ -68,6 +68,7 @@ from plan_expr.expr import (
     EXPR_COL_REF,
     EXPR_CORRELATED_SUBQUERY,
     EXPR_EXTRACT,
+    EXPR_DATE_ADD,
     EXPR_IN_LIST,
     EXPR_JSON_EXTRACT,
     EXPR_LITERAL,
@@ -508,6 +509,8 @@ def _walk_expr(
         _walk_expr(e.udf_call_child_ref(), input, udfs, where, check, calls)
     elif tag == EXPR_EXTRACT:
         _walk_expr(e.extract_child_ref(), input, udfs, where, check, calls)
+    elif tag == EXPR_DATE_ADD:
+        _walk_expr(e.date_add_child_ref(), input, udfs, where, check, calls)
     elif tag == EXPR_MATH_FN:
         _walk_expr(e.math_fn_child_ref(), input, udfs, where, check, calls)
     elif tag == EXPR_AGG_FN:

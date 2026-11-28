@@ -9,7 +9,9 @@
 
 from arrow.arrow_types import ArrowType
 from arrow.boolean_array import BooleanArray
+from arrow.column import Column
 from arrow.schema import RecordBatch
+from byte_buffer.heap_region import HeapRegion
 from column_kernels.compiler_helpers import (
     broadcast_scalar,
     copy_column,
@@ -54,6 +56,7 @@ from plan_expr.expr import (
 )
 
 from .column_compare import _eval_col_vs_col_promoted
+from .column_decimal import _expr_name_hint, _resolve_temporal_arrow_type
 from .eval_column import _eval_column_expr
 from .integer_literal_value import (
     integer_literal_value,
@@ -86,6 +89,34 @@ from .predicate_logic import (
 )
 from .predicate_numeric_dict import _numeric_dict_filter_dispatch
 from .string_bytes import string_array_of
+
+
+def _is_date_or_timestamp_us(at: ArrowType) -> Bool:
+    return at == ArrowType.DATE32 or at == ArrowType.TIMESTAMP_US
+
+
+def _stamp_temporal_pair(
+    mut left_col: Column[HeapRegion],
+    mut right_col: Column[HeapRegion],
+    left_hint: String,
+    right_hint: String,
+    batch: RecordBatch,
+) -> None:
+    """Give two operands of a comparison their logical temporal types.
+
+    A parquet or CSV scan stamps a DATE column INT32 and carries DATE32 only
+    on the batch schema's field (see `_resolve_temporal_arrow_type`), so
+    `ship_date > order_date + 7` meets a DATE32-stamped computed operand and
+    an INT32-stamped column. When BOTH operands resolve to a DATE32 or a
+    TIMESTAMP_US, each is re-stamped with the type it resolves to, so the
+    promoted comparison reads the pair as dates and timestamps. Any other
+    pair, in particular an integer column against a date, is left as it is.
+    """
+    var lt = _resolve_temporal_arrow_type(left_col, batch, left_hint)
+    var rt = _resolve_temporal_arrow_type(right_col, batch, right_hint)
+    if _is_date_or_timestamp_us(lt) and _is_date_or_timestamp_us(rt):
+        left_col.arrow_type = lt
+        right_col.arrow_type = rt
 
 
 def _predicate_binary_op(expr: Expr, batch: RecordBatch) raises -> BooleanArray:
@@ -205,6 +236,9 @@ def _predicate_binary_op(expr: Expr, batch: RecordBatch) raises -> BooleanArray:
             var rhs_col = broadcast_scalar(rhs_lit.copy(), batch.num_rows())
             return _eval_col_vs_col_promoted(lhs_col^, rhs_col^, cop)
         var rhs_expr_col = _eval_column_expr(rhs_ref, batch)
+        _stamp_temporal_pair(
+            lhs_col, rhs_expr_col, _expr_name_hint(expr.binary_left_ref()), _expr_name_hint(rhs_ref), batch
+        )
         return _eval_col_vs_col_promoted(lhs_col^, rhs_expr_col^, op)
 
     # Comparison: column op literal OR column op column OR column op <expr>
@@ -240,9 +274,15 @@ def _predicate_binary_op(expr: Expr, batch: RecordBatch) raises -> BooleanArray:
     # for shapes like `col("ps_availqty") > col("qty_sum") * 0.5`.
     if not expr.binary_right_ref().is_literal():
         var rhs_col = _eval_column_expr(expr.binary_right_ref(), batch)
-        return _eval_col_vs_col_promoted(
-            copy_column(batch, col_idx), rhs_col^, op
+        var lhs_col = copy_column(batch, col_idx)
+        _stamp_temporal_pair(
+            lhs_col,
+            rhs_col,
+            batch.schema.field_name(col_idx),
+            _expr_name_hint(expr.binary_right_ref()),
+            batch,
         )
+        return _eval_col_vs_col_promoted(lhs_col^, rhs_col^, op)
 
     var lit_val = expr.binary_right_ref().literal_value()
 

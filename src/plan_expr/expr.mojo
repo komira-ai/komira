@@ -353,6 +353,22 @@ comptime EXPR_STRING_FN_N: UInt8 = 26
 # UDF runtimes are later stages, and an evaluator that meets it refuses.
 comptime EXPR_UDF_APPLY: UInt8 = 27
 
+# A DATE shifted by a constant calendar amount: `{months, days, child}`.
+# `child` evaluates to a DATE32 column; the node answers DATE32, the date
+# `months` calendar months and then `days` days on (either may be negative).
+# Adding months keeps the day of the month and clamps it to the last day of
+# the target month (2024-01-31 + 1 month = 2024-02-29, 2024-02-29 - 12
+# months = 2023-02-28), as PostgreSQL and DuckDB do. A NULL date answers
+# NULL; a result outside the 32-bit day range of DATE32 is refused by name
+# by the evaluator.
+#
+# The SQL binder lowers `d + n` (integer n) to `{0, n, d}` and
+# `d +/- INTERVAL` / `date_add(d, INTERVAL)` to `{months, days, d}` under a
+# cast to TIMESTAMP, which is the type DuckDB answers for a DATE plus an
+# INTERVAL. The pair is a plan constant, never a column: the plan has no
+# INTERVAL value.
+comptime EXPR_DATE_ADD: UInt8 = 28
+
 
 
 # =============================================================================
@@ -373,7 +389,7 @@ comptime EXPR_UDF_APPLY: UInt8 = 27
 # Adding an `EXPR_*` constant above means bumping the count and adding one arm
 # below.
 
-comptime EXPR_TAG_COUNT: Int = 28
+comptime EXPR_TAG_COUNT: Int = 29
 """One past the highest `EXPR_*` tag id.
 
 Every `EXPR_*` constant is declared in this file, so this covers the whole
@@ -472,6 +488,9 @@ def _write_expr_tag_name[W: Writer](mut writer: W, tag: UInt8):
         return
     if tag == EXPR_UDF_APPLY:
         writer.write(String("EXPR_UDF_APPLY"))
+        return
+    if tag == EXPR_DATE_ADD:
+        writer.write(String("EXPR_DATE_ADD"))
         return
     writer.write(String("tag#") + String(Int(tag)))
     return
@@ -2315,6 +2334,28 @@ struct UdfApplyData(Movable):
         pass
 
 
+struct DateAddData(Movable):
+    """Payload for `EXPR_DATE_ADD` (tag 28): the DATE32 `child` shifted by
+    `months` calendar months (the day clamped to the month's end) and then by
+    `days` days. Constructed via `Expr.date_add(months, days, child)`."""
+
+    var child: OwnedPointer[Expr]
+    var months: Int32
+    var days: Int32
+
+    def __init__(out self, var child: Expr, months: Int32, days: Int32):
+        self.child = OwnedPointer(child^)
+        self.months = months
+        self.days = days
+
+    def copy(self) -> Self:
+        return Self(self.child[].copy(), self.months, self.days)
+
+    # PORT(1.0.0): explicit destructor, as on `ExtractData`.
+    def __deinit__(deinit self):
+        pass
+
+
 
 # THE STRING-SIMILARITY family. Three ops, three SQL
 # names, all Utf8 x Utf8 -> **FLOAT64**.
@@ -2848,6 +2889,9 @@ struct Expr(Movable, Writable):
     var _string_fn_n: Optional[StringFnNData]
     # A call of a `UdfRef` by index. Populated when tag == EXPR_UDF_APPLY.
     var _udf_apply: Optional[UdfApplyData]
+    # A DATE shifted by constant months and days. Populated when
+    # tag == EXPR_DATE_ADD.
+    var _date_add: Optional[DateAddData]
 
     # --- Private constructor (all fields) ---
 
@@ -2880,6 +2924,7 @@ struct Expr(Movable, Writable):
         self._udf_call = None
         self._string_fn_n = None
         self._udf_apply = None
+        self._date_add = None
 
     def copy(self) -> Self:
         """Deep copy of the expression tree.
@@ -2946,6 +2991,8 @@ struct Expr(Movable, Writable):
             e._string_fn_n = self._string_fn_n.value().copy()
         elif self.tag == EXPR_UDF_APPLY:
             e._udf_apply = self._udf_apply.value().copy()
+        elif self.tag == EXPR_DATE_ADD:
+            e._date_add = self._date_add.value().copy()
         # else: unknown tag — return placeholder Expr(tag) as-is.
         return e^
 
@@ -4115,6 +4162,40 @@ struct Expr(Movable, Writable):
         """The `i`-th argument. Requires tag == EXPR_UDF_APPLY."""
         return self._udf_apply.value().args[i]
 
+    # -- a DATE shifted by constant months and days (EXPR_DATE_ADD) --------
+
+    @staticmethod
+    @always_inline
+    def date_add(months: Int32, days: Int32, var child: Expr) -> Expr:
+        """Create an `EXPR_DATE_ADD` node: the DATE32 `child` moved
+        `months` calendar months (the day clamped to the end of the target
+        month) and then `days` days. Answers DATE32."""
+        var e = Expr(EXPR_DATE_ADD)
+        e._date_add = DateAddData(child^, months, days)
+        return e^
+
+    @always_inline
+    def is_date_add(self) -> Bool:
+        """True if tag == EXPR_DATE_ADD."""
+        return self.tag == EXPR_DATE_ADD
+
+    @always_inline
+    def date_add_child_ref(self) -> ref [origin_of(self._date_add.value().child[])] Expr:
+        """The DATE32 operand. Requires tag == EXPR_DATE_ADD."""
+        return self._date_add.value().child[]
+
+    @always_inline
+    def date_add_months(self) -> Int32:
+        """The calendar months added (negative to go back). Requires
+        tag == EXPR_DATE_ADD."""
+        return self._date_add.value().months
+
+    @always_inline
+    def date_add_days(self) -> Int32:
+        """The days added after the months (negative to go back). Requires
+        tag == EXPR_DATE_ADD."""
+        return self._date_add.value().days
+
     @staticmethod
     @always_inline
     def math_fn2(op: UInt8, var left: Expr, var right: Expr) -> Expr:
@@ -5217,6 +5298,15 @@ struct Expr(Movable, Writable):
             for i in range(len(ua.args)):
                 writer.write(", ")
                 ua.args[i].write_to(writer)
+            writer.write(")")
+        elif self.tag == EXPR_DATE_ADD:
+            # ⛔ PLAN IDENTITY: both constants and the child, so that two
+            # shifts by different amounts never share a compiled plan.
+            ref da = self._date_add.value()
+            writer.write(
+                "DateAdd(months=", Int(da.months), ", days=", Int(da.days), ", "
+            )
+            da.child[].write_to(writer)
             writer.write(")")
         elif self.tag == EXPR_MATH_FN2:
             ref mf2 = self._math_fn2.value()

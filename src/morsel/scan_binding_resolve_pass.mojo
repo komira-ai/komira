@@ -114,6 +114,7 @@ from plan_expr.expr import (
     EXPR_STRUCT_FIELD_IDX,
     EXPR_MAP_GET,
     EXPR_JSON_EXTRACT,
+    EXPR_DATE_ADD,
     EXPR_EXTRACT,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
@@ -1179,6 +1180,12 @@ def resolve_expr_binding_leaves(
             return 0
         return resolve_expr_binding_leaves(
             expr._extract.value().child[], resolvers, scan_registry, snapshots
+        )
+    if tag == EXPR_DATE_ADD:
+        if not expr._date_add:
+            return 0
+        return resolve_expr_binding_leaves(
+            expr._date_add.value().child[], resolvers, scan_registry, snapshots
         )
     if tag == EXPR_MATH_FN:
         if not expr._math_fn:

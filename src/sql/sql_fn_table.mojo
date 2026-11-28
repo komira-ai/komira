@@ -396,6 +396,7 @@ a JSON-null leaf cannot tell the two selectors apart.
 comptime DSG_MAKE_TS_US: UInt8 = 33
 comptime DSG_MAKE_TS_MS: UInt8 = 34
 comptime DSG_MAKE_TS_NS: UInt8 = 35
+comptime DSG_DATE_ADD: UInt8 = 36
 """The epoch-count timestamp selectors: the ARITY-1 EPOCH-COUNT overloads of
 `make_timestamp` / `make_timestamp_ms` / `make_timestamp_ns` — an integer count
 of ticks since 1970-01-01, relabelled as the TIMESTAMP unit that count is in.
@@ -763,21 +764,18 @@ comptime _R_JSONMAP: String = (
 )
 
 comptime _R_INTERVAL: String = (
-    "SQL not supported: this name is a DuckDB v1.5.3 MACRO over the "
-    "INTERVAL type (measured bodies: `date_add(date, interval)` is "
-    "`(date + \"interval\")`, `ago(i)` is `(current_timestamp - CAST(i AS "
-    "INTERVAL))`). THE MISSING PRIMITIVE IS AN INTERVAL OPERAND: this "
-    "engine has no INTERVAL VALUE: an `INTERVAL '<n>' <unit>` literal is "
-    "accepted only as the interval operand of a constant `DATE +/- INTERVAL` "
-    "or `INTERVAL + DATE` that folds to a DATE at bind time (`sql_bind_interval`), so there is "
-    "no interval operand to hand a macro and no non-constant date+interval "
-    "arm. ⚠ NOT the "
-    "same as `date_diff`/`date_sub`, whose output is an INT64 COUNT of "
-    "units and which read no interval at all: they fold two DATE literals, "
-    "and over columns they lower to integer arithmetic on the operands' "
-    "calendar fields (`plan_expr.temporal_delta`). "
-    "Either way the OUTPUT is an integer, "
-    "which is why neither of them unblocks this family."
+    "SQL not supported: `ago(i)` is a DuckDB v1.5.3 MACRO over the INTERVAL "
+    "type (measured body: `(current_timestamp - CAST(i AS INTERVAL))`). THE "
+    "MISSING PRIMITIVE IS AN INTERVAL VALUE: this engine has none. An "
+    "`INTERVAL '<n>' <unit>` literal is accepted only as the interval operand "
+    "of a DATE `+` / `-` or as the second argument of `date_add(date, "
+    "INTERVAL ...)`, where it is folded into a constant months-and-days shift "
+    "at bind time (`sql_bind_interval`), so there is no interval value to hand "
+    "to `ago`, and `current_timestamp` is not served either. ⚠ NOT the same "
+    "as `date_diff`/`date_sub`, whose output is an INT64 COUNT of units and "
+    "which read no interval at all: they fold two DATE literals, and over "
+    "columns they lower to integer arithmetic on the operands' calendar "
+    "fields (`plan_expr.temporal_delta`)."
 )
 
 comptime _R_ROUNDN: String = (
@@ -1299,15 +1297,15 @@ comptime _R_INTERVALCTOR: String = (
     "`expr_walk` has an INTERVAL_MDN arm for interval +/- interval, so this "
     "is NOT a columnar gap — it is that no `EXPR_*` tag MINTS one from a "
     "number, and the `sql_bind_*` modules have no INTERVAL VALUE (the literal "
-    "folds away inside a constant `DATE +/- INTERVAL`), so the SQL door "
+    "is folded into a constant months-and-days shift of a DATE), so the SQL door "
     "cannot reach the arms that exist. VERIFIED: "
     "`Column` builds an INTERVAL_MDN column (the (int32 months, int32 days, "
     "int64 nanos) triple), "
     "`compiler_eval_column` adds and subtracts two of them, and "
     "`ScalarValue.interval_month_day_nano` constructs the literal — all "
     "live, all unreachable. ⛔ THREE THINGS ARE MISSING AND ONLY THE FIRST "
-    "IS OBVIOUS: (1) `SX_INTERVAL` exists but only the bind-time `DATE +/- "
-    "INTERVAL` fold and the output-name deparse read it, never as a value; (2) an interval LITERAL would still be SIX INT64 ZEROS — "
+    "IS OBVIOUS: (1) `SX_INTERVAL` exists but only the bind-time DATE shift (`DATE +/- "
+    "INTERVAL`, `date_add(date, INTERVAL ...)`) and the output-name deparse read it, never as a value; (2) an interval LITERAL would still be SIX INT64 ZEROS — "
     "`broadcast_scalar` has no interval arm and `walk_expr_field` declares "
     "`ArrowType.NULL` for it, the matched-pair defect that DATE32 and "
     "TIMESTAMP are fixed out of and INTERVAL is NOT (the recipe is "
@@ -1316,8 +1314,8 @@ comptime _R_INTERVALCTOR: String = (
     "so even a literal would not serve them — `to_days(n)` over a column "
     "needs a kernel that builds the month/day/nano triple per row, and "
     "there is no `EXPR_*` tag that does. ⚠ DISTINCT FROM `_R_INTERVAL`, WHICH "
-    "IS THE OTHER HALF: that reason is about macros needing an interval "
-    "OPERAND to add to a date; these names are about the interval VALUE "
+    "IS THE OTHER HALF: that reason is about `ago`, a macro "
+    "over an interval VALUE subtracted from `current_timestamp`; these names are about the interval VALUE "
     "itself having no producer."
 )
 
@@ -3624,7 +3622,7 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     #
     # ---- THE INTERVAL TYPE
     if name == "ago": return SqlFnSpec(FNK_REFUSED, _R_INTERVAL)
-    if name == "date_add": return SqlFnSpec(FNK_REFUSED, _R_INTERVAL)
+    if name == "date_add": return SqlFnSpec(FNK_DESUGAR, DSG_DATE_ADD, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     #
     # ---- TWO-ARGUMENT ROUNDING
     if name == "round_even": return SqlFnSpec(FNK_REFUSED, _R_ROUNDN)

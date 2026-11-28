@@ -197,6 +197,7 @@ from plan_expr.expr import (
     EXPR_STRUCT_FIELD_IDX,
     EXPR_MAP_GET,
     EXPR_JSON_EXTRACT,
+    EXPR_DATE_ADD,
     EXPR_EXTRACT,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
@@ -592,6 +593,12 @@ def bind_expr_inmem_payloads(
         if not expr._extract:
             return 0
         return bind_expr_inmem_payloads(registry, expr._extract.value().child[])
+    if tag == EXPR_DATE_ADD:
+        if not expr._date_add:
+            return 0
+        return bind_expr_inmem_payloads(
+            registry, expr._date_add.value().child[]
+        )
     if tag == EXPR_MATH_FN:
         if not expr._math_fn:
             return 0

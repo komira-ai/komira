@@ -63,6 +63,7 @@ from plan_expr.expr import (
     EXPR_COL_IDX,
     EXPR_COL_REF,
     EXPR_CORRELATED_SUBQUERY,
+    EXPR_DATE_ADD,
     EXPR_EXTRACT,
     EXPR_IN_LIST,
     EXPR_JSON_EXTRACT,
@@ -215,6 +216,9 @@ def collect_udf_calls(
         return
     if tag == EXPR_EXTRACT:
         collect_udf_calls(expr.extract_child_ref(), out, refuse_correlated_subquery)
+        return
+    if tag == EXPR_DATE_ADD:
+        collect_udf_calls(expr.date_add_child_ref(), out, refuse_correlated_subquery)
         return
     if tag == EXPR_MATH_FN:
         collect_udf_calls(expr.math_fn_child_ref(), out, refuse_correlated_subquery)

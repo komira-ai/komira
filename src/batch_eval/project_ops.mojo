@@ -64,6 +64,7 @@ from .column_compare import _eval_col_vs_col_promoted
 from .column_decimal import _eval_decimal_binary_pair, _expr_name_hint
 from .eval_column import _eval_column_expr
 from .eval_predicate import (_eval_predicate)
+from .predicate_binary import _stamp_temporal_pair
 from .predicate_logic import (_is_comparison_op)
 
 
@@ -185,6 +186,13 @@ def _project_binary_op(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegi
         left_col.arrow_type == ArrowType.INTERVAL_MONTH_DAY_NANO
         or right_col.arrow_type == ArrowType.INTERVAL_MONTH_DAY_NANO
     ):
+        # A scan stamps a DATE column INT32 (its DATE32 is on the schema
+        # field), so `ship_date > order_date + INTERVAL '7' DAY` in a select
+        # list needs the same re-stamp the predicate path applies.
+        _stamp_temporal_pair(
+            left_col, right_col, _expr_name_hint(expr.binary_left_ref()),
+            _expr_name_hint(expr.binary_right_ref()), batch,
+        )
         var cmp_cc_ba = _eval_col_vs_col_promoted(
             left_col^, right_col^, op
         )

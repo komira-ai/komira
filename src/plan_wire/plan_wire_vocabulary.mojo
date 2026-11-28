@@ -58,7 +58,7 @@ in the generator. A repository lint fails if you do.
 comptime PLAN_WIRE_UNSPECIFIED_VALUE: Int32 = 0
 """Wire 0, in every space. Never a valid tag."""
 
-comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 359
+comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 360
 """Total published members across all 33 spaces. A drift tripwire a test can pin."""
 
 comptime PLAN_WIRE_SPACE_COUNT: Int = 33
@@ -255,19 +255,19 @@ def plan_tag_wire_name(wire: Int32) -> String:
 #     SortData/TopNData, not as an Expr arm
 # ==========================================================================
 
-comptime EXPR_TAG_WIRE_MEMBERS: Int = 28
+comptime EXPR_TAG_WIRE_MEMBERS: Int = 29
 comptime EXPR_TAG_ENGINE_MIN: UInt8 = 0
-comptime EXPR_TAG_ENGINE_MAX: UInt8 = 27
+comptime EXPR_TAG_ENGINE_MAX: UInt8 = 28
 comptime EXPR_TAG_WIRE_MIN: Int32 = 1
-comptime EXPR_TAG_WIRE_MAX: Int32 = 28
+comptime EXPR_TAG_WIRE_MAX: Int32 = 29
 
 
 def expr_tag_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this ExprTag value?
 
-    Runs: [(0, 27)]. Total, never raising.
+    Runs: [(0, 28)]. Total, never raising.
     """
-    return engine_tag <= 27
+    return engine_tag <= 28
 
 
 def expr_tag_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -418,6 +418,9 @@ def write_expr_tag_wire_name[W: Writer](mut writer: W, wire: Int32):
         return
     if wire == 28:
         writer.write("EXPR_UDF_APPLY")
+        return
+    if wire == 29:
+        writer.write("EXPR_DATE_ADD")
         return
     writer.write("ExprTag#", Int(wire))
 
@@ -4338,7 +4341,7 @@ def plan_wire_space_member_count(space: Int) raises -> Int:
     if space == 0:
         return 19
     if space == 1:
-        return 28
+        return 29
     if space == 2:
         return 38
     if space == 3:
@@ -4409,7 +4412,7 @@ def plan_wire_space_engine_max(space: Int) raises -> UInt8:
     if space == 0:
         return 20
     if space == 1:
-        return 27
+        return 28
     if space == 2:
         return 37
     if space == 3:
