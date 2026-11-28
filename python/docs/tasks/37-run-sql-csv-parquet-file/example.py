@@ -37,9 +37,9 @@ with komira.Session() as s:
     )
     print(over.to_arrow().to_pylist())
 
-    # A DataFrame is not a table yet: its rows go to a Parquet file first.
+    # A DataFrame or an Arrow table in memory is a table once registered.
     df = komira.read_csv("sales.csv")
-    big = df[df["amount"] > 100]
-    pq.write_table(big.materialize().to_arrow(), "big.parquet")
-    s.register_parquet("big", "big.parquet")
+    s.register("big", df[df["amount"] > 100])
     print(s.sql("SELECT id, amount FROM big ORDER BY id").to_arrow().to_pylist())
+    s.register("goals", targets)
+    print(s.sql("SELECT region FROM goals WHERE target > 100").to_arrow().to_pylist())

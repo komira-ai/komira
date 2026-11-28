@@ -12,7 +12,11 @@ the wheel declares no `pandas` or `polars` extra yet (its rule writes no `Provid
 `ImportError` of a missing one names the distribution (`pip install pandas`) until it does.
 `Session.register_csv(name, path, *, delimiter=",", header=True, all_varchar=False)` and
 `Session.register_json(name, path)` are built (`komira_register_csv` and `komira_register_json`,
-ABI 1.5): decision 4's CSV and NDJSON registration, from the engine's own schema. The default session,
+ABI 1.5): decision 4's CSV and NDJSON registration, from the engine's own schema.
+`Session.register(name, obj)` is built (`komira_register_arrow_stream`, ABI 1.9): a komira frame, whose
+plan runs first, or any object with the Arrow PyCapsule stream interface, its rows copied into a table the
+session holds, as DuckDB's `register` names it; DuckDB's replacement scan, which finds a frame by its
+Python variable name, is not built. The default session,
 the per-session lock and the fork hook are not built. The error table of decision 9 is built:
 `KomiraError` carries `status`, `code` and `step` from `libkomira` ABI 1.7, and `ParseError`,
 `BindError`, `UnsupportedOperation`, `CredentialsError` and `StorageError` are public;
@@ -225,7 +229,7 @@ a pandas-shaped and a polars-shaped DataFrame surface. What happens to each part
 | `Session`: context manager, `close`, one context per session | yes | | the `plan_wire` argument (below) |
 | `Session.sql` | yes, as the official door returning a `Result` | | its status as "escape hatch, goes away with the scaffolding": SQL is now the first release's whole query surface |
 | default session and module-level calls | yes, for `sql` and `register_parquet` (and `add_sql_binding` when it lands) | the DataFrame readers | the public `session()` accessor: a second way to reach the same object |
-| table registration | `register_parquet(name, path)`, with the name required; CSV and NDJSON registration, from the engine's own schema (`register_csv(name, path, *, delimiter, header, all_varchar)`, `register_json(name, path)`) | | automatic names (`t1`, `t2`, ...): SQL needs the name the user wrote |
+| table registration | `register_parquet(name, path)`, with the name required; CSV and NDJSON registration, from the engine's own schema (`register_csv(name, path, *, delimiter, header, all_varchar)`, `register_json(name, path)`); rows in memory, `register(name, obj)` of a frame or an Arrow C stream | | automatic names (`t1`, `t2`, ...): SQL needs the name the user wrote |
 | `KomiraError` with the engine's status and message | yes, with the fields of decision 9 | | the `PLAN_ENDPOINT_<NAME>(<code>):` message prefix and its generated code table: libkomira's status codes and error text replace them |
 | `UnsupportedOperation` | yes, now a `KomiraError` (it was a `TypeError`) | | |
 | pandas-shaped `DataFrame`, `Column`, `Expr`, `GroupBy`, `MaterializedFrame`; the shared plan builder `Query`; the protobuf plan encoder | | with the DataFrame surface, through the plan door (`komira_plan_stream`) | |
