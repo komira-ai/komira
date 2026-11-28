@@ -29,7 +29,7 @@ with komira.Session() as s:
         " FROM orders ORDER BY id"
     ).to_arrow().to_pylist()
 
-    # The interval can sit on either side of a comparison: the orders that
+    # A shifted date compares with another date column: the orders that
     # shipped more than a week after they were placed.
     late = s.sql(
         "SELECT id FROM orders"

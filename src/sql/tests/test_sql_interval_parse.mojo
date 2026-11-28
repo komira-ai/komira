@@ -14,7 +14,8 @@
 #      (catches: the keyword reading taken unconditionally)
 #   4. A count that is an expression or a column (`interval (x) day`,
 #      `interval x day`) is refused by name, while a column called `interval`
-#      followed by an alias or a non-unit word still parses as a column.
+#      followed by an alias, a keyword (`interval AS day`, `FROM day`) or a
+#      non-unit word still parses as a column.
 #      (catches: `interval x day` read as a column aliased `x`)
 #   5. The refusals, each named: a unit inside the string, a non-integer
 #      count, a count beyond 10^9, a missing unit, and the units outside the
@@ -153,6 +154,17 @@ def test_interval_column_followed_by_something_else_is_still_a_column() raises:
     assert_equal(Int(_e("interval day").tag), Int(SX_COLUMN))
     assert_equal(Int(_e("interval (x) + 1").tag), Int(SX_BINARY))
     _ = _err("interval (x day")
+
+
+def test_interval_column_before_a_keyword_and_a_unit_word_is_still_a_column() raises:
+    """A column called `interval` aliased `day`, or read from a table called
+    `day`, is a column: the keyword after it is not an interval count."""
+    for alias in ["day", "week", "month", "year", "days"]:
+        assert_equal(Int(_e("interval AS " + alias).tag), Int(SX_COLUMN))
+    var st = parse_sql(tokenize("SELECT interval FROM day"))
+    assert_equal(Int(st.query.select_items[0].expr.tag), Int(SX_COLUMN))
+    var st2 = parse_sql(tokenize("SELECT interval FROM t WHERE interval IS NOT NULL ORDER BY interval DESC"))
+    assert_equal(Int(st2.query.select_items[0].expr.tag), Int(SX_COLUMN))
 
 
 def main() raises:

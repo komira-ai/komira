@@ -35,7 +35,7 @@ with komira.Session() as s:
         " FROM orders ORDER BY id"
     ).to_arrow().to_pylist()
 
-    # The interval can sit on either side of a comparison: the orders that
+    # A shifted date compares with another date column: the orders that
     # shipped more than a week after they were placed.
     late = s.sql(
         "SELECT id FROM orders"
@@ -65,7 +65,7 @@ late: [5]
 - Adding to a date column works in SQL, with the answers DuckDB gives. `order_date + INTERVAL '7' DAY`, `INTERVAL '7' DAY + order_date`, `order_date - INTERVAL '7' DAY` and `date_add(order_date, INTERVAL '7' DAY)` answer a timestamp at midnight (`datetime.datetime` in Python), also for day units; `order_date + 7`, `7 + order_date` and `order_date - 7` add whole days and answer a date (`datetime.date`). The units are day, week, month and year.
 - A month or a year is added by calendar month and keeps the day of the month, or the last day of the month when it has no such day: `2024-01-31 + INTERVAL '1' MONTH` is `2024-02-29`, `2023-01-31 + INTERVAL '1' MONTH` is `2023-02-28`, and `2024-02-29 - INTERVAL '1' YEAR` is `2023-02-28`. A NULL date stays NULL.
 - The interval must be a constant: `INTERVAL (n) DAY` with a column for the count is refused by name as a non-constant interval. There is no interval value in a query, so `date - date` giving an interval is not available: use `date_diff`.
-- A constant date plus an interval, `DATE '2024-03-01' + INTERVAL '30' DAY`, is folded to a date when the query is bound.
+- A constant date plus an interval, `DATE '2024-03-01' + INTERVAL '30' DAY`, is folded to a date when the query is bound; DuckDB answers a timestamp there. Compared with a date column it selects the same rows.
 - This page covers SQL only. Adding a `pd.Timedelta` to a date column of the pandas-shaped frame (`df["d"] + pd.Timedelta(days=7)` after `komira.read_csv`) is out of its scope, and the frame has no timedelta type: the timedelta accessors (`.dt.total_seconds`, `.dt.days`) are refused by name. Add days and take the difference with SQL as above.
 
 ## Related

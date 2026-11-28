@@ -359,7 +359,8 @@ comptime EXPR_UDF_APPLY: UInt8 = 27
 # Adding months keeps the day of the month and clamps it to the last day of
 # the target month (2024-01-31 + 1 month = 2024-02-29, 2024-02-29 - 12
 # months = 2023-02-28), as PostgreSQL and DuckDB do. A NULL date answers
-# NULL; a result outside years 1..9999 is refused by the evaluator.
+# NULL; a result outside the 32-bit day range of DATE32 is refused by name
+# by the evaluator.
 #
 # The SQL binder lowers `d + n` (integer n) to `{0, n, d}` and
 # `d +/- INTERVAL` / `date_add(d, INTERVAL)` to `{months, days, d}` under a

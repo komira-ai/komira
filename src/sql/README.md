@@ -280,7 +280,9 @@ PostgreSQL and DuckDB do: 31 Jan + 1 month is 28 Feb (29 in a leap year),
 29 Feb + 1 year is 28 Feb, 31 Mar - 1 month is 29 Feb in a leap year. A clamped
 day is not restored by the next step of a chain (31 Jan + 1 month + 1 month is
 29 Mar in 2024). A constant DATE result outside years 1 to 9999 is refused at
-bind time; a shifted column is checked when it runs.
+bind time; a shifted column is checked when it runs, against the 32-bit day
+range of a DATE (and the 64-bit microsecond range of the TIMESTAMP it is cast
+to).
 
 Refused by name: a unit outside the accepted four (QUARTER, HOUR, MINUTE,
 SECOND, MILLISECOND, and the rest), a unit written inside the string

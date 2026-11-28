@@ -20,7 +20,7 @@ from arrow.column import Column
 from arrow.primitive_array import PrimitiveArray
 from arrow.schema import Field, RecordBatch, RecordBatchBuilder, SchemaBuilder
 from byte_buffer.heap_region import HeapRegion
-from plan_expr.expr import Expr
+from plan_expr.expr import BIN_GT, BIN_LT, Expr
 
 from batch_eval.eval_column import _eval_column_expr
 
@@ -103,6 +103,31 @@ def test_date_add_serves_a_scan_stamped_int32_column_declared_date32() raises:
     assert_equal(Int(arr.get(0)), 19783)
     assert_equal(Int(arr.get(1)), 19417)
     assert_true(out.is_null_at(2))
+
+
+def test_a_select_list_comparison_of_a_scan_stamped_date_with_its_shift_reads_dates() raises:
+    """`SELECT d < d + INTERVAL '7' DAY` and `SELECT d > d + 7` over a column a
+    scan stamped INT32: the comparison reads both sides as dates (true and
+    false on every row) and a NULL date answers NULL."""
+    var batch = _scan_stamped_batch(_vals(), 2, ArrowType.DATE32)
+    var lt = _eval_column_expr(
+        Expr.binary(
+            BIN_LT, Expr.col_ref("d"),
+            Expr.cast_to_arrow(Expr.date_add(0, 7, Expr.col_ref("d")), ArrowType.TIMESTAMP_US),
+        ),
+        batch,
+    )
+    var gt = _eval_column_expr(
+        Expr.binary(BIN_GT, Expr.col_ref("d"), Expr.date_add(0, 7, Expr.col_ref("d"))),
+        batch,
+    )
+    assert_true(lt.is_null_at(2), "NULL date, NULL answer (<)")
+    assert_true(gt.is_null_at(2), "NULL date, NULL answer (>)")
+    var lt_b = lt.as_boolean()
+    var gt_b = gt.as_boolean()
+    for i in [0, 1, 3]:
+        assert_true(lt_b.get(i), "d < d + 7 days")
+        assert_false(gt_b.get(i), "d > d + 7")
 
 
 def test_date_add_over_a_computed_date_child_composes() raises:

@@ -58,7 +58,7 @@ in the generator. A repository lint fails if you do.
 comptime PLAN_WIRE_UNSPECIFIED_VALUE: Int32 = 0
 """Wire 0, in every space. Never a valid tag."""
 
-comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 359
+comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 360
 """Total published members across all 33 spaces. A drift tripwire a test can pin."""
 
 comptime PLAN_WIRE_SPACE_COUNT: Int = 33
@@ -4341,7 +4341,7 @@ def plan_wire_space_member_count(space: Int) raises -> Int:
     if space == 0:
         return 19
     if space == 1:
-        return 28
+        return 29
     if space == 2:
         return 38
     if space == 3:
@@ -4412,7 +4412,7 @@ def plan_wire_space_engine_max(space: Int) raises -> UInt8:
     if space == 0:
         return 20
     if space == 1:
-        return 27
+        return 28
     if space == 2:
         return 37
     if space == 3:

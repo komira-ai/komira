@@ -59,12 +59,30 @@ def interval_literal_starts(tokens: List[Token], pos: Int) -> Bool:
     return False
 
 
+def _is_clause_word(word: String) -> Bool:
+    """Whether `word` is a keyword that can follow a column named `interval`
+    (`interval AS day`, `interval FROM days`), so it is never read as an
+    interval count."""
+    for w in [
+        "as", "from", "where", "group", "order", "by", "having", "limit",
+        "offset", "union", "except", "intersect", "on", "using", "join",
+        "inner", "left", "right", "full", "cross", "natural", "outer", "and",
+        "or", "not", "is", "in", "between", "like", "ilike", "then", "else",
+        "end", "when", "asc", "desc", "nulls", "over", "filter", "window",
+        "qualify", "collate",
+    ]:
+        if word == w:
+            return True
+    return False
+
+
 def interval_count_is_expression(tokens: List[Token], pos: Int) -> Bool:
     """True when the token at `pos` is `interval` followed by a count that is
     not a literal and then a unit word: a parenthesised expression
     (`interval (x) day`) or a column reference (`interval x day`,
     `interval t.x day`). Such a count is refused by name; a column called
-    `interval` followed by anything else is still a column."""
+    `interval` followed by anything else, a keyword such as `AS` or `FROM`
+    included (`SELECT interval AS day`), is still a column."""
     if pos + 2 >= len(tokens):
         return False
     if tokens[pos].kind != TK_IDENT or tokens[pos].text != "interval":
@@ -81,7 +99,10 @@ def interval_count_is_expression(tokens: List[Token], pos: Int) -> Bool:
                     break
             k += 1
         k += 1
-    elif tokens[k].kind == TK_IDENT and not _is_unit_word(tokens[k].text):
+    elif (
+        tokens[k].kind == TK_IDENT and not _is_unit_word(tokens[k].text)
+        and not _is_clause_word(tokens[k].text)
+    ):
         k += 1
         while (
             k + 1 < len(tokens) and tokens[k].kind == TK_DOT
