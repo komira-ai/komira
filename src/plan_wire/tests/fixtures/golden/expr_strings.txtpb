@@ -276,6 +276,12 @@ plan {
       dict_index_type_id: 4
     }
     fields {
+      name: "sn_ltrim"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
       name: "sn_repeat"
       arrow_type_id: 13
       nullable: true
@@ -294,6 +300,12 @@ plan {
       dict_index_type_id: 4
     }
     fields {
+      name: "sn_rtrim"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
       name: "sn_strpos"
       arrow_type_id: 5
       dtype_code: _DT_INT64
@@ -302,6 +314,12 @@ plan {
     }
     fields {
       name: "sn_translate"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_trim"
       arrow_type_id: 13
       nullable: true
       dict_index_type_id: 4
@@ -1089,6 +1107,29 @@ plan {
       alias {
         child {
           string_fn_n {
+            op: STRFNN_LTRIM
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "abc"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_ltrim"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
             op: STRFNN_REPEAT
             args {
               col_ref {
@@ -1174,6 +1215,29 @@ plan {
       alias {
         child {
           string_fn_n {
+            op: STRFNN_RTRIM
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "abc"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_rtrim"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
             op: STRFNN_STRPOS
             args {
               col_ref {
@@ -1221,6 +1285,29 @@ plan {
           }
         }
         name: "sn_translate"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_TRIM
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "abc"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_trim"
       }
     }
     exprs {

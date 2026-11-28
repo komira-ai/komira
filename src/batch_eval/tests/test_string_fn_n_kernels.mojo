@@ -80,6 +80,9 @@ from plan_expr.expr import (
     STRFNN_RPAD,
     STRFNN_REPEAT,
     STRFNN_STRPOS,
+    STRFNN_TRIM,
+    STRFNN_LTRIM,
+    STRFNN_RTRIM,
     string_fn_n_arity_ok,
 )
 from batch_eval.eval_column import _eval_column_expr
@@ -345,6 +348,172 @@ def test_translate_is_CHARACTER_based_unlike_every_other_member() raises:
         _node(STRFNN_TRANSLATE, args^),
         expect,
         6,
+    )
+
+
+# ---------------------------------------------------------------------------
+# trim / ltrim / rtrim (s, characters) — a SET of CHARACTERS from the edges.
+# ---------------------------------------------------------------------------
+
+comptime TRIM_ROWS: Int = 11
+
+
+def _trim_batch() raises -> RecordBatch:
+    """Columns `s` and `c`, eleven rows; row 6 has a NULL `s`, row 7 a NULL
+    `c`. Both NULL rows store a value that would give a non-NULL answer if the
+    validity bit were ignored."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("s"), ArrowType.STRING, True))
+    sb.add_field(Field(String("c"), ArrowType.STRING, True))
+    var s = List[String]()
+    var c = List[String]()
+    s.append(String("\t\n hi \n\t"))
+    c.append(String("\t\n "))
+    s.append(String("xyxhixy"))
+    c.append(String("xy"))
+    s.append(String("xaxbx"))
+    c.append(String("x"))
+    s.append(String("abc"))
+    c.append(String(""))
+    s.append(String("xyyx"))
+    c.append(String("xy"))
+    s.append(String(""))
+    c.append(String("xy"))
+    s.append(String("xx"))
+    c.append(String("x"))
+    s.append(String("xx"))
+    c.append(String("x"))
+    s.append(String("èé"))
+    c.append(String("é"))
+    s.append(String("éèé"))
+    c.append(String("é"))
+    s.append(String("　x　"))
+    c.append(String("　"))
+    var sv = List[Bool]()
+    var cv = List[Bool]()
+    for i in range(TRIM_ROWS):
+        sv.append(i != 6)
+        cv.append(i != 7)
+    var rb = RecordBatchBuilder()
+    rb.add_column(
+        Column.from_string(StringArray.from_strings_with_validity(s, sv))
+    )
+    rb.add_column(
+        Column.from_string(StringArray.from_strings_with_validity(c, cv))
+    )
+    return rb.build(sb.build())
+
+
+def _trim_expected(op: UInt8) -> List[String]:
+    """Rows 6 and 7 are NULL and hold ''."""
+    var out = List[String]()
+    if op == STRFNN_TRIM:
+        out.append(String("hi"))
+        out.append(String("hi"))
+        out.append(String("axb"))
+        out.append(String("abc"))
+        out.append(String(""))
+        out.append(String(""))
+        out.append(String(""))
+        out.append(String(""))
+        out.append(String("è"))
+        out.append(String("è"))
+        out.append(String("x"))
+    elif op == STRFNN_LTRIM:
+        out.append(String("hi \n\t"))
+        out.append(String("hixy"))
+        out.append(String("axbx"))
+        out.append(String("abc"))
+        out.append(String(""))
+        out.append(String(""))
+        out.append(String(""))
+        out.append(String(""))
+        out.append(String("èé"))
+        out.append(String("èé"))
+        out.append(String("x　"))
+    else:
+        out.append(String("\t\n hi"))
+        out.append(String("xyxhi"))
+        out.append(String("xaxb"))
+        out.append(String("abc"))
+        out.append(String(""))
+        out.append(String(""))
+        out.append(String(""))
+        out.append(String(""))
+        out.append(String("è"))
+        out.append(String("éè"))
+        out.append(String("　x"))
+    return out^
+
+
+def _check_trim_op(op: UInt8, label: String) raises:
+    var batch = _trim_batch()
+    var args = List[Expr]()
+    args.append(Expr.col_ref(String("s")))
+    args.append(Expr.col_ref(String("c")))
+    var e = _node(op, args^)
+    var fld = field_for_expr(e, batch.schema)
+    assert_equal(fld.arrow_type, ArrowType.STRING, label + ": type")
+    var sa = _eval_column_expr(e, batch).as_string()
+    var expect = _trim_expected(op)
+    for i in range(TRIM_ROWS):
+        if i == 6 or i == 7:
+            assert_true(sa.is_null(i), label + ": NULL @row " + String(i))
+        else:
+            assert_true(not sa.is_null(i), label + ": not NULL @row " + String(i))
+            assert_equal(sa.get(i), expect[i], label + " @row " + String(i))
+
+
+def test_trim_strips_the_set_from_both_edges_by_codepoint() raises:
+    """a tab, newline and space set stripped from both ends; `xy` strips any mix;
+    interior members kept; empty set is identity; all-members and empty
+    strings give ''; NULL string or NULL set gives NULL; set `é` (C3 A9) never
+    eats the C3 of `è` (C3 A8); U+3000 is matched whole; `c` is per-row."""
+    _check_trim_op(STRFNN_TRIM, String("trim(s,c)"))
+
+
+def test_ltrim_strips_only_the_left_edge() raises:
+    """Same rows as trim; right-edge members are kept."""
+    _check_trim_op(STRFNN_LTRIM, String("ltrim(s,c)"))
+
+
+def test_rtrim_strips_only_the_right_edge() raises:
+    """Same rows as trim; left-edge members are kept."""
+    _check_trim_op(STRFNN_RTRIM, String("rtrim(s,c)"))
+
+
+def test_trim_with_a_literal_character_set_broadcasts() raises:
+    """`trim(v, ' A')` over the shared fixture strips spaces and `A` as a set
+    and agrees with the one-argument form on a spaces-only set."""
+    var args = List[Expr]()
+    args.append(_v())
+    args.append(_lit(String(" A")))
+    var expect: List[String] = [
+        String("b"),
+        String("cD"),
+        String("ef"),
+        String(""),
+        String(""),
+        String("Straße"),
+        String(""),
+    ]
+    _assert_strings(
+        String("trim(v,' A')"), _node(STRFNN_TRIM, args^), expect, 6
+    )
+    var args2 = List[Expr]()
+    args2.append(_v())
+    args2.append(_lit(String(" ")))
+    var expect2: List[String] = [
+        String("Ab  "),
+        String("cD "),
+        String("ef"),
+        String(""),
+        String(""),
+        String("Straße"),
+        String(""),
+    ]
+    _assert_strings(
+        String("ltrim(v,' ')"), _node(STRFNN_LTRIM, args2^), expect2, 6
     )
 
 

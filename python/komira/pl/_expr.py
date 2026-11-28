@@ -25,6 +25,7 @@ import builtins
 import datetime
 import decimal
 
+from komira import _text
 from komira._errors import UnsupportedOperation
 from komira._ops import (
     Agg,
@@ -35,7 +36,9 @@ from komira._ops import (
     Lit,
     MathFn,
     Node,
+    Regexp,
     StringFn,
+    StringFnN,
     StringOp,
     Unary,
     When,
@@ -840,6 +843,68 @@ class ExprStringNameSpace:
                 "match the text itself with str.contains(pattern, literal=True)"
             )
         return self._expr._unary(lambda a, s: StringOp("contains", a, pattern))
+
+    def _strip(self, verb: str, side: str, characters: str | None) -> Expr:
+        if characters is not None:
+            _need_text(verb, "characters", characters)
+        chars = _text.UNICODE_WHITE_SPACE if characters is None else characters
+        return self._expr._unary(lambda a, s: _text.trim(a, chars, side))
+
+    def strip_chars(self, characters: str | None = None) -> Expr:
+        """The string without the characters of `characters` at either end: a
+        set of characters, not a prefix. `None` removes the Unicode whitespace
+        (`White_Space`), a tab, a newline and a non-breaking space among it."""
+        return self._strip("str.strip_chars", "both", characters)
+
+    def strip_chars_start(self, characters: str | None = None) -> Expr:
+        """The string without the characters of `characters` at its start, as `strip_chars`."""
+        return self._strip("str.strip_chars_start", "left", characters)
+
+    def strip_chars_end(self, characters: str | None = None) -> Expr:
+        """The string without the characters of `characters` at its end, as `strip_chars`."""
+        return self._strip("str.strip_chars_end", "right", characters)
+
+    def _replace(self, verb: str, pattern: str, value: str, literal: bool, every: bool) -> Expr:
+        _need_text(verb, "pattern", pattern)
+        _need_text(verb, "value", value)
+        if not isinstance(literal, builtins.bool):
+            raise TypeError(f"{verb}: literal must be a bool, not {type(literal).__name__}")
+        if pattern == "" or (not literal and _text.matches_empty(pattern)):
+            raise UnsupportedOperation(
+                f"{verb}: the pattern {pattern!r} matches the empty string, so it matches between characters, "
+                "which the engine counts in bytes and polars in characters: give a pattern that matches at least "
+                "one character"
+            )
+        if literal and every:
+            return self._expr._unary(lambda a, s: StringFnN("replace", (a, Lit(pattern), Lit(value))))
+        if literal:
+            regex, replacement = _text.escape(pattern), value.replace("\\", "\\\\")
+        else:
+            regex, replacement = pattern, _text.polars_replacement(value, pattern, verb)
+        flags = "g" if every else ""
+        return self._expr._unary(lambda a, s: Regexp("replace", a, regex, replacement=replacement, flags=flags))
+
+    def replace(self, pattern: str, value: str, *, literal: bool = False, n: int = 1) -> Expr:
+        """The string with the first match of `pattern` replaced by `value`.
+        `pattern` is a regular expression in the engine's dialect (RE2's
+        syntax without backreferences or lookaround, matched over bytes, the
+        dialect pandas' `str.replace(regex=True)` takes), or the text itself
+        with `literal=True`. In `value`, `$1` or `${1}` is group 1, `$0` the
+        whole match and `$$` a `$`; with `literal=True` it is the text itself."""
+        verb = "str.replace"
+        if isinstance(n, builtins.bool) or not isinstance(n, builtins.int):
+            raise TypeError(f"{verb}: n must be an int, not {type(n).__name__}")
+        if n != 1:
+            raise UnsupportedOperation(
+                f"{verb}(n={n}) replaces the first n matches, and the engine replaces the first or every one: "
+                "use n=1, or str.replace_all for every match"
+            )
+        return self._replace(verb, pattern, value, literal, every=False)
+
+    def replace_all(self, pattern: str, value: str, *, literal: bool = False) -> Expr:
+        """The string with every match of `pattern` replaced by `value`, with
+        the rules of `replace`."""
+        return self._replace("str.replace_all", pattern, value, literal, every=True)
 
 
 def _need_text(verb: str, what: str, value: object) -> None:

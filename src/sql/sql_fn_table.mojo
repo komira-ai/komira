@@ -121,6 +121,7 @@ from plan_expr.expr import (
     STRFNN_LEVENSHTEIN, STRFNN_DAMERAU_LEVENSHTEIN, STRFNN_HAMMING,
     STRFNN_JARO, STRFNN_JARO_WINKLER, STRFNN_JACCARD,
     STRFNN_TRANSLATE,
+    STRFNN_TRIM, STRFNN_LTRIM, STRFNN_RTRIM,
     EXTRACT_YEAR, EXTRACT_QUARTER, EXTRACT_MONTH, EXTRACT_DAY, EXTRACT_HOUR,
     EXTRACT_MINUTE, EXTRACT_SECOND,
     EXTRACT_DAYOFWEEK, EXTRACT_ISODOW, EXTRACT_DAYOFYEAR,
@@ -2427,19 +2428,22 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     """
     # -- EXPR_STRING_FN: the one-argument string family ------------------------
     #
-    # ⚠ ARITY IS REFUSED, NOT TRUNCATED, AND `trim` IS WHY. DuckDB's
-    # `trim(s, chars)` is a DIFFERENT function with an explicit strip set;
-    # widening this row to 1..2 would silently ignore the caller's `chars` and
-    # answer a question they did not ask.
+    # ⚠ `trim`, `ltrim` AND `rtrim` TAKE 1 OR 2 ARGUMENTS, AND THE TWO FORMS ARE
+    # DIFFERENT OPS. `trim(s)` strips ASCII spaces only (`STRFN_TRIM`);
+    # DuckDB's `trim(s, chars)` strips a SET of characters (`STRFNN_TRIM`).
+    # The rows carry `FN_ARITY_OWN` because `_bind_scalar_call` picks the op
+    # by argument count and refuses 0 or 3+ arguments itself — a count check
+    # on the row would either truncate `chars` or name one number for both
+    # forms.
     #
     # ⛔ `strlen` IS NOT AN ALIAS OF `length`. `strlen('héllo')` = 6 (BYTES)
     # while `length('héllo')` = 5 (CHARACTERS). It IS a row — its own, on
     # `STRFN_STRLEN`, below — and it must never join THIS row.
     if name == "upper" or name == "ucase": return SqlFnSpec(FNK_STRING_FN, STRFN_UPPER, 1, 1)
     if name == "lower" or name == "lcase": return SqlFnSpec(FNK_STRING_FN, STRFN_LOWER, 1, 1)
-    if name == "trim": return SqlFnSpec(FNK_STRING_FN, STRFN_TRIM, 1, 1)
-    if name == "ltrim": return SqlFnSpec(FNK_STRING_FN, STRFN_LTRIM, 1, 1)
-    if name == "rtrim": return SqlFnSpec(FNK_STRING_FN, STRFN_RTRIM, 1, 1)
+    if name == "trim": return SqlFnSpec(FNK_STRING_FN, STRFN_TRIM, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
+    if name == "ltrim": return SqlFnSpec(FNK_STRING_FN, STRFN_LTRIM, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
+    if name == "rtrim": return SqlFnSpec(FNK_STRING_FN, STRFN_RTRIM, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     if name == "length" or name == "len" or name == "char_length" or name == "character_length": return SqlFnSpec(FNK_STRING_FN, STRFN_LENGTH, 1, 1)
     if name == "reverse": return SqlFnSpec(FNK_STRING_FN, STRFN_REVERSE, 1, 1)
     # -- the STRING -> INT bucket -----------------------------------------

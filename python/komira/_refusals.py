@@ -120,10 +120,6 @@ MODULE = _rows(
 # The names the `.str` accessor of a Series does not define.
 STRING = _rows(
     (
-        ("strip", "lstrip", "rstrip"),
-        ".str.{name}() is not supported yet: the engine trims spaces only, and pandas trims all whitespace",
-    ),
-    (
         ("split", "rsplit", "cat", "get", "join", "findall", "extractall", "get_dummies", "partition", "rpartition"),
         ".str.{name}() is not supported yet: the plan has no node for it",
     ),

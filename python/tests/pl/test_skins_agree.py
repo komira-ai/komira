@@ -334,6 +334,25 @@ case(
     ),
 )
 case(
+    "assign_string_strip_of_a_set_of_characters",
+    lambda f: f.t.assign(a=f.t["g"].str.strip("xy"), b=f.t["g"].str.lstrip(" "), c=f.t["g"].str.rstrip("é")),
+    lambda f: f.t.with_columns(
+        col("g").str.strip_chars("xy").alias("a"),
+        col("g").str.strip_chars_start(" ").alias("b"),
+        col("g").str.strip_chars_end("é").alias("c"),
+    ),
+)
+case(
+    "assign_string_replace_every_match_of_text",
+    lambda f: f.t.assign(a=f.t["g"].str.replace("a.", "-", regex=False)),
+    lambda f: f.t.with_columns(col("g").str.replace_all("a.", "-", literal=True).alias("a")),
+)
+case(
+    "assign_string_replace_every_match_of_a_pattern",
+    lambda f: f.t.assign(a=f.t["g"].str.replace("[ab]+", "-", regex=True)),
+    lambda f: f.t.with_columns(col("g").str.replace_all("[ab]+", "-").alias("a")),
+)
+case(
     "assign_astype_numeric_and_string",
     lambda f: f.t.assign(
         a=f.t["x"].astype("float64"), b=f.t["x"].astype("string"), n=f.t["x"].astype("int32")

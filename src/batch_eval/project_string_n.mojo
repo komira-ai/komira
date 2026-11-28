@@ -24,11 +24,14 @@ from plan_expr.expr import (
     STRFNN_JARO_WINKLER,
     STRFNN_LEVENSHTEIN,
     STRFNN_LPAD,
+    STRFNN_LTRIM,
     STRFNN_REPEAT,
     STRFNN_REPLACE,
     STRFNN_RPAD,
+    STRFNN_RTRIM,
     STRFNN_STRPOS,
     STRFNN_TRANSLATE,
+    STRFNN_TRIM,
     STRING_FN_N_REPEAT_MAX_BYTES,
     string_fn_n_arity,
     string_fn_n_arity_ok,
@@ -46,6 +49,7 @@ from .string_bytes import (
     _sfnn_string_arg,
     _strpos_chars,
     _translate_chars,
+    _trim_chars,
 )
 from .string_metrics import (
     _damerau_levenshtein_bytes,
@@ -384,6 +388,21 @@ def _project_string_fn_n(expr: Expr, batch: RecordBatch) raises -> Column[HeapRe
                     sfnn_args[0].get(i),
                     sfnn_args[1].get(i),
                     sfnn_args[2].get(i),
+                )
+            )
+        elif (
+            sfnn_op == STRFNN_TRIM
+            or sfnn_op == STRFNN_LTRIM
+            or sfnn_op == STRFNN_RTRIM
+        ):
+            # CHARACTER-based set strip; the NULL rule above already
+            # answered a NULL string or a NULL `characters`.
+            sfnn_out.append(
+                _trim_chars(
+                    sfnn_args[0].get(i),
+                    sfnn_args[1].get(i),
+                    sfnn_op != STRFNN_RTRIM,
+                    sfnn_op != STRFNN_LTRIM,
                 )
             )
         else:

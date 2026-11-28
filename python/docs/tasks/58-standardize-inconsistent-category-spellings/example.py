@@ -43,8 +43,8 @@ with komira.Session() as s:
         .to_pylist()
     )
 
-# pandas-shaped: a regex strips the whitespace, .str.lower() fixes the case.
+# pandas-shaped: .str.strip() removes the whitespace, .str.lower() fixes the case.
 df = komira.read_csv("sales.csv")
-df["category"] = df["category"].str.replace(r"^\s+|\s+$", "", regex=True).str.lower()
+df["category"] = df["category"].str.strip().str.lower()
 totals = df.groupby("category", as_index=False)["amount"].sum().sort_values("category")
 print(totals.materialize().to_arrow().to_pylist())

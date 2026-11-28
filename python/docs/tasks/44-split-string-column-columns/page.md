@@ -55,5 +55,5 @@ Output:
 
 - [How do I extract part of a string with a regex?](../40-extract-part-string-regex/page.md) (rank 40, works)
 - [How do I concatenate string columns?](../43-concatenate-string-columns/page.md) (rank 43, partial)
-- [How do I lowercase, trim and replace text in a column?](../42-lowercase-trim-replace-text-column/page.md) (rank 42, partial)
+- [How do I lowercase, trim and replace text in a column?](../42-lowercase-trim-replace-text-column/page.md) (rank 42, works)
 - How do I flatten nested JSON into columns? (rank 45, gap; no page yet)

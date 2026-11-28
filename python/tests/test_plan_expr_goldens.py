@@ -152,6 +152,9 @@ _STRING_FN_N_ARGS = {
     "jaro": (S, Lit("abc")),
     "jaro_winkler": (S, Lit("abc")),
     "jaccard": (S, Lit("abc")),
+    "trim": (S, Lit("abc")),
+    "ltrim": (S, Lit("abc")),
+    "rtrim": (S, Lit("abc")),
 }
 
 _REGEXPS = [

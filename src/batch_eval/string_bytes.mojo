@@ -707,6 +707,75 @@ def _translate_chars(
     return out^
 
 
+def _codepoint_in_set(
+    sb: Span[UInt8, _],
+    begin: Int,
+    end: Int,
+    fb: Span[UInt8, _],
+    f_starts: List[Int],
+) -> Bool:
+    """Is the codepoint `sb[begin:end]` one of the codepoints of `fb`?
+
+    Whole codepoints are compared byte for byte, so a set member never matches
+    the lead byte of a different codepoint that happens to share it."""
+    var n = end - begin
+    for fi in range(len(f_starts)):
+        var f_begin = f_starts[fi]
+        var f_end = len(fb) if fi + 1 == len(f_starts) else f_starts[fi + 1]
+        if f_end - f_begin != n:
+            continue
+        var same = True
+        for k in range(n):
+            if sb[begin + k] != fb[f_begin + k]:
+                same = False
+                break
+        if same:
+            return True
+    return False
+
+
+def _trim_chars(
+    subject: String, characters: String, left: Bool, right: Bool
+) -> List[UInt8]:
+    """`trim/ltrim/rtrim(s, characters)` — strip CHARACTERS of the set.
+
+    `characters` is a SET of codepoints (order and repeats irrelevant). While
+    the codepoint at a chosen edge of `s` is in the set it is dropped; `left`
+    chooses the start of the string, `right` the end. An empty set is the
+    identity; a string made only of set members becomes ''.
+
+    ⛔ CODEPOINTS, NOT BYTES, like `_translate_chars`: `U+00A0` (C2 A0) is one
+    unit, and a set holding `é` (C3 A9) must not eat the C3 of `è` (C3 A8) —
+    that would leave a stranded continuation byte, i.e. invalid UTF-8."""
+    var sb = subject.as_bytes()
+    var fb = characters.as_bytes()
+    var f_starts = _codepoint_starts(fb)
+    var s_starts = _codepoint_starts(sb)
+    var lo = 0
+    var hi = len(s_starts)
+    if left:
+        while lo < hi:
+            var b = s_starts[lo]
+            var e = len(sb) if lo + 1 == len(s_starts) else s_starts[lo + 1]
+            if not _codepoint_in_set(sb, b, e, fb, f_starts):
+                break
+            lo += 1
+    if right:
+        while hi > lo:
+            var b = s_starts[hi - 1]
+            var e = len(sb) if hi == len(s_starts) else s_starts[hi]
+            if not _codepoint_in_set(sb, b, e, fb, f_starts):
+                break
+            hi -= 1
+    var out = List[UInt8]()
+    if lo < hi:
+        var b0 = s_starts[lo]
+        var e0 = len(sb) if hi == len(s_starts) else s_starts[hi]
+        for k in range(b0, e0):
+            out.append(sb[k])
+    return out^
+
+
 def _strpos_chars(hay: String, needle: String) -> Int:
     """`strpos(hay, needle)` — 1-BASED CHARACTER position, `0` if absent.
 
