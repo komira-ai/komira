@@ -615,18 +615,16 @@ class Expr:
     def shift(self, n: int = 1, *, fill_value: object = None) -> Expr:
         """The value `n` rows before this one in the frame's order (or
         `over(order_by=...)`), `-n` rows after it when `n` is negative; null
-        where there is no such row, as polars documents `Expr.shift`
-        (https://docs.pola.rs/api/python/stable/reference/expressions/api/polars.Expr.shift.html).
-        It keeps the column's type; `fill_value` is refused."""
+        where there is no such row, as polars' API reference documents
+        `Expr.shift`. It keeps the column's type; `fill_value` is refused."""
         from . import _window
 
         return _window.shift(self, n, fill_value)
 
     def diff(self, n: int = 1, null_behavior: str = "ignore") -> Expr:
-        """The value less its `shift(n)`, in the column's type, as polars
-        documents `Expr.diff`
-        (https://docs.pola.rs/api/python/stable/reference/expressions/api/polars.Expr.diff.html);
-        null where there is no such row (`null_behavior="ignore"`).
+        """The value less its `shift(n)`, in the column's type, as polars'
+        API reference documents `Expr.diff`; null where there is no such
+        row (`null_behavior="ignore"`).
         `null_behavior="drop"` changes the number of rows and is refused."""
         from . import _window
 

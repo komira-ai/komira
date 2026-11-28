@@ -364,10 +364,9 @@ class Series:
         """The value `periods` rows before each row in the frame's sort order,
         or `-periods` rows after it when `periods` is negative; missing where
         there is no such row (the first `periods` rows, or the last
-        `-periods`). pandas documents `Series.shift` as shifting the data by
-        `periods` with a missing value where no data is shifted in
-        (https://pandas.pydata.org/docs/reference/api/pandas.Series.shift.html).
-        The frame must be sorted (`sort_values`). The Series keeps the
+        `-periods`). pandas' API reference documents `Series.shift` as
+        shifting the data by `periods`, with a missing value where no data is
+        shifted in. The frame must be sorted (`sort_values`). The Series keeps the
         column's type, an int64, float64 or string column; `freq`,
         `fill_value` and `suffix` are refused."""
         _check_axis(axis, "shift")
@@ -391,10 +390,9 @@ class Series:
 
     def diff(self, periods: int = 1) -> Series:
         """Each value less the value `periods` rows before it in the frame's
-        sort order (after it when negative): `s - s.shift(periods)`, as pandas
-        documents `Series.diff`
-        (https://pandas.pydata.org/docs/reference/api/pandas.Series.diff.html);
-        missing where there is no such row. The answer is float64, as pandas
+        sort order (after it when negative): `s - s.shift(periods)`, as
+        pandas' API reference documents `Series.diff`; missing where there is
+        no such row. The answer is float64, as pandas
         gives it for an int64 column. The frame must be sorted."""
         column = self._column("diff()")
         built = _windows.diff(self._frame, column, periods)
@@ -402,14 +400,13 @@ class Series:
 
     def pct_change(self, periods: int = 1, fill_method: object = None, freq: object = None, **kwargs: object) -> Series:
         """The fractional change from the value `periods` rows before:
-        `s / s.shift(periods) - 1`, as pandas documents `Series.pct_change`
-        (https://pandas.pydata.org/docs/reference/api/pandas.Series.pct_change.html),
-        as float64; missing where there is no such row or either value is
-        missing. Over a previous value of 0 it is inf, -inf or NaN, as pandas
-        divides; a previous -0.0 is taken as 0, so its infinity has the sign
-        of the value, where pandas flips it. Missing values are not filled first (`fill_method=None`,
-        pandas' default); `freq` and other arguments are refused. The frame
-        must be sorted."""
+        `s / s.shift(periods) - 1`, as pandas' API reference documents
+        `Series.pct_change`, as float64; missing where there is no such row
+        or either value is missing. Over a previous value of 0 it is inf,
+        -inf or NaN, as pandas divides; a previous -0.0 is taken as 0, so its
+        infinity has the sign of the value, where pandas flips it. Missing
+        values are not filled first (`fill_method=None`, pandas' default);
+        `freq` and other arguments are refused. The frame must be sorted."""
         column = self._column("pct_change()")
         if fill_method is not None:
             raise UnsupportedOperation(
