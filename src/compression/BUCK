@@ -7,16 +7,20 @@ load(":buildrules.mojo.bzl", "mojo_package")
 # Byte-stream codec trait and the eight codec implementations.
 #
 # Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"). `:lib` is the library
-# file and exists only once every test of tests/ has passed. Its one native library is snappy
-# (`[native.snappy]` of mopm.toml): `natives` names the `native_library` target that builds it,
-# //third_party/snappy:snappy_native (`libsnappy.a`, C++17, its C API renamed komira_snappy_*), instead of the
-# package compiling a source of its own. `mojo_package` links the archive into every test of the package and of
-# the packages that depend on it, and packs it into `:conda`. The codec libraries opened at run time (bzip2,
-# xz, zstd; libz and liblz4 are zlib's and lz4's) are `[native-dependencies]` with
+# file and exists only once every test of tests/ has passed. Its two native libraries are snappy
+# (`[native.snappy]` of mopm.toml) and zstd (`[native.komira_zstd]`): `natives` names the `native_library`
+# targets that build them, //third_party/snappy:snappy_native (`libsnappy.a`, C++17, its C API renamed
+# komira_snappy_*) and //third_party/zstd:zstd_native (`libkomira_zstd.a`, C, every symbol renamed
+# komira_zstd_*), instead of the package compiling a source of its own. `mojo_package` links the archives into
+# every test of the package and of the packages that depend on it, and packs them into `:conda`. The codec
+# libraries opened at run time (bzip2 and xz; libz is zlib's) are `[native-dependencies]` with
 # `mode = "load"`.
 mojo_package(
     path = ".",
-    natives = {"libsnappy.a": "//third_party/snappy:snappy_native"},
+    natives = {
+        "libkomira_zstd.a": "//third_party/zstd:zstd_native",
+        "libsnappy.a": "//third_party/snappy:snappy_native",
+    },
     test_data = {
         "tests/test_gzip_lz4_frame_conformers.mojo": {
             "golden/gettysburg.txt": "//third_party/pierrec-lz4:gettysburg.txt",
@@ -31,10 +35,13 @@ mojo_package(
 # the sonames the library opens at run time (OwnedDLHandle, codec_libraries.mojo): the conda package
 # `compression_conda` requires the conda-forge package tools/build/package/system_libs.bzl names for
 # each, and `[native-dependencies]` of mopm.toml says the same for `:conda`. `c_deps` and `native` are the
-# older packaging of the same snappy (below): the shared library of the release set.
+# older packaging of the same snappy and zstd (below): the shared library of the release set.
 mojo_adopted_library(
     name = "compression",
-    c_deps = ["//third_party/snappy:snappy"],
+    c_deps = [
+        "//third_party/snappy:snappy",
+        "//third_party/zstd:zstd",
+    ],
     deps = [
         "//src/lz4:lz4",
         "//src/zlib:zlib",
@@ -42,7 +49,6 @@ mojo_adopted_library(
     dlopen = [
         "libbz2.so.1.0",
         "liblzma.so.5",
-        "libzstd.so.1",
     ],
     lib = ":lib",
     # snappy is C++: its runtime, once, after the archive (the package's own tests get it from the rules).
@@ -56,9 +62,9 @@ mojo_adopted_library(
 )
 
 # What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's own
-# `.mojoc` and nothing else under `lib/mojo/`, the archive that was built and tested (`lib/libsnappy.a` is
-# exactly the bytes of the `snappy_native` target), and the direct dependencies: the Mojo packages, then the
-# conda packages of the three libraries it opens at run time.
+# `.mojoc` and nothing else under `lib/mojo/`, the archives that were built and tested (`lib/libsnappy.a` and
+# `lib/libkomira_zstd.a` are exactly the bytes of the `snappy_native` and `zstd_native` targets), and the direct
+# dependencies: the Mojo packages, then the conda packages of the two libraries it opens at run time.
 mojo_conda_holds(
     name = "conda_holds",
     conda = ":conda",
@@ -67,9 +73,11 @@ mojo_conda_holds(
         "mojo-komira-ai.zlib >=0.1,<0.2",
         "bzip2 >=1.0.8,<2",
         "liblzma >=5.2.5,<6",
-        "zstd >=1.5.2,<2",
     ],
-    natives = {"libsnappy.a": "//third_party/snappy:snappy_native"},
+    natives = {
+        "libkomira_zstd.a": "//third_party/zstd:zstd_native",
+        "libsnappy.a": "//third_party/snappy:snappy_native",
+    },
     package = "compression",
     sole = True,
     visibility = ["PUBLIC"],
@@ -94,6 +102,7 @@ native_shared_library(
     name = "komira_compression_native",
     archives = [
         "//third_party/snappy:snappy",
+        "//third_party/zstd:zstd",
     ],
     callers = [
         ":compression",
