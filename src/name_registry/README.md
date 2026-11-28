@@ -14,10 +14,13 @@ table that turns an id back into its name.
   the table is full. Id 0 marks an empty slot, so a name whose id is 0 cannot
   be registered.
 
-Concurrency: register from one thread at a time (or under your own lock).
-Once registration is done, any number of threads may call `lookup`,
-`contains` and `count`. The full contract is in the header of
-`registry.mojo`.
+Concurrency: any number of threads may call `try_register` at once. A
+registration claims its slot with one compare-and-swap, so each name is
+stored once, counted once, and returns `True` from at most one of the calls
+that register it. `contains` and `count` may run at any time; call `lookup`
+once the registrations it must see have returned, since it reads the name's
+bytes, which are written just after the claim. The full contract is in the
+header of `registry.mojo`.
 
 The package depends only on `hashing`.
 

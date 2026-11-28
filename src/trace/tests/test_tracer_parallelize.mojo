@@ -12,7 +12,7 @@
 # =============================================================================
 
 from std.memory import Pointer
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal
 
 from fork_join import fork_join, ForkJoinBody
 from trace.tracer import Tracer
@@ -81,8 +81,8 @@ def test_disjoint_per_worker_emit() raises:
 
 
 struct _DupNameBody[o: Origin[mut=True]](ForkJoinBody):
-    """Every worker emits the SAME name, on purpose -- the `try_register`
-    read-then-write race is the subject of the arm below."""
+    """Every worker emits the SAME name, on purpose: concurrent registrations
+    of one name are the subject of the arm below."""
 
     var tracer: Pointer[Tracer, Self.o]
 
@@ -96,58 +96,24 @@ struct _DupNameBody[o: Origin[mut=True]](ForkJoinBody):
 
 
 def test_name_registry_populated_under_parallelize() raises:
-    """Multiple workers emit the same name — the registry ends up HOLDING it,
-    and the insert count stays inside the one-duplicate-per-worker bound the
-    implementation actually promises.
+    """Several workers emit the same name at once: the registry holds it,
+    stored and counted once.
 
-    ⚠ `count() == 1` WOULD BE AN INTERMITTENT RED: it asserts a property
-    `NameRegistry` explicitly says it does not provide. `try_register` is a plain
-    read-then-write, NOT a CAS:
-
-        var existing = self.entries[idx].name_id      # read
-        if existing == UInt32(0):
-            # "Concurrent writers on the SAME idx ... may both pass this
-            #  check; we accept up to one duplicate write because the JSONL
-            #  drain dedups by name_id at emit time."
-            self.entries[idx].name_id = name_id       # write
-            _ = self.n_registered.fetch_add(Int32(1))
-
-    so N workers racing on one unregistered name can each see 0 and each
-    `fetch_add`. `n_registered` is therefore an UPPER BOUND on distinct names,
-    not a count of them — and `count()` has no production consumer outside
-    `tracer.mojo`. Every real reader — `lookup`, `contains`, the JSONL drain — linear-probes and
-    stops at the FIRST matching entry, so a duplicate is invisible to all of
-    them. Pinning a non-contract that has a race behind it is exactly how a suite
-    acquires an unexplainable intermittent red.
-
-    The bounds below are the real contract: at least one insert happened (the
-    registry is POPULATED — what this test is named for), and at most one per
-    racing worker. If that ceiling were ever exceeded, `try_register`'s "up to
-    one duplicate write" reasoning would be wrong and this SHOULD go red.
-
-    ⚠ WHAT THIS DELIBERATELY DOES NOT COVER. Two DIFFERENT names that hash to the
-    same `idx` can both read 0 and both write, and the second write OVERWRITES
-    the first — a genuinely LOST name, not a benign duplicate. That is a real
-    defect and it needs an actual CAS on `entries[idx].name_id`; it is out of
-    scope here because it changes a lock-free hot path and has to be measured,
-    not edited. It is NOT what a racing single name produces (one name, four
-    emitters, count 2)."""
+    `NameRegistry.try_register` claims a slot with one compare-and-swap of
+    the slot's id, so of the workers that race to register one name exactly
+    one claims the slot and the others see the name and return False. The
+    deterministic forms of this race (a second registration run inside the
+    first one's claim window, of the same name and of another name with the
+    same home slot) are tested in `name_registry`'s own tests; this one runs
+    it on real threads through the tracer."""
     comptime N_EMITTERS = 4
     var tracer = Tracer(num_workers=N_EMITTERS, ring_capacity=256)
     tracer.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(1))
     fork_join(_DupNameBody(Pointer(to=tracer)), N_EMITTERS)
 
     var n = tracer.name_registry_count()
-    assert_true(
-        n >= 1,
-        "the one emitted name must be registered; count was " + String(n),
-    )
-    assert_true(
-        n <= N_EMITTERS,
-        "at most ONE duplicate insert per racing worker is in contract ("
-        + String(N_EMITTERS)
-        + " emitters); count was "
-        + String(n),
+    assert_equal(
+        n, 1, "the one emitted name is registered once; count was " + String(n)
     )
     print("  test_name_registry_populated_under_parallelize PASS, count=", n)
 

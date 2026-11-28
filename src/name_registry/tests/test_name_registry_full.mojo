@@ -13,6 +13,10 @@
 #      False after probing every slot, and the count stays at 256.
 #   4. An id absent from the full table is absent to `lookup` and `contains`,
 #      which also probe every slot and then stop.
+#   5. With one slot free, a registration (n256) whose claim of that slot is
+#      overtaken by another name (n255, registered whole inside its claim
+#      window) does not overwrite it: it probes every other slot and is
+#      refused, and n255 keeps the slot.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -23,6 +27,25 @@ from name_registry import (
     name_id,
     name_id_of,
 )
+from name_registry.registry import _ClaimWindow
+
+
+struct _RegisterInWindow[other: StringLiteral](_ClaimWindow):
+    """Registers `other` whole inside the first claim window: what a second
+    thread does when it registers between this registration's check that a
+    slot is empty and its claim of the slot."""
+
+    var opened: Int
+    var other_registered: Bool
+
+    def __init__(out self):
+        self.opened = 0
+        self.other_registered = False
+
+    def in_window(mut self, mut registry: NameRegistry):
+        self.opened += 1
+        if self.opened == 1:
+            self.other_registered = registry.try_register[Self.other]()
 
 
 def _expected_name(i: Int) -> String:
@@ -32,10 +55,13 @@ def _expected_name(i: Int) -> String:
     return "n" + digits
 
 
-def _fill(mut reg: NameRegistry, mut ids: List[UInt32]) -> Int:
+def _fill(
+    mut reg: NameRegistry, mut ids: List[UInt32], with_n255: Bool = True
+) -> Int:
     """Registers n000..n255 (one `try_register` instantiation per name, the
-    only way to register a literal) and returns how many succeeded; `ids`
-    gets each name's id, computed at run time from the same text."""
+    only way to register a literal; n255 only `with_n255`) and returns how
+    many succeeded; `ids` gets the id of every one of the 256 names, computed
+    at run time from the same text."""
     for i in range(MAX_REGISTERED_NAMES):
         ids.append(name_id_of(_expected_name(i)))
     var oks = 0
@@ -294,7 +320,8 @@ def _fill(mut reg: NameRegistry, mut ids: List[UInt32]) -> Int:
     oks += Int(reg.try_register["n252"]())
     oks += Int(reg.try_register["n253"]())
     oks += Int(reg.try_register["n254"]())
-    oks += Int(reg.try_register["n255"]())
+    if with_n255:
+        oks += Int(reg.try_register["n255"]())
     return oks
 
 
@@ -356,11 +383,34 @@ def test_full_table_absent_id_is_absent() raises:
         assert_false(Bool(reg.lookup(absent[k])), "absent id has no name")
 
 
+def test_full_table_claim_lost_on_the_last_free_slot_is_refused() raises:
+    """With n000..n254 registered, one slot is free, and every probe for a
+    new name ends there. n256's claim of it is overtaken by n255, registered
+    whole inside n256's claim window: n256 probes every other slot and is
+    refused, and n255 keeps the slot."""
+    var reg = NameRegistry()
+    var ids = List[UInt32]()
+    assert_equal(_fill(reg, ids, with_n255=False), MAX_REGISTERED_NAMES - 1)
+    assert_equal(reg.count(), MAX_REGISTERED_NAMES - 1, "one slot free")
+    var window = _RegisterInWindow["n255"]()
+    assert_false(reg._try_register_at["n256"](window), "no slot left")
+    assert_equal(window.opened, 1, "the one free slot opened one window")
+    assert_true(window.other_registered, "n255 took the last slot")
+    assert_equal(reg.count(), MAX_REGISTERED_NAMES, "n255 counted, n256 not")
+    assert_equal(reg.lookup(name_id["n255"]()).value(), String("n255"))
+    assert_false(reg.contains(name_id["n256"]()), "n256 is not stored")
+    for i in range(len(ids)):
+        assert_equal(
+            reg.lookup(ids[i]).value(), _expected_name(i), "every name kept"
+        )
+
+
 def main() raises:
     print("test_name_registry_full")
     print("=======================")
     test_full_table_every_name_registers_and_reads_back()
     test_full_table_refuses_another_name()
     test_full_table_absent_id_is_absent()
+    test_full_table_claim_lost_on_the_last_free_slot_is_refused()
     print()
     print("ALL TESTS PASS")

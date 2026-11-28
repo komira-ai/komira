@@ -11,8 +11,9 @@
 #     _ = reg.try_register["engine.segment.execute"]()
 #     var text = reg.lookup(name_id["engine.segment.execute"]())
 #
-# Register from one thread at a time; once registration is done any number of
-# threads may read. The full contract is in `registry.mojo`.
+# Any number of threads may register at once (each slot is claimed with one
+# compare-and-swap); `lookup` once the registrations it must see have
+# returned. The full contract is in `registry.mojo`.
 # =============================================================================
 
 from .registry import (
