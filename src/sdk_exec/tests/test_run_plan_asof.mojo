@@ -33,9 +33,13 @@
 #     quote columns; groups do not mix.
 #   * test_no_key_matches_duckdb: with no key every quote is one group, the
 #     NULL-symbol quote included.
-#   * test_timestamp_asof_column_matches_duckdb: a TIMESTAMP ASOF column is
-#     walked as its instants: read from Parquet, and from CSV cast from its
-#     text (komira's CSV reader infers no TIMESTAMP; DuckDB's does).
+#   * test_timestamp_asof_column_matches_duckdb: a TIMESTAMP ASOF column, read
+#     from Parquet, is walked as its instants.
+#   * test_a_csv_timestamp_column_is_refused_at_lower: komira's CSV reader
+#     infers no TIMESTAMP (it reads the column as text, where DuckDB's reads a
+#     timestamp) and SQL has no CAST to TIMESTAMP, so the same columns read
+#     from CSV are a LOWERING_ASOF_UNSERVED refusal naming string, not an
+#     answer.
 #   * test_two_keys_match_duckdb: two key pairs (VARCHAR and BIGINT) both
 #     have to match.
 #   * test_tied_right_rows_match_duckdb: of two quotes at one time, the one
@@ -157,10 +161,15 @@ def _empty() -> List[_Case]:
 
 
 def _kinds(name: String) -> List[String]:
-    """The leaf kinds a case has an answer over: the empty tables are
-    Parquet only."""
+    """The leaf kinds a case has an answer over: the empty tables and the
+    TIMESTAMP cases are Parquet only (komira's CSV reader reads a timestamp as
+    text; `test_a_csv_timestamp_column_is_refused_at_lower`)."""
     var out: List[String] = ["parquet"]
-    if not name.endswith("_empty_right") and not name.endswith("_empty_left"):
+    if (
+        not name.endswith("_empty_right")
+        and not name.endswith("_empty_left")
+        and not name.endswith("_timestamp")
+    ):
         out.append("csv")
     return out^
 
@@ -187,11 +196,6 @@ def _node(ctx: EngineContext, c: _Case, kind: String) raises -> LogicalPlan:
         lcols = "id, sym, tts"
         rcols = "sym, tts, px, qid"
         on = "tts"
-        if kind == "csv":
-            # komira's CSV reader infers no TIMESTAMP (it reads the column as
-            # text), where DuckDB's does: the sides cast it.
-            lcols = "id, sym, CAST(tts AS TIMESTAMP) AS tts"
-            rcols = "sym, CAST(tts AS TIMESTAMP) AS tts, px, qid"
     elif c.shape == _TWO:
         rcols = "sym, qid, ts, px"
         lkeys.append("id")
@@ -318,7 +322,7 @@ def test_every_case_is_run() raises:
         assert_true(found, "no test runs case " + name)
     for i in range(len(named)):
         assert_true(read_data(named[i] + ".tsv").byte_length() > 0, named[i])
-    assert_equal(answered, 20)
+    assert_equal(answered, 18)
 
 
 def test_an_asof_column_of_another_type_is_refused_at_lower() raises:
@@ -344,6 +348,28 @@ def test_an_asof_column_of_another_type_is_refused_at_lower() raises:
     assert_true("ASOF columns are" in r.reason, r.reason)
 
 
+def test_a_csv_timestamp_column_is_refused_at_lower() raises:
+    var ctx = EngineContext(EngineOptions(worker_count=1))
+    var keys: List[String] = ["sym"]
+    var plan = LogicalPlan.asof_join(
+        _side(ctx, "id, sym, tts", "t", "csv"),
+        _side(ctx, "sym, tts, px, qid", "q", "csv"),
+        keys.copy(),
+        keys.copy(),
+        "tts",
+        "tts",
+        ASOF_BACKWARD,
+        AsofTolerance.none(),
+    )
+    var out = run_plan(ctx, plan^)
+    assert_true(not out.ok(), "a CSV timestamp column ran as text")
+    ref r = out.refusal.value()
+    assert_equal(r.step, String(STEP_LOWER))
+    assert_true(
+        "the ASOF columns are string and string" in r.reason, r.reason
+    )
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_backward_and_forward_keyed_match_duckdb]()
@@ -354,4 +380,5 @@ def main() raises:
     suite.test[test_empty_sides_match_duckdb]()
     suite.test[test_every_case_is_run]()
     suite.test[test_an_asof_column_of_another_type_is_refused_at_lower]()
+    suite.test[test_a_csv_timestamp_column_is_refused_at_lower]()
     suite^.run()
