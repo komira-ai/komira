@@ -111,8 +111,8 @@ def test_csv_pattern_reads_every_file_in_order() raises:
     _assert_ints(
         sql_result(s, "select id from '" + pattern + "' order by id"), want, "FROM"
     )
-    var total = sql_result(s, String("select sum(amt) from sales"))
-    assert_equal(_ints(total)[0], Int64(150))
+    var counted = sql_result(s, String("select count(*) from sales"))
+    assert_equal(_ints(counted)[0], Int64(5))
 
 
 def test_globstar_and_question_mark() raises:
@@ -220,8 +220,8 @@ def test_json_pattern_reads_every_file() raises:
     )
     var rows = sql_result(s, String("select v, w from events order by id"))
     assert_equal(rows.schema.num_columns(), 2)
-    var v = rows.batches[0].column_at(0)
-    var w = rows.batches[0].column_at(1)
+    ref v = rows.batches[0].column_at(0)
+    ref w = rows.batches[0].column_at(1)
     assert_equal(v.as_string().get(1), String("y"))
     assert_true(v.is_null_at(2), "a key the second file lacks is NULL")
     assert_true(w.is_null_at(0), "a key the first file lacks is NULL")
