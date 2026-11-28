@@ -282,7 +282,7 @@ def test_options_refused_by_name_and_kind() raises:
     _refuses("SELECT * FROM read_csv('f', comment = '#')", "read_csv option 'comment' is not implemented")
     _refuses("SELECT * FROM read_parquet('f', skip = 1)", "read_parquet option 'skip' is a read_csv option and means nothing here")
     _refuses("SELECT * FROM read_json('f', skip = 1)", "read_json option 'skip' is a read_csv option and means nothing here")
-    _refuses("SELECT * FROM read_avro('f', skip = 1)", "read_avro option 'skip' is a read_csv option and means nothing here")
+    _refuses("SELECT * FROM read_avro('f', skip = 1)", "read_avro('f', ...) takes NO options")
     _refuses("SELECT * FROM iceberg_scan('f', skip = 1)", "iceberg_scan option 'skip' is a read_csv option and means nothing here")
     _refuses(
         "SELECT * FROM read_csv('f', skip = -1)",
