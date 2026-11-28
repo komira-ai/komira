@@ -63,7 +63,8 @@ Fixed before this design, and not reopened here:
 - **wave**: a group of libraries that can be published together, because every library each of them
   needs is published already or in an earlier wave (§5).
 - **FFI boundary**: the one module that holds foreign pointers (the library handle, C strings, the
-  Arrow stream) and turns them into Mojo values (rule M9).
+  Arrow stream) and turns them into Mojo values. The repository's rule is that foreign code is
+  called only from the module that owns the foreign resource, behind safe functions.
 - **welded test**: a test the build runs before a library's package can exist, so a failing test
   fails the build.
 - **install test**: the release's README end-to-end test (`//release/readme_e2e/verify:<name>`). It
@@ -88,10 +89,10 @@ Fixed before this design, and not reopened here:
 | what the user writes | files and SQL text, and later logical plans; reads rows back | the physical plan itself: pipelines, their operators and the step that ends each, run as written | a program whose schema is a compile-time value |
 | when names and types are checked | at run time, when the library binds the plan | at run time, when the plan is submitted (§5) | when the user's program is compiled |
 | what it rests on | the shared library's C interface (§1 to §3) | the engine's Mojo libraries, linked into the user's program (§5) | the typed operator tables (§6) |
-| what installing it compiles | `komira` and two small libraries (`arrow`, `arrow_ipc`); no engine | the engine: 58 packages (§5) | not designed |
+| what installing it compiles | `komira`, `komira_error` and two small libraries (`arrow`, `arrow_ipc`); no engine | the engine: 58 packages (§5) | not designed |
 | built | first | second | not planned; the owner has not ruled on it |
 
-The untyped SDK comes first because the examples gate needs it and because it needs only three
+The untyped SDK comes first because the examples gate needs it and because it needs only four
 packages and one change to mopm (§4). The physical-plan surface needs the engine's closure
 published. The order of the work is not a question for the owner.
 
@@ -147,14 +148,14 @@ a call the C interface already has. The Python package makes the same calls
 | `session.add_sql_binding(name: String, source: Files) raises` | `name` reads `source` in later `sql` calls; binding a name again replaces it | `komira_add_sql_binding(ctx, name, source, len, KOMIRA_BIND_SESSION)` (1.10), with the source as `komira.plan.v1.WireBoundSource` bytes, encoded with the published `plan_proto` and `proto_codec` |
 | `session.sql(query: String) raises -> Result` | runs one statement, raises on any refusal | `komira_sql_stream(ctx, sql, &stream)` (1.3), then the stream is read into Mojo values (§3) |
 | `Result` | the answer: `num_rows()`, `num_columns()`, `column_names()`, `table()` (a `ref [self] Table`), and `Writable` for `print` | the stream's batches, read once and released (§3) |
-| `KomiraError` | what each call raises: `code`, `step`, `status` and the message | `komira_last_error` (1.0), `komira_last_error_code` and `komira_last_error_step` (1.7) |
+| `KomiraError` (from `komira_error`) | what each call raises: `code`, `step`, `status` and the message | `komira_last_error` (1.0), `komira_last_error_code` and `komira_last_error_step` (1.7) |
 
 The behaviour:
 - **Options.** `threads` and `memory_limit` mean what they mean in Python's `Session(threads=...,
   memory_limit=...)`. Absent means the host's own value, and below 1 is refused before the call, as
   Python's `_option` refuses it. The library returns NULL when the engine does not start, and
   `Session()` then raises a fixed message, since there is no context to ask. Nothing reads an
-  environment variable (rule S2).
+  environment variable: configuration is passed in code, not in the environment.
 - **`files`.**
   - An empty location is refused. A leading `~` is expanded and a relative path is made absolute
     against the working directory when `files` is called, as Python's `komira.files` does.
@@ -196,19 +197,26 @@ The behaviour:
 - **The same classes, as a value.** Mojo structs have no inheritance, so the class is a value, not a
   type. `KomiraError.error_class()` returns the name Python and Node use for the same refusal:
   `ParseError`, `BindError`, `UnsupportedOperation`, `MemoryLimitError`, `CredentialsError`,
-  `StorageError`, `LibraryLoadError`, `UnsupportedCpuError`, or else `KomiraError`. It picks the
-  name by the same code-then-step tables as Python's `_CODE_CLASSES` and `_STEP_CLASSES`, which
-  Node's `errorClass` also follows. The three codes `komira` raises itself (below) map to
-  `LibraryLoadError` (`LIBRARY_VERSION_UNSUPPORTED`), `UnsupportedCpuError` (`CPU_UNSUPPORTED`) and
-  `KomiraError` (`RESULT_NOT_PRINTABLE`).
-- **Three codes are new.** `LIBRARY_VERSION_UNSUPPORTED`, `CPU_UNSUPPORTED` and
-  `RESULT_NOT_PRINTABLE` are **PROPOSED** for `komira` alone: they come from checks `komira` makes
-  before or after the library is called. Python's `LibraryLoadError` and `UnsupportedCpuError` carry
-  no code.
+  `StorageError`, `LibraryLoadError`, `UnsupportedCpuError`, or else `KomiraError`. The mapping is
+  Python's: its code-then-step tables, `_CODE_CLASSES` and `_STEP_CLASSES`. TypeScript's is coarser.
+  Node's `errorClass(status, code)` has no step table, has one subclass for refusals
+  (`UnsupportedOperation`, else `KomiraError`), and maps fewer codes than Python
+  (`COPY_TYPE_UNSUPPORTED`, `TABLE_TYPE_UNSUPPORTED` and `COPY_COMPRESSION_UNSUPPORTED` are
+  Python's only). So a refusal TypeScript calls `KomiraError` can be a `ParseError` in Python and in
+  Mojo. The two codes `komira` raises itself (below) map to `LibraryLoadError`
+  (`LIBRARY_VERSION_UNSUPPORTED`) and `UnsupportedCpuError` (`CPU_UNSUPPORTED`).
+- **Two codes are new.** `LIBRARY_VERSION_UNSUPPORTED` and `CPU_UNSUPPORTED` are **PROPOSED** for
+  the Mojo packages alone: they come from checks `komira` makes before the library is called.
+  Python's `LibraryLoadError` and `UnsupportedCpuError` carry no code.
+- **Where it lives.** `KomiraError` and `error_class()` live in a small package of their own,
+  `komira_error`, with no dependencies. `komira` and `komira_physical` both import it, so a
+  physical-plan error has the same type as a session error, and `komira_physical` does not depend on
+  `komira` or on the shared library.
 - **Typed raises.** A `KomiraError` raised by type needs the pinned compiler's typed raises:
   `def sql(mut self, query: String) raises KomiraError -> Result`. No function under `src/`
   declares one yet, so slice 1 first proves them on the pinned Mojo with a standalone program that
-  uses no komira code (rule M13).
+  uses no komira code. The repository asks that a claim about the compiler be shown by such a
+  small program.
 - **The fallback.** If typed raises do not work there, every call raises a plain `Error` with the
   same text and the code at the start of the reason. A later move to `KomiraError` would change the
   signatures, a public interface change, so this is settled before the first release.
@@ -238,10 +246,13 @@ The behaviour:
     'src/*.mojo'`), for example `def write_to[W: Writer](self, mut writer: W)` in
     `src/arrow/schema.mojo`.
   - So `Result` does not format inside `write_to`. `sql` formats the first 20 rows once, when it
-    builds the `Result`, and keeps the text. A failure is raised by `sql` itself, as a `KomiraError`
-    with code `RESULT_NOT_PRINTABLE`, `format_table`'s message, and step `execute`.
-  - `print(result)` writes the kept text and cannot fail, so the user never sees a half-printed
-    table.
+    builds the `Result`, and keeps the text.
+  - A query that ran is never lost to a printing failure. If formatting fails, `sql` still returns
+    the rows, and the `Result` keeps instead one fixed line naming the failure:
+    `komira: the result could not be printed: <format_table's message>`. The rows stay readable
+    through `table()`.
+  - `print(result)` writes the kept text, the table or that line, and cannot fail, so the user never
+    sees a half-printed table.
   - The cost is formatting at most 20 rows per query *(inferred: small next to running it)*.
 
 ### Logical plans
@@ -320,7 +331,8 @@ library komira builds itself as a shared library.
   host to give, must be in the environment or on the host. Which one gives it in a mopm project is
   not verified yet *(inferred: the Mojo compiler's own environment has it)*, and slice 1's install
   test settles it.
-- The user gives no path and sets no environment variable (rule S2).
+- The user gives no path and sets no environment variable: configuration is passed in code, not
+  in the environment.
 - The library is opened once per process and never closed:
   - the library is linked `DF_1_NODELETE`, because the Mojo standard library's process-wide
     values must outlive it (`tools/build/mojo/shared_lib.bzl`);
@@ -358,10 +370,14 @@ library komira builds itself as a shared library.
 
 ## 3. The FFI boundary
 
-The FFI boundary is one private module, `komira._lib` (rule M9). It owns every foreign pointer, and
-its `# FFI-BOUNDARY:` header says who owns and frees each one. Every `UnsafePointer` in it has an
-adjacent `# SAFETY:` comment (M3). The wildcard origins appear only there (M4). The repository
-already has the pattern in three places:
+The FFI boundary is one private module, `komira._lib`. It owns every foreign pointer, and its
+`# FFI-BOUNDARY:` header says who owns and frees each one. Every `UnsafePointer` in it has an adjacent
+`# SAFETY:` comment saying why it is sound. The wildcard origins (`MutUntrackedOrigin`), which the
+repository allows only in a module's FFI internals, appear only there. So `komira._lib` takes a row
+in `tests/pointer_lint_ffi.tsv`, the pointer lint's list of FFI modules, naming the foreign resource
+it owns: "the libkomira shared library: its handle, the session's context, the C strings and buffers
+of each call, and the ArrowArrayStream each query returns". The repository already has the pattern
+in three places:
 - `src/so/tests/gate/*.mojo` and `src/tests/helpers/komira_plan_harness/door.mojo` open libkomira
   from Mojo and call it;
 - `compression/codec_libraries.mojo` has a process-wide handle slot and a raising opener.
@@ -382,7 +398,7 @@ The steps on the first `Session()`:
    `LIBRARY_VERSION_UNSUPPORTED` that names both versions.
 3. Resolve the other calls.
 
-No public name takes or returns a pointer (M1):
+No public name takes or returns a pointer:
 - `Session` holds an `Int`;
 - `Files` holds a `String`;
 - `Result` holds a `Table`;
@@ -393,8 +409,9 @@ only inside `komira._lib` and never names it in its own API.
 
 ## 4. What `komira` needs published
 
-`komira` imports `arrow` (for `Table` and `format_table`), `arrow_ipc` (to read the stream) and
-`plan_proto` with `proto_codec` (for `WireBoundSource`). Their closures, from `./buck2 uquery
+`komira` imports `komira_error` (for `KomiraError`), `arrow` (for `Table` and `format_table`),
+`arrow_ipc` (to read the stream) and `plan_proto` with `proto_codec` (for `WireBoundSource`).
+`komira_error` is new and imports nothing. Their closures, from `./buck2 uquery
 "deps(//src/<name>:<name>)" --output-attribute deps` with the `deps` attribute walked and test
 dependencies left out:
 - `arrow` (11 libraries, with itself): `arrow`, `atomic_alias`, `byte_buffer`, `compression`,
@@ -408,16 +425,24 @@ Of those 18, all are published except two:
   is published.
 - `arrow_ipc`: its reason is "depends on an unpublished library", namely `arrow`.
 
-So the untyped SDK publishes **three packages**, `arrow`, `arrow_ipc` and `komira`, plus the mopm
-change of §2. Two notes on them:
+So the untyped SDK publishes **four packages**, `komira_error`, `arrow`, `arrow_ipc` and `komira`,
+plus the mopm change of §2. Notes on them:
 - **Coverage.** By the census of 2026-10-10 (each library's `coverage_census.tsv`), `arrow` has
-  67.8% line coverage of 7,042 lines and `arrow_ipc` 86.1% of 6,827. Rule T1 holds a touched package
-  to 99% line and branch, so both need tests first. The pull request's check measures again.
+  67.8% line coverage of 7,042 lines and `arrow_ipc` 86.1% of 6,827. The repository holds every
+  package a pull request touches to 99% line and branch coverage, so both need tests first. The pull
+  request's check measures again.
 - **Names.** `arrow` and `arrow_ipc` are claimed on the prod registry already
-  (`release/prod_claimed_names.txt`). `komira` is not.
+  (`release/prod_claimed_names.txt`). `komira` and `komira_error` are not.
+- **Why a binding, not `komira_register_parquet`.** The first slice binds a file through
+  `komira_add_sql_binding`, with the source encoded as protobuf, although `komira_register_parquet`
+  (1.1) takes a bare path. Sources are values in every SDK (credentials_and_writes.md, decision 12),
+  and the same `files` value later carries a credential for a remote file, which
+  `komira_register_parquet` cannot. The encoding libraries are published already, and the logical
+  plans of slice 5 need them anyway. Their cost is five small libraries compiled at install.
 
 The engine is compiled once, by the release, into the shared library, as it is for the wheel. A
-user who installs `komira` compiles `komira`, `arrow` and `arrow_ipc`, and no engine library.
+user who installs `komira` compiles `komira`, `komira_error`, `arrow` and `arrow_ipc`, and no engine
+library.
 
 ## 5. Mojo physical plan: `komira_physical`
 
@@ -535,8 +560,9 @@ Two changes make this hold, both **PROPOSED**:
   The builder holds the flowing schema of each pipeline when the plan is submitted, so it can run
   them.
 
-Each refusal is a `KomiraError` of §1's shape whose code is the name above and whose message names
-the pipeline, the operator and the column.
+Each refusal is a `KomiraError` from `komira_error` (§1) whose code is the name above and whose
+message names the pipeline, the operator and the column. `komira_physical` depends on `komira_error`
+and on the engine's closure (below), and not on `komira` or the shared library.
 
 ### What is stable enough to expose, and what is not
 
@@ -600,8 +626,10 @@ would need an execution context outside `sdk_exec`. That is a later refactor, no
   packages.
 - **Task pages.** This surface is the form "Mojo physical plan", key `mojo_plan`. Its tree is
   `src/komira_physical/docs/tasks/`, in its own package, as komira-ai/komira#2495 places a tree, and
-  it has its own tab. A task is shown in that form only when the builder can write its plan. Until
-  the builder lands, every task's `mojo_plan` record is `not-shown`, with that reason.
+  it has its own tab. This path replaces `src/komira/docs/mojo_plan_tasks/` of the text the two
+  designs shared earlier, which assumed both forms were one package. A task is shown in that form
+  only when the builder can write its plan. Until the builder lands, every task's `mojo_plan` record
+  is `not-shown`, with that reason.
 - **Welded tests.**
   - The same query through `komira` and through `komira_physical` gives the same rows.
   - Each submit refusal of the table above is asserted by its exact message: an unknown column, a
@@ -639,8 +667,8 @@ The result:
 Three facts about the graph:
 - **The declared `deps` are incomplete.** `sdk_exec`'s own `deps` list 87 of the 93. The other 6
   (`decimal_literal`, `iceberg`, `op_agg_hash`, `op_fused_kernels`, `op_join_build`, `rowcell`) are
-  reached only through its dependencies. Rule M11 asks for the full closure. Slice 6 adds the 4 of
-  them that stay in the recommended closure (`iceberg` and `rowcell` leave it).
+  reached only through its dependencies. A library's `deps` must list its full closure. Slice 6 adds
+  the 4 of them that stay in the recommended closure (`iceberg` and `rowcell` leave it).
 - **The ledger's import lists can be shorter.** For several libraries the "imports" in
   UNPUBLISHED.md (each library's own imports) name fewer libraries than its BUCK `deps` (which hold
   the full closure). Two examples:
@@ -713,8 +741,8 @@ The columns:
 - "reason today" is UNPUBLISHED.md's reason.
 - "coverage" is the line coverage in the library's own `coverage_census.tsv`, measured by the census
   of 2026-10-10 (`csv`'s of 2026-10-27). "not measured" means the library has no census file. These
-  numbers are old. The pull request's check measures again, and rule T1 holds every touched package
-  to 99% line and 99% branch.
+  numbers are old. The pull request's check measures again, and the repository holds every touched
+  package to 99% line and 99% branch.
 - "unpublished deps" counts the library's BUCK `deps` among the 56.
 - "work before or in its pull request" lists the work. "claim the name" means a maintainer claims
   `komira-ai/<name>` on the prod registry first, a step outside the repository
@@ -796,10 +824,10 @@ The columns:
   example. Most of these are engine internals (`lowering`, `op_window`, `engine_runtime`, ...), so
   the example shows the library's own public call on a small input, as the published packages'
   READMEs do. It can be written in the same pull request as the move.
-- **Coverage first (25 below 99% by the old census, 20 not measured, 11 at or above 99%).** T1 holds
-  a touched package to 99%, and a move touches every file. *(inferred)* This is the largest part of
-  the work: `arrow` (67.8% of 7,042 lines), `column_kernels` (67.0% of 7,061) and `udf` (17.5% of
-  674) are the biggest gaps. The real numbers come from each pull request's check.
+- **Coverage first (25 below 99% by the old census, 20 not measured, 11 at or above 99%).** The
+  repository holds a touched package to 99%, and a move touches every file. *(inferred)* This is the
+  largest part of the work: `arrow` (67.8% of 7,042 lines), `column_kernels` (67.0% of 7,061) and
+  `udf` (17.5% of 674) are the biggest gaps. The real numbers come from each pull request's check.
 - **Native code to package (5).** `mopm_migrate` refuses a library that owns C or links one, so
   each of the five is moved by hand, after the published precedents. Each one's C must also build
   for macOS, since the pull request check builds every package's library for darwin-arm64
@@ -842,26 +870,26 @@ them). Whether it exists at the end is owner decision 1, and this design gives i
 ## 7. The Mojo rules, and what a user's build needs
 
 How the two packages obey the rules:
-- **M1, no pointer type in a public API.**
+- **No pointer type in a public API.**
   - `komira`'s public names hold values: an `Int`, a `String`, a `Table`, strings (§3).
   - `komira_physical` exposes its own values (`Engine`, `PhysicalPlan`, `PipelineId`, its
     expressions and aggregates) and `arrow`'s `Schema` and `RecordBatch`.
   - The IR it emits is pointer-free in its public fields too (`physical_plan.mojo`'s header says it
     is inert data with no `UnsafePointer`). `Expr` keeps its `OwnedPointer` children in private
     fields.
-- **M3, M4, M9.** `komira`'s foreign pointers live in `komira._lib` alone, with `# SAFETY:` and
-  `# FFI-BOUNDARY:` comments (§3). `komira_physical` has no FFI of its own: native code stays in
-  the engine libraries that own it. `//:pointer_lint` runs over both, like every library under
-  `src/`.
-- **M11, packaging is `.mojoc`.**
+- **Pointers, wildcard origins and foreign calls.** `komira`'s foreign pointers live in
+  `komira._lib` alone, with `# SAFETY:` and `# FFI-BOUNDARY:` comments (§3). `komira_physical` has
+  no FFI of its own: native code stays in the engine libraries that own it. `//:pointer_lint` runs
+  over both, like every library under `src/`.
+- **Packaging is `.mojoc`, and `deps` list the whole closure.**
   - Both are `mojo_package`s from their first commit, so each library is a `.mojoc` and each
     package a `.conda` with a `mopm.toml`.
   - Their BUCK `deps` are their whole closures: 18 libraries for `komira` (§4); `sdk_exec` and its
     86 for `komira_physical` (§5).
   - Each `mopm.toml` `[dependencies]` names only what the package imports. mopm resolves the rest
     from each package's own dependencies (`>=0.1,<0.2`, [docs/ci.md](../ci.md)).
-- **M15, T6, T18.** Every file stays under 1,000 lines, every test file is in `test_srcs`, and every
-  public name appears in a README example.
+- **Files, tests and examples.** Every file stays under 1,000 lines, every test file is in
+  `test_srcs`, and every public name appears in a README example.
 
 A user's build needs:
 
@@ -916,8 +944,8 @@ Every README example of `komira` and of `komira_physical` runs twice in the pull
    - **PROPOSED**: `komira`'s tests are given `//src/so:libkomira[dist]`'s directory the way
      buildrules gives a package's conda-forge libraries to its tests, by a library directory
      (`--lib-dir`).
-   - A test run is not a user's configuration, so this is not an environment variable rule S2
-     forbids *(inferred)*.
+   - A test run is not a user's configuration, so this is not the configuration by environment
+     variable that the repository forbids *(inferred)*.
 2. **The install test** (**EXISTS**: `//release/readme_e2e/verify:<name>`). It is what a stranger
    does, run offline ([tools/build/readme_e2e/README.md](../../tools/build/readme_e2e/README.md)):
    - it makes an empty project (`mopm.toml` with a name and version, `[toolchain] mojo` and an empty
@@ -937,7 +965,7 @@ A README example writes its own input first, with SQL's `COPY (SELECT ...) TO 't
 which runs through the shared library like any query. It asserts the rows it reads back, as
 documentation_tests.md judges README examples by exit status. The release then adds `komira` to the
 packages the `prod-add` job installs from the prod registry ([docs/ci.md](../ci.md)). That runs in
-the release workflow, not in the pull request check (rule B9).
+the release workflow, not in the pull request check, which runs only the build and unit tests.
 
 ### Task-page examples
 
@@ -967,7 +995,7 @@ runner.
 
 ## 10. Tests of `komira` itself
 
-The welded tests in `src/komira/tests/`, each in `test_srcs` (T6), cover the following.
+The welded tests in `src/komira/tests/`, each in `test_srcs`, cover the following.
 
 The happy path:
 - one session, one binding, one query, over a Parquet file the test writes with `COPY`;
@@ -989,7 +1017,8 @@ Refusals, each asserted by its exact message and by the `code`, `step` and `stat
 - a NULL context from the library (the fixed message), and a library that cannot be opened
   (`LibraryLoadError` from `error_class()`);
 - a CPU without the x86-64-v3 flags (`CPU_UNSUPPORTED`), given stand-in flags by the test;
-- a cell `format_table` cannot render (`RESULT_NOT_PRINTABLE`), and a `print` of the kept text;
+- a cell `format_table` cannot render: `sql` returns the rows, `table()` reads them, and `print`
+  writes the fixed line;
 - `error_class()` for one code of each class and for a step with no code;
 - a relative path and a `~` path made absolute by `files`;
 - `Session(threads=0)` and `Session(memory_limit=0)`;
@@ -1008,12 +1037,12 @@ Everything below the C interface is libkomira's, already tested by its gate driv
 
 | slice | what lands | ends with |
 |---|---|---|
-| 1 | the first query through the shared library, in this order: komira-ai/mopm gains `[native.<id>] kind = "shared"` and the mopm pin is bumped here; the install test learns to install and find a shared native, with its scenario and negative case; `arrow` (with `format_table` moved into it) and `arrow_ipc` published, tests to 99% first; a sub-target of `//src/so:libkomira` that leaves out the Mojo runtime; the standalone proof that the pinned compiler's typed raises work; then `komira`: `komira._lib` with its CPU check, `Session`, `files`, `add_sql_binding`, `sql`, `Result`, `KomiraError`, its tests (§10) and its README example | **the install test**: `//release/readme_e2e/verify:komira` installs `komira-ai/komira` into an empty project and runs one SQL query over one local Parquet file through the shared library. Then `prod-add` does `mopm add komira-ai/komira` from the prod registry on the next release |
+| 1 | the first query through the shared library, in this order: komira-ai/mopm gains `[native.<id>] kind = "shared"` and the mopm pin is bumped here; the install test learns to install and find a shared native, with its scenario and negative case; `arrow` (with `format_table` moved into it) and `arrow_ipc` published, tests to 99% first; a sub-target of `//src/so:libkomira` that leaves out the Mojo runtime; the standalone proof that the pinned compiler's typed raises work; then `komira_error`; then `komira`: `komira._lib` with its CPU check and its row in `tests/pointer_lint_ffi.tsv`, `Session`, `files`, `add_sql_binding`, `sql`, `Result`, `KomiraError`, its tests (§10) and its README example | **the install test**: `//release/readme_e2e/verify:komira` installs `komira-ai/komira` into an empty project and runs one SQL query over one local Parquet file through the shared library. Then `prod-add` does `mopm add komira-ai/komira` from the prod registry on the next release |
 | 2 | Mojo task examples in `src/komira/docs/tasks/`, form `mojo`, run by komira-ai/komira#2495's `mojo_task_examples` with its byte-for-byte compare (komira-ai/komira#2495 slice 5) | every task SQL can answer shown in Mojo; the rest `not-shown` with a reason (§9) |
 | 3 | the CPU-level variants: the `VARIANTS` selector in `komira._lib`, as in [isa_variants.md](isa_variants.md) | `komira` runs on an x86-64-v2 CPU |
 | 4 | cancel and progress (`komira_run_*`, `komira_sql_stream_run`), and credentials with remote files (`komira_credential_*`, `files("s3://...", credential=...)`) | a cancelled query refused by name; a query over a bucket through a fake object store |
 | 5 | logical plans: a design for the Mojo frame API, then that API over `plan_proto` and `komira_plan_stream` | a plan run through the shared library gives the same rows as its SQL |
-| 6 | the physical-plan surface's first step: `engine_iceberg.mojo` and its test `sdk_exec/tests/test_run_sql_iceberg.mojo` move to `sdk_exec_iceberg`, and `sdk_exec`'s `deps` drop `iceberg_catalog` and gain the 4 libraries of the 86 they lack (M11). No behaviour changes | `sdk_exec`'s closure is the 86 of §5 |
+| 6 | the physical-plan surface's first step: `engine_iceberg.mojo` and its test `sdk_exec/tests/test_run_sql_iceberg.mojo` move to `sdk_exec_iceberg`, and `sdk_exec`'s `deps` drop `iceberg_catalog` and gain the 4 libraries of the 86 they lack (a library's `deps` list its full closure). No behaviour changes | `sdk_exec`'s closure is the 86 of §5 |
 | 7 | the 54 libraries left of the engine's closure, in the waves of §5, then `sdk_exec` | `sdk_exec` published |
 | 8 | the executor's own checks: the sink capability table moves to `physical_plan` and `check_plan` refuses an unserved sink; `run_lowered_plan_with` refuses a missing result or a stray root, before any pipeline runs (§5) | a hand-made `LoweredPlan` with either fault refused by name |
 | 9 | `komira_physical`: `Engine`, `PhysicalPlan`, `parquet`, `filter`, `project`, `limit`, `hash_aggregate`, collect, the expressions and aggregates, the checks at submit, `run`, its README example and the `mojo_plan` tree | the install test runs its README example; the same query through `komira` and `komira_physical` gives the same rows |
@@ -1044,7 +1073,8 @@ Three questions, each about what exists at the end. The order of the work is not
 2. **Is the untyped Mojo package called `komira`** (`from komira import Session, files`)? The
    owner's words were "I think the untyped sdk is komira?", and this design uses it as the working
    name.
-   - Confirming it means claiming `komira` on the production registry before slice 1 publishes.
+   - Confirming it means claiming `komira`, and the small `komira_error` beside it, on the
+     production registry before slice 1 publishes.
      `arrow` and `arrow_ipc` are claimed already.
    - The physical-plan surface needs 50 more names before its waves are published, listed in §5's
      table (every row marked "claim the name"), as each wave comes or all at once.
@@ -1077,8 +1107,8 @@ These are engineering choices, not the owner's. Each says what the design does a
   ([typescript_package.md](typescript_package.md), section 3).
 - **The package carries no Mojo runtime.** The user's Mojo at the same pin already holds one, and a
   second copy would not be mapped anyway (§2).
-- **Errors match Python and Node**, with plain `Error` as the fallback if typed raises fail on the
-  pinned compiler (§1).
+- **Errors match Python's classes**, from a small `komira_error` package both Mojo packages share,
+  with plain `Error` as the fallback if typed raises fail on the pinned compiler (§1).
 - **`format_table` moves into `arrow`.** Then `komira` can print without depending on `sdk`.
 - **What is copied from Python as it ships:**
   - `add_sql_binding(name, files(...))`;
@@ -1115,4 +1145,3 @@ These are engineering choices, not the owner's. Each says what the design does a
     pin is 1.1.0.
 
   Each is for its own document's owner to settle.
-
