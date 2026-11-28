@@ -65,7 +65,9 @@
 #                                            several windows in one SELECT
 #                                            (two with one spec), a window over
 #                                            a WHERE, an outer ORDER BY on a
-#                                            total key, a WHERE no row passes.
+#                                            total key, an outer ORDER BY on a
+#                                            window and the id (LIMIT 40), a
+#                                            WHERE no row passes.
 #   test_windows_with_shared_subplans_equal_duckdb
 #                                            a CTE holding a window read twice
 #                                            (whole, and under two filters), a
@@ -74,6 +76,16 @@
 #                                            one over a union of the reads),
 #                                            and a join whose left side is a
 #                                            window while a CTE is read twice.
+#   test_windows_inside_expressions_and_beside_a_star_equal_duckdb
+#                                            f * 100.0 / sum(f) OVER (PARTITION
+#                                            BY g), the percent of the
+#                                            partition total; max - min over
+#                                            one running window spec; a
+#                                            row_number in a CASE; a lag in
+#                                            coalesce inside abs; `*` and
+#                                            `w.*` of a derived table before a
+#                                            window column; every one with the
+#                                            NULL partition of g.
 #   test_every_case_is_run                   each case of cases.sql belongs to
 #                                            one of the tests above.
 #   test_unserved_windows_are_named_refusals_at_lower
@@ -152,6 +164,7 @@ def _column_type(name: String) -> ArrowType:
         or name == "cnt" or name == "cnv" or name == "sv" or name == "mnv"
         or name == "mxv" or name == "si" or name == "lv1" or name == "ld2" or name == "lv0"
         or name == "ld3" or name == "fv" or name == "lastv" or name == "nthv"
+        or name == "spread" or name == "first_v" or name == "jump" or name == "tot"
     ):
         return ArrowType.INT64
     # min and max of an INTEGER stay INTEGER.
@@ -160,7 +173,8 @@ def _column_type(name: String) -> ArrowType:
     # percent_rank, cume_dist, avg, and a sum, min, max, lag of a DOUBLE.
     if (
         name == "pr" or name == "cd" or name == "av" or name == "ai" or name == "sf"
-        or name == "mnf" or name == "mxf" or name == "lf"
+        or name == "mnf" or name == "mxf" or name == "lf" or name == "f"
+        or name == "pct"
     ):
         return ArrowType.FLOAT64
     # lag, lead and first_value of a VARCHAR.
@@ -286,6 +300,18 @@ def _shapes() -> List[String]:
 def _ordered() -> List[String]:
     var out = List[String]()
     out.append("ordered_output")
+    out.append("expr_order_by_window")
+    return out^
+
+
+def _in_expressions() -> List[String]:
+    var out = List[String]()
+    out.append("expr_percent_of_total")
+    out.append("expr_two_windows")
+    out.append("expr_window_in_case")
+    out.append("expr_window_in_function")
+    out.append("expr_star_and_window")
+    out.append("expr_qualified_star_and_window")
     return out^
 
 
@@ -324,6 +350,10 @@ def test_windows_with_shared_subplans_equal_duckdb() raises:
     _check_all(_shared())
 
 
+def test_windows_inside_expressions_and_beside_a_star_equal_duckdb() raises:
+    _check_all(_in_expressions())
+
+
 def test_every_case_is_run() raises:
     var known = _ranking()
     known.extend(_lag_lead())
@@ -332,6 +362,7 @@ def test_every_case_is_run() raises:
     known.extend(_shapes())
     known.extend(_ordered())
     known.extend(_shared())
+    known.extend(_in_expressions())
     var cases = _cases()
     assert_equal(len(cases), len(known), "cases in cases.sql")
     for i in range(len(cases)):

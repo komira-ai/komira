@@ -40,7 +40,7 @@ from sql.sql_bind_corr_scalar import (
 from sql.sql_bind_set_op import _bind_select_with_union
 from sql.sql_bind_window_order import (
     _has_window, _bind_window_projection, _order_key_name, _OK_COLUMN, _OK_OUTPUT,
-    _classify_order_keys, _order_output_column, _bind_order,
+    _classify_order_keys, _order_output_column, _bind_order, _refuse_misplaced_windows,
 )
 from sql.sql_catalog import SqlCatalog
 
@@ -307,6 +307,9 @@ def _bind_select(
     # built plan's output schema (with the `_right` collision rename) and the
     # qualifier-aware `scope`.
     var scope = _build_bind_scope(stmt.from_tables, stmt.joins, catalog, cte_scope)
+    # A window in ON, WHERE, GROUP BY, HAVING or an aggregate's argument is
+    # refused with DuckDB's reason before any of them binds.
+    _refuse_misplaced_windows(stmt)
     var plan = _relation_scan(stmt.from_tables[0], catalog, cte_scope)
     var left_aliases = _visible_qualifiers(stmt.from_tables[0])
     for i in range(1, len(stmt.from_tables)):
@@ -441,20 +444,25 @@ def _bind_select(
     var order_expr_idx = List[Int]()
     var order_expr_names = List[String]()
     _classify_order_keys(
-        stmt, schema, has_window, order_kind, order_out_idx, order_expr_idx,
+        stmt, schema, scope, order_kind, order_out_idx, order_expr_idx,
         order_expr_names,
     )
 
     if has_window:
-        # Window functions build PARTITION BY node(s) then a Project. They are
-        # refused beside GROUP BY / aggregation in the same SELECT (a window
-        # over an aggregate needs a two-stage plan this binder does not build).
+        # Window functions build PARTITION BY node(s) then a Project (which
+        # carries ORDER BY keys the list does not produce, as a projection
+        # does). They are refused beside GROUP BY / aggregation in the same
+        # SELECT (a window over an aggregate needs a two-stage plan this
+        # binder does not build).
         if has_agg or group_present:
             raise Error(
                 "SQL not supported: a window function combined with GROUP BY /"
                 + " aggregation in the same SELECT"
             )
-        plan = _bind_window_projection(stmt, schema, scope, plan^, catalog, cte_scope, prebound)
+        plan = _bind_window_projection(
+            stmt, schema, scope, plan^, catalog, cte_scope, prebound,
+            order_names, order_carry, order_expr_idx, order_expr_names,
+        )
     elif has_agg or group_present:
         # A bare integer literal beside an aggregate (`SELECT 1 AS one,
         # count(*) FROM t`) is INT32 on the same terms as in a projection.
@@ -497,6 +505,7 @@ def _bind_select(
     var star_passthrough = (
         len(stmt.select_items) == 1
         and stmt.select_items[0].is_star
+        and stmt.select_items[0].expr.qualifier == ""
         and not has_agg
         and not group_present
         and not has_window

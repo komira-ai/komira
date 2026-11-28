@@ -4,7 +4,7 @@
 # =============================================================================
 
 from arrow.arrow_types import ArrowType
-from arrow.schema import Schema
+from arrow.schema import Schema, SchemaBuilder
 from plan_expr.expr import Expr
 from plan_expr.null_order_policy import derived_nulls_first
 from plan_expr.partition_expr import (
@@ -22,17 +22,19 @@ from plan_ir.logical_plan import (
 from sql.sql_ast import (
     SXWIN_AVG, SXWIN_COUNT, SXWIN_CUME_DIST, SXWIN_DENSE_RANK, SXWIN_FIRST_VALUE,
     SXWIN_LAG, SXWIN_LAST_VALUE, SXWIN_LEAD, SXWIN_MAX, SXWIN_MIN, SXWIN_NTH_VALUE,
-    SXWIN_NTILE, SXWIN_PERCENT_RANK, SXWIN_RANK, SXWIN_ROW_NUMBER, SXWIN_SUM, SX_BOOL,
-    SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT, SX_NULL, SX_STRING, SX_TIMESTAMP, SX_WINDOW,
-    SelectStmt, SqlExpr, SqlWindowData,
+    SXWIN_NTILE, SXWIN_PERCENT_RANK, SXWIN_RANK, SXWIN_ROW_NUMBER, SXWIN_SUM, SX_AGG,
+    SX_BOOL, SX_CALL, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT, SX_NULL, SX_STRING,
+    SX_TIMESTAMP, SX_WINDOW, SelectItem, SelectStmt, SqlExpr, SqlWindowData,
+    sql_call_is_aggregate,
 )
 from sql.sql_bind_expr import _bind_scalar
-from sql.sql_bind_names import _duckdb_expr_text
+from sql.sql_bind_names import _duckdb_expr_text, _group_has
 from sql.sql_bind_ops import _sx_is_big_int
 from sql.sql_bind_scope import (
     CteScope, _date_to_days, _schema_has_col, BindScope,
 )
 from sql.sql_catalog import SqlCatalog
+from sql.sql_window_text import window_hidden_name
 
 
 # =============================================================================
@@ -43,9 +45,13 @@ from sql.sql_catalog import SqlCatalog
 # DENSE_RANK}, the distribution functions {PERCENT_RANK, CUME_DIST, NTILE},
 # the aggregates {SUM, COUNT, AVG, MIN, MAX} over a running or bounded ROWS /
 # RANGE frame, and the value functions {LAG, LEAD, FIRST_VALUE, LAST_VALUE,
-# NTH_VALUE}. Each top-level SX_WINDOW SELECT item becomes one PartitionBy
-# node appending its output column (row count is preserved); the final
-# Project selects the pass-through columns and the window output columns.
+# NTH_VALUE}. Each window becomes one PartitionBy node appending its output
+# column (row count is preserved). A window may stand where DuckDB allows one:
+# as a SELECT item, nested in a SELECT item's expression, or in an ORDER BY
+# key; a nested one is computed under a hidden name and read by the
+# expression (`_bind_window_projection`). The final Project selects the
+# SELECT list. A window in WHERE, ON, GROUP BY, HAVING or an aggregate's
+# argument is refused with DuckDB's reason (`_refuse_misplaced_windows`).
 
 
 def _map_win_func(func: UInt8) raises -> UInt8:
@@ -305,53 +311,250 @@ def _apply_window(sx: SqlExpr, schema: Schema, scope: BindScope, out_name: Strin
 
 
 def _has_window(stmt: SelectStmt) -> Bool:
-    """True iff any top-level SELECT item is a window function."""
+    """True iff a window function stands anywhere in the SELECT list or in an
+    ORDER BY key: a top-level item, nested in an item's expression, or in an
+    ORDER BY expression. Such a SELECT binds through
+    `_bind_window_projection`."""
     for i in range(len(stmt.select_items)):
         ref it = stmt.select_items[i]
-        if not it.is_star and it.expr.tag == SX_WINDOW:
+        if not it.is_star and it.expr.contains_window():
+            return True
+    for i in range(len(stmt.order_by)):
+        if stmt.order_by[i].expr.contains_window():
             return True
     return False
 
 
-def _bind_window_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, var child: LogicalPlan, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> LogicalPlan:
-    """Bind a SELECT whose list contains window function(s). Each SX_WINDOW
-    item builds a `PARTITION BY` node (chained onto `child`) whose output
-    column is named by the item's alias (or a synthesized `_w<n>`); the item
-    projects a col_ref to that output. Non-window items bind as ordinary
-    scalars over the input schema (they pass through the row-preserving
-    window nodes). The final Project emits the SELECT columns in order. The
-    caller refuses window functions beside GROUP BY / aggregation."""
+def _aggregate_wraps_window(sx: SqlExpr) -> Bool:
+    """True iff an aggregate call in `sx` has a window in its argument
+    (`sum(rank() OVER (...))`)."""
+    if sx.tag == SX_AGG:
+        return sx._agg.value().arg[].contains_window()
+    if sx.tag == SX_CALL and sql_call_is_aggregate(sx.text):
+        return sx.contains_window()
+    if sx._binary:
+        if _aggregate_wraps_window(sx._binary.value().left[]):
+            return True
+        if _aggregate_wraps_window(sx._binary.value().right[]):
+            return True
+    if sx._agg:
+        if _aggregate_wraps_window(sx._agg.value().arg[]):
+            return True
+    if sx._call:
+        ref ca = sx._call.value().args
+        for i in range(len(ca)):
+            if _aggregate_wraps_window(ca[i]):
+                return True
+    if sx._case:
+        ref cd = sx._case.value()
+        for i in range(len(cd.conds)):
+            if _aggregate_wraps_window(cd.conds[i]):
+                return True
+        for i in range(len(cd.results)):
+            if _aggregate_wraps_window(cd.results[i]):
+                return True
+        for i in range(len(cd.otherwise)):
+            if _aggregate_wraps_window(cd.otherwise[i]):
+                return True
+    return False
+
+
+def _refuse_misplaced_windows(stmt: SelectStmt) raises:
+    """Refuse a window function in a clause that cannot hold one, with
+    DuckDB's reason (DuckDB v1.5.5 Binder Errors). A window is computed over
+    the rows the WHERE, GROUP BY and HAVING clauses produce, so none of them
+    can read one. A join's ON is a WHERE to DuckDB:
+
+      WHERE / JOIN ... ON   WHERE clause cannot contain window functions!
+      GROUP BY              GROUP BY clause cannot contain window functions!
+      HAVING                HAVING clause cannot contain window functions!
+      sum(rank() OVER ())   aggregate function calls cannot contain window
+                            function calls
+    """
+    var in_where = Bool(stmt.where_pred) and stmt.where_pred.value().contains_window()
+    for i in range(len(stmt.joins)):
+        ref jc = stmt.joins[i]
+        if Bool(jc.on_pred) and jc.on_pred.value().contains_window():
+            in_where = True
+    if in_where:
+        raise Error("SQL bind error: WHERE clause cannot contain window functions")
+    for i in range(len(stmt.group_by)):
+        if stmt.group_by[i].contains_window():
+            raise Error("SQL bind error: GROUP BY clause cannot contain window functions")
+    if Bool(stmt.having_pred) and stmt.having_pred.value().contains_window():
+        raise Error("SQL bind error: HAVING clause cannot contain window functions")
+    var wrapped = False
+    for i in range(len(stmt.select_items)):
+        ref it = stmt.select_items[i]
+        if not it.is_star and _aggregate_wraps_window(it.expr):
+            wrapped = True
+    for i in range(len(stmt.order_by)):
+        if _aggregate_wraps_window(stmt.order_by[i].expr):
+            wrapped = True
+    if wrapped:
+        raise Error(
+            "SQL bind error: aggregate function calls cannot contain window"
+            " function calls"
+        )
+
+
+def _collect_windows(sx: SqlExpr, mut names: List[String], mut windows: List[SqlWindowData]):
+    """Append each window in `sx` not already listed, with its hidden name
+    (`window_hidden_name`), in the order the expression is written."""
+    if sx.tag == SX_WINDOW:
+        var name = window_hidden_name(sx)
+        for i in range(len(names)):
+            if names[i] == name:
+                return
+        names.append(name^)
+        windows.append(sx._window.value().copy())
+        return
+    if sx._binary:
+        _collect_windows(sx._binary.value().left[], names, windows)
+        _collect_windows(sx._binary.value().right[], names, windows)
+    if sx._agg:
+        _collect_windows(sx._agg.value().arg[], names, windows)
+    if sx._call:
+        ref ca = sx._call.value().args
+        for i in range(len(ca)):
+            _collect_windows(ca[i], names, windows)
+    if sx._case:
+        ref cd = sx._case.value()
+        for i in range(len(cd.conds)):
+            _collect_windows(cd.conds[i], names, windows)
+        for i in range(len(cd.results)):
+            _collect_windows(cd.results[i], names, windows)
+        for i in range(len(cd.otherwise)):
+            _collect_windows(cd.otherwise[i], names, windows)
+
+
+def _top_window_name(item: SelectItem, win_counter: Int) -> String:
+    """The output name of a top-level window item: its alias, or `_w<n>`
+    for the n-th top-level window of the SELECT list."""
+    if item.out_alias:
+        return String(item.out_alias.value())
+    return String("_w") + String(win_counter)
+
+
+def _bind_window_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, var child: LogicalPlan, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr], order_names: List[String], mut order_carry: List[String], order_expr_idx: List[Int], order_expr_names: List[String]) raises -> LogicalPlan:
+    """Bind a SELECT that holds window function(s) (`_has_window`).
+
+    Each window builds a `PARTITION BY` node chained onto `child`; a window
+    preserves the rows and appends one column. A TOP-LEVEL window item
+    names its column by its alias (or `_w<n>`) and projects it. A window
+    NESTED in an expression (`v * 100.0 / sum(v) OVER (PARTITION BY g)`,
+    `CASE WHEN rank() OVER (...) = 1 ...`, `abs(v - avg(v) OVER ())`, an
+    ORDER BY key) is computed under its hidden name (`window_hidden_name`;
+    one window written twice is computed once), and the expression binds
+    over the input columns plus those hidden ones, where `_bind_scalar`
+    reads the window as that column. The final Project names only the
+    SELECT list, so the hidden columns go no further.
+
+    `*` expands to the FROM's columns and `q.*` to the relation `q`'s
+    (`BindScope.star_out_names`), in place, so `SELECT *, sum(n) OVER (...)
+    AS tot` is the table's columns, then `tot`, as in DuckDB. An unaliased
+    item holding a nested window is named as DuckDB names it
+    (`_duckdb_expr_text`: `((n * 100.0) / sum(n) OVER (PARTITION BY g))`).
+
+    The ORDER BY carry is `_bind_projection`'s: a column key the list does
+    not produce, and an expression no item produces (a window in it
+    included), are appended as hidden columns the SELECT binder prunes after
+    the sort. The caller refuses window functions beside GROUP BY /
+    aggregation."""
     var plan = child^
-    var proj = ExprArray()
+    # Pass 1: every window, in SELECT-list order, then those of the carried
+    # ORDER BY expressions.
     var win_counter = 0
+    var hidden = List[String]()
+    var nested = List[SqlWindowData]()
     for i in range(len(stmt.select_items)):
         ref item = stmt.select_items[i]
         if item.is_star:
-            raise Error("SQL not supported: SELECT * alongside a window function")
+            continue
         if item.expr.tag == SX_WINDOW:
-            var out_name: String
-            if item.out_alias:
-                out_name = String(item.out_alias.value())
-            else:
-                out_name = String("_w") + String(win_counter)
+            var out_name = _top_window_name(item, win_counter)
             win_counter += 1
             # A window named like an input column: the PARTITION BY node
             # appends its column, so `max(v) OVER (PARTITION BY g) AS v` over
-            # [k, g, v] would make [k, g, v, v] and the col_ref below would
-            # resolve to the input `v`. Such a window is computed under an
-            # internal name and aliased back.
+            # [k, g, v] would make [k, g, v, v] and a col_ref would resolve to
+            # the input `v`. Such a window is computed under an internal name
+            # and aliased back in pass 2.
+            if _schema_has_col(schema, out_name):
+                out_name = String("_w_shadow_") + String(i) + String("_") + out_name
+            plan = _apply_window(item.expr, schema, scope, out_name, plan^)
+        else:
+            _collect_windows(item.expr, hidden, nested)
+    for t in range(len(order_expr_idx)):
+        _collect_windows(stmt.order_by[order_expr_idx[t]].expr, hidden, nested)
+    for w in range(len(nested)):
+        plan = _apply_window(
+            SqlExpr.window(nested[w].copy()), schema, scope, hidden[w], plan^
+        )
+    # The schema the expressions bind over: the input columns, then the hidden
+    # window columns with the types their PARTITION BY nodes gave them.
+    var sb = SchemaBuilder()
+    for c in range(schema.num_columns()):
+        sb.add_field(schema.field_at_unchecked(c))
+    for w in range(len(hidden)):
+        sb.add_field(
+            plan.output_schema.field_at_unchecked(plan.output_schema.column_index(hidden[w]))
+        )
+    var bind_schema = sb.build()
+
+    # Pass 2: the projection, in SELECT-list order.
+    var proj = ExprArray()
+    var out_names = List[String]()
+    win_counter = 0
+    for i in range(len(stmt.select_items)):
+        ref item = stmt.select_items[i]
+        if item.is_star:
+            var cols = scope.star_out_names(item.expr.qualifier)
+            for c in range(len(cols)):
+                proj.append(Expr.col_ref(cols[c]))
+                out_names.append(cols[c])
+            continue
+        if item.expr.tag == SX_WINDOW:
+            var out_name = _top_window_name(item, win_counter)
+            win_counter += 1
             if _schema_has_col(schema, out_name):
                 var internal = String("_w_shadow_") + String(i) + String("_") + out_name
-                plan = _apply_window(item.expr, schema, scope, internal, plan^)
                 proj.append(Expr.alias(Expr.col_ref(internal), out_name))
-                continue
-            plan = _apply_window(item.expr, schema, scope, out_name, plan^)
-            proj.append(Expr.col_ref(out_name))
+            else:
+                proj.append(Expr.col_ref(out_name))
+            out_names.append(out_name^)
+            continue
+        var e = _bind_scalar(item.expr, bind_schema, scope, catalog, cte_scope, prebound)
+        if item.out_alias:
+            e = Expr.alias(e^, item.out_alias.value())
+            out_names.append(String(item.out_alias.value()))
+        elif item.expr.tag == SX_COLUMN:
+            out_names.append(String(item.expr.text))
+        elif item.expr.contains_window():
+            var nm = _duckdb_expr_text(item.expr)
+            e = Expr.alias(e^, nm)
+            out_names.append(nm^)
         else:
-            var e = _bind_scalar(item.expr, schema, scope, catalog, cte_scope, prebound)
-            if item.out_alias:
-                e = Expr.alias(e^, item.out_alias.value())
-            proj.append(e^)
+            out_names.append(_duckdb_expr_text(item.expr))
+        proj.append(e^)
+
+    # The ORDER BY carry, as in `_bind_projection`.
+    for n in range(len(order_names)):
+        ref onm = order_names[n]
+        if _group_has(out_names, onm) or _group_has(order_carry, onm):
+            continue
+        if not _schema_has_col(schema, onm):
+            continue
+        proj.append(Expr.col_ref(onm))
+        out_names.append(String(onm))
+        order_carry.append(String(onm))
+    for t in range(len(order_expr_idx)):
+        var oe = _bind_scalar(
+            stmt.order_by[order_expr_idx[t]].expr, bind_schema, scope, catalog,
+            cte_scope, prebound,
+        )
+        proj.append(Expr.alias(oe^, order_expr_names[t]))
+        out_names.append(String(order_expr_names[t]))
+        order_carry.append(String(order_expr_names[t]))
     return LogicalPlan.project(proj^, plan^)
 
 
@@ -388,6 +591,9 @@ def _order_key_name(sx: SqlExpr, scope: BindScope) -> String:
 #                             orders by input `k`), and a name only the SELECT
 #                             list has (`ORDER BY b * 2`) is the alias
 #   ORDER BY count(*) DESC   over GROUP BY: an aggregate, selected or not
+#   ORDER BY sum(v) OVER (PARTITION BY g) DESC
+#                            a window (v1.5.5), computed under its hidden name
+#                            like a window nested in a SELECT item
 #
 # AN EXPRESSION A SELECT ITEM ALREADY PRODUCES IS THAT ITEM — the same
 # canonical text (`_duckdb_expr_text`), DuckDB's own matching — so it sorts by
@@ -395,9 +601,8 @@ def _order_key_name(sx: SqlExpr, scope: BindScope) -> String:
 # `SELECT g, count(*) ... ORDER BY count(*) DESC` under DISTINCT / windows too.
 #
 # NARROWINGS, EACH REFUSED BY NAME (DuckDB answers them):
-#   * an ORDER BY expression no SELECT item produces, under SELECT DISTINCT or
-#     beside a window function — a hidden column would widen the DISTINCT key /
-#     the window path has no carry;
+#   * an ORDER BY expression no SELECT item produces, under SELECT DISTINCT —
+#     a hidden column would widen the DISTINCT key;
 #   * an ORDER BY expression naming a SELECT ALIAS that is not an input column
 #     (`ORDER BY b * 2`) — the alias would have to be substituted by its item.
 
@@ -409,7 +614,7 @@ comptime _OK_CARRIED: Int = 2  # an expression carried as `__order_key_<i>`
 def _classify_order_keys(
     stmt: SelectStmt,
     schema: Schema,
-    has_window: Bool,
+    scope: BindScope,
     mut order_kind: List[Int],
     mut order_out_idx: List[Int],
     mut order_expr_idx: List[Int],
@@ -450,20 +655,14 @@ def _classify_order_keys(
         var mj = _order_expr_select_match(stmt, kx)
         if mj >= 0:
             order_kind.append(_OK_OUTPUT)
-            order_out_idx.append(mj)
+            order_out_idx.append(_item_output_index(stmt, mj, scope))
             continue
-        if stmt.distinct or has_window:
+        if stmt.distinct:
             raise Error(
                 "SQL not supported: ORDER BY an expression that no SELECT item"
-                " produces, under "
-                + (String("SELECT DISTINCT") if stmt.distinct else String("a window function"))
-                + ". The key would be a hidden column, which "
-                + (
-                    String("would widen the DISTINCT key and change the row count")
-                    if stmt.distinct
-                    else String("the window projection has no carry for")
-                )
-                + ". Select the expression (and ORDER BY its position or"
+                " produces, under SELECT DISTINCT. The key would be a hidden"
+                " column, which would widen the DISTINCT key and change the row"
+                " count. Select the expression (and ORDER BY its position or"
                 " alias), or order by a column."
             )
         var alias_only = _order_expr_alias_ref(kx, stmt, schema)
@@ -479,6 +678,20 @@ def _classify_order_keys(
         order_out_idx.append(-1)
         order_expr_idx.append(i)
         order_expr_names.append(String("__order_key_") + String(i))
+
+
+def _item_output_index(stmt: SelectStmt, item: Int, scope: BindScope) raises -> Int:
+    """The output column SELECT item `item` lands in: a `*` or `q.*` before it
+    stands for every column it expands to, so in `SELECT *, k + 1 AS kp FROM
+    t(k, g)` item 1 is output column 2."""
+    var out = 0
+    for j in range(item):
+        ref it = stmt.select_items[j]
+        if it.is_star:
+            out += len(scope.star_out_names(it.expr.qualifier))
+        else:
+            out += 1
+    return out
 
 
 def _order_expr_select_match(stmt: SelectStmt, kx: SqlExpr) raises -> Int:

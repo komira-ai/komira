@@ -22,8 +22,8 @@
 #      list strips one cast level only.
 #   7. Literals of every kind, DATE validation (day of month, leap years,
 #      malformed text), CASE typing (float promotion, typed NULL arms and
-#      defaults), and the scalar-position refusals (aggregate in WHERE,
-#      window nested in an expression).
+#      defaults), and the scalar-position refusals (aggregate in WHERE, a
+#      window where no window projection computed it).
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -436,7 +436,7 @@ def test_case_without_else_over_non_numeric_arms() raises:
 def test_scalar_position_refusals() raises:
     _check(
         "SELECT rank() OVER (ORDER BY k) + 1 FROM t",
-        "ERR: SQL not supported: a window function `f(...) OVER (...)` must be a top-level SELECT item (it cannot be nested inside an expression)"
+        "ERR: SQL not supported: a window function `f(...) OVER (...)` in this position (a window function may stand only in the SELECT list and in ORDER BY)"
     )
     _check(
         "SELECT sum(k) FROM t WHERE sum(k) > 1",

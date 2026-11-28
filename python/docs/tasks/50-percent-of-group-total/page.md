@@ -1,6 +1,6 @@
 # How do I compute each row's percent of its group total?
 
-Take a window `SUM(...) OVER (PARTITION BY group)` in an inner query and divide by it in the outer one, or divide a pandas-shaped column by `groupby(...).transform("sum")`.
+Divide by a window `SUM(...) OVER (PARTITION BY group)` in the same SELECT, or divide a pandas-shaped column by `groupby(...).transform("sum")`.
 
 <!-- include example.py -->
 ```python
@@ -18,17 +18,23 @@ Path("sales.csv").write_text(
     "north,Flo,200\n"
 )
 
-# SQL: a window SUM gives each row its group total; a second SELECT divides.
-# round(x * 1000 / total) / 10 keeps one decimal.
+# SQL: SUM(amount) OVER (PARTITION BY region) is each row's group total, and
+# the division reads it in the same SELECT. Scaling by 1000, rounding and
+# dividing by 10 keeps one decimal.
 with komira.Session() as s:
     s.register_csv("sales", "sales.csv")
     shares = s.sql(
-        "SELECT region, rep, amount, round(amount * 1000.0 / total) / 10 AS pct"
-        " FROM (SELECT region, rep, amount,"
-        " SUM(amount) OVER (PARTITION BY region) AS total FROM sales)"
-        " ORDER BY region, rep"
+        "SELECT region, rep, amount,"
+        " round(amount * 1000.0 / SUM(amount) OVER (PARTITION BY region)) / 10 AS pct"
+        " FROM sales ORDER BY region, rep"
     )
     print(shares.to_arrow().to_pylist())
+    # SELECT * beside a window: the table's columns, then the window's.
+    totals = s.sql(
+        "SELECT *, SUM(amount) OVER (PARTITION BY region) AS total"
+        " FROM sales ORDER BY rep"
+    )
+    print(totals.to_arrow().to_pylist())
 
 # pandas-shaped: divide by the group's transform('sum'), round when printing.
 df = komira.read_csv("sales.csv")
@@ -42,6 +48,7 @@ Output:
 <!-- include expected_output.txt -->
 ```text
 [{'region': 'east', 'rep': 'Ana', 'amount': 120, 'pct': 60.0}, {'region': 'east', 'rep': 'Bo', 'amount': 80, 'pct': 40.0}, {'region': 'north', 'rep': 'Flo', 'amount': 200, 'pct': 100.0}, {'region': 'west', 'rep': 'Cy', 'amount': 50, 'pct': 16.7}, {'region': 'west', 'rep': 'Di', 'amount': 150, 'pct': 50.0}, {'region': 'west', 'rep': 'Ed', 'amount': 100, 'pct': 33.3}]
+[{'region': 'east', 'rep': 'Ana', 'amount': 120, 'total': 200}, {'region': 'east', 'rep': 'Bo', 'amount': 80, 'total': 200}, {'region': 'west', 'rep': 'Cy', 'amount': 50, 'total': 300}, {'region': 'west', 'rep': 'Di', 'amount': 150, 'total': 300}, {'region': 'west', 'rep': 'Ed', 'amount': 100, 'total': 300}, {'region': 'north', 'rep': 'Flo', 'amount': 200, 'total': 200}]
 Ana 60.0
 Bo 40.0
 Cy 16.7
@@ -52,8 +59,8 @@ Flo 100.0
 
 ## Notes
 
-- The window total has to be its own SELECT item: komira refuses a window function nested inside an expression, so `amount * 100.0 / SUM(amount) OVER (...)` in one SELECT fails, and the division goes in an outer query (komira-ai/komira#2379). `probe_window_in_expression.py` beside this page tries the one-SELECT form and must fail with the line in `probe_window_in_expression.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
-- The inner query lists its columns: `SELECT *` next to a window function is refused too (komira-ai/komira#2379).
+- A window function can sit inside any SELECT or ORDER BY expression, as in `amount * 100.0 / SUM(amount) OVER (PARTITION BY region)`; WHERE, GROUP BY and HAVING cannot hold one (filter on a window in an outer query).
+- `SELECT *` beside a window lists the table's columns in order, then the window's, and `t.*` lists one table's columns.
 - SQL `round(x, 1)` with a digit count is refused (the engine has only one-argument `round`), so the example scales by 1000, rounds, and divides by 10 (komira-ai/komira#2381).
 - The pandas-shaped Series has no `round` yet (komira-ai/komira#2381), so the example formats the percent in Python when printing; the stored column keeps full precision.
 - Each row stays: `transform("sum")` and the window both put the group total beside every row, unlike `GROUP BY`, which collapses the rows.

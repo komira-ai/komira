@@ -1593,6 +1593,18 @@ struct _Parser(Movable):
             if self._kind() == TK_STAR:
                 self._advance()
                 items.append(SelectItem(SqlExpr.star(), Optional[String](), True))
+            elif (
+                self._kind() == TK_IDENT
+                and self.pos + 2 < len(self.tokens)
+                and self.tokens[self.pos + 1].kind == TK_DOT
+                and self.tokens[self.pos + 2].kind == TK_STAR
+            ):
+                # `q.*`: every column of the relation `q` names, in place.
+                var qualifier = String(self.tokens[self.pos].text)
+                self._advance()
+                self._advance()
+                self._advance()
+                items.append(SelectItem(SqlExpr.star(qualifier), Optional[String](), True))
             else:
                 var e = self._parse_expr()
                 var out_alias: Optional[String] = None

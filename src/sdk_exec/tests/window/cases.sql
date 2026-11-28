@@ -41,3 +41,14 @@ COPY (WITH w AS (SELECT id, g, row_number() OVER (PARTITION BY g ORDER BY id) AS
 COPY (WITH c AS (SELECT g, max(v) AS mxv FROM read_parquet('win.parquet') GROUP BY g) SELECT g, mxv, rank() OVER (ORDER BY mxv) AS rk FROM c UNION ALL SELECT g, mxv, dense_rank() OVER (ORDER BY g) AS rk FROM c) TO 'cte_window_over_group.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (WITH c AS (SELECT g, max(v) AS mxv FROM read_parquet('win.parquet') GROUP BY g) SELECT g, mxv, rank() OVER (ORDER BY mxv) AS rk FROM (SELECT g, mxv FROM c UNION ALL SELECT g, mxv FROM c) u) TO 'cte_window_over_union.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (WITH c AS (SELECT g, max(v) AS mxv FROM read_parquet('win.parquet') GROUP BY g) SELECT w.id, w.rn, a.mxv FROM (SELECT id, g, row_number() OVER (PARTITION BY g ORDER BY id) AS rn FROM read_parquet('win.parquet')) w JOIN c a ON w.g = a.g UNION ALL SELECT mxv AS id, mxv AS rn, mxv FROM c) TO 'cte_window_join_shared.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+-- A window inside an expression, and beside a star: the percent of the
+-- partition total, two windows in one expression, a window in a CASE and in a
+-- function's argument, `*` and `w.*` before a window column, and an outer
+-- ORDER BY on a window.
+COPY (SELECT id, g, f, f * 100.0 / sum(f) OVER (PARTITION BY g) AS pct FROM read_parquet('win.parquet')) TO 'expr_percent_of_total.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT id, g, o, max(v) OVER (PARTITION BY g ORDER BY o) - min(v) OVER (PARTITION BY g ORDER BY o) AS spread FROM read_parquet('win.parquet')) TO 'expr_two_windows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT id, g, CASE WHEN row_number() OVER (PARTITION BY g ORDER BY id) = 1 THEN v ELSE 0 END AS first_v FROM read_parquet('win.parquet')) TO 'expr_window_in_case.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT id, g, abs(v - coalesce(lag(v) OVER (PARTITION BY g ORDER BY id), 0)) AS jump FROM read_parquet('win.parquet')) TO 'expr_window_in_function.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT *, sum(v) OVER (PARTITION BY g) AS tot FROM (SELECT id, g, v FROM read_parquet('win.parquet')) w) TO 'expr_star_and_window.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT w.*, count(*) OVER (PARTITION BY w.g) AS cnt FROM (SELECT id, g, s FROM read_parquet('win.parquet')) w) TO 'expr_qualified_star_and_window.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT id, g FROM read_parquet('win.parquet') ORDER BY sum(v) OVER (PARTITION BY g) DESC, id LIMIT 40) TO 'expr_order_by_window.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

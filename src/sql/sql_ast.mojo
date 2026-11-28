@@ -26,13 +26,13 @@ comptime SX_FLOAT: UInt8 = 2  # float literal (float_val; `text` = its digits as
 comptime SX_STRING: UInt8 = 3  # string literal (text)
 comptime SX_BINARY: UInt8 = 4  # binary op (op in `op`; children in _left/_right)
 comptime SX_AGG: UInt8 = 5  # aggregate call (func in `op`; arg in _agg_arg)
-comptime SX_STAR: UInt8 = 6  # '*' (only valid as COUNT(*) arg or SELECT *)
+comptime SX_STAR: UInt8 = 6  # '*' (only valid as COUNT(*) arg, SELECT * or SELECT q.*; `q` in `qualifier`)
 comptime SX_DATE: UInt8 = 7  # date literal `date 'YYYY-MM-DD'` (raw string in `text`)
 comptime SX_LIKE: UInt8 = 8  # `child [NOT] LIKE 'pat'` (child in _agg; pat in text; negate in like_negate)
 comptime SX_CALL: UInt8 = 9  # scalar fn call `name(args...)` (name in `text`; args in _call)
 comptime SX_SUBQUERY: UInt8 = 10  # subquery reference by index (int_val -> SelectStmt.subqueries): the GENERIC subquery-operand node. Scalar `(SELECT ...)` AND the predicate subqueries — `[NOT] EXISTS (...)`, `x [NOT] IN (...)` — all use this node. The referenced `SubqueryDef.kind` (scalar / exists / not-exists / in / not-in) drives how the query binder pre-binds it; the outer binder just looks up `prebound[idx]` regardless of kind (a scalar Expr for SCALAR, a boolean predicate Expr for EXISTS/IN).
 comptime SX_CASE: UInt8 = 11  # `CASE [operand] WHEN cond THEN res ... [ELSE default] END`. Children in `_case`: parallel WHEN-condition / THEN-result Slabs + a 0/1-entry ELSE Slab. A SIMPLE case (`CASE x WHEN v THEN ...`) is DESUGARED at parse time into a searched CASE (each condition becomes `x = v`), so the binder + AST only ever see the searched form. Binds to an `EXPR_WHEN` IR node (`_bind_case`); an omitted ELSE binds to a NULL literal (SQL default). The q8 market-share `sum(CASE WHEN ... THEN ... ELSE 0 END)` routes its CASE through the aggregate-argument binder (`_bind_agg_from_sx` -> `_bind_scalar`).
-comptime SX_WINDOW: UInt8 = 12  # `f(...) OVER (PARTITION BY ... ORDER BY ... [ROWS/RANGE frame])` window function. Metadata in `_window` (a `SqlWindowData`): the SXWIN_* function, the aggregate ARG column (empty for ranking fns), the partition/order column lists + descending flags + written NULLS placement, and the frame bounds. `SqlWindowData` holds NO nested `SqlExpr` (arg + partition/order are plain column NAMES, per the corpus), so the AST stays ACYCLIC through this node (no new recursion cycle / no AOT-wedge risk). Binds to a `LogicalPlan.partition_by` (PLAN_PARTITION_BY) node — the existing engine window operator, no new executor.
+comptime SX_WINDOW: UInt8 = 12  # `f(...) OVER (PARTITION BY ... ORDER BY ... [ROWS/RANGE frame])` window function. Metadata in `_window` (a `SqlWindowData`): the SXWIN_* function, the aggregate ARG column (empty for ranking fns), the partition/order column lists + descending flags + written NULLS placement, and the frame bounds. `SqlWindowData` holds NO nested `SqlExpr` (arg + partition/order are plain column NAMES, per the corpus), so the AST stays ACYCLIC through this node (no new recursion cycle / no AOT-wedge risk). Binds to a `LogicalPlan.partition_by` (PLAN_PARTITION_BY) node — the existing engine window operator, no new executor. As a SELECT item the node's column is the item; nested in a SELECT or ORDER BY expression it is computed under a hidden column the expression reads (`_bind_window_projection`).
 comptime SX_UNARY: UInt8 = 13  # `NOT child` / `child IS [NOT] NULL` — a UNARY predicate. The SXUN_* code is in `op`; the child lives in the `_agg` slot, exactly as SX_LIKE's does. ⚠ THE `_agg` REUSE IS DELIBERATE, NOT A SHORTCUT: a new `Optional[SqlAggData]`-shaped FIELD would add another self-referential storage path for Mojo's AOT whole-program synthesis to walk, and this frontend has already paid for one of those (see SX_SUBQUERY's note on the `_bind_scalar <-> _bind_select` cycle that deadlocks the compiler). One-child nodes share one slot.
 comptime SX_BOOL: UInt8 = 14  # `TRUE` / `FALSE`, value in `int_val` (0/1). ⚠ NOT folded into SX_INT: `flag = 1` and `flag = true` are different queries, only the second type-checks against a BOOL column, and binding a bool literal as an integer would push the type error down into a comparison kernel instead of raising in the binder.
 
@@ -1013,8 +1013,12 @@ struct SqlExpr(Movable):
         return e^
 
     @staticmethod
-    def star() -> SqlExpr:
-        return SqlExpr(SX_STAR)
+    def star(qualifier: String = String("")) -> SqlExpr:
+        """`*`, or `q.*` in a SELECT list (the relation's name or alias in
+        `qualifier`)."""
+        var e = SqlExpr(SX_STAR)
+        e.qualifier = qualifier
+        return e^
 
     @staticmethod
     def binary(op: UInt8, var left: SqlExpr, var right: SqlExpr) -> SqlExpr:
@@ -1242,6 +1246,40 @@ struct SqlExpr(Movable):
                     return True
             for i in range(len(cd.otherwise)):
                 if cd.otherwise[i].contains_aggregate():
+                    return True
+        return False
+
+    def contains_window(self) -> Bool:
+        """True iff this expression tree holds a window function `f(...) OVER
+        (...)` anywhere: top-level, nested in arithmetic, a CASE, a call's
+        argument, or an aggregate's argument (an SX_AGG's `_agg` slot is walked
+        too, unlike `contains_aggregate`). A subquery is not looked into: its
+        windows belong to its own SELECT."""
+        if self.tag == SX_WINDOW:
+            return True
+        if self._binary:
+            if self._binary.value().left[].contains_window():
+                return True
+            if self._binary.value().right[].contains_window():
+                return True
+        if self._agg:
+            if self._agg.value().arg[].contains_window():
+                return True
+        if self._call:
+            ref ca = self._call.value().args
+            for i in range(len(ca)):
+                if ca[i].contains_window():
+                    return True
+        if self._case:
+            ref cd = self._case.value()
+            for i in range(len(cd.conds)):
+                if cd.conds[i].contains_window():
+                    return True
+            for i in range(len(cd.results)):
+                if cd.results[i].contains_window():
+                    return True
+            for i in range(len(cd.otherwise)):
+                if cd.otherwise[i].contains_window():
                     return True
         return False
 

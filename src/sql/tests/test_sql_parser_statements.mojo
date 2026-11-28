@@ -53,6 +53,8 @@
 #      `SELECT *` over the union parked as a derived table (qualifier `#union`)
 #      after every branch; on any earlier branch each is a syntax error naming
 #      the clause; a derived table may hold a UNION ALL, wrapped the same way.
+#  14. A SELECT list holds `*` and `q.*` (the relation's name in the star's
+#      qualifier) beside other items; a lone trailing name is a column.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -510,6 +512,22 @@ def test_from_less_select_ends_at_every_allowed_clause() raises:
     _refuses("SELECT 1 WINDOW w AS (ORDER BY 1)", "a named WINDOW clause")
     _refuses("SELECT 1 QUALIFY 1 = 1", "the QUALIFY clause")
     _refuses("SELECT a b c", "expected keyword 'from'")
+
+
+def test_select_list_stars_bare_and_qualified() raises:
+    var st = _parse("SELECT u.*, *, t.k, k FROM t, u")
+    assert_equal(len(st.query.select_items), 4)
+    assert_true(st.query.select_items[0].is_star)
+    assert_equal(st.query.select_items[0].expr.qualifier, "u")
+    assert_true(st.query.select_items[1].is_star)
+    assert_equal(st.query.select_items[1].expr.qualifier, "")
+    assert_false(st.query.select_items[2].is_star)
+    assert_equal(st.query.select_items[2].expr.qualifier, "t")
+    assert_false(st.query.select_items[3].is_star)
+    # A name that is the last token before the end is a column, not `q.*`.
+    var lone = _parse("SELECT k")
+    assert_false(lone.query.select_items[0].is_star)
+    assert_equal(lone.query.select_items[0].expr.text, "k")
 
 
 def test_group_having_order() raises:

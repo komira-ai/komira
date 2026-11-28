@@ -10,15 +10,15 @@
 #   1. Each window function lowers to one PARTITION BY node with its own
 #      `PF_*` function; with no ORDER BY the default frame is the whole
 #      partition and with one it is RANGE ... CURRENT ROW; a written frame is
-#      kept; value windows carry their offset and DEFAULT; an unknown
-#      column, a window beside GROUP BY or `*`, and a missing argument are
-#      refused.
+#      kept; value windows carry their offset and DEFAULT; `*` beside a
+#      window expands to the table's columns; an unknown column, a window
+#      beside GROUP BY, and a missing argument are refused.
 #   2. A window named like an input column is computed under an internal
 #      name; a qualified window column resolves through the join scope.
 #   3. ORDER BY: a column key, an ordinal (range-checked), a SELECT item's
 #      expression or alias, and an expression carried as a hidden column
-#      and pruned at the root; refusals for non-integer literals, hidden keys
-#      under DISTINCT or a window, and a key two items share.
+#      and pruned at the root, beside a window too; refusals for non-integer
+#      literals, hidden keys under DISTINCT, and a key two items share.
 #   4. NULLS FIRST / LAST: the placement list is built only when a key asks,
 #      a key that does not ask gets the derived default.
 #      The same holds for a window's ORDER BY: a deviating placement shows in
@@ -140,7 +140,7 @@ def _select(stmt: SelectStmt, cat: SqlCatalog) raises -> LogicalPlan:
     var order_expr_idx = List[Int]()
     var order_expr_names = List[String]()
     _classify_order_keys(
-        stmt, schema, has_window, order_kind, order_out_idx, order_expr_idx,
+        stmt, schema, scope, order_kind, order_out_idx, order_expr_idx,
         order_expr_names,
     )
     if has_window:
@@ -149,7 +149,10 @@ def _select(stmt: SelectStmt, cat: SqlCatalog) raises -> LogicalPlan:
                 "SQL not supported: a window function combined with GROUP BY /"
                 " aggregation in the same SELECT"
             )
-        plan = _bind_window_projection(stmt, schema, scope, plan^, cat, cte, prebound)
+        plan = _bind_window_projection(
+            stmt, schema, scope, plan^, cat, cte, prebound, order_names,
+            order_carry, order_expr_idx, order_expr_names,
+        )
     elif has_agg or grouped:
         plan = _bind_aggregate(
             stmt, schema, scope, plan^, cat, cte, prebound, order_names,
@@ -306,7 +309,9 @@ def test_window_refusals() raises:
     )
     _check(
         "SELECT *, rank() OVER (ORDER BY k) FROM t",
-        "ERR: SQL not supported: SELECT * alongside a window function"
+        "Project(exprs=[ColRef(k), ColRef(v), ColRef(s), ColRef(g), ColRef(d), ColRef(ts), ColRef(i32), ColRef(dc), ColRef(b), ColRef(f32), ColRef(u64), ColRef(j), ColRef(_w0)])\n"
+        "  PartitionBy(partition=[], order=[k ASC], funcs=[RANK(, offset=0, frame=RANGE[0:0..2:0]) AS _w0])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
         "SELECT k, sum(v) OVER () FROM t GROUP BY k",
@@ -579,7 +584,11 @@ def test_order_by_under_distinct_and_windows() raises:
     )
     _check(
         "SELECT k, rank() OVER (ORDER BY k) AS r FROM t ORDER BY -k",
-        "ERR: SQL not supported: ORDER BY an expression that no SELECT item produces, under a window function. The key would be a hidden column, which the window projection has no carry for. Select the expression (and ORDER BY its position or alias), or order by a column."
+        "Project(exprs=[ColRef(k), ColRef(r)])\n"
+        "  Sort(keys=[__order_key_0 ASC])\n"
+        "    Project(exprs=[ColRef(k), ColRef(r), Alias(UnaryOp(NEGATE, ColRef(k)), \"__order_key_0\")])\n"
+        "      PartitionBy(partition=[], order=[k ASC], funcs=[RANK(, offset=0, frame=RANGE[0:0..2:0]) AS r])\n"
+        "        Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
         "SELECT k, rank() OVER (ORDER BY k) AS r FROM t ORDER BY r",
