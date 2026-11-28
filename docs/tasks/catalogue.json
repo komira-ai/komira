@@ -94,7 +94,6 @@
     "question": "How do I remove duplicate rows?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2378",
       "komira-ai/komira#2380"
     ]
   },
