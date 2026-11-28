@@ -172,7 +172,22 @@ def avro_tvf_schema(path: String) raises -> Schema:
     touched: bind pays an mmap plus a few page faults, not a copy of the file.
 
     ⛔ A NON-RECORD ROOT IS REFUSED: `ResolutionTable.identity` raises on an
-    OCF whose writer schema root is not a record."""
+    OCF whose writer schema root is not a record.
+
+    ⛔ ONE LOCAL FILE. A path holding a glob character (`*`, `?`, `[`) or a
+    URL scheme (`://`) is refused by name before any file is opened: DuckDB
+    reads those as several files or a remote object, which this reader does
+    not, and a glob must never be read as a file of that literal name."""
+    if "*" in path or "?" in path or "[" in path:
+        raise Error(
+            "SQL not supported: read_avro('" + path + "') names a glob;"
+            + " read_avro reads one local file, not a glob or a list of files"
+        )
+    if "://" in path:
+        raise Error(
+            "SQL not supported: read_avro('" + path + "') names a URL;"
+            + " read_avro reads one local file"
+        )
     var src_buf = read_chunked(path)
     var full = src_buf.view_range_ro(0, src_buf.len()).into_span()
     var header = decode_ocf_header(full)

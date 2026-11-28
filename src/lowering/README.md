@@ -1,7 +1,7 @@
 # lowering
 
 Lowering: a bound `LogicalPlan`, a `HostProfile` and the resolved inputs go in;
-the physical plan (`physical_plan`, IR version 21) and the `ParamTable`
+the physical plan (`physical_plan`, IR version 22) and the `ParamTable`
 its segments index come out. It is pure. `lower` opens no file, reads no clock
 and no environment variable and touches no global, so equal arguments give a
 `LoweredPlan` that renders byte-equal.
@@ -28,7 +28,10 @@ and no environment variable and touches no global, so equal arguments give a
   newline-delimited JSON file, whose spec names the file and the schema it is
   read at: the scan's projection, in its order, at the types the plan was
   bound at, and its pushed filter, when it has one, an operator over every
-  key; the pushed filter and projection of the batch, CSV and Iceberg arms
+  key; `SOURCE_AVRO` for a scan of one Avro object container file
+  (`read_avro`), cut the same way: the spec names the file and the columns it
+  delivers, the projection at the types the file's header gives, and a pushed
+  filter is an operator over every column; the pushed filter and projection of the batch, CSV and Iceberg arms
   become operators, and so do those of
   a Parquet scan with Hive partition columns, over the files' columns followed
   by the partition columns). A step, a user function run once, opens one too
@@ -60,7 +63,7 @@ and no environment variable and touches no global, so equal arguments give a
   segment unless the top node is a breaker, which is then the result.
   `cut_walk` is the dispatch on the node's tag and the resolution of shared
   subplans around it (below); each arm is its own module (`cut_scan` and
-  its JSON arm `cut_scan_jsonl`, `cut_filter`, `cut_project`, `cut_limit`,
+  its JSON and Avro arms `cut_scan_jsonl` and `cut_scan_avro`, `cut_filter`, `cut_project`, `cut_limit`,
   `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_topn`, `cut_window`,
   `cut_union`, `cut_join`,
   `cut_shared`), and `cut_state` holds
@@ -162,8 +165,8 @@ shape:
   window with a partition or order key; see Order); a partial or final
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
-  than Parquet, in memory, CSV, JSON or an Iceberg table; a JSON scan whose
-  projection names a column its schema does not hold; a CSV scan with `header=false` (the reader
+  than Parquet, in memory, CSV, JSON, Avro or an Iceberg table; a JSON or
+  Avro scan whose projection names a column its schema does not hold; a CSV scan with `header=false` (the reader
   would name its columns `col_0`, `col_1`, ..., where DuckDB names them
   `column0`, `column1`, ...); a union with no branch, or with a branch whose
   schema is not the union's (column count, and per column the name, Arrow

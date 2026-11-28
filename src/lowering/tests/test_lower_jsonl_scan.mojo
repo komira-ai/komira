@@ -25,7 +25,8 @@
 #   * test_the_legacy_ndjson_factory_lowers_the_same: `LogicalPlan.scan(path,
 #     SOURCE_NDJSON, ...)` builds the same JSON leaf and is cut the same way.
 #   * test_an_unbounded_json_scan_is_refused: LOWERING_SCAN_NOT_TOTAL.
-#   * test_an_avro_scan_is_still_refused: the arm is JSON's only.
+#   * test_an_avro_scan_is_not_cut_as_json: an Avro scan opens a SOURCE_AVRO
+#     segment, and the JSON arm's fields stay empty.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -48,6 +49,7 @@ from physical_plan.physical_plan import (
     OP_PROJECT,
     SINK_AGG,
     SINK_COLLECT,
+    SOURCE_AVRO,
     SOURCE_JSONL,
 )
 from plan_expr.agg_expr import AggExpr, AGG_COUNT
@@ -252,15 +254,17 @@ def test_an_unbounded_json_scan_is_refused() raises:
     assert_true(message.startswith(String(LOWERING_SCAN_NOT_TOTAL) + ": "), message)
 
 
-def test_an_avro_scan_is_still_refused() raises:
+def test_an_avro_scan_is_not_cut_as_json() raises:
     var schema = _schema()
-    var message = _message(
+    var lp = _lowered(
         LogicalPlan.scan_from_source(
             SourceVariant(AvroSource(String("t.avro"), schema.copy())), schema^
         )
     )
-    assert_true(message.startswith(String(LOWERING_UNCUTTABLE_NODE) + ": "), message)
-    assert_true("avro" in message, message)
+    ref seg = lp.segments[0]
+    assert_equal(seg.source_kind, SOURCE_AVRO)
+    assert_equal(seg.source_spec.jsonl_path, "")
+    assert_equal(seg.source_spec.avro_path, "t.avro")
 
 
 def main() raises:
