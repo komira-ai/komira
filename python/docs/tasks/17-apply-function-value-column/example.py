@@ -28,3 +28,14 @@ lf = pl.scan_csv("items.csv").with_columns(
     (pl.col("price") * 2).alias("double_price"),
 )
 print(lf.sort("name").collect().to_arrow().to_pylist())
+
+# Your own Python function: SQL does not call one, so run the query and
+# apply the function to the rows of its result.
+def band(price):
+    return "high" if price > 5 else "low"
+
+
+with komira.Session() as s:
+    s.register_csv("items", "items.csv")
+    rows = s.sql("SELECT name, price FROM items ORDER BY name").to_arrow().to_pylist()
+print([{**row, "band": band(row["price"])} for row in rows])

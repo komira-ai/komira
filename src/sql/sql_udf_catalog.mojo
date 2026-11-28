@@ -286,8 +286,24 @@ struct SqlUdfCatalog(Copyable, Movable):
 
     var _entries: List[SqlUdfEntry]
 
+    var no_declaration_door: Optional[String]
+    """What the binder says in place of `catalog.declare_udf` advice when the
+    caller of this catalog cannot declare a UDF, or None when it can.
+
+    None (the default): the caller declares UDFs with
+    `SqlCatalog.declare_udf`, and the binder's refusal of an unknown function
+    name, and of a name the engine refuses to lower, tells it to. A value:
+    one or more whole sentences, ending with their full stop, that end those
+    two refusals instead of that advice (a refused row's own reason is
+    unchanged). libkomira's session sets one (`so.session`): the Python and
+    TypeScript packages reach the binder through it, and SQL there calls no
+    user function, by decision.
+    It changes nothing else: `declare` still declares, and a declared UDF
+    still resolves."""
+
     def __init__(out self):
         self._entries = List[SqlUdfEntry]()
+        self.no_declaration_door = None
 
     def num_declared(self) -> Int:
         """How many UDFs are callable from SQL through this catalog.

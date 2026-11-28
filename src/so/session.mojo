@@ -21,6 +21,17 @@ from .status import (
     KOMIRA_STEP_PARSE,
 )
 
+comptime _NO_SQL_UDF_DECLARATION = (
+    "SQL cannot call a Python function, by decision: write the computation"
+    " with built-in SQL functions, or run the query and apply the function to"
+    " its result in Python (`Result.to_pandas()`)."
+)
+"""How the binder's refusal of an unknown or refused function name ends on a
+session. SQL on a session calls built-in functions only: the C surface has
+no call that declares a user function to SQL, and will not have one, so the
+refusal says so and names what the Python package does offer instead of
+`catalog.declare_udf`, which no caller of the C surface can reach."""
+
 
 def step_number(name: String) -> Int32:
     """The `KOMIRA_STEP_*` number of the `sdk_exec` step `name` (`parse`,
@@ -112,7 +123,9 @@ struct Session(Movable):
     var engine: EngineContext
     """The session's engine: its catalog holds the tables registered on this
     session (`register_parquet`), looked up by name without regard to case,
-    and its workers are started when the session is created."""
+    and declares no UDF (its `no_declaration_door` is
+    `_NO_SQL_UDF_DECLARATION`); its workers are started when the session is
+    created."""
     var credentials: SessionCredentials
     """The credentials defined on this session (`komira_credential_add`,
     `_set`, `_seal`), by name; their values are wiped when the session is
@@ -136,6 +149,9 @@ struct Session(Movable):
         self._last_error_step = KOMIRA_STEP_NONE
         self._last_error_code = String()
         self.engine = EngineContext(options)
+        self.engine.catalog.udfs.no_declaration_door = String(
+            _NO_SQL_UDF_DECLARATION
+        )
         self.credentials = SessionCredentials()
         self.bound_stores = BoundStores()
 

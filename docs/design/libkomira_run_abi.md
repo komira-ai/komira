@@ -248,10 +248,12 @@ given:
   environment variable and as a session argument. Neither is carried. A frame
   always travels as a plan, and configuration is never read from the environment
   (rule S2).
-- **No Python UDFs in either entry yet.** The earlier SDK reached them only
-  through SQL text, as in-process callbacks. Rule B21 requires Python UDFs to run
-  in zygote-forked workers, so neither entry carries them until that design lands.
-  The plan door refuses an envelope with UDFs by name (§3).
+- **No Python UDFs in either entry yet, and never in the SQL entry.** The earlier
+  SDK reached them only through SQL text, as in-process callbacks. SQL does not
+  call Python functions, by decision, so `komira_sql_stream` never carries them
+  and no call declares one to SQL. Rule B21 requires Python UDFs to run in
+  zygote-forked workers, so the plan door carries them only when that design
+  lands; until then it refuses an envelope with UDFs by name (§3).
 - **One engine per session.** The earlier SDK built a fresh engine context for
   every call. Here the session keeps one `EngineContext` (§7).
 

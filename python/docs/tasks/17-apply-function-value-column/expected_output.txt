@@ -3,3 +3,4 @@
 {'name': 'cy', 'shout': 'CY', 'root': 4.0, 'double_price': 16.0, 'band': 'high'}
 [{'name': 'ana', 'price': 10.5, 'qty': 4, 'shout': 'ANA', 'double_price': 21.0}, {'name': 'bo', 'price': 3.25, 'qty': 9, 'shout': 'BO', 'double_price': 6.5}, {'name': 'cy', 'price': 8.0, 'qty': 16, 'shout': 'CY', 'double_price': 16.0}]
 [{'name': 'ana', 'price': 10.5, 'qty': 4, 'shout': 'ANA', 'double_price': 21.0}, {'name': 'bo', 'price': 3.25, 'qty': 9, 'shout': 'BO', 'double_price': 6.5}, {'name': 'cy', 'price': 8.0, 'qty': 16, 'shout': 'CY', 'double_price': 16.0}]
+[{'name': 'ana', 'price': 10.5, 'band': 'high'}, {'name': 'bo', 'price': 3.25, 'band': 'low'}, {'name': 'cy', 'price': 8.0, 'band': 'high'}]

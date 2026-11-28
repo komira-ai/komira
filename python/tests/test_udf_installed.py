@@ -267,8 +267,9 @@ def main(argv):
                 s.sql("SELECT score(a, b) AS score FROM t")
             except komira.UnsupportedOperation as e:
                 want = (
-                    "bind: SQL not supported: scalar function 'score'. No UDFs are declared on this catalog either "
-                    "\u2014 declare one with `catalog.declare_udf(f)`"
+                    "bind: SQL not supported: scalar function 'score'. It is not a built-in. SQL cannot call a "
+                    "Python function, by decision: write the computation with built-in SQL functions, or run the "
+                    "query and apply the function to its result in Python (`Result.to_pandas()`)."
                 )
                 assert str(e) == want, "SQL naming the UDF is refused with {!r} ({}), not {!r}".format(str(e), type(e).__name__, want)
             else:

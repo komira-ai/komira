@@ -1,6 +1,6 @@
 # How do I apply a function to every value in a column?
 
-Write the function as an expression over the column: a built-in SQL function in `SELECT`, arithmetic and `.str` methods on a pandas-shaped Series, or expressions in `with_columns` on the polars-shaped frame. A Python function of your own (`Series.apply`, `map_elements`) is not available yet.
+Write the function as an expression over the column: a built-in SQL function in `SELECT`, arithmetic and `.str` methods on a pandas-shaped Series, or expressions in `with_columns` on the polars-shaped frame. A Python function of your own (`Series.apply`, `map_elements`) is not available yet on a frame, and SQL does not call one, by decision: run the query and apply the function to its result.
 
 <!-- include example.py -->
 ```python
@@ -34,6 +34,17 @@ lf = pl.scan_csv("items.csv").with_columns(
     (pl.col("price") * 2).alias("double_price"),
 )
 print(lf.sort("name").collect().to_arrow().to_pylist())
+
+# Your own Python function: SQL does not call one, so run the query and
+# apply the function to the rows of its result.
+def band(price):
+    return "high" if price > 5 else "low"
+
+
+with komira.Session() as s:
+    s.register_csv("items", "items.csv")
+    rows = s.sql("SELECT name, price FROM items ORDER BY name").to_arrow().to_pylist()
+print([{**row, "band": band(row["price"])} for row in rows])
 ```
 
 Output:
@@ -45,6 +56,7 @@ Output:
 {'name': 'cy', 'shout': 'CY', 'root': 4.0, 'double_price': 16.0, 'band': 'high'}
 [{'name': 'ana', 'price': 10.5, 'qty': 4, 'shout': 'ANA', 'double_price': 21.0}, {'name': 'bo', 'price': 3.25, 'qty': 9, 'shout': 'BO', 'double_price': 6.5}, {'name': 'cy', 'price': 8.0, 'qty': 16, 'shout': 'CY', 'double_price': 16.0}]
 [{'name': 'ana', 'price': 10.5, 'qty': 4, 'shout': 'ANA', 'double_price': 21.0}, {'name': 'bo', 'price': 3.25, 'qty': 9, 'shout': 'BO', 'double_price': 6.5}, {'name': 'cy', 'price': 8.0, 'qty': 16, 'shout': 'CY', 'double_price': 16.0}]
+[{'name': 'ana', 'price': 10.5, 'band': 'high'}, {'name': 'bo', 'price': 3.25, 'band': 'low'}, {'name': 'cy', 'price': 8.0, 'band': 'high'}]
 ```
 
 ## Notes
@@ -53,7 +65,7 @@ Output:
 - The pandas-shaped Series has arithmetic, comparisons, `astype`, `isin`, the `.str` and `.dt` accessors, and the cumulative and window verbs. The polars-shaped `Expr` has arithmetic, `abs`, `cast`, `fill_null`, `is_in`, `when/then/otherwise`, the `.str` namespace and the aggregate and window verbs.
 - A Python function of your own over each value is not available. `Series.apply`, `Series.map` and `DataFrame.apply` do not exist, and nor does a public `udf` decorator: komira-ai/komira#2332. `probe_series_apply.py` beside this page tries `df["price"].apply(...)` and must fail with the line in `probe_series_apply.error.txt`.
 - The polars-shaped `Expr.map_elements` does not exist either: komira-ai/komira#2384. `probe_polars_map_elements.py` must fail with the line in `probe_polars_map_elements.error.txt`.
-- SQL cannot call a Python function: komira-ai/komira#2330.
+- SQL does not call a Python function, by decision, and will not: a Python function of your own belongs in the Python API on a frame. In SQL, write the computation with the built-in functions above, or run the query and apply your function to its result, `s.sql(...).to_pandas()`. A call such as `SELECT score(a, b) FROM t` is refused with `bind: SQL not supported: scalar function 'score'. It is not a built-in. SQL cannot call a Python function, by decision: write the computation with built-in SQL functions, or run the query and apply the function to its result in Python (`Result.to_pandas()`).`
 - Some everyday functions have no method or no form yet: `round(x, digits)` in SQL is refused (only `round(x)` runs), and `Series.round`, `Series.abs` and `Expr.round` do not exist: komira-ai/komira#2383.
 - The day a probe runs to the end, this page's check goes red, and the page and the catalogue status change with it.
 - The `.str` accessor of the pandas-shaped Series is newer than the PyPI release 0.1.1623.

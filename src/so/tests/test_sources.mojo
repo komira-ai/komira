@@ -21,7 +21,12 @@
 # a refusal is also the session's last error with its step number and code (a
 # syntax error is parse and SQL_SYNTAX_ERROR, an unknown table bind and
 # SQL_BIND_ERROR, INTERSECT ALL parse and SQL_NOT_SUPPORTED), and a later
-# success leaves no error once the caller clears it.
+# success leaves no error once the caller clears it; a call of a function
+# that is neither a built-in nor declared, and of a name the engine refuses to
+# lower, is refused at bind (SQL_NOT_SUPPORTED) with a message that ends by
+# saying SQL cannot call a Python function, by decision, and what to do
+# instead, in place of the binder's advice to call `catalog.declare_udf`,
+# which no caller of the C surface can reach.
 from std.os import makedirs
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -36,6 +41,7 @@ from parquet_writer.record_batch_writer import (
 
 from runtime_paths import test_tmpdir
 from sdk_exec.engine_sql import STEP_BIND, run_sql
+from sql.sql_fn_table import sql_scalar_fn_spec
 
 from so import (
     KOMIRA_STEP_BIND,
@@ -405,6 +411,38 @@ def test_sql_result_success_records_no_error() raises:
     assert_equal(s.last_error_code(), String(""))
 
 
+def test_sql_calling_an_unknown_function_says_sql_cannot_call_python() raises:
+    var s = Session()
+    register_parquet(
+        s, String("three"), _three_row_parquet(test_tmpdir() + "/udf_refusal.parquet")
+    )
+    var unknown = _message_of(s, String("select score(k, k) as score from three"))
+    assert_equal(
+        unknown,
+        String(
+            "bind: SQL not supported: scalar function 'score'. It is not a"
+            " built-in. SQL cannot call a Python function, by decision: write"
+            " the computation with built-in SQL functions, or run the query"
+            " and apply the function to its result in Python"
+            " (`Result.to_pandas()`)."
+        ),
+    )
+    assert_equal(s.last_error(), unknown)
+    assert_equal(s.last_error_step(), KOMIRA_STEP_BIND)
+    assert_equal(s.last_error_code(), String("SQL_NOT_SUPPORTED"))
+
+    var refused = _message_of(s, String("select nextafter(k, 1.0) from three"))
+    assert_equal(
+        refused,
+        "bind: " + sql_scalar_fn_spec(String("nextafter")).reason
+        + " SQL cannot call a Python function, by decision: write the"
+        " computation with built-in SQL functions, or run the query and apply"
+        " the function to its result in Python (`Result.to_pandas()`).",
+    )
+    assert_equal(s.last_error_step(), KOMIRA_STEP_BIND)
+    assert_equal(s.last_error_code(), String("SQL_NOT_SUPPORTED"))
+
+
 def main() raises:
     test_register_parquet()
     test_register_parquet_refusals()
@@ -424,4 +462,5 @@ def main() raises:
     test_sql_result_refusal_names_its_step()
     test_sql_result_refusal_records_step_and_code()
     test_sql_result_success_records_no_error()
+    test_sql_calling_an_unknown_function_says_sql_cannot_call_python()
     print("OK")
