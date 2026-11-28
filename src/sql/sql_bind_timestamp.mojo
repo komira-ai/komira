@@ -5,19 +5,22 @@
 
 from arrow.arrow_types import ArrowType
 from arrow.schema import Schema
-from plan_expr.expr import Expr
+from column_kernels.strptime_format import compile_strptime_format
+from plan_expr.expr import (
+    EXPR_LITERAL, Expr, STRFNN_STRPTIME, STRFNN_TRY_STRPTIME,
+)
 from plan_expr.expr_walk import (
     PlanColRefFields, walk_expr_field,
 )
 from plan_expr.scalar_value import ScalarValue
-from sql.sql_ast import SqlExpr
+from sql.sql_ast import SX_NULL, SqlExpr
 from sql.sql_bind_expr import _bind_scalar
 from sql.sql_bind_scope import (
     CteScope, _date_to_days, BindScope,
 )
 from sql.sql_catalog import SqlCatalog
 from sql.sql_fn_table import (
-    DSG_MAKE_TS_MS, DSG_MAKE_TS_NS,
+    DSG_MAKE_TS_MS, DSG_MAKE_TS_NS, DSG_TRY_STRPTIME,
 )
 
 
@@ -25,7 +28,9 @@ def _sql_cast_target_arrow(ty: String) raises -> ArrowType:
     """One written SQL type name -> the `ArrowType` this engine converts to.
 
     The table is the served set, not DuckDB's type system: INTEGER, BIGINT,
-    REAL and DOUBLE (with their aliases). Every other type DuckDB names is
+    REAL and DOUBLE (with their aliases). DATE and TIMESTAMP from a text
+    operand never reach it: `_bind_cast` binds them first
+    (`_bind_text_temporal_cast`). Every other type DuckDB names is
     refused by name, naming the type the query wrote, rather than cast to the
     nearest served type (`CAST(x AS DECIMAL(18,4))` lowered to DOUBLE would
     answer `0.30000000000000004` where DuckDB answers `0.3000`).
@@ -180,8 +185,9 @@ def _bind_make_timestamp_epoch(
             " operand has no correct reading — a floating-point count would"
             " have to be rounded (and DuckDB's rounding model for that is not"
             " graded in this tree), and a string would have to be PARSED,"
-            " which is the separate gap `strptime` is refused for. Cast the"
-            " argument to BIGINT if that is what you meant."
+            " which is what `strptime(text, format)` and"
+            " CAST(<text> AS TIMESTAMP) do. Cast the argument to BIGINT if that"
+            " is what you meant."
         )
 
     # AN INT32 OPERAND IS WIDENED, NOT RELABELLED. A 4-byte column relabelled
@@ -402,3 +408,78 @@ def _timestamp_literal_micros(text: String, aware: Bool) raises -> Int64:
     return micros - offset_us
 
 
+def _null_timestamp() -> Expr:
+    """A NULL TIMESTAMP value: a NULL BIGINT labelled TIMESTAMP_US."""
+    return Expr.cast_to_arrow(
+        Expr.literal(ScalarValue.null(DType.int64)), ArrowType.TIMESTAMP_US
+    )
+
+
+def _bind_strptime(
+    sx: SqlExpr,
+    dsg: UInt8,
+    schema: Schema,
+    scope: BindScope,
+    catalog: SqlCatalog,
+    cte_scope: CteScope,
+    prebound: List[Expr],
+) raises -> Expr:
+    """`strptime(text, format)` / `try_strptime(text, format)` -> TIMESTAMP,
+    as DuckDB v1.5 (https://duckdb.org/docs/stable/sql/functions/timestamp.html,
+    directives: https://duckdb.org/docs/stable/sql/functions/dateformat.html).
+
+    The format must be a string literal: DuckDB refuses any other format at
+    bind time with "strptime format must be a constant", and this binder uses
+    the same words. The format is compiled here, so a directive this engine
+    does not serve (%z %Z %n and the week-based ones) is refused by name
+    before anything runs. A NULL format or a NULL text literal is a NULL
+    TIMESTAMP, as in DuckDB. A LIST of formats (DuckDB tries each in turn) is
+    refused by name."""
+    ref cargs = sx._call.value().args
+    var fname = String(sx.text)
+    if len(cargs) != 2:
+        raise Error(
+            "SQL bind error: `" + fname + "` takes two arguments, the text and"
+            " a format string, but got " + String(len(cargs)) + "."
+        )
+    # A bare NULL is not bindable on its own here, so the NULL format and the
+    # NULL text are answered before their arguments are bound.
+    if cargs[1].tag == SX_NULL:
+        return _null_timestamp()
+    var fmt = _bind_scalar(cargs[1], schema, scope, catalog, cte_scope, prebound)
+    if fmt.tag != EXPR_LITERAL:
+        var fmissing = String("")
+        var fat = walk_expr_field[PlanColRefFields](fmt, schema, fmissing).arrow_type
+        if fmissing.byte_length() == 0 and fat == ArrowType.LIST:
+            raise Error(
+                "SQL not supported: `" + fname + "` with a LIST of formats."
+                " DuckDB tries each format in turn; this engine takes one"
+                " format string."
+            )
+        raise Error("Invalid Input Error: strptime format must be a constant")
+    var fval = fmt.literal_value()
+    if fval.is_null():
+        return _null_timestamp()
+    if not fval.is_string():
+        raise Error(
+            "SQL bind error: the format of `" + fname + "` must be a string,"
+            " like '%Y-%m-%d'."
+        )
+    # Compiling refuses an unserved directive by name and raises DuckDB's
+    # own error for a malformed format.
+    _ = compile_strptime_format(fval.string_val)
+    if cargs[0].tag == SX_NULL:
+        return _null_timestamp()
+    var text = _bind_scalar(cargs[0], schema, scope, catalog, cte_scope, prebound)
+    var missing = String("")
+    var at = walk_expr_field[PlanColRefFields](text, schema, missing).arrow_type
+    if missing.byte_length() == 0 and at != ArrowType.STRING:
+        raise Error(
+            "SQL not supported: `" + fname + "` parses TEXT, but this argument"
+            " is of type " + String(at) + "."
+        )
+    var op = STRFNN_TRY_STRPTIME if dsg == DSG_TRY_STRPTIME else STRFNN_STRPTIME
+    var args = List[Expr]()
+    args.append(text^)
+    args.append(fmt^)
+    return Expr.string_fn_n(op, args^)

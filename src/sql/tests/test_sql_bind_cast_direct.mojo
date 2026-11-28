@@ -324,7 +324,7 @@ def test_make_timestamp() raises:
     )
     _check(
         "SELECT make_timestamp(v) FROM t",
-        "ERR: SQL not supported: `make_timestamp` takes an INTEGER tick count since 1970-01-01, but this argument is of type float64. REFUSED RATHER THAN COERCED: the lowering LABELS the operand's own integer as a temporal unit, so a non-integer operand has no correct reading — a floating-point count would have to be rounded (and DuckDB's rounding model for that is not graded in this tree), and a string would have to be PARSED, which is the separate gap `strptime` is refused for. Cast the argument to BIGINT if that is what you meant."
+        "ERR: SQL not supported: `make_timestamp` takes an INTEGER tick count since 1970-01-01, but this argument is of type float64. REFUSED RATHER THAN COERCED: the lowering LABELS the operand's own integer as a temporal unit, so a non-integer operand has no correct reading — a floating-point count would have to be rounded (and DuckDB's rounding model for that is not graded in this tree), and a string would have to be PARSED, which is what `strptime(text, format)` and CAST(<text> AS TIMESTAMP) do. Cast the argument to BIGINT if that is what you meant."
     )
     _check(
         "SELECT make_timestamp(k, k) FROM t",

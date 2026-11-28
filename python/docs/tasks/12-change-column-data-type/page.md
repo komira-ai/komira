@@ -65,8 +65,8 @@ int64
 - `astype` takes a pyarrow type, a komira name (`"int64"`, `"float64"`, `"string"`), a pandas spelling (`"Int64"`, `"str"`) or `int`, `float` and `str`. `dtypes` shows the result.
 - Text to a number works in `astype` and in polars `cast` (the example does it). In SQL, `CAST` from text to a number is refused by name; cast in the frame, or read the column as a number.
 - Number to number, and integer to text, work in all three. A float to an integer rounds half to even (2.5 becomes 2) in SQL `CAST`, as DuckDB does, and in `astype`, where pandas truncates toward zero (komira-ai/komira#2376); polars `cast` truncates, as polars does. Check a float column before casting it down.
-- SQL `CAST` reaches `INTEGER`, `BIGINT`, `REAL`, `DOUBLE` and, from an integer, `VARCHAR`. Other targets (`DATE`, `TIMESTAMP`, `SMALLINT`, `BOOLEAN`, `DECIMAL` over a column) and `TRY_CAST` are refused by name.
-- Parsing text into a date is a task of its own: it is not done by `astype("date32")` or `cast`, which refuse or fail on text (rank 23).
+- SQL `CAST` reaches `INTEGER`, `BIGINT`, `REAL`, `DOUBLE` and, from an integer, `VARCHAR`. From text, `CAST` also reaches `DATE` and `TIMESTAMP`, and `TRY_CAST` of text to them gives NULL for a value that does not parse. Other targets (`SMALLINT`, `BOOLEAN`, `DECIMAL` over a column) and `TRY_CAST` to a number are refused by name.
+- `astype("date32")` on a string column parses the text as `CAST(... AS DATE)` does (rank 23). The polars-shaped `cast` of text to a date is not changed.
 - A value that does not convert fails the query; `astype(errors="ignore")` is refused.
 - `DataFrame.astype` and `Series.astype` are newer than the PyPI release 0.1.1623.
 

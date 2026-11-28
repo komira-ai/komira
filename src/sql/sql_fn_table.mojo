@@ -419,6 +419,14 @@ visible failure.
 `_R_TSMINT`, whose missing primitive — civil-calendar-to-days — is REAL and is
 untouched by this. See `_bind_make_timestamp_epoch`."""
 
+comptime DSG_STRPTIME: UInt8 = 36
+comptime DSG_TRY_STRPTIME: UInt8 = 37
+"""`strptime(text, format)` / `try_strptime(text, format)` -> TIMESTAMP, an
+`EXPR_STRING_FN_N` node (`STRFNN_STRPTIME` / `STRFNN_TRY_STRPTIME`) whose
+format must be a string literal, as DuckDB requires ("strptime format must be
+a constant"). The binder compiles the format so a directive this engine does
+not serve is refused by name at bind time; see `_bind_strptime`."""
+
 
 # -----------------------------------------------------------------------------
 # ⭐ THE TWO CAST DESUGAR NAMES — NAMES THE TOKENIZER CANNOT PRODUCE.
@@ -1173,23 +1181,14 @@ comptime _R_WALLCLOCK: String = (
 )
 
 comptime _R_TSFORMAT: String = (
-    "SQL not supported: `strftime`, `strptime` and `try_strptime` carry a "
-    "TEMPORAL FORMAT DIRECTIVE string — `strftime` renders a temporal value "
-    "to VARCHAR and the other two PARSE a VARCHAR to TIMESTAMP on DuckDB "
-    "v1.5.3. TWO MISSING PRIMITIVES, one per direction. (1) RENDER: no "
-    "expression here converts a temporal column to text — `EXPR_EXTRACT` "
-    "answers INT64 for field units and, for trunc units, carries the CHILD's "
-    "own temporal type through unchanged, so there is no temporal-to-string "
-    "route at all. (2) PARSE: a string-to-timestamp conversion needs a "
-    "CALENDAR-FIELDS-TO-INSTANT step — the parsed year/month/day have to "
-    "become a tick count — which is the SAME civil-calendar-to-days primitive "
-    "`_R_TSMINT` measures absent for `make_date(y, m, d)`. ⚠ THE EPOCH-COUNT "
-    "`make_timestamp` OVERLOADS DO NOT SERVE THIS: `make_timestamp(<n>)` labels a "
-    "tick count that is ALREADY an instant, and a format directive never "
-    "produces one — it produces fields. ⚠ `try_strptime` DIFFERS FROM "
-    "`strptime` ONLY IN FAILURE "
-    "(NULL instead of an error), so it cannot be served before its strict "
-    "twin is."
+    "SQL not supported: `strftime` RENDERS a temporal value to VARCHAR through "
+    "a FORMAT DIRECTIVE string, and no expression here converts a temporal "
+    "column to text — `EXPR_EXTRACT` answers INT64 for field units and, for "
+    "trunc units, carries the CHILD's own temporal type through unchanged, so "
+    "there is no temporal-to-string route at all. The PARSE direction is "
+    "served: `strptime(text, format)` and `try_strptime(text, format)` read "
+    "text into a TIMESTAMP, and CAST(<text> AS DATE | TIMESTAMP) reads ISO "
+    "text."
 )
 
 comptime _R_TSMINT: String = (
@@ -3929,10 +3928,10 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     if name == "today": return SqlFnSpec(FNK_REFUSED, _R_WALLCLOCK)
     if name == "transaction_timestamp": return SqlFnSpec(FNK_REFUSED, _R_WALLCLOCK)
     #
-    # ---- TEMPORAL format/parse directives — 3 names
+    # ---- TEMPORAL format/parse directives — 3 names (strftime refused; strptime and try_strptime lowered)
     if name == "strftime": return SqlFnSpec(FNK_REFUSED, _R_TSFORMAT)
-    if name == "strptime": return SqlFnSpec(FNK_REFUSED, _R_TSFORMAT)
-    if name == "try_strptime": return SqlFnSpec(FNK_REFUSED, _R_TSFORMAT)
+    if name == "strptime": return SqlFnSpec(FNK_DESUGAR, DSG_STRPTIME, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
+    if name == "try_strptime": return SqlFnSpec(FNK_DESUGAR, DSG_TRY_STRPTIME, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     #
     # ---- TEMPORAL CONSTRUCTORS — 7 names, SPLIT 3 SERVED / 4 REFUSED
     #

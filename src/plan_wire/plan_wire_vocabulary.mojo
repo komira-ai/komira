@@ -58,7 +58,7 @@ in the generator. A repository lint fails if you do.
 comptime PLAN_WIRE_UNSPECIFIED_VALUE: Int32 = 0
 """Wire 0, in every space. Never a valid tag."""
 
-comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 359
+comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 361
 """Total published members across all 33 spaces. A drift tripwire a test can pin."""
 
 comptime PLAN_WIRE_SPACE_COUNT: Int = 33
@@ -2326,19 +2326,19 @@ def string_fn_wire_name(wire: Int32) -> String:
 # Declared in: src/plan_expr/expr.mojo
 # ==========================================================================
 
-comptime STRING_FN_N_WIRE_MEMBERS: Int = 14
+comptime STRING_FN_N_WIRE_MEMBERS: Int = 16
 comptime STRING_FN_N_ENGINE_MIN: UInt8 = 0
-comptime STRING_FN_N_ENGINE_MAX: UInt8 = 13
+comptime STRING_FN_N_ENGINE_MAX: UInt8 = 15
 comptime STRING_FN_N_WIRE_MIN: Int32 = 1
-comptime STRING_FN_N_WIRE_MAX: Int32 = 14
+comptime STRING_FN_N_WIRE_MAX: Int32 = 16
 
 
 def string_fn_n_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this StringFnN value?
 
-    Runs: [(0, 13)]. Total, never raising.
+    Runs: [(0, 15)]. Total, never raising.
     """
-    return engine_tag <= 13
+    return engine_tag <= 15
 
 
 def string_fn_n_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -2430,6 +2430,12 @@ def write_string_fn_n_wire_name[W: Writer](mut writer: W, wire: Int32):
         return
     if wire == 14:
         writer.write("STRFNN_JACCARD")
+        return
+    if wire == 15:
+        writer.write("STRFNN_STRPTIME")
+        return
+    if wire == 16:
+        writer.write("STRFNN_TRY_STRPTIME")
         return
     writer.write("StringFnN#", Int(wire))
 
@@ -4372,7 +4378,7 @@ def plan_wire_space_member_count(space: Int) raises -> Int:
     if space == 17:
         return 19
     if space == 18:
-        return 14
+        return 16
     if space == 19:
         return 3
     if space == 20:
@@ -4443,7 +4449,7 @@ def plan_wire_space_engine_max(space: Int) raises -> UInt8:
     if space == 17:
         return 18
     if space == 18:
-        return 13
+        return 15
     if space == 19:
         return 2
     if space == 20:

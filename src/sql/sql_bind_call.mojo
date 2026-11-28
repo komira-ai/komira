@@ -31,7 +31,7 @@ from sql.sql_bind_ops import _bind_sql_division
 from sql.sql_bind_scope import (
     CteScope, BindScope,
 )
-from sql.sql_bind_timestamp import _bind_make_timestamp_epoch
+from sql.sql_bind_timestamp import _bind_make_timestamp_epoch, _bind_strptime
 from sql.sql_catalog import SqlCatalog
 from sql.sql_fn_table import (
     CONST_FALSE, CONST_INT_ZERO, CONST_TRUE, CONST_USER, DSG_CAST, DSG_CENTURY,
@@ -41,7 +41,7 @@ from sql.sql_fn_table import (
     DSG_JSON_EXTRACT_TEXT, DSG_LEAST, DSG_LEFT, DSG_MAKE_TS_MS, DSG_MAKE_TS_NS,
     DSG_MAKE_TS_US, DSG_MAP_EXTRACT_VALUE, DSG_MILLENNIUM, DSG_NANOSECOND, DSG_NULLIF,
     DSG_PI, DSG_RIGHT, DSG_STRING_SPLIT, DSG_STRUCT_EXTRACT, DSG_STRUCT_EXTRACT_AT,
-    DSG_SUBSTRING, DSG_TRY_CAST, FNK_BINARY_OP, FNK_CONST, FNK_DESUGAR, FNK_EXTRACT_FIELD,
+    DSG_STRPTIME, DSG_SUBSTRING, DSG_TRY_CAST, DSG_TRY_STRPTIME, FNK_BINARY_OP, FNK_CONST, FNK_DESUGAR, FNK_EXTRACT_FIELD,
     FNK_MATH_FN, FNK_MATH_FN2, FNK_REFUSED, FNK_REGEXP, FNK_STRING_FN, FNK_STRING_FN_N,
     FNK_STRING_PRED, FNK_UNARY_NUM, sql_scalar_fn_spec,
 )
@@ -401,6 +401,10 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
         # refusal, and differ only in the UNIT the count is in and the unit the
         # answer carries. See `_bind_make_timestamp_epoch`.
         return _bind_make_timestamp_epoch(
+            sx, dsg_op, schema, scope, catalog, cte_scope, prebound,
+        )
+    if dsg_op == DSG_STRPTIME or dsg_op == DSG_TRY_STRPTIME:
+        return _bind_strptime(
             sx, dsg_op, schema, scope, catalog, cte_scope, prebound,
         )
     if dsg_op == DSG_EVEN:

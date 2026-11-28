@@ -1,13 +1,12 @@
 # How do I parse strings into dates?
 
-komira reads ISO text (`2026-09-15`) as a date when it reads the file; for any other format, parse the text with pyarrow first and give komira the dates.
+`CAST(text AS DATE)`, `TRY_CAST(text AS DATE)` and `strptime(text, '<format>')` parse text in SQL, and `astype("date32")` parses a string column of a frame; a few `strptime` directives are still refused.
 
 <!-- include example.py -->
 ```python
 from pathlib import Path
 
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 import komira
@@ -29,18 +28,55 @@ with komira.Session() as s:
     print(result.schema.field("shipped").type)
     print(result.to_pylist())
 
-# Any other format: parse the text with pyarrow, then give komira the dates.
-text = pa.table({"id": [1, 2, 3], "shipped": ["09/15/2026", "10/20/2026", "12/31/2026"]})
-parsed = pc.strptime(text["shipped"], format="%m/%d/%Y", unit="s").cast(pa.date32())
-pq.write_table(text.set_column(1, "shipped", parsed), "us_orders.parquet")
+# Any other format: strptime(text, format) parses the text in SQL. The format
+# is a constant string of % directives and the result is a timestamp.
+Path("us_orders.csv").write_text(
+    "id,shipped\n"
+    "1,09/15/2026\n"
+    "2,10/20/2026\n"
+    "3,12/31/2026\n"
+)
 with komira.Session() as s:
-    s.register_parquet("us_orders", "us_orders.parquet")
+    s.register_csv("us_orders", "us_orders.csv")
     result = s.sql(
-        "SELECT id, shipped, year(shipped) AS year FROM us_orders"
-        " WHERE shipped < DATE '2026-12-01' ORDER BY id"
+        "SELECT id, strptime(shipped, '%m/%d/%Y') AS shipped"
+        " FROM us_orders ORDER BY id"
     ).to_arrow()
     print(result.schema.field("shipped").type)
     print(result.to_pylist())
+
+# ISO text held as a string column: CAST gives a date, TRY_CAST gives NULL for
+# text that is not a date (a column that mixes dates with "unknown" is text).
+Path("text_dates.csv").write_text(
+    "id,shipped\n"
+    "1,2026-09-15\n"
+    "2,unknown\n"
+    "3,2026-12-31\n"
+)
+with komira.Session() as s:
+    s.register_csv("text_dates", "text_dates.csv")
+    result = s.sql(
+        "SELECT id, TRY_CAST(shipped AS DATE) AS shipped"
+        " FROM text_dates ORDER BY id"
+    ).to_arrow()
+    print(result.schema.field("shipped").type)
+    print(result.to_pylist())
+    s.register_csv("text_ok", "orders.csv", all_varchar=True)
+    result = s.sql(
+        "SELECT id, CAST(shipped AS DATE) AS shipped FROM text_ok ORDER BY id"
+    ).to_arrow()
+    print(result.schema.field("shipped").type)
+    print(result.to_pylist())
+
+# pandas-shaped: astype("date32") on a string column parses it like CAST.
+pq.write_table(
+    pa.table({"id": [1, 2], "shipped": ["2026-09-15", "2026-10-01"]}),
+    "strings.parquet",
+)
+df = komira.read_parquet("strings.parquet")
+typed = df.astype({"shipped": "date32"}).sort_values("id").materialize().to_arrow()
+print(typed.schema.field("shipped").type)
+print(typed.to_pylist())
 ```
 
 Output:
@@ -49,16 +85,24 @@ Output:
 ```text
 date32[day]
 [{'id': 2, 'shipped': datetime.date(2026, 10, 1), 'month': 10, 'days': 30}, {'id': 3, 'shipped': datetime.date(2026, 12, 31), 'month': 12, 'days': 121}]
+timestamp[us]
+[{'id': 1, 'shipped': datetime.datetime(2026, 9, 15, 0, 0)}, {'id': 2, 'shipped': datetime.datetime(2026, 10, 20, 0, 0)}, {'id': 3, 'shipped': datetime.datetime(2026, 12, 31, 0, 0)}]
 date32[day]
-[{'id': 1, 'shipped': datetime.date(2026, 9, 15), 'year': 2026}, {'id': 2, 'shipped': datetime.date(2026, 10, 20), 'year': 2026}]
+[{'id': 1, 'shipped': datetime.date(2026, 9, 15)}, {'id': 2, 'shipped': None}, {'id': 3, 'shipped': datetime.date(2026, 12, 31)}]
+date32[day]
+[{'id': 1, 'shipped': datetime.date(2026, 9, 15)}, {'id': 2, 'shipped': datetime.date(2026, 10, 1)}, {'id': 3, 'shipped': datetime.date(2026, 12, 31)}]
+date32[day]
+[{'id': 1, 'shipped': datetime.date(2026, 9, 15)}, {'id': 2, 'shipped': datetime.date(2026, 10, 1)}]
 ```
 
 ## Notes
 
-- `register_csv` types a column of `YYYY-MM-DD` values as a date (`date32`), so `year`, `month`, `date_diff` and comparisons with `DATE '...'` work on it with no parsing step.
-- komira's SQL cannot parse text itself yet: `CAST(<text> AS DATE)` and `CAST(<text> AS TIMESTAMP)` are refused by name, and so is `strptime` (komira-ai/komira#2366). `probe_cast_date.py` and `probe_strptime.py` beside this page try both and must fail with the lines of their `.error.txt` files. The day one runs, this page's check goes red, and the page and the catalogue status change with it.
-- The program parses with `pyarrow.compute.strptime` (a format of `%` directives, as in Python), casts the result to a date, and writes Parquet for komira to read. A value that does not match the format raises in pyarrow, so a bad row is found before komira sees it.
-- The pandas-shaped frame has no `to_datetime`: `komira.to_datetime()` is refused and points at `astype`, which does not parse text into dates today.
+- `register_csv` types a column of `YYYY-MM-DD` values as a date (`date32`), so `year`, `month`, `date_diff` and comparisons with `DATE '...'` work on it with no parsing step. A column that mixes dates with other text, or is read with `all_varchar=True`, stays a string column and is parsed with the forms below.
+- `CAST(<text> AS DATE)` and `CAST(<text> AS TIMESTAMP)` accept what DuckDB accepts: optional leading and trailing whitespace; `YYYY-MM-DD` with `-`, `/`, `\` or a space as the separator (the same one twice); a month and day of one or two digits; an optional ` (BC)`; and text after the day that is not a digit is ignored (`2026-09-15 10:11` is `2026-09-15`). Text that does not parse, and a day that does not exist (`2026-02-30`), fail the query under `CAST` and give NULL under `TRY_CAST`. A NULL input gives NULL. See <https://duckdb.org/docs/stable/sql/expressions/cast.html>.
+- `strptime(text, format)` and `try_strptime(text, format)` return a `TIMESTAMP` (microseconds), as DuckDB does; `try_strptime` gives NULL for text that does not match. The format must be a constant string. Supported directives: `%Y %y %-y %m %-m %d %-d %b %h %B %a %A %H %-H %I %-I %p %M %-M %S %-S %f %g %j %-j %c %x %X %T %%`. Refused by name: `%z` and `%Z` (DuckDB returns a `TIMESTAMP WITH TIME ZONE`), `%n` (a `TIMESTAMP_NS`), the week-based `%G %V %u %U %W %w`, and a list of formats. See <https://duckdb.org/docs/stable/sql/functions/dateformat.html> and <https://duckdb.org/docs/stable/sql/functions/timestamp.html>.
+- In the pandas-shaped frame, `Series.astype("date32")` and `DataFrame.astype({"col": "date32"})` on a string column parse the text as `CAST(... AS DATE)` does, and a value that does not parse fails the query. `astype` to a timestamp dtype from text is still refused.
+- `komira.to_datetime()` is refused and points at `astype`; the polars-shaped `cast` of text to a date is not changed by this.
+- Still refused, so the status is partial (komira-ai/komira#2366): the directives and the list of formats named above, a format that is not a constant, and `astype` of text to a timestamp dtype.
 
 ## Related
 

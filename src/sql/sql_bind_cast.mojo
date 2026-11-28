@@ -283,9 +283,59 @@ def _bind_decimal_literal_cast(
     )
 
 
+def _text_cast_temporal_target(ty_l: String) -> ArrowType:
+    """The Arrow type a text CAST to `ty_l` produces, for the two temporal
+    targets served from text; `ArrowType.NULL` for every other name.
+
+    DuckDB v1.5's spellings: `DATE`, and `TIMESTAMP` with its aliases
+    `DATETIME` and `TIMESTAMP_US` (all three are its microsecond TIMESTAMP).
+    `TIMESTAMP_S` / `_MS` / `_NS`, `TIMESTAMPTZ` and `TIME` are not here and
+    keep the target table's refusal."""
+    if ty_l == "date":
+        return ArrowType.DATE32
+    if ty_l == "timestamp" or ty_l == "datetime" or ty_l == "timestamp_us":
+        return ArrowType.TIMESTAMP_US
+    return ArrowType.NULL
+
+
+def _bind_text_temporal_cast(
+    var child: Expr, ty: String, target: ArrowType, is_try: Bool, schema: Schema
+) raises -> Expr:
+    """`CAST(<text> AS DATE | TIMESTAMP)` and its `TRY_CAST` twin -> an
+    `EXPR_CAST` to DATE32 / TIMESTAMP_US that the evaluator parses with
+    DuckDB's text grammar (`column_kernels.temporal_parse`): a strict cast
+    raises DuckDB's conversion error for text that does not parse, and
+    TRY_CAST answers NULL for it.
+
+    The operand must be visibly text. One that is already of the target type
+    is returned as it is (the identity cast). Every other operand is refused
+    by name: a number, a DATE to TIMESTAMP or a TIMESTAMP to DATE are other
+    casts, which this engine does not run."""
+    var missing = String("")
+    var src = walk_expr_field[PlanColRefFields](child, schema, missing).arrow_type
+    if missing.byte_length() == 0:
+        if src == target:
+            return child^
+        if src == ArrowType.STRING:
+            if is_try:
+                var phys = DType.int32 if target == ArrowType.DATE32 else DType.int64
+                return Expr.cast_from_parts(child^, phys, target, 0, 0, True)
+            return Expr.cast_to_arrow(child^, target)
+    var what = String(src) if missing.byte_length() == 0 else String("an operand whose type is not visible here")
+    raise Error(
+        "SQL not supported: CAST from " + what + " to " + ty.upper() + "."
+        " DATE and TIMESTAMP are reached from TEXT here (DuckDB's text"
+        " grammar, `YYYY-MM-DD[ HH:MM:SS[.ffffff]]`), and from a value"
+        " already of that type; a cast from a number, or between DATE and"
+        " TIMESTAMP, is not run by this engine."
+    )
+
+
 def _bind_cast(sx: SqlExpr, is_try: Bool, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:
     """`CAST(<expr> AS <type>)` / `<expr>::<type>` -> an `EXPR_CAST` node.
 
+    A DATE or TIMESTAMP target over a text operand is served for CAST and
+    TRY_CAST alike (`_bind_text_temporal_cast`). For every other target,
     `TRY_CAST` and a string operand are refused by name (see the comment
     below for why). `_bound_expr_is_string` is the conservative predicate
     `_bind_nullif` uses too: it catches a string column, a string literal and
@@ -314,6 +364,14 @@ def _bind_cast(sx: SqlExpr, is_try: Bool, schema: Schema, scope: BindScope, cata
     if _sql_type_name_is_decimal(ty):
         return _bind_decimal_literal_cast(cargs[0], ty, is_try)
     var ty_l = ty.lower()
+    # DATE / TIMESTAMP from text, CAST and TRY_CAST alike: bound here, before
+    # the target table (which serves numeric targets only) and before the
+    # TRY_CAST and string-operand refusals below (which are about the
+    # numeric rounding model and stay for numeric targets).
+    var temporal = _text_cast_temporal_target(ty_l)
+    if temporal != ArrowType.NULL:
+        var tchild = _bind_scalar(cargs[0], schema, scope, catalog, cte_scope, prebound)
+        return _bind_text_temporal_cast(tchild^, ty, temporal, is_try, schema)
     if (
         not is_try
         and (ty_l == "varchar" or ty_l == "text" or ty_l == "string" or ty_l == "char")

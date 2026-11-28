@@ -1,0 +1,7 @@
+k	"TRY_CAST(CASE  WHEN ((k = 3)) THEN ('2028-02-29') ELSE s END AS ""DATE"")"
+0	
+1	
+2	
+3	2028-02-29
+4	
+5	

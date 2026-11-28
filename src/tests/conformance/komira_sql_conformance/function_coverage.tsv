@@ -645,7 +645,7 @@ string_to_array	FNK_DESUGAR	-	-	1	equal:1
 strip_accents	FNK_REFUSED	_R_UNORM	-	0	probe:refused_bind
 strlen	FNK_STRING_FN	-	-	1	equal:1
 strpos	FNK_STRING_FN_N	-	yes	2	equal:2
-strptime	FNK_REFUSED	_R_TSFORMAT	yes	0	probe:refused_bind
+strptime	FNK_DESUGAR	-	yes	2	equal:2
 struct_concat	FNK_REFUSED	_R_STRUCTTYPE	-	0	probe:refused_bind
 struct_contains	FNK_REFUSED	_R_STRUCTTYPE	-	0	probe:refused_bind
 struct_extract	FNK_DESUGAR	-	-	0	no_case
@@ -696,7 +696,7 @@ transaction_timestamp	FNK_REFUSED	_R_WALLCLOCK	-	0	probe:refused_bind
 translate	FNK_STRING_FN_N	-	-	2	equal:2
 trim	FNK_STRING_FN	-	yes	1	equal:1
 trunc	FNK_UNARY_NUM	-	yes	3	equal:3
-try_strptime	FNK_REFUSED	_R_TSFORMAT	-	0	probe:refused_bind
+try_strptime	FNK_DESUGAR	-	-	1	equal:1
 txid_current	FNK_REFUSED	_R_SESSION	-	0	probe:refused_bind
 typeof	FNK_REFUSED	_R_TYPEVAL	yes	0	probe:refused_bind
 ucase	FNK_STRING_FN	-	-	1	equal:1

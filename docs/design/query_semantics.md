@@ -560,6 +560,13 @@ The rulings that settled each item once open or departing, the table of parity g
 - **Current behaviour.** Saturates to ±inf (`src/kernels/cast_to_varchar_kernels.mojo:48`); accepts the special spellings (`:47`). "Code that does not follow", item 19, unless the oracle shows DuckDB saturates too.
 - **Mark.** MATCHES.
 
+### 6.7a String to DATE and TIMESTAMP, and strptime
+
+- **Rule.** `CAST(text AS DATE)` and `CAST(text AS TIMESTAMP)` accept DuckDB's text: optional leading and trailing whitespace; `YYYY-MM-DD` with `-`, `/`, `\` or a space as the separator (the same one twice); a month and day of one or two digits; an optional ` (BC)`; and text after the day that is not a digit is ignored (`'2026-09-15 10:11'` is 2026-09-15). Text that does not parse, and a day that does not exist (`'2026-02-30'`), is an error under CAST and NULL under TRY_CAST. `strptime(text, format)` returns a TIMESTAMP (microseconds) and `try_strptime` answers NULL where `strptime` fails. The format is a constant string. Supported directives: `%Y %y %-y %m %-m %d %-d %b %h %B %a %A %H %-H %I %-I %p %M %-M %S %-S %f %g %j %-j %c %x %X %T %%`. Refused by name: `%z` and `%Z` (DuckDB returns a TIMESTAMP WITH TIME ZONE), `%n` (a TIMESTAMP_NS), the week-based `%G %V %u %U %W %w`, and a list of formats.
+- **DuckDB.** DuckDB documentation: <https://duckdb.org/docs/stable/sql/expressions/cast.html>, <https://duckdb.org/docs/stable/sql/functions/dateformat.html>, <https://duckdb.org/docs/stable/sql/functions/timestamp.html>.
+- **Current behaviour.** The Python frame's `astype("date32")` on a string column builds the same cast and parses as CAST does.
+- **Mark.** MATCHES for the forms above; the refusals are named.
+
 ### 6.8 Timestamp units
 
 - **Rule.** The plan carries Arrow's four timestamp units (seconds, milliseconds, microseconds, nanoseconds), and DATE32 as days. Casting to a finer unit is exact or an error if out of range. Casting to a coarser unit rounds as DuckDB does, measured by the oracle on an instant before the Unix epoch with a sub-unit part (truncation toward zero, or toward negative infinity: the measurement decides).
