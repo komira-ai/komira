@@ -49,7 +49,7 @@ marked **not built** is designed, but the skin does not define it yet: calling i
 | `filter` | `df[pred]`, where `pred` is a boolean `Series` of `df` | `lf.filter(pred)` | FILTER | cut |
 | `project` | `df[["a", "b"]]`, `df.rename(columns=...)`, `add_prefix`, `add_suffix` | `lf.select("a", "b")`, `lf.select(kpl.col("a").alias("b"))`, `lf.rename(...)` | PROJECT of column references and aliases | cut |
 | `computed_column` | `df.assign(x=...)`, `df["x"] = ...`; operators `+ - * /`, unary `-`, comparisons, `& \| ~`; `df.fillna`; `s.isna()`, `s.notna()`, `df.isna()`, `df.notna()` (and `isnull`, `notnull`); not built: `// % **`, `abs()`, `round()` | `lf.with_columns(expr)`, `lf.select(expr)`; operators `+ - * / // %`, unary `-`, comparisons, `& \| ~`; `kpl.lit`, `abs`, `fill_null`, `is_null`, `is_not_null`; not built: `**`, `round`, `fill_nan`, `is_nan` | PROJECT of literals, binary and unary ops (`build_with_columns_plan`) | cut |
-| `cast` | `df.astype(dtype or {col: dtype})`, `s.astype(dtype)` | `expr.cast(dtype)` | `EXPR_CAST` | in its node |
+| `cast` | `df.astype(dtype or {col: dtype})`, `s.astype(dtype)`; `km.to_datetime(s, unit="s" / "ms" / "us" / "ns")` of an integer Series | `expr.cast(dtype)` | `EXPR_CAST` (for `to_datetime`, an int64 count, times 1_000_000 or 1_000 for `"s"` and `"ms"` with `EXPR_BINARY_OP`, cast to `timestamp_us`, or to `timestamp_ns` for `"ns"`) | in its node |
 | `case_when` | `s.case_when(caselist)`, `s.where(cond, other)`, `s.mask(cond, other)`; `other` required; not built | `kpl.when(c).then(v).otherwise(w)`; `otherwise` required | `EXPR_WHEN` | in its node |
 | `in_list` | `s.isin([...])` | `expr.is_in([...])` | the OR of `=` that `col_expr.is_in` and the SQL parser build, which the optimizer folds into `EXPR_IN_LIST` (`Expr.in_list_node`); more than 64 values refused, as the Mojo builder refuses them | in its node |
 | `between` | `s.between(lo, hi, inclusive="both")`, not built | `expr.is_between(lo, hi, closed="both")` | the two comparisons `between_of` and the SQL parser build, not `EXPR_BETWEEN` | in its node; the cell stays empty (see [Grounding](#grounding-that-no-surface-reaches)) |
@@ -159,7 +159,7 @@ A verb that does exist but refuses some arguments, or an unordered frame, is not
 | `Index`, `MultiIndex`, `RangeIndex` | `komira frames have no index` |
 | `pivot_table`, `melt`, `crosstab`, `get_dummies` | `komira.<name>() is not supported yet: the plan has no node for it` |
 | `merge_ordered` | `merge_ordered() fills by row order, which a frame does not have; use merge() then sort_values()` |
-| `to_datetime`, `to_numeric` | `komira.<name>() is not supported; cast a column with s.astype(...)` |
+| `to_numeric` | `komira.<name>() is not supported; cast a column with s.astype(...)` |
 | `NamedAgg` | `use a tuple: agg(out=("column", "func"))` |
 
 ### Module `komira.pl`

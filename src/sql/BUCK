@@ -63,6 +63,7 @@ mojo_library(
         "tests/test_sql_bind_cast_direct.mojo",
         "tests/test_sql_bind_corr_scalar.mojo",
         "tests/test_sql_bind_decimal_literal.mojo",
+        "tests/test_sql_bind_epoch_direct.mojo",
         "tests/test_sql_bind_expr_direct.mojo",
         "tests/test_sql_bind_fn_args_direct.mojo",
         "tests/test_sql_bind_fn_call_direct.mojo",

@@ -83,6 +83,7 @@ mojo_library(
         "tests/test_string_fn_n_kernels.mojo",
         "tests/test_string_op_over_computed_operand.mojo",
         "tests/test_substring_duckdb_semantics.mojo",
+        "tests/test_temporal_epoch_eval.mojo",
         "tests/test_temporal_extract.mojo",
         "tests/test_temporal_extract_part2.mojo",
         "tests/test_udf_predicate_names_its_own_output_column.mojo",

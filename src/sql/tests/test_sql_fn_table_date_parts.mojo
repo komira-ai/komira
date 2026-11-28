@@ -2,7 +2,7 @@
 # Row pins: the date_part specifier tables and the date_trunc period table
 # =============================================================================
 #
-# What it proves: every spelling on every row of sql_date_part_unit (56),
+# What it proves: every spelling on every row of sql_date_part_unit (57),
 # sql_date_part_desugar (12) and sql_date_trunc_unit (57) resolves to its
 # row's unit, and a specifier resolves in exactly one of the two specifier
 # tables (they return different vocabularies). Names on no row return None.
@@ -21,6 +21,7 @@ from plan_expr.expr import (
     EXTRACT_ISODOW,
     EXTRACT_ISOYEAR,
     EXTRACT_MICROSECOND,
+    EXTRACT_EPOCH,
     EXTRACT_MILLISECOND,
     EXTRACT_MINUTE,
     EXTRACT_MONTH,
@@ -167,6 +168,7 @@ def test_specifier_units() raises:
             "useconds",
         ],
     )
+    _unit(EXTRACT_EPOCH, ["epoch"])
 
 
 def test_specifier_desugars() raises:
@@ -267,7 +269,7 @@ def test_names_on_no_row_return_none() raises:
     # PostgreSQL `isoweek`, an upper-case spelling (the parser lower-folds
     # before the lookup) and the empty string.
     var none: List[String] = [
-        "epoch", "julian", "timezone", "nanosecond", "isoweek", "YEAR", "",
+        "julian", "timezone", "nanosecond", "isoweek", "YEAR", "",
     ]
     for i in range(len(none)):
         assert_false(sql_date_part_unit(none[i]), none[i])

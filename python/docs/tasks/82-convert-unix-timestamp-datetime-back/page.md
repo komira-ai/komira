@@ -1,6 +1,6 @@
 # How do I convert a Unix timestamp to a datetime and back?
 
-In SQL, `make_timestamp(unix_s * 1000000)` (or `make_timestamp_ms(unix_ms)`) makes a TIMESTAMP, and `date_diff('second', origin, ts)` against a column holding `make_timestamp(0)` gives the Unix timestamp back.
+In SQL, `make_timestamp(unix_s * 1000000)` or `epoch_ms(unix_ms)` makes a TIMESTAMP, and `epoch(ts)`, `epoch_ms(ts)` and `epoch_us(ts)` give the Unix timestamp back; on the pandas-shaped frame, `komira.to_datetime(s, unit="s")`. `to_timestamp(n)` is not served yet.
 
 <!-- include example.py -->
 ```python
@@ -19,56 +19,58 @@ Path("events.csv").write_text(
 with komira.Session() as s:
     s.register_csv("events", "events.csv")
 
-    # Seconds to TIMESTAMP: make_timestamp counts microseconds since the Unix epoch.
-    seconds = s.sql(
-        "SELECT unix_s, make_timestamp(unix_s * 1000000) AS ts FROM events ORDER BY unix_s"
+    # To TIMESTAMP: make_timestamp counts microseconds since the Unix epoch,
+    # and epoch_ms of a BIGINT counts milliseconds.
+    to_ts = s.sql(
+        "SELECT unix_s, make_timestamp(unix_s * 1000000) AS ts,"
+        " unix_ms, epoch_ms(unix_ms) AS ts_ms FROM events ORDER BY unix_s"
     )
-    for row in seconds.to_arrow().to_pylist():
-        print(row["unix_s"], row["ts"])
+    for row in to_ts.to_arrow().to_pylist():
+        print(row["unix_s"], row["ts"], row["unix_ms"], row["ts_ms"])
 
-    # Milliseconds to TIMESTAMP: make_timestamp_ms counts milliseconds.
-    millis = s.sql(
-        "SELECT unix_ms, make_timestamp_ms(unix_ms) AS ts FROM events ORDER BY unix_ms"
-    )
-    for row in millis.to_arrow().to_pylist():
-        print(row["unix_ms"], row["ts"])
-
-    # Back: the units between the Unix epoch, make_timestamp(0) kept in a
-    # column, and the timestamp. date_diff takes columns, not the call itself.
+    # Back: epoch(ts) is seconds as a DOUBLE, with the fraction; epoch_ms(ts)
+    # and epoch_us(ts) are BIGINT milliseconds and microseconds.
     back = s.sql(
-        "SELECT unix_s, date_diff('second', origin, ts) AS back_s,"
-        " unix_ms, date_diff('millisecond', origin, ts_ms) AS back_ms"
-        " FROM (SELECT unix_s, unix_ms, make_timestamp(0) AS origin,"
-        " make_timestamp(unix_s * 1000000) AS ts,"
-        " make_timestamp_ms(unix_ms) AS ts_ms FROM events) AS e"
-        " ORDER BY unix_s"
+        "SELECT epoch(ts) AS s, epoch_ms(ts) AS ms, epoch_us(ts) AS us"
+        " FROM (SELECT epoch_ms(unix_ms) AS ts FROM events) AS e ORDER BY ms"
     )
     for row in back.to_arrow().to_pylist():
         print(row)
+
+# pandas-shaped: komira.to_datetime(series, unit=...) reads an integer as a
+# count of seconds ("s"), milliseconds ("ms"), microseconds or nanoseconds.
+df = komira.read_csv("events.csv")
+df["ts"] = komira.to_datetime(df["unix_s"], unit="s")
+df["ts_ms"] = komira.to_datetime(df["unix_ms"], unit="ms")
+print(df.dtypes)
+for row in df.sort_values("unix_s").materialize().to_arrow().to_pylist():
+    print(row["ts"], row["ts_ms"])
 ```
 
 Output:
 
 <!-- include expected_output.txt -->
 ```text
-1788220800 2026-09-01 00:00:00
-1788224461 2026-09-01 01:01:01
-1788438896 2026-09-03 12:34:56
-1788220800123 2026-09-01 00:00:00.123000
-1788224461500 2026-09-01 01:01:01.500000
-1788438896007 2026-09-03 12:34:56.007000
-{'unix_s': 1788220800, 'back_s': 1788220800, 'unix_ms': 1788220800123, 'back_ms': 1788220800123}
-{'unix_s': 1788224461, 'back_s': 1788224461, 'unix_ms': 1788224461500, 'back_ms': 1788224461500}
-{'unix_s': 1788438896, 'back_s': 1788438896, 'unix_ms': 1788438896007, 'back_ms': 1788438896007}
+1788220800 2026-09-01 00:00:00 1788220800123 2026-09-01 00:00:00.123000
+1788224461 2026-09-01 01:01:01 1788224461500 2026-09-01 01:01:01.500000
+1788438896 2026-09-03 12:34:56 1788438896007 2026-09-03 12:34:56.007000
+{'s': 1788220800.123, 'ms': 1788220800123, 'us': 1788220800123000}
+{'s': 1788224461.5, 'ms': 1788224461500, 'us': 1788224461500000}
+{'s': 1788438896.007, 'ms': 1788438896007, 'us': 1788438896007000}
+{'unix_s': 'int64', 'unix_ms': 'int64', 'ts': 'timestamp_us', 'ts_ms': 'timestamp_us'}
+2026-09-01 00:00:00 2026-09-01 00:00:00.123000
+2026-09-01 01:01:01 2026-09-01 01:01:01.500000
+2026-09-03 12:34:56 2026-09-03 12:34:56.007000
 ```
 
 ## Notes
 
-- `make_timestamp(n)` reads `n` as microseconds since the Unix epoch and `make_timestamp_ms(n)` reads milliseconds; both answer a TIMESTAMP, which Python receives as a `datetime.datetime`. The argument must be an integer: a DOUBLE is refused by name, so cast it to BIGINT first.
-- A multiplication that does not fit in 64 bits raises an overflow error; it does not wrap.
-- `date_diff(unit, a, b)` takes two TIMESTAMP columns (or literals), so the Unix epoch has to sit in a column: `make_timestamp(0)` is named in a subquery and read from the outer query. A call written directly as the argument is refused.
-- `epoch(ts)`, `epoch_ms(ts)`, `to_timestamp(n)`, `date_part('epoch', ts)` and `CAST(ts AS BIGINT)` are not served yet, and neither is `komira.to_datetime(s, unit="s")` on the pandas-shaped frame: komira-ai/komira#2344.
-- `probe_to_datetime.py` beside this page tries `komira.to_datetime` and must fail with the line in `probe_to_datetime.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
+- `make_timestamp(n)` reads `n` as microseconds since the Unix epoch, and `epoch_ms(n)` (the same as `make_timestamp_ms(n)`) reads milliseconds; both answer a TIMESTAMP, which Python receives as a `datetime.datetime`. The argument must be an integer: a DOUBLE is refused by name, so cast it to BIGINT first.
+- `epoch_ms` has two overloads, as in DuckDB: of a BIGINT it makes a TIMESTAMP, of a TIMESTAMP or DATE it answers BIGINT milliseconds. `epoch(x)` is DOUBLE seconds, with the fraction of a second, and `epoch_us(x)` BIGINT microseconds. Before 1970 the counts are negative, and `epoch_ms` drops the sub-millisecond part toward zero: `epoch_ms(TIMESTAMP '1969-12-31 23:59:59.9995')` is 0 and `epoch_us` of it is -500. A NULL stays NULL.
+- A multiplication that does not fit in 64 bits raises an overflow error; it does not wrap. So does `komira.to_datetime` of a count of seconds too large for a microsecond timestamp.
+- `komira.to_datetime(s, unit=...)` takes a Series of integers, with `unit` `"s"`, `"ms"`, `"us"` or `"ns"` (pandas' default). `"s"`, `"ms"` and `"us"` give `timestamp_us` and `"ns"` gives `timestamp_ns`, where pandas gives `datetime64[ns]` for each. Text and its `format=`, floats, `utc=True` and `errors="coerce"` are refused by name.
+- `date_part('epoch', ts)` and `EXTRACT(epoch FROM ts)` are the same as `epoch(ts)`.
+- Not served yet: `to_timestamp(n)`, which in DuckDB answers a TIMESTAMP WITH TIME ZONE and waits on time-zone support (komira-ai/komira#2342); `epoch_ns(ts)`; `CAST(ts AS BIGINT)`. Each is refused by name.
 
 ## Related
 

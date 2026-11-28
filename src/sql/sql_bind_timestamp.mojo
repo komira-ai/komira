@@ -5,7 +5,9 @@
 
 from arrow.arrow_types import ArrowType
 from arrow.schema import Schema
-from plan_expr.expr import Expr
+from plan_expr.expr import (
+    EXTRACT_EPOCH, EXTRACT_EPOCH_MS, EXTRACT_EPOCH_US, Expr,
+)
 from plan_expr.expr_walk import (
     PlanColRefFields, walk_expr_field,
 )
@@ -17,7 +19,7 @@ from sql.sql_bind_scope import (
 )
 from sql.sql_catalog import SqlCatalog
 from sql.sql_fn_table import (
-    DSG_MAKE_TS_MS, DSG_MAKE_TS_NS,
+    DSG_EPOCH, DSG_EPOCH_MS, DSG_MAKE_TS_MS, DSG_MAKE_TS_NS,
 )
 
 
@@ -184,6 +186,13 @@ def _bind_make_timestamp_epoch(
             " argument to BIGINT if that is what you meant."
         )
 
+    return _relabel_tick_count(child^, at, dsg)
+
+
+def _relabel_tick_count(var child: Expr, at: ArrowType, dsg: UInt8) -> Expr:
+    """An INT64 or INT32 tick count `child` (of type `at`) as the TIMESTAMP
+    `dsg` names: `DSG_MAKE_TS_US`, `_MS` (also `epoch_ms(BIGINT)`) or `_NS`.
+    """
     # AN INT32 OPERAND IS WIDENED, NOT RELABELLED. A 4-byte column relabelled
     # to an 8-byte timestamp would read two rows as one instant — a wrong
     # answer with a success code. DuckDB reaches the BIGINT overload by an
@@ -205,6 +214,78 @@ def _bind_make_timestamp_epoch(
             ArrowType.TIMESTAMP_US,
         )
     return Expr.cast_to_arrow(ticks^, ArrowType.TIMESTAMP_US)
+
+
+def _is_epoch_operand(at: ArrowType) -> Bool:
+    """A type `epoch`, `epoch_ms` and `epoch_us` count: DATE or a TIMESTAMP of
+    any unit, with or without a zone (a TIMESTAMPTZ holds UTC ticks, and the
+    count of an instant does not depend on a zone)."""
+    return (
+        at == ArrowType.DATE32
+        or at == ArrowType.TIMESTAMP
+        or at == ArrowType.TIMESTAMP_S
+        or at == ArrowType.TIMESTAMP_MS
+        or at == ArrowType.TIMESTAMP_US
+        or at == ArrowType.TIMESTAMP_NS
+    )
+
+
+def _bind_epoch_count(
+    sx: SqlExpr,
+    dsg: UInt8,
+    schema: Schema,
+    scope: BindScope,
+    catalog: SqlCatalog,
+    cte_scope: CteScope,
+    prebound: List[Expr],
+) raises -> Expr:
+    """`epoch(x)` / `epoch_ms(x)` / `epoch_us(x)` — the instant `x` (a DATE or
+    TIMESTAMP) as a count since 1970-01-01 00:00:00, and `epoch_ms(n)` of a
+    BIGINT `n`, which goes the other way.
+
+    DuckDB v1.5.5 (measured; `duckdb_functions()` lists the overloads):
+
+        epoch(TIMESTAMP '2026-09-01 00:00:00.123456') = 1788220800.123456 (DOUBLE)
+        epoch_ms(TIMESTAMP '2026-09-01 00:00:00.123') = 1788220800123     (BIGINT)
+        epoch_us(TIMESTAMP '1969-12-31 23:59:59.9995') = -500             (BIGINT)
+        epoch_ms(1788220800123) = 2026-09-01 00:00:00.123               (TIMESTAMP)
+
+    A DATE or TIMESTAMP operand lowers to `EXPR_EXTRACT` with
+    `EXTRACT_EPOCH` / `_EPOCH_MS` / `_EPOCH_US`. An integer operand of
+    `epoch_ms` lowers exactly as `make_timestamp_ms` does. Every other operand
+    is refused here, naming its type: DuckDB's TIME, TIME WITH TIME ZONE and
+    INTERVAL overloads are not served, an integer has no `epoch` or
+    `epoch_us` overload in DuckDB either, and an untyped NULL is ambiguous
+    between the overloads.
+    """
+    ref cargs = sx._call.value().args
+    var n = len(cargs)
+    var fname = String(sx.text)
+    if n != 1:
+        raise Error(
+            "SQL bind error: `" + fname + "` takes exactly ONE argument — a"
+            " TIMESTAMP or DATE — but got " + String(n) + "."
+        )
+    var child = _bind_scalar(cargs[0], schema, scope, catalog, cte_scope, prebound)
+    var missing = String("")
+    var at = walk_expr_field[PlanColRefFields](child, schema, missing).arrow_type
+    if _is_epoch_operand(at):
+        if dsg == DSG_EPOCH:
+            return Expr.extract(EXTRACT_EPOCH, child^)
+        if dsg == DSG_EPOCH_MS:
+            return Expr.extract(EXTRACT_EPOCH_MS, child^)
+        return Expr.extract(EXTRACT_EPOCH_US, child^)
+    if dsg == DSG_EPOCH_MS and (at == ArrowType.INT64 or at == ArrowType.INT32):
+        return _relabel_tick_count(child^, at, DSG_MAKE_TS_MS)
+    var takes = String("a TIMESTAMP or a DATE")
+    if dsg == DSG_EPOCH_MS:
+        takes = String("a TIMESTAMP, a DATE, or a BIGINT millisecond count")
+    raise Error(
+        "SQL not supported: `" + fname + "` takes " + takes + ", but this"
+        " argument is of type " + String(at) + ". The TIME and INTERVAL"
+        " overloads DuckDB also has are not served, and an untyped NULL"
+        " matches more than one overload: cast it, as in `NULL::TIMESTAMP`."
+    )
 
 
 def _timestamp_literal_micros(text: String, aware: Bool) raises -> Int64:

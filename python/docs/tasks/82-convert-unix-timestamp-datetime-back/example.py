@@ -13,29 +13,29 @@ Path("events.csv").write_text(
 with komira.Session() as s:
     s.register_csv("events", "events.csv")
 
-    # Seconds to TIMESTAMP: make_timestamp counts microseconds since the Unix epoch.
-    seconds = s.sql(
-        "SELECT unix_s, make_timestamp(unix_s * 1000000) AS ts FROM events ORDER BY unix_s"
+    # To TIMESTAMP: make_timestamp counts microseconds since the Unix epoch,
+    # and epoch_ms of a BIGINT counts milliseconds.
+    to_ts = s.sql(
+        "SELECT unix_s, make_timestamp(unix_s * 1000000) AS ts,"
+        " unix_ms, epoch_ms(unix_ms) AS ts_ms FROM events ORDER BY unix_s"
     )
-    for row in seconds.to_arrow().to_pylist():
-        print(row["unix_s"], row["ts"])
+    for row in to_ts.to_arrow().to_pylist():
+        print(row["unix_s"], row["ts"], row["unix_ms"], row["ts_ms"])
 
-    # Milliseconds to TIMESTAMP: make_timestamp_ms counts milliseconds.
-    millis = s.sql(
-        "SELECT unix_ms, make_timestamp_ms(unix_ms) AS ts FROM events ORDER BY unix_ms"
-    )
-    for row in millis.to_arrow().to_pylist():
-        print(row["unix_ms"], row["ts"])
-
-    # Back: the units between the Unix epoch, make_timestamp(0) kept in a
-    # column, and the timestamp. date_diff takes columns, not the call itself.
+    # Back: epoch(ts) is seconds as a DOUBLE, with the fraction; epoch_ms(ts)
+    # and epoch_us(ts) are BIGINT milliseconds and microseconds.
     back = s.sql(
-        "SELECT unix_s, date_diff('second', origin, ts) AS back_s,"
-        " unix_ms, date_diff('millisecond', origin, ts_ms) AS back_ms"
-        " FROM (SELECT unix_s, unix_ms, make_timestamp(0) AS origin,"
-        " make_timestamp(unix_s * 1000000) AS ts,"
-        " make_timestamp_ms(unix_ms) AS ts_ms FROM events) AS e"
-        " ORDER BY unix_s"
+        "SELECT epoch(ts) AS s, epoch_ms(ts) AS ms, epoch_us(ts) AS us"
+        " FROM (SELECT epoch_ms(unix_ms) AS ts FROM events) AS e ORDER BY ms"
     )
     for row in back.to_arrow().to_pylist():
         print(row)
+
+# pandas-shaped: komira.to_datetime(series, unit=...) reads an integer as a
+# count of seconds ("s"), milliseconds ("ms"), microseconds or nanoseconds.
+df = komira.read_csv("events.csv")
+df["ts"] = komira.to_datetime(df["unix_s"], unit="s")
+df["ts_ms"] = komira.to_datetime(df["unix_ms"], unit="ms")
+print(df.dtypes)
+for row in df.sort_values("unix_s").materialize().to_arrow().to_pylist():
+    print(row["ts"], row["ts_ms"])

@@ -31,12 +31,12 @@ from sql.sql_bind_ops import _bind_sql_division
 from sql.sql_bind_scope import (
     CteScope, BindScope,
 )
-from sql.sql_bind_timestamp import _bind_make_timestamp_epoch
+from sql.sql_bind_timestamp import _bind_epoch_count, _bind_make_timestamp_epoch
 from sql.sql_catalog import SqlCatalog
 from sql.sql_fn_table import (
     CONST_FALSE, CONST_INT_ZERO, CONST_TRUE, CONST_USER, DSG_CAST, DSG_CENTURY,
     DSG_COALESCE, DSG_DATE_DIFF, DSG_DATE_PART, DSG_DATE_SUB, DSG_DATE_TRUNC,
-    DSG_DAYS_IN_MONTH, DSG_DECADE, DSG_ERA, DSG_EVEN, DSG_FDIV, DSG_FMOD, DSG_GREATEST,
+    DSG_DAYS_IN_MONTH, DSG_DECADE, DSG_EPOCH, DSG_EPOCH_MS, DSG_EPOCH_US, DSG_ERA, DSG_EVEN, DSG_FDIV, DSG_FMOD, DSG_GREATEST,
     DSG_IFNULL, DSG_ISFINITE, DSG_ISINF, DSG_ISNAN, DSG_JSON_EXTRACT,
     DSG_JSON_EXTRACT_TEXT, DSG_LEAST, DSG_LEFT, DSG_MAKE_TS_MS, DSG_MAKE_TS_NS,
     DSG_MAKE_TS_US, DSG_MAP_EXTRACT_VALUE, DSG_MILLENNIUM, DSG_NANOSECOND, DSG_NULLIF,
@@ -401,6 +401,12 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
         # refusal, and differ only in the UNIT the count is in and the unit the
         # answer carries. See `_bind_make_timestamp_epoch`.
         return _bind_make_timestamp_epoch(
+            sx, dsg_op, schema, scope, catalog, cte_scope, prebound,
+        )
+    if dsg_op == DSG_EPOCH or dsg_op == DSG_EPOCH_MS or dsg_op == DSG_EPOCH_US:
+        # The inverse of the arm above; `epoch_ms(BIGINT)` IS that arm, chosen
+        # by the operand's type. See `_bind_epoch_count`.
+        return _bind_epoch_count(
             sx, dsg_op, schema, scope, catalog, cte_scope, prebound,
         )
     if dsg_op == DSG_EVEN:

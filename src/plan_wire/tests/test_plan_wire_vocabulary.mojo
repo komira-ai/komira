@@ -176,7 +176,7 @@ def test_countless_space_totals_are_pinned() raises:
     # or this library's build goes red. If this line collides in a merge,
     # ⛔ DO NOT PICK A SIDE — both sides' numbers are wrong; re-run the
     # generator over the MERGED sources and read the constant.
-    assert_equal(PLAN_WIRE_VOCABULARY_MEMBERS, 359, "total published members")
+    assert_equal(PLAN_WIRE_VOCABULARY_MEMBERS, 362, "total published members")
     assert_equal(AGG_FN_WIRE_MEMBERS, 38, "AGG_* has no engine count constant")
     assert_equal(PLAN_WIRE_SPACE_COUNT, 33, "enumerated tag spaces")
     # ArrowType has no engine count constant either, and it is the space LEG 2
@@ -365,7 +365,7 @@ def test_the_sparse_gaps_are_refused() raises:
     """The specific gaps, named.
 
     `WindowFn` runs 0-5, 10-14, 20-24. `BinaryOp` runs 0-4, 10-15, 20-21.
-    `ExtractField` runs 0-14, 16-25. A membership test written as `t <= max`
+    `ExtractField` runs 0-14, 16-25, 28-30. A membership test written as `t <= max`
     would accept PF 6, BIN 5 and EXTRACT 15 — none of which the engine declares
     — and encode plans that nothing can execute. A regression here is not "a
     test failed", it is "the vocabulary accepts a tag the engine never made".
@@ -385,8 +385,9 @@ def test_the_sparse_gaps_are_refused() raises:
     assert_true(
         not plan_wire_is_declared(PLAN_WIRE_SPACE_BINARY_OP, 16), "BIN 16 is a gap"
     )
-    # The extraction run is 0-14 and 16-25; the reserved hole is the SINGLE
-    # value 15.
+    # The runs are 0-14, 16-25 (truncation) and 28-30 (epoch counts); the
+    # reserved hole between the first two is the SINGLE value 15 (26 and 27
+    # are held for the weekday and month name units).
     # ⛔ THE POSITIVE ASSERTIONS ARE NOT DECORATION AND MUST NOT BE DROPPED WHEN
     # THIS MOVES AGAIN. A gap assertion on its own is satisfied by a space that
     # refuses EVERYTHING, so "re-point the gap until the test passes" is a real
@@ -407,6 +408,18 @@ def test_the_sparse_gaps_are_refused() raises:
     assert_true(
         plan_wire_is_declared(PLAN_WIRE_SPACE_EXTRACT_FIELD, 14),
         "EXTRACT_MICROSECOND = 14 — the top of the extraction run",
+    )
+    assert_true(
+        plan_wire_is_declared(PLAN_WIRE_SPACE_EXTRACT_FIELD, 30),
+        "EXTRACT_EPOCH_US = 30 — the top of the space",
+    )
+    assert_true(
+        not plan_wire_is_declared(PLAN_WIRE_SPACE_EXTRACT_FIELD, 31),
+        "EXTRACT 31 is past the top of the space",
+    )
+    assert_true(
+        plan_wire_is_declared(PLAN_WIRE_SPACE_EXTRACT_FIELD, 28),
+        "EXTRACT_EPOCH = 28 — the bottom of the epoch run",
     )
 
     # And the ones that ARE declared either side of a gap, so the assertions

@@ -45,9 +45,20 @@ from kernels.temporal_extract import (
     extract_year_date32,
     extract_year_ts,
 )
+from kernels.temporal_epoch import (
+    epoch_ms_date32,
+    epoch_ms_ts,
+    epoch_seconds_date32,
+    epoch_seconds_ts,
+    epoch_us_date32,
+    epoch_us_ts,
+)
 from plan_expr.expr import (
     EXTRACT_DAY,
     EXTRACT_DAYOFWEEK,
+    EXTRACT_EPOCH,
+    EXTRACT_EPOCH_MS,
+    EXTRACT_EPOCH_US,
     EXTRACT_DAYOFYEAR,
     EXTRACT_HOUR,
     EXTRACT_ISODOW,
@@ -339,6 +350,9 @@ def _project_extract(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion
             + String(Int(child_col.arrow_type.type_id))
             + " and the batch schema does not declare it temporal either"
         )
+    # --- epoch counts (kernels/temporal_epoch.mojo) ---
+    if unit == EXTRACT_EPOCH or unit == EXTRACT_EPOCH_MS or unit == EXTRACT_EPOCH_US:
+        return _project_epoch(unit, child_col, src_at)
     # --- date_trunc family ---
     if _is_trunc_unit(unit):
         # Map the IR EXTRACT_TRUNC_* tag onto the kernel TRUNC_* tag.
@@ -506,3 +520,24 @@ def _project_extract(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion
         "PipelineCompiler: EXPR_EXTRACT — unsupported unit on TIMESTAMP_*: "
         + String(Int(unit))
     )
+
+
+def _project_epoch(
+    unit: UInt8, child_col: Column[HeapRegion], src_at: ArrowType
+) raises -> Column[HeapRegion]:
+    """`epoch` (FLOAT64 seconds), `epoch_ms` and `epoch_us` (INT64) of a
+    DATE32 or TIMESTAMP_* column; `src_at` is its resolved temporal type,
+    which tells the kernel the tick unit."""
+    if src_at == ArrowType.DATE32:
+        var days = child_col.as_primitive[DType.int32]()
+        if unit == EXTRACT_EPOCH:
+            return Column.from_primitive[DType.float64](epoch_seconds_date32(days))
+        if unit == EXTRACT_EPOCH_MS:
+            return Column.from_primitive[DType.int64](epoch_ms_date32(days))
+        return Column.from_primitive[DType.int64](epoch_us_date32(days))
+    var ticks = child_col.as_primitive[DType.int64]()
+    if unit == EXTRACT_EPOCH:
+        return Column.from_primitive[DType.float64](epoch_seconds_ts(ticks, src_at))
+    if unit == EXTRACT_EPOCH_MS:
+        return Column.from_primitive[DType.int64](epoch_ms_ts(ticks, src_at))
+    return Column.from_primitive[DType.int64](epoch_us_ts(ticks, src_at))

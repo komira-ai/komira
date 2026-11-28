@@ -114,6 +114,7 @@ def main(args):
         "read_csv",
         "read_json",
         "read_parquet",
+        "to_datetime",
     ]
     assert komira.__all__ == want, komira.__all__
     assert issubclass(LibraryLoadError, KomiraError) and issubclass(KomiraError, Exception)

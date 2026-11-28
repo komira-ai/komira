@@ -21,9 +21,9 @@
 #      (mutant caught: `lowers_to_a_node` derived from `kind != FNK_NONE`,
 #      which answers yes for every refusal row)
 #   6. Every name in sql_date_part_universe() resolves through
-#      sql_date_part_unit or sql_date_part_desugar, except the five real
-#      specifiers this engine refuses (epoch, julian, timezone,
-#      timezone_hour, timezone_minute), which resolve through neither; and
+#      sql_date_part_unit or sql_date_part_desugar, except the four real
+#      specifiers this engine refuses (julian, timezone, timezone_hour,
+#      timezone_minute), which resolve through neither; and
 #      every spelling either table serves is in the universe.
 #      (mutant caught: a name added to the universe with no unit or desugar
 #      row, or a served spelling missing from it)
@@ -114,7 +114,7 @@ def test_a_refusal_row_states_a_reason_and_claims_nothing() raises:
 
 
 def _refused_specifiers() -> List[String]:
-    return ["epoch", "julian", "timezone", "timezone_hour", "timezone_minute"]
+    return ["julian", "timezone", "timezone_hour", "timezone_minute"]
 
 
 def _in(names: List[String], n: String) -> Bool:
@@ -157,10 +157,10 @@ def test_the_refusal_summary_is_derived_from_the_tables() raises:
         " weekofyear, w, isoyear, yearweek, millisecond, milliseconds, msec,"
         " msecs, ms, msecond, mseconds, microsecond, microseconds, usec, usecs,"
         " us, usecond, useconds, century, centuries, cent, decade, decades, dec,"
-        " decs, millennium, millennia, mil, mils, era. It does NOT serve epoch,"
+        " decs, millennium, millennia, mil, mils, era, epoch. It does NOT serve"
         " julian, timezone, timezone_hour, timezone_minute, each of which IS a"
-        " real v1.5.3 specifier with a measured blocker (epoch / julian read a"
-        " RAW value no unit on this wire carries; the timezone reads answer 0"
+        " real v1.5.3 specifier with a measured blocker (julian is a Julian day"
+        " number no unit on this wire carries; the timezone reads answer 0"
         " for every naive timestamp and are refused rather than served as a"
         " plausible zero). This list is DERIVED from the specifier tables, not"
         " written beside them"

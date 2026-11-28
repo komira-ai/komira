@@ -188,6 +188,7 @@ from plan_expr.expr import (
     EXTRACT_DAYOFWEEK, EXTRACT_ISODOW, EXTRACT_DAYOFYEAR,
     EXTRACT_WEEK, EXTRACT_ISOYEAR, EXTRACT_YEARWEEK,
     EXTRACT_MILLISECOND, EXTRACT_MICROSECOND,
+    EXTRACT_EPOCH, EXTRACT_EPOCH_MS, EXTRACT_EPOCH_US,
     REGEXP_SPLIT_TO_ARRAY, REGEXP_EXTRACT_ALL, REGEXP_COUNT, REGEXP_INSTR,
     REGEXP_SUBSTR, REGEXP_FULL_MATCH,
 )
@@ -2636,25 +2637,22 @@ def test_every_math_fn2_member_round_trips_with_asymmetric_operands() raises:
 
 
 def test_every_declared_extract_unit_round_trips() raises:
-    """★ TWENTY-FIVE UNITS ACROSS TWO DISJOINT RUNS, WITH A ONE-VALUE HOLE.
+    """★ TWENTY-EIGHT UNITS ACROSS THREE DISJOINT RUNS, WITH HOLES.
 
     `EXTRACT_*` is the sparsest space in the format: fields are 0..14,
-    truncations are 16..25, and **15 alone is declared by NOTHING**. A corpus
-    that swept `range(EXTRACT_FIELD_WIRE_MEMBERS)` would therefore be testing
-    units 0..24 — one of which does not exist and nine of which (16..24) are
-    real — so the sweep enumerates the CONSTANTS, and the count is pinned
-    against the derived `EXTRACT_FIELD_WIRE_MEMBERS` so a new unit cannot
-    arrive untested.
+    truncations are 16..25, epoch counts are 28..30, and **15, 26 and 27 are
+    declared by NOTHING** (26 and 27 are held for the weekday and month name
+    units). A corpus that swept `range(EXTRACT_FIELD_WIRE_MEMBERS)` would
+    therefore be testing units 0..27 — three of which do not exist, and
+    missing all three epoch units — so the sweep enumerates the CONSTANTS, and the count is pinned against the derived
+    `EXTRACT_FIELD_WIRE_MEMBERS` so a new unit cannot arrive untested.
 
-    ⚠ THE FIELD RUN IS 0..14 AND THE HOLE IS ONE VALUE. A new unit arrives
-    with a new line here because the assertion below goes RED, not because
-    anyone remembered — that is the event this count exists to force a reader
-    through.
+    ⚠ THE HOLES ARE SMALL. A new unit arrives with a new line here because
+    the assertion below goes RED, not because anyone remembered — that is the
+    event this count exists to force a reader through.
 
-    ⛔ THE RESERVED SPACE IS FULL. A further field unit cannot simply take
-    16+ — that is the truncation run, and `_is_trunc_unit` is an OPEN-ENDED
-    `>= 16` that the type ladder, the capability gate and both executors
-    DELEGATE to. See the note in `expr.mojo`; it is a decision, not a step.
+    `_is_trunc_unit` is the BOUNDED range 16..25, so the epoch units above it
+    are not read as truncations by the type ladder or the executor.
 
     ⚠ `_infer_expr_field` HAS NO EXTRACT ARM — it falls through to
     `Field("expr", NULL, True)` — so LEG 2 types every one of these the same
@@ -2675,10 +2673,13 @@ def test_every_declared_extract_unit_round_trips() raises:
     # this file restating five constants it does not otherwise use.
     for u in range(21, 26):
         units.append(UInt8(u))
+    units.append(EXTRACT_EPOCH)
+    units.append(EXTRACT_EPOCH_MS)
+    units.append(EXTRACT_EPOCH_US)
     assert_equal(
         len(units), EXTRACT_FIELD_WIRE_MEMBERS,
         "the corpus does not sweep every DECLARED ExtractField unit. The space"
-        + " is SPARSE — 0..6 and 16..25 — so `range(count)` is the wrong"
+        + " is SPARSE — 0..14, 16..25 and 28..30 — so `range(count)` is the wrong"
         + " enumeration and this list is the right one; a member added to"
         + " either run must be added here too.",
     )
