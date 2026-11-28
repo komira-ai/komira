@@ -1,7 +1,8 @@
 # Object-store URLs: read, write and list s3://, gs:// and az:// from Python and SQL
 
 Status: design, not built. It plans the work of komira-ai/komira#2337 as a sequence of small pull
-requests. **EXISTS** names code on `main`; **PROPOSED** is new. Statements the author deduced rather
+requests. **EXISTS** names code on `main`; **PROPOSED** is new; in the format table, **PLANNED** names the
+slice that builds a cell and **NOT PLANNED** gives the reason none does. Statements the author deduced rather
 than read are marked *(inferred)*.
 
 The binding, credential, plan and error model is already designed in
@@ -37,7 +38,7 @@ df = komira.read_parquet("s3://sales/2026/east.parquet",
 lf = komira.pl.scan_parquet("s3://sales/2026/*.parquet",
                             storage_options={"aws_access_key_id": key_id,
                                              "aws_secret_access_key": secret, "aws_region": "eu-west-1"})
-s.register_csv("returns", "s3://sales/2026/returns.csv", delimiter=";")   # Q3, still open
+s.register_csv("returns", "s3://sales/2026/returns.csv", delimiter=";")
 
 # An explicit credential, for SQL: a scope (a location ending in "/") gives every URL under it its
 # credential and store settings.
@@ -65,22 +66,83 @@ What does not change: the SQL text is DuckDB's; a local path reads as it does to
 `Session.add_sql_binding(name, komira.files(...))` spelling, with the same credential classes, keeps
 working, and the two task pages that use it keep their output.
 
+## How each format is read, and how a file gets a SQL name
+
+Every cell says **EXISTS** (on `main`, for local paths unless it says otherwise), **PLANNED** with
+the slice that brings it or extends it to URLs, or **NOT PLANNED** with the reason. "Mirrors" names
+the library a spelling copies.
+
+| format | pandas-shaped reader | polars-shaped reader (`komira.pl`, lazy only) | SQL table function | SQL name |
+|---|---|---|---|---|
+| Parquet | `komira.read_parquet(path)` **EXISTS**; URLs **PLANNED** in 4, with `storage_options=` in 4b. Mirrors pandas `read_parquet` | `komira.pl.scan_parquet(path)` **EXISTS**; URLs in 4 and 4b. Mirrors polars `scan_parquet` | `read_parquet('...')`, `FROM '....parquet'` **EXISTS**; URLs **PLANNED** in 3. Mirrors DuckDB | `s.register_parquet(name, path)` **EXISTS**; URL shapes (Q3) in 3 and 4b |
+| CSV | `komira.read_csv(path, sep=, header=)` **EXISTS**; URLs **PLANNED** in 5a | `komira.pl.scan_csv(path, separator=, has_header=)` **EXISTS**; URLs in 5a | `read_csv`, `read_csv_auto`, `FROM '....csv'` **EXISTS**; URLs in 5a | `s.register_csv(name, path, delimiter=, header=, all_varchar=)` **EXISTS**; URL shapes in 5a |
+| JSON Lines | `komira.read_json(path, lines=True)` **EXISTS**; URLs **PLANNED** in 5b | `komira.pl.scan_ndjson(path)` **EXISTS**; URLs in 5b | `read_json`, `read_ndjson`, `read_json_auto`, `FROM '....jsonl'` (and `.json`, `.ndjson`) **EXISTS**, newline-delimited only; URLs in 5b | `s.register_json(name, path)` **EXISTS**, newline-delimited; URL shapes in 5b |
+| JSON, one document or an array | `read_json(path)` without `lines=True` is refused by name today (`UnsupportedOperation`). **NOT PLANNED**: none of the four ranks asks for it, and adding it is additive | **NOT PLANNED**: polars reads one JSON document only eagerly (`read_json`, no `scan_json`), and `komira.pl` has no eager frame | `read_json(..., format='array')` is refused by name today. **NOT PLANNED**, as on the left | none for one document, as for the reader |
+| Avro | **NOT PLANNED**: pandas has no Avro reader, so there is nothing to mirror | **NOT PLANNED**: polars reads Avro only eagerly (`read_avro`, no `scan_avro`), and `komira.pl` has no eager frame. `komira.pl.read_avro` is refused today with a message that points at a `scan_avro` that does not exist; slice 1 corrects that message to say Avro is not read | `read_avro('...')` parses and binds its schema from the container header, then lowering refuses the scan (`LOWERING_UNCUTTABLE_NODE`, which `test_lower_refusals.mojo` asserts); no SQL-level test runs it. **NOT PLANNED** here: it needs an Avro arm in lowering, and no rank asks for it. Mirrors DuckDB's avro extension | none |
+| ORC | **NOT PLANNED**: pandas has `read_orc`, and the engine has an ORC reader (`src/orc`), but lowering refuses it, as it refuses every source other than Parquet, CSV, JSON Lines, in-memory data and Iceberg (`lowering/cut_scan.mojo`, `LOWERING_UNCUTTABLE_NODE`), and no rank asks for it. A later `komira.read_orc` would mirror pandas | **NOT PLANNED**: polars has no ORC reader | **NOT PLANNED**: DuckDB has no ORC reader, so SQL has no name to mirror | none |
+| Arrow IPC (Feather) | **NOT PLANNED**: pandas has `read_feather`, but the engine has no IPC file scan, only IPC codecs (`src/arrow_ipc`) | **NOT PLANNED**: polars has `scan_ipc`; `komira.pl.read_ipc`'s refusal points at a `scan_ipc` that does not exist, which slice 1 corrects | **NOT PLANNED**: DuckDB's core has no `read_arrow` | none |
+| Iceberg | **NOT PLANNED here**: pandas has `read_iceberg`, marked experimental. komira's DataFrame door is `komira.read_table(catalog, "ns.table")`, which belongs to the Iceberg design and the credentials design | **NOT PLANNED here**: polars has `scan_iceberg` | `iceberg_scan('<metadata path>')` **EXISTS** for local tables (`sdk_exec/engine_iceberg.mojo`); object-store tables belong to the Iceberg design | `s.add_sql_binding(name, komira.iceberg(...))`, the credentials design's, **PLANNED** there |
+
+Sources: [pandas IO](https://pandas.pydata.org/docs/reference/io.html),
+[polars IO](https://docs.pola.rs/api/python/stable/reference/io.html),
+[DuckDB Avro](https://duckdb.org/docs/stable/core_extensions/avro.html) (a core extension, not built
+into DuckDB's core). DuckDB's [data sources](https://duckdb.org/docs/stable/data/data_sources.html)
+list no ORC. On `main` the readers are those of `python/komira/_frame.py`, `pl/_frame.py` and
+`_session.py`, and the table functions are those of `src/sql/sql_parser.mojo`. The binder has no
+`glob`, which decision 7 adds.
+
+**Naming a file for SQL takes no verb per format.**
+
+- **The general way.** `Session.register(name, frame)` composes with any reader:
+  `s.register("returns", komira.read_csv("s3://...", sep=";", storage_options={...}))`. It is
+  komira-ai/komira#2467, in review, which mirrors DuckDB's `register`.
+- **The short forms.** `register_parquet`, `register_csv` and `register_json` are short forms of it
+  for the three released verbs. From slice 4c, `s.register_csv(name, url, delimiter=";",
+  storage_options=...)` and `s.register(name, komira.read_csv(url, sep=";", storage_options=...))`
+  bind byte-equal plans.
+- **#2467 as it stands is not lazy.** It runs the frame and copies its rows into the session at the
+  call (`_komira_rows` is `materialize()` or `collect()`), and every later query reads that copy. So
+  the file is read once, at `register`, under the credential, and what the session keeps is rows,
+  with no plan and no credential name. Nothing leaks, since the rows hold no secret, but the read is
+  not lazy. The short forms are as lazy as the readers: the footer or schema is read when the name
+  is registered, and the rows at each query.
+- **What keeps it lazy, if Q8 is answered as recommended (slice 4c).** `register` of a komira frame binds the frame's plan as a
+  view, through `komira_add_sql_binding`'s view arm (`WireBoundSource.view = 3`, held in
+  `bound_source.proto` for the credentials design's decision 4 and not built). The binder inlines
+  the plan. The read stays as lazy as the reader left it: the footer or schema at creation, the rows
+  at each query. The plan carries the credential by name only: the reader's `storage-options-<n>`,
+  sealed on the session by decision 8.
+- **The test that would hold it** is
+  `test_a_registered_url_frame_reads_at_each_query_and_names_its_credential`, in slice 4c, over
+  `FakeS3`. It asserts four things:
+  - `register` sends the stand-in no request beyond the reader's footer reads;
+  - each query sends its object reads, which the stand-in records;
+  - the bound plan's bytes carry `storage-options-1` and none of the key bytes;
+  - `s.register_csv(name, url, ...)` and `s.register(name, komira.read_csv(url, ...))` bind
+    byte-equal plans.
+
+**How `add_sql_binding` and scopes relate.** They stay as the credentials design has them. `register`
+and its short forms name a file you read. `add_sql_binding(name, komira.files(...))` binds what SQL
+text itself consults: a scope, which gives a URL written inside SQL its credential, or a source under
+a credential name that a job manager's secret store knows. So the rule is: to read a file into a
+name, register it; for URLs in the SQL text, bind a scope.
+
 ## Decisions on the APIs, and the question still open
 
 Each row is an API with no counterpart in DuckDB, pandas or polars, or a place where komira differs
-from them. Six rows are decided, and the rest of the document is written to them. Q3 is still open:
-no part of a slice that depends on it starts before it is answered. Slices 3, 5a and 5b depend on it
-only for their `register_*` part.
+from them. Q1 to Q7 are decided, and the rest of the document is written to them. Q8 is open: no
+part of a slice that depends on it starts before it is answered, and only slice 4c depends on it.
 
 | # | question | the reference libraries | decision | slice |
 |---|---|---|---|---|
 | Q1 | How a DataFrame reader gets an explicit credential | pandas: `read_parquet(url, storage_options={...})`, a dict of keys forwarded to the fsspec backend; polars: `scan_parquet(url, storage_options={...}, credential_provider=...)`, a dict of object_store keys | **decided: both spellings.** (1) `storage_options=` on every pandas-shaped and polars-shaped reader, each shape taking its own library's keys ([decision 8](#8-storage_options-a-second-spelling-of-a-source)). The SDK splits the dict into a credential, sealed under a generated name, and the source's settings, so it builds exactly the plan a `komira.files` source builds, and no secret rides in the plan. (2) A `komira.files(...)` source in place of the path, as the credentials design's decision 3 already says, for what a dict cannot say. The credentials design's "Options considered" rejects storage options *per session, matched by prefix* (`Session(storage=[...])`), which is a different thing from a keyword on one call | 4 (the source), 4b (`storage_options=`) |
 | Q2 | How a write terminal gets an explicit credential | pandas: `df.to_parquet(url, storage_options={...})`; polars: `write_parquet(url, storage_options=...)`, `sink_parquet(url, storage_options=...)` | **decided: both spellings, as Q1.** `storage_options=` on `to_parquet`, `to_csv` and `to_json` (and on `komira.pl`'s sink and write verbs once they are built) lands with the write terminals in slice 6b. A `komira.files(...)` destination has no counterpart in any reference library. With `storage_options=` covering explicit credentials, it is not needed in the first slices and waits for a later, additive pull request | 6b (`storage_options=`); later (the source destination) |
-| Q3 | Whether `register_parquet`, `register_csv` and `register_json` take a URL, and a `komira.files` source | these verbs are komira's own; DuckDB's counterpart is `read_csv('s3://...', delim=';')` in SQL | **open.** Recommendation: yes to both. A bare URL means `komira.files(url)` with the chain. A source is the only way to give a remote CSV its parsing options (`delimiter`, `header`) and an explicit credential, since `komira.files` takes no format options. The alternative is a `format=`/`delimiter=` keyword on `komira.files`, which would be invented too | 3, 5a, 5b (their `register_*` part) |
+| Q3 | What `register_parquet`, `register_csv` and `register_json` take for a remote file | these verbs are komira's own; DuckDB's counterpart is `read_csv('s3://...', delim=';')` in SQL | **decided: exactly two remote shapes.** A bare URL, read with the chain: `s.register_csv(name, 's3://...', delimiter=';')`. A URL with `storage_options=`, an explicit credential split as decision 8 splits it: `s.register_csv(name, 's3://...', delimiter=';', storage_options={...})`. The same two shapes hold for `register_parquet` and `register_json`, beside the local path they take today. They take no `komira.files` source | 3, 4b, 5a, 5b |
 | Q4 | A listing verb in the SDK | DuckDB: SQL `glob(pattern)`. pandas and polars have none | **decided: add one.** `komira.glob(pattern)`, and `Session.glob(pattern)`, build the plan node SQL `glob(pattern)` builds and return a frame with the one column `file`. A source or `storage_options=` gives the credential. There is one listing path, in the library ([decision 7](#7-listing)) | 7 |
 | Q5 | Which protocol reads `gs://` | DuckDB reads `gs://` through Google's S3-compatible XML API with HMAC keys | **decided: the gRPC backend that exists, and no other.** The SDK only builds a plan; the library underneath calls GCS. What that backend still needs, and how `gs://` is tested without a second backend, are in [decision 2](#2-the-library-and-wire-protocol-for-each-store) | 8a, 8b |
 | Q6 | When a glob lists | Spark lists when the DataFrame is created and holds that listing for it ([decision 9](#9-when-a-glob-lists-sparks-rule)) | **decided: as Spark does.** A read's glob and `glob()` list when the source, frame or statement is created, and hold that listing; a run reads what was listed, an object that changed or went away since then is refused by name, and the caller refreshes by creating it again | 3, 4, 7 |
 | Q7 | A public bucket read with no configuration | DuckDB's examples read public buckets with no secret set | **decided: fall back to unsigned.** When the provider chain finds no credentials, a read under `komira.AMBIENT` is sent unsigned. A private bucket then fails with a message naming both causes. `komira.ANONYMOUS` still forces unsigned. The same rule holds for `gs://` and `az://` where the store answers unsigned reads ([decision 3](#3-credentials)) | 2b |
+| Q8 | Whether `Session.register(name, frame)` binds a komira frame as a view of its plan or as a copy of its rows | DuckDB's `register(view_name, python_object)` binds a view, read at each query. komira-ai/komira#2467, in review, copies the rows at the call | **open.** Recommendation: a komira frame (`komira.DataFrame`, `komira.pl.LazyFrame`) binds as a view of its plan, as DuckDB's does, so the read stays lazy and the plan carries the credential by name ([the naming rule](#how-each-format-is-read-and-how-a-file-gets-a-sql-name)). An Arrow object keeps #2467's copy, since it has no plan. The alternative keeps the copy for frames too, and then `register` and the `register_*` short forms differ: the short forms read at each query, `register` once | 4c |
 
 Rows that are not questions, because an existing design settles them: a bare URL in SQL and in the
 DataFrame readers uses the provider chain (`komira.AMBIENT`); plaintext `http://` is reached only
@@ -304,7 +366,7 @@ behaviour checks it against the pinned version.
 | the same, with a credential | `komira.read_parquet(url, storage_options={...})` with pandas' keys and `komira.pl.scan_parquet(url, storage_options={...})` with polars' keys (decision 8); or `komira.read_parquet(komira.files(url, credential=komira.AwsKeys(...), region=...))` (Q1) | `storage_options={"key": ..., "secret": ...}`, passed to `fsspec.open` | `storage_options={"aws_access_key_id": ..., "aws_region": ...}` | 4, 4b |
 | polars-shaped lazy read | `komira.pl.scan_parquet(url or source)`, `scan_csv`, `scan_ndjson` | | `pl.scan_parquet`, `pl.scan_csv`, `pl.scan_ndjson` | 4, 5a, 5b |
 | read CSV or JSON from a URL | `komira.read_csv(url or source, sep=..., header=...)`, `komira.read_json(...)` | `pd.read_csv("s3://...")` *(inferred: the read_parquet page documents the URL schemes; the read_csv page was not read)* | `pl.scan_csv("s3://...")`; polars reads Parquet, CSV, IPC and NDJSON from cloud storage ([polars: cloud storage](https://docs.pola.rs/user-guide/io/cloud-storage/)) | 5a, 5b |
-| bind a SQL name to a URL | `s.register_parquet(name, url or source)`, `register_csv(name, url or source, delimiter=..., header=...)`, `register_json(...)` (Q3); **EXISTS**: `s.add_sql_binding(name, komira.files(url, ...))` for Parquet | | | 3, 5a, 5b |
+| bind a SQL name to a URL | `s.register_parquet(name, url)`, `register_csv(name, url, delimiter=..., header=...)`, `register_json(name, url)`, each also with `storage_options=` (Q3); `s.register(name, frame)` with any reader ([the naming rule](#how-each-format-is-read-and-how-a-file-gets-a-sql-name)); **EXISTS**: `s.add_sql_binding(name, komira.files(url, ...))` for Parquet | | | 3, 4b, 4c, 5a, 5b |
 | write a frame to a URL | `df.to_parquet("s3://b/k.parquet")`, `to_csv`, `to_json`, chain; with a credential, `storage_options=` (decision 8), and later perhaps a `komira.files` destination (Q2) | `df.to_parquet("s3://...", storage_options={...})` ([pandas: to_parquet](https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.to_parquet.html)) | `df.write_parquet("s3://...")`; the [cloud-storage guide](https://docs.pola.rs/user-guide/io/cloud-storage/) says a frame is written by passing a cloud URL | 6b |
 | list a prefix | `komira.glob("s3://b/p/*")`, `s.glob(...)`, a frame with one column `file`; or `s.sql("SELECT file FROM glob('s3://b/p/*')")` (Q4) | none | none | 7 |
 
@@ -433,8 +495,9 @@ the same plan node (Q4).
 write terminals `to_parquet`, `to_csv` and `to_json`. `komira.pl`'s sink and write verbs take it when
 they are built. A scheme's rows apply once that scheme is read: the `gs://` rows of the tables below
 are refused with `STORAGE_URL_REFUSED`, as a `gs://` URL is, until slice 8b. It is taken beside a URL, never beside a local path or a `komira.files`
-source (`TypeError`). It is not added to `register_*` or `add_sql_binding`, which are komira's own
-verbs and take a source (Q3).
+source (`TypeError`). `register_parquet`, `register_csv` and `register_json` take it too, beside a
+URL (Q3): slice 4b for `register_parquet`, 5a for `register_csv`, 5b for `register_json`. It is not
+added to `add_sql_binding`, which takes a source.
 
 **What the SDK builds.** The credentials design's decision 4 stands: the plan carries a location,
 the settings needed to reach it, and a credential *name*, never a value. So the SDK splits the dict
@@ -581,8 +644,6 @@ spelling each documents):
   `data_access` credential. Neither is an object-store dict.
 - **A credential a job manager resolves.** That needs a name its secret store knows, which a
   generated name is not.
-- **CSV options in `register_csv`**, and every binding that outlives one call: these take a source
-  (Q3).
 
 ### 9. When a glob lists: Spark's rule
 
@@ -743,7 +804,10 @@ except where the table at the end says so.
   named code (rule T5). Moves: probes under `31-read-parquet-csv-files-s3/`, each with its one-line
   error: `probe_csv_object.py` (a CSV object in `komira.files`), `probe_sql_url.py` (a Parquet URL
   in the SQL text under a bound scope) and `probe_read_parquet_url.py`. Also the notes of pages 31
-  and 93. No status change.
+  and 93. It also corrects `komira.pl`'s refusals of `read_avro` and `read_ipc` (`pl/_names.py`),
+  which point at a `scan_avro` and a `scan_ipc` that do not exist: they say instead that komira does
+  not read Avro or Arrow IPC files, and `test_pl_names.py` asserts the new messages. No status
+  change.
 - **Slice 2: The S3 chain: `komira.AMBIENT` and `komira.AwsProfile` on `s3://`.** `so` builds the
   default chain over the process's environment and files (decision 3). The region comes from
   `region=` first; then, for `AMBIENT`, from the chain, and for `AwsProfile`, from the profile. The
@@ -769,7 +833,7 @@ except where the table at the end says so.
   Moves: page 31's notes. No status change.
 - **Slice 3: Scopes, the default scopes, and URLs in the SQL text, for Parquet reads.**
   `komira.files("s3://b/")` binds a scope (decision 5). `FROM '<url>'` and `read_parquet('<url>')`
-  read through the longest covering scope. `register_parquet(name, url or source)` binds, pending Q3.
+  read through the longest covering scope. `register_parquet(name, url)` binds a bare URL with the chain (Q3).
   Tests: the longest scope wins; `s3://b/` does not cover `s3://b-two/`; an `az://` URL with no bound scope
   reads a public container unsigned under the default scope; the default `s3://` scope reads with the chain; a scope bound twice
   replaces the first; an `az://` URL under no bound scope is no longer refused, and the slice amends
@@ -797,14 +861,28 @@ except where the table at the end says so.
   no secret appears in the plan, the render or a message; anonymous beside a credential key, and
   `account_key` beside `sas_token`, are refused; an S3 dict with no region reads in the region `HeadBucket`
   reports, and on an `endpoint=` store gives `STORAGE_REGION_UNKNOWN`; `credential_provider=` is refused by name; a user credential named
-  `storage-options-1` raises `ValueError`. Moves: page 31's notes. No status change.
+  `storage-options-1` raises `ValueError`; `register_parquet(name, url, storage_options=...)` binds the
+  plan `read_parquet` builds with the same dict; `register_parquet(name, komira.files(...))` raises
+  `TypeError` (Q3). Moves: page 31's notes. No status change.
+- **Slice 4c: `Session.register` of a komira frame as a view** (Q8, after komira-ai/komira#2467
+  merges). The `WireBoundSource.view` arm (number 3) is built: the SDK sends the frame's plan
+  envelope, and the binder inlines it. A view whose plan carries a write target or UDFs is refused with
+  `BIND_VIEW_NOT_A_QUERY`, the credentials design's code. An Arrow object keeps #2467's copy. #2467's
+  `test_registered_rows_are_a_copy_of_the_frame_when_it_was_registered` changes with the rule it held,
+  and Q8 decides that rule. Tests:
+  - `test_a_registered_url_frame_reads_at_each_query_and_names_its_credential`, as the naming rule says;
+  - a registered frame over a local file answers the file's rows at each query, after it is rewritten;
+  - a frame whose plan writes gives `BIND_VIEW_NOT_A_QUERY`;
+  - the cross-release tests, since the view arm is a new field of a binding's bytes (not of a plan).
+
+  No status change.
 - **Slice 5a: CSV objects on `s3://` and `az://`.** The CSV scan spec carries the file system, as
   Parquet's does. The scan reads the object's body through it with `read_at` and parses it with
   `read_csv_bytes_to_batch`, decompressing with `decompress_text_bytes_to_buffer`. The binder takes
   the format from the extension, so slice 1's refusal of `.csv` goes. `read_csv('<url>')` and
-  `FROM '<url>.csv'` read through the scope. `register_csv` takes a URL or a source (Q3), and so do
-  `komira.read_csv` and `komira.pl.scan_csv`, over `WireScanBinding.access`, with `storage_options=`
-  as in slice 4b for `komira.read_csv` and `komira.pl.scan_csv`. Tests: each CSV option
+  `FROM '<url>.csv'` read through the scope. `register_csv` takes a URL, bare or with `storage_options=` (Q3).
+  `komira.read_csv` and `komira.pl.scan_csv` take a URL or a `komira.files` source, over
+  `WireScanBinding.access`, with `storage_options=` as in slice 4b. Tests: each CSV option
   over a stand-in equals the same file read locally; `.csv.gz` and `.csv.zst`; a missing object gives
   `STORAGE_NOT_FOUND`; the two cross-release tests for a CSV scan. Moves: it removes
   `probe_csv_object.py`. **Rank 31 may become `works`**: Parquet and CSV are read from `s3://` with
@@ -876,7 +954,7 @@ Only as far as is true after the slice lands:
 | after slice | 31 | 32 | 93 | 96 |
 |---|---|---|---|---|
 | today | partial | gap | partial | gap |
-| 1 to 4b | partial | gap | partial | gap |
+| 1 to 4c | partial | gap | partial | gap |
 | 5a | **works** | gap | partial | gap |
 | 5b | works | gap | partial | gap |
 | 6a | works | **works** | partial | gap |
