@@ -78,6 +78,13 @@ TABLES = {
         "first": _ORDERED_KEY,
         "last": _ORDERED_KEY,
     },
+    "ExprDateTimeNameSpace": {
+        name: (
+            ".dt.{name}() is not supported yet: komira.pl's dt has truncate(every); "
+            "the pandas-shaped frame's .dt has the date parts"
+        )
+        for name in ("year", "quarter", "month", "day", "weekday", "ordinal_day", "hour", "minute", "second")
+    },
 }
 
 
