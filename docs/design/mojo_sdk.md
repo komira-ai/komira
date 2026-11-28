@@ -89,7 +89,7 @@ Fixed before this design, and not reopened here:
 | what the user writes | files and SQL text, and later logical plans; reads rows back | the physical plan itself: pipelines, their operators and the step that ends each, run as written | a program whose schema is a compile-time value |
 | when names and types are checked | at run time, when the library binds the plan | at run time, when the plan is submitted (§5) | when the user's program is compiled |
 | what it rests on | the shared library's C interface (§1 to §3) | the engine's Mojo libraries, linked into the user's program (§5) | the typed operator tables (§6) |
-| what installing it compiles | `komira` and the 19 libraries of its closure (§4); no engine | the engine: 58 packages (§5) | not designed |
+| what installing it compiles | `komira` and the 19 libraries of its closure (§4); no engine | `komira_physical` and the 88 libraries of its closure (`sdk_exec`, its 86 and `komira_error`), the engine among them; of these, 58 packages are still to publish (§5) | not designed |
 | built | first | second | not planned; the owner has not ruled on it |
 
 The untyped SDK comes first because the examples gate needs it and because it needs only four
@@ -1062,7 +1062,7 @@ Everything below the C interface is libkomira's, already tested by its gate driv
 | 6 | the physical-plan surface's first step: `engine_iceberg.mojo` and its test `sdk_exec/tests/test_run_sql_iceberg.mojo` move to `sdk_exec_iceberg`, and `sdk_exec`'s `deps` drop `iceberg_catalog` and gain the 4 libraries of the 86 they lack (a library's `deps` list its full closure). No behaviour changes | `sdk_exec`'s closure is the 86 of §5 |
 | 7 | the 54 libraries left of the engine's closure, in the waves of §5, then `sdk_exec` | `sdk_exec` published |
 | 8 | the executor's own checks: the sink capability table moves to `physical_plan` and `check_plan` refuses an unserved sink; `run_lowered_plan_with` refuses a missing result or a stray root, before any pipeline runs (§5) | a hand-made `LoweredPlan` with either fault refused by name |
-| 9 | `komira_physical`: `Engine`, `PhysicalPlan`, `parquet`, `filter`, `project`, `limit`, `hash_aggregate`, collect, the expressions and aggregates, the checks at submit, `run`, its README example and the `mojo_plan` tree | the install test runs its README example; the same query through `komira` and `komira_physical` gives the same rows |
+| 9 | `komira_physical`: `Engine`, `PhysicalPlan`, `parquet`, `filter`, `project`, `limit`, `hash_aggregate`, collect, the expressions and aggregates, the checks at submit, `run` and its README example. The `mojo_plan` tree and its first task examples land with komira-ai/komira#2495's slice 6, which owns the tree | the install test runs its README example; the same query through `komira` and `komira_physical` gives the same rows |
 | 10 | `sort`, `top_n`, `output_of` and `hash_join` in `komira_physical` | a two-pipeline join plan run as written |
 
 The order inside slice 1 is fixed by what each part needs. The slices after it go in any order the
@@ -1092,10 +1092,11 @@ komira-ai/komira#2495. The order of the work is not among them.
    owner's words were "I think the untyped sdk is komira?", and this design uses it as the working
    name.
    - Confirming it means claiming `komira`, and the small `komira_error` beside it, on the
-     production registry before slice 1 publishes.
-     `arrow` and `arrow_ipc` are claimed already.
-   - The physical-plan surface needs 50 more names before its waves are published, listed in §5's
-     table (every row marked "claim the name"), as each wave comes or all at once.
+     production registry before slice 1 publishes. These two are the only names that need a yes
+     now. `arrow` and `arrow_ipc` are claimed already.
+   - For information, not a question: the physical-plan surface needs 50 more names before its waves
+     are published, listed in §5's table (every row marked "claim the name"). They are claimed as
+     each wave comes, or all at once.
    - **Recommended:** `komira`, the name on PyPI and npm.
 3. **The gate.** What it means for a task a language cannot show is asked once, in
    komira-ai/komira#2495's question for the owner, with its table of ranks per language and its
