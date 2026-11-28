@@ -31,7 +31,7 @@ _BOTH = _rows(
     (("index", "set_index", "reset_index", "sort_index", "reindex"), "komira frames have no index"),
     (("sample",), ".sample() is not supported: it picks rows at random, and a plan names no random rows"),
     (
-        ("shift", "diff", "pct_change", "ffill", "bfill", "interpolate", "expanding"),
+        ("ffill", "bfill", "interpolate", "expanding"),
         ".{name}() is not supported yet",
     ),
     (
@@ -42,6 +42,10 @@ _BOTH = _rows(
 )
 
 FRAME = _BOTH | _rows(
+    (
+        ("shift", "diff", "pct_change"),
+        'DataFrame.{name}() of every column is not supported yet: take one column, as df["column"].{name}()',
+    ),
     (
         ("join",),
         "DataFrame.join joins on the index, which komira frames do not have; use merge(other, on=...)",

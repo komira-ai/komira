@@ -32,8 +32,12 @@ null key, and columns named like the left's. The programs cover:
   over() a partition, rank with every supported method over ties, descending
   and per partition, cum_sum, cum_count, cum_min, cum_max (also reversed and
   over a partition with order_by) on a sorted frame, rolling_sum,
-  rolling_mean, rolling_min and rolling_max with and without min_samples, and
-  the types of cum_sum over int32, float32 and bool.
+  rolling_mean, rolling_min and rolling_max with and without min_samples,
+  shift (forward, back and by 0, over int64, float64, string, int32 and
+  float32, nulls where there is no such row) and diff (the type kept: an
+  int64's is Int64, an int32's Int32, a float32's Float32) on a sorted frame
+  and over a partition with order_by, and the types of cum_sum over int32,
+  float32 and bool.
 
 And the edges the oracle does not cover: unique(subset, keep="any") keeps one
 row of each value, any of them; and collect() of a frame of all of these calls
@@ -372,6 +376,35 @@ WINDOWS = [
             "id",
             P.col("x").rolling_sum(2, min_samples=1).over("g", order_by="id").alias("grs"),
             P.col("y").rolling_mean(2, min_samples=1).over("g", order_by="id").alias("grm"),
+        ),
+        False,
+    ),
+    (
+        "shift_and_diff_on_a_sorted_frame",
+        lambda P, lf, rf: lf.sort("id").select(
+            "id",
+            P.col("x").shift(1).alias("s1"),
+            P.col("x").shift(-2).alias("sm2"),
+            P.col("x").shift(0).alias("s0"),
+            P.col("y").shift(3).alias("sy3"),
+            P.col("g").shift(1).alias("sg"),
+            P.col("i32").shift(-1).alias("si32"),
+            P.col("f32").shift(2).alias("sf32"),
+            P.col("x").diff().alias("d"),
+            P.col("x").diff(-1).alias("dm1"),
+            P.col("y").diff(2).alias("dy2"),
+            P.col("i32").diff().alias("di32"),
+            P.col("f32").diff().alias("df32"),
+        ),
+        True,
+    ),
+    (
+        "shift_and_diff_over_partition_order_by",
+        lambda P, lf, rf: lf.select(
+            "id",
+            "g",
+            P.col("x").shift(1).over("g", order_by="id").alias("gs"),
+            P.col("x").diff().over("g", order_by="id").alias("gd"),
         ),
         False,
     ),

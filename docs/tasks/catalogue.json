@@ -641,10 +641,7 @@
     "slug": "compare-row-previous-row",
     "category": "Time",
     "question": "How do I compare each row with the previous row (lag, lead, change)?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2387"
-    ]
+    "status": "works"
   },
   {
     "rank": 78,
