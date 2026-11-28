@@ -74,7 +74,7 @@ from .nested_decoder import (
 )
 from .orc_logical_arrow import (
     is_acid_schema,
-    acid_output_columns,
+    _output_columns,
 )
 
 
@@ -1240,23 +1240,9 @@ def _read_orc_nested(
     # Resolve the top-level output columns. For an ACID file this lifts row.*
     # (default) or exposes all 6 columns (with_acid_columns=True). For a plain
     # nested file it is the root struct's direct children.
-    var col_node_idxs = List[Int]()
-    var col_names = List[String]()
-    if is_acid_schema(schema):
-        var plan = acid_output_columns(schema, with_acid_columns)
-        col_node_idxs = plan.node_idxs.copy()
-        col_names = plan.names.copy()
-    else:
-        for i in range(len(root.subtypes)):
-            col_node_idxs.append(root.subtypes[i])
-            if i < len(root.field_names):
-                col_names.append(root.field_names[i])
-            else:
-                col_names.append(String("_col") + String(i))
-
-    var out_schema = nested_output_schema(
-        schema, col_node_idxs, col_names
-    )
+    var plan = _output_columns(schema, with_acid_columns)
+    var col_node_idxs = plan.node_idxs.copy()
+    var out_schema = nested_output_schema(schema, col_node_idxs, plan.names)
 
     # Every stripe's footer and located streams, in file order. Zero stripes
     # is an empty table: each column decodes to zero rows of its type.

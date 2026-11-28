@@ -12,10 +12,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # The real members are the sources `source_parquet`, `source_batch`,
 # `source_sink_output`, `source_csv` (a CSV file decoded at its bound column
 # types, served as a resident batch), `source_iceberg` (the planned files of
-# an Iceberg snapshot, with their deletes applied, served as a resident batch)
-# and `source_jsonl` (a JSONL file read at the plan's schema, served as a batch
-# source), the operators `op_filter`, `op_project`,
-# `op_limit` and `op_hash_probe` (the INNER, LEFT, RIGHT, FULL, SEMI, ANTI and
+# an Iceberg snapshot, with their deletes applied, served as a resident batch),
+# `source_jsonl` (a JSONL file read at the plan's schema, served as a batch
+# source) and `source_orc` (the columns of an ORC file the plan names, decoded
+# at its types and served as a batch source), the operators `op_filter`,
+# `op_project`, `op_limit` and `op_hash_probe` (the INNER, LEFT, RIGHT, FULL, SEMI, ANTI and
 # CROSS join probe over an index of the build rows; RIGHT and FULL owe their
 # unmatched build rows as a tail that `run_segment` pushes after the workers),
 # the sinks `sink_collect`, `sink_agg` (the ungrouped aggregation, over
@@ -115,6 +116,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 missing file and no path refused naming the
 #                                 file; through run_plan with a filter and a
 #                                 projection, on one worker and on three.
+# test_source_orc                 the ORC source built from a spec: the spec's
+#                                 columns at its order and types with every
+#                                 value and NULL, morsels of a few rows, a file
+#                                 of several stripes, ZLIB and ZSTD files read
+#                                 as NONE, a spec of no column counting the
+#                                 file's rows, a file of no row; a column the
+#                                 file lacks, a column bound at another type, a
+#                                 missing file, a file that is not ORC and no
+#                                 path refused naming the file; through
+#                                 run_plan with a filter and a projection, on
+#                                 one worker and on three.
 # test_real_plan                  hand-built plans end to end: scan, filter,
 #                                 project and limit; a segment reading another's
 #                                 output; what the builder refuses.
@@ -334,6 +346,7 @@ mojo_library(
         "//src/op_sources:op_sources",
         "//src/op_spill_rows:op_spill_rows",
         "//src/operator_api:operator_api",
+        "//src/orc:orc",
         "//src/parquet:parquet",
         "//src/parquet_api:parquet_api",
         "//src/parquet_codec:parquet_codec",
@@ -343,6 +356,7 @@ mojo_library(
         "//src/plan_expr:plan_expr",
         "//src/plan_ir:plan_ir",
         "//src/plan_stats:plan_stats",
+        "//src/protobuf:protobuf",
         "//src/row_format:row_format",
         "//src/scalar_arithmetic:scalar_arithmetic",
         "//src/scan_planning:scan_planning",
@@ -409,6 +423,7 @@ mojo_library(
         "tests/test_source_csv.mojo",
         "tests/test_source_iceberg.mojo",
         "tests/test_source_jsonl.mojo",
+        "tests/test_source_orc.mojo",
         "tests/test_sources.mojo",
         "tests/test_string_group_memory.mojo",
         "tests/test_string_keys.mojo",

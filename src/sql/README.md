@@ -17,7 +17,7 @@ name tables that say which identifiers the grammar claims
 (`sql_agg_code`, `sql_call_is_aggregate`, `sql_name_claimed_by_grammar`).
 
 `sql.sql_tvf_options` holds what the nodes share about table functions: the reader
-kinds (`TVF_PARQUET`, `TVF_CSV`, `TVF_JSON`, `TVF_AVRO`, `TVF_ICEBERG`), `TvfOptions` (the
+kinds (`TVF_PARQUET`, `TVF_CSV`, `TVF_JSON`, `TVF_AVRO`, `TVF_ICEBERG`, `TVF_ORC`), `TvfOptions` (the
 `all_varchar`, `header`, `delim` and `hive_partitioning` options of a `read_*` call,
 the `allow_moved_paths` and `snapshot_from_id` options of `iceberg_scan`,
 and the `HIVE_PARTITIONING_*` modes), and the extension rules of the
@@ -78,12 +78,14 @@ opens no file), resolves names case-insensitively (`has`, `schema_of`,
 name, refuses a name the grammar or a lowering builtin already claims, and
 replaces an earlier declaration of the same name.
 
-`sql.sql_tvf_bind` gives the `read_csv`, `read_json` and `read_avro`
+`sql.sql_tvf_bind` gives the `read_csv`, `read_json`, `read_avro` and `read_orc`
 table functions their schema at bind time and builds their scan leaf. A CSV
 schema is inferred from a bounded prefix with the call's `delimiter` and
 `has_header` (`all_varchar` then types every column STRING); a JSONL schema is
 inferred from a newline-snapped 256 KiB prefix; an Avro schema is read from the
-OCF container header. A `.gz`, `.zst` or `.lz4` CSV or JSONL file is
+OCF container header; an ORC schema is read from the file footer (no row is decoded),
+and a column type outside BOOLEAN, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE,
+VARCHAR and DATE, and a glob path, are refused by name. A `.gz`, `.zst` or `.lz4` CSV or JSONL file is
 decompressed whole first (`parquet_codec.text_decompress`). An inference
 that finds no column raises an `Error` naming the file. `tvf_relation_scan`
 returns a lazy row-oriented scan whose source carries the dialect and the
@@ -153,7 +155,7 @@ Iceberg tables. Every other DuckDB `iceberg_scan` option (`version`,
 `skip_schema_inference`, `snapshot_from_timestamp`) is refused by name, as is
 any CSV, JSON or Parquet option on `iceberg_scan`, and both Iceberg options on
 the other readers. `SqlCatalog.add_source` registers any resolved
-`SourceVariant` as a table under its own schema (an Iceberg table). A `read_csv`, `read_json` or `read_avro`
+`SourceVariant` as a table under its own schema (an Iceberg table). A `read_csv`, `read_json`, `read_avro` or `read_orc`
 relation gets its schema from `sql_tvf_bind`, which reads the file. The
 binder's code is split over the `sql_bind_*` modules (the FROM scope,
 operators, functions, casts and timestamps, subqueries, correlated scalar

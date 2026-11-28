@@ -200,3 +200,24 @@ def acid_output_columns(
         else:
             names.append(String("_col") + String(i))
     return AcidOutputColumns(idxs^, names^)
+
+
+def _output_columns(
+    schema: OrcSchema, with_acid_columns: Bool
+) raises -> AcidOutputColumns:
+    """The top-level output columns of a file read on the nested path: an ACID
+    file's as `acid_output_columns` gives them, else the root struct's direct
+    children, each named by the footer (`_col<i>` when the footer names none).
+    """
+    if is_acid_schema(schema):
+        return acid_output_columns(schema, with_acid_columns)
+    var root = schema.node(0)
+    var idxs = List[Int]()
+    var names = List[String]()
+    for i in range(len(root.subtypes)):
+        idxs.append(root.subtypes[i])
+        if i < len(root.field_names):
+            names.append(root.field_names[i])
+        else:
+            names.append(String("_col") + String(i))
+    return AcidOutputColumns(idxs^, names^)

@@ -43,6 +43,12 @@ comptime TVF_AVRO: UInt8 = 4
 # no footer names its files. A table's metadata does, and the caller's
 # `SqlParquetFooters.iceberg_relation` reads it before binding.
 comptime TVF_ICEBERG: UInt8 = 5
+# `read_orc`. An ORC file carries its schema in its FOOTER, so the bind reads the
+# footer (no stripe is opened, no row decoded) and `TvfOptions` is left at its
+# defaults: there is no dialect to steer. Like Avro it is outside the parquet
+# footer split (`is_parquet_tvf_kind` is False), routed through `sql_tvf_bind`,
+# and lowers to the ORC source (`SOURCE_ORC`) over one local file.
+comptime TVF_ORC: UInt8 = 6
 
 # `read_parquet(..., hive_partitioning = ...)`: AUTO (no option written) reads
 # Hive `key=value` directories when every file of the relation has the same

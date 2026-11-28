@@ -40,7 +40,7 @@ from .sql_token import (
 from .sql_fn_table import CAST_DESUGAR_NAME as _CAST_DESUGAR_NAME, TRY_CAST_DESUGAR_NAME as _TRY_CAST_DESUGAR_NAME
 from .sql_fn_table import POSITION_IN_DESUGAR_NAME as _POSITION_IN_DESUGAR_NAME
 from .sql_tvf_options import (
-    TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO, TVF_ICEBERG,
+    TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO, TVF_ICEBERG, TVF_ORC,
     hive_partitioning_value, _replacement_scan_kind, _file_stem,
 )
 from .sql_ast import (
@@ -1074,7 +1074,7 @@ struct _Parser(Movable):
                 " `WHERE [NOT] EXISTS (...)`."
             )
         # Table-valued function: read_parquet('path') / read_csv / read_json /
-        # read_avro / iceberg_scan. The ident is lower-folded by the tokenizer, so compare
+        # read_avro / read_orc / iceberg_scan. The ident is lower-folded by the tokenizer, so compare
         # directly.
         #
         # ⭐ `read_avro` is the SQL spelling of an Avro file.
@@ -1087,22 +1087,26 @@ struct _Parser(Movable):
             (name == "read_parquet" or name == "read_csv" or name == "read_json"
              or name == "read_ndjson" or name == "read_json_auto"
              or name == "read_csv_auto" or name == "read_avro"
+             or name == "read_orc"
              or name == "iceberg_scan")
             and self.pos + 1 < len(self.tokens)
             and self.tokens[self.pos + 1].kind == TK_LPAREN
         ):
-            # ⚠ THE AVRO AND ICEBERG TESTS MUST PRECEDE THE
+            # ⚠ THE AVRO, ORC AND ICEBERG TESTS MUST PRECEDE THE
             # `!= "read_parquet"` CATCH-ALL.
             # That elif is a DEFAULT-TO-JSON, not a JSON test: adding a spelling
             # to the clause above without a branch here would bind
             # `read_avro('f.avro')` as JSONL and hand the JSON prefix inferrer
-            # an OCF container header (and `iceberg_scan('t')` as JSONL over a
-            # table directory).
+            # an OCF container header (and `read_orc('f.orc')` as JSONL over an
+            # ORC footer, and `iceberg_scan('t')` as JSONL over a table
+            # directory).
             var kind: UInt8 = TVF_PARQUET
             if name == "read_csv" or name == "read_csv_auto":
                 kind = TVF_CSV
             elif name == "read_avro":
                 kind = TVF_AVRO
+            elif name == "read_orc":
+                kind = TVF_ORC
             elif name == "iceberg_scan":
                 kind = TVF_ICEBERG
             elif name != "read_parquet":
@@ -1130,14 +1134,16 @@ struct _Parser(Movable):
             # CLEAN and drop the option silently, which is the one outcome the
             # module note at `sql_ast.mojo` says is worse than raising.
             #
-            # The blanket avro refusal below stands beside the per-key guards,
+            # The blanket avro and orc refusal below stands beside the per-key guards,
             # which would also catch it: it names the whole shape in one
             # sentence and fires before the first option is even read.
-            if kind == TVF_AVRO and self._kind() == TK_COMMA:
+            if (kind == TVF_AVRO or kind == TVF_ORC) and self._kind() == TK_COMMA:
+                var carrier = String(" an ORC file carries its schema and its codec in its footer,")
+                if kind == TVF_AVRO:
+                    carrier = String(" an Avro OCF carries its writer schema and its codec in the container header,")
                 raise Error(
-                    "SQL not supported: read_avro('" + path + "', ...) takes NO"
-                    + " options — an Avro OCF carries its writer schema and its"
-                    + " codec in the container header, so there is no dialect to"
+                    "SQL not supported: " + name + "('" + path + "', ...) takes NO"
+                    + " options —" + carrier + " so there is no dialect to"
                     + " steer and nothing an option could mean. It is REJECTED"
                     + " rather than ignored — an ignored option can change the"
                     + " result silently."

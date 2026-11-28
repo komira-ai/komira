@@ -4,7 +4,7 @@
 #   before binding starts.
 # =============================================================================
 #
-# The binder opens no parquet file (a `read_csv`, `read_json` or `read_avro`
+# The binder opens no parquet file (a `read_csv`, `read_json`, `read_avro` or `read_orc`
 # relation still reads its file through `sql_tvf_bind` while binding). Two of
 # its answers depend on parquet footers: the schema of a
 # `read_parquet('path')` relation (the files it names and their Hive partition
@@ -38,7 +38,7 @@ from arrow.schema import Schema
 from scan_source.parquet_source import ParquetSource
 from scan_source.source_variant import SOURCE_VARIANT_PARQUET, SourceVariant
 from sql.sql_ast import (
-    SelectStmt, SqlStatement, TVF_AVRO, TVF_CSV, TVF_ICEBERG, TVF_JSON,
+    SelectStmt, SqlStatement, TVF_AVRO, TVF_CSV, TVF_ICEBERG, TVF_JSON, TVF_ORC,
     SUBQ_NOT_IN,
 )
 from sql.sql_catalog import SqlCatalog, catalog_relation_schema
@@ -114,12 +114,14 @@ def path_has_glob(path: String) -> Bool:
 
 def is_parquet_tvf_kind(kind: UInt8) -> Bool:
     """A TVF of kind `kind` is read through a parquet footer: every kind but the
-    CSV, JSON and Avro readers (whose schemas `sql_tvf_bind` infers) and
+    CSV, JSON, Avro and ORC readers (whose schemas `sql_tvf_bind` infers or reads
+    from the file) and
     `iceberg_scan` (whose files the table's metadata names)."""
     return (
         kind != TVF_CSV
         and kind != TVF_JSON
         and kind != TVF_AVRO
+        and kind != TVF_ORC
         and kind != TVF_ICEBERG
     )
 

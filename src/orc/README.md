@@ -7,7 +7,11 @@ Apache ORC v1 files to and from Arrow record batches (`arrow`).
   list, map and union columns, over every stripe. `read_orc_bytes_projected`
   decodes only the listed top-level columns. Hive ACID files show their `row`
   columns by default; `read_orc_bytes_opts(bytes, with_acid_columns=True)`
-  keeps the ACID metadata columns too.
+  keeps the ACID metadata columns too. `read_orc_bytes_schema` gives the
+  schema `read_orc_bytes` would return, from the footer alone (no stripe is
+  read), and `read_orc_tail` the PostScript and Footer of a file of any codec.
+  SQL reads a file with `read_orc('path')` (the README of the repository's
+  `src/tests/e2e/komira_read_orc_e2e` runs it).
 - **Writing.** `write_orc_bytes(batch, OrcWriterOptions(compression,
   row_index_stride, writer_timezone))` and `write_orc_file` write a file with
   column statistics, optionally row indexes and bloom filters, and several
@@ -15,7 +19,8 @@ Apache ORC v1 files to and from Arrow record batches (`arrow`).
 - **Codecs.** `ORC_COMPRESSION_NONE`, `_ZLIB`, `_SNAPPY`, `_LZO` (read only),
   `_LZ4` and `_ZSTD`.
 - **Metadata and encodings.** `OrcFileTail.parse` reads the PostScript and
-  Footer (Protocol Buffers) of an uncompressed file; `OrcSchema` maps the type
+  Footer (Protocol Buffers) of an uncompressed file, `read_orc_tail` those of
+  a file of any codec; `OrcSchema` maps the type
   tree to Arrow types and to its Hive-notation form (`struct<a:bigint,...>`);
   the integer run-length encodings (RLE v1 and v2) and the byte and boolean
   RLEs decode and encode on their own (`decode_rlev2`, `encode_int_rle_v2`,
@@ -34,8 +39,8 @@ from arrow.primitive_array import PrimitiveArray
 from arrow.record_batch import RecordBatchBuilder
 from arrow.schema import Field, SchemaBuilder
 from arrow.string_array import StringArray
-from orc import ORC_COMPRESSION_NONE, OrcFileTail, OrcSchema, OrcWriterOptions
-from orc import read_orc_bytes, read_orc_bytes_projected, write_orc_bytes
+from orc import ORC_COMPRESSION_NONE, ORC_COMPRESSION_ZSTD, OrcFileTail, OrcSchema, OrcWriterOptions
+from orc import read_orc_bytes, read_orc_bytes_projected, read_orc_bytes_schema, read_orc_tail, write_orc_bytes
 
 var sb = SchemaBuilder()
 sb.add_field(Field("id", ArrowType.INT64, False))
@@ -63,6 +68,12 @@ var only_name: List[Int] = [1]
 var projected = read_orc_bytes_projected(Span(orc), only_name)
 assert_equal(projected.num_columns(), 1)
 assert_equal(projected.column_as_string(0).get(1), "bb")
+
+# The schema and the row count of a compressed file, from its footer alone.
+var zstd = write_orc_bytes(batch, OrcWriterOptions(ORC_COMPRESSION_ZSTD, 10000, "UTC"))
+var schema = read_orc_bytes_schema(Span(zstd))
+assert_equal(schema.field_name(1), "name")
+assert_equal(read_orc_tail(Span(zstd)).footer.number_of_rows, 4)
 ```
 
 The integer run-length encoding v2, against the examples in the ORC

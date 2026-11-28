@@ -147,7 +147,7 @@ def _relation_schema(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope
     """The schema of one FROM relation: a `read_parquet('path')` TVF's scan
     schema, the files' columns then the Hive partition columns (resolved before
     binding, `cte_scope.parquet`), a `read_csv` /
-    `read_json` / `read_avro` TVF's inferred or header schema (`sql_tvf_bind`),
+    `read_json` / `read_avro` / `read_orc` TVF's inferred, header or footer schema (`sql_tvf_bind`),
     an `iceberg_scan` TVF's table schema (the source the caller's reader
     resolved before binding), the FROM-less relation's one column, a CTE /
     derived-relation schema (the name shadows the catalog), or a catalog
@@ -172,7 +172,7 @@ def _relation_scan(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope) 
     """The scan node for one FROM relation. A parquet TVF scans the
     `ParquetSource` resolved before binding (its files and partition columns), the same node
     `SqlCatalog.build_scan` builds for a registered parquet table; a CSV /
-    JSONL / Avro TVF builds the lazy row-oriented leaf of `sql_tvf_bind`; the
+    JSONL / Avro / ORC TVF builds the lazy leaf of `sql_tvf_bind`; the
     FROM-less relation is its one-row scan; an `iceberg_scan` TVF scans the
     source the caller's reader resolved before binding; a CTE reference inlines
     a fresh copy of the bound CTE subplan (the name shadows the catalog);

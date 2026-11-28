@@ -25,9 +25,14 @@ from physical_plan.physical_plan import SourceSpecPod, MorselOp, SOURCE_JSONL
 
 
 def _projected(
-    node: LogicalPlan, full: Schema, ref names: List[String]
+    node: LogicalPlan,
+    full: Schema,
+    ref names: List[String],
+    scan: StaticString,
 ) raises -> Schema:
-    """The fields of `full` that `names` name, in the order of `names`."""
+    """The fields of `full` that `names` name, in the order of `names`.
+    `scan` describes the scan ("a JSON scan") in the refusal for a name `full`
+    lacks."""
     var sb = SchemaBuilder()
     for i in range(len(names)):
         var found = False
@@ -39,7 +44,8 @@ def _projected(
         if not found:
             raise _uncuttable(
                 node,
-                "a JSON scan that projects '"
+                String(scan)
+                + " that projects '"
                 + names[i]
                 + "', a column its schema does not hold",
             )
@@ -59,7 +65,7 @@ def _open_jsonl_scan(
     if not pushed:
         var read = full.copy()
         if proj:
-            read = _projected(node, full, proj.value())
+            read = _projected(node, full, proj.value(), "a JSON scan")
         return _Pipe(
             SOURCE_JSONL, SourceSpecPod.jsonl(path^, read.copy()), read^, idx
         )
@@ -76,7 +82,7 @@ def _open_jsonl_scan(
         for i in range(len(cols)):
             exprs.append(Expr.col_ref(cols[i]))
             names.append(String(cols[i]))
-        pipe.schema = _projected(node, full, cols)
+        pipe.schema = _projected(node, full, cols, "a JSON scan")
         pipe.append_op(MorselOp.project(exprs^, names^))
         pipe.has_project = True
     return pipe^

@@ -105,6 +105,13 @@ Import each module by name; the package root exports nothing.
   each, a `.jsonl.gz`/`.zst`/`.lz4` (and `.ndjson`, `.json`) file decompressed
   whole. The batches are served as a `BatchSource`; a file of no row is one
   empty batch at the schema. A read that fails names the file.
+- `source_orc`: `build_orc_source` reads the ORC file a SOURCE_ORC spec names,
+  mapped into memory once: the spec's columns are matched to the file's by
+  name, decoded in the spec's order through `orc`, and served as a
+  `BatchSource`. A column the file lacks, or holds at a type other than the
+  bound one, is refused naming it; a spec of no column is the file's row count
+  from its footer, with nothing decoded; a file of no row is one empty batch at
+  the schema. A read that fails names the file.
 - `op_filter`, `op_project`, `op_limit`: the operators. A filter evaluates its
   predicate and records the rows it keeps as the batch's selection mask instead
   of gathering them; all rows kept leaves no mask, none kept is FILTERED_EMPTY,
@@ -382,7 +389,7 @@ Import each module by name; the package root exports nothing.
   they decided are in `docs/design/lowering_and_pipeline.md` (section 4.3).
 - `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
   serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CSV,
-  SOURCE_ICEBERG, SOURCE_JSONL, SOURCE_CONCAT (a UNION ALL: it takes the output of every producer the spec
+  SOURCE_ICEBERG, SOURCE_JSONL, SOURCE_ORC, SOURCE_CONCAT (a UNION ALL: it takes the output of every producer the spec
   names, after checking each is a dependency, and concatenates them in the
   spec's order into one batch it serves as a `SinkOutputSource`, with each
   column nullable when any producer's is; a concatenation of no segment is

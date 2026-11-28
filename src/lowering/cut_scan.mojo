@@ -26,7 +26,8 @@
 # filter an Iceberg scan pushed is kept as an operator because the planner uses
 # it only to skip files.
 # A scan of one newline-delimited JSON file opens a SOURCE_JSONL pipeline
-# (`cut_scan_jsonl`).
+# (`cut_scan_jsonl`), and a scan of one ORC file opens a SOURCE_ORC pipeline
+# (`cut_scan_orc`).
 #
 # Refused: an unbounded scan, a Hive-partitioned scan that lists its files
 # lazily (a directory scan or a partition predicate) or a Parquet scan on a
@@ -36,13 +37,16 @@
 # beyond the inputs' count (LOWERING_INPUTS_SCAN_COUNT); a CSV scan with
 # header=false, whose columns the reader would not name as DuckDB does, and
 # any other source
-# (LOWERING_UNCUTTABLE_NODE); an Iceberg scan whose files the inputs do not
+# (LOWERING_UNCUTTABLE_NODE: Avro is among them; an ORC scan bound with no
+# column, or projecting a column its schema lacks, is refused in its arm); an
+# Iceberg scan whose files the inputs do not
 # carry (LOWERING_SCAN_NOT_TOTAL).
 # =============================================================================
 
 from arrow.schema import Field
 from containers.slab import Slab
 from lowering.cut_scan_jsonl import _open_jsonl_scan
+from lowering.cut_scan_orc import _open_orc_scan
 from lowering.cut_state import _Cutter, _Pipe, _uncuttable
 from lowering.lowered_plan import (
     LoweringInputs,
@@ -77,6 +81,7 @@ from scan_source.source_variant import (
     SOURCE_VARIANT_CSV,
     SOURCE_VARIANT_BINDING,
     SOURCE_VARIANT_JSON,
+    SOURCE_VARIANT_ORC,
 )
 
 comptime ICEBERG_TABLE_KIND_NAME: StaticString = "komira.iceberg.table"
@@ -209,6 +214,8 @@ def _open_scan(
         return pipe^
     if sd.source.tag == SOURCE_VARIANT_JSON:
         return _open_jsonl_scan(node, idx, proj^, pushed^)
+    if sd.source.tag == SOURCE_VARIANT_ORC:
+        return _open_orc_scan(node, idx, proj^, pushed^)
     raise _uncuttable(node, "a " + sd.source.kind_name() + " source")
 
 

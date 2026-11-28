@@ -9,7 +9,9 @@
 # is its header LINE, and a JSONL file has none at all. This module infers their
 # schemas at bind time and builds the scan leaf. `read_avro('p')` is here too:
 # an OCF carries its schema in the container header, and its leaf has the same
-# shape as the CSV and JSONL leaves.
+# shape as the CSV and JSONL leaves. `read_orc('p')` is here as well: an ORC
+# file carries its schema in its footer, so the bind reads the footer (no
+# stripe is opened, no row decoded) and the leaf is the lazy ORC source.
 #
 # THREE PROPERTIES THIS FILE IS BUILT AROUND
 # ==========================================
@@ -50,8 +52,10 @@ from plan_ir.logical_plan import LogicalPlan
 from scan_source.avro_source import AvroSource
 from scan_source.csv_source import CsvSource
 from scan_source.json_source import JsonSource
+from scan_source.orc_source import OrcSource
 from scan_source.source_variant import SourceVariant
 from avro import decode_ocf_header, ResolutionTable
+from orc import OrcSchema, is_acid_schema, read_orc_bytes_schema, read_orc_tail
 from csv.csv_options import CsvReadOptions, QUOTE_STYLE_TAG_RFC4180
 from csv.reader import read_csv_bytes_to_schema_dynamic
 from jsonl.schema_inference import infer_jsonl_schema
@@ -59,7 +63,8 @@ from parquet_codec.text_decompress import (
     is_compressed_text_path, read_text_source_to_heap_buffer,
 )
 
-from .sql_ast import FromRelation, TvfOptions, TVF_CSV, TVF_JSON, TVF_AVRO
+from .sql_ast import FromRelation, TvfOptions, TVF_CSV, TVF_JSON, TVF_AVRO, TVF_ORC
+from .sql_bind_parquet import path_has_glob
 
 
 # Bytes of JSONL prefix handed to the record-shape inferrer (256 KiB, the same
@@ -181,26 +186,113 @@ def avro_tvf_schema(path: String) raises -> Schema:
     return table.out_schema.copy()
 
 
+def _orc_column_is_readable(t: ArrowType) -> Bool:
+    """`t` is one of the Arrow types a `read_orc` column may have: BOOLEAN,
+    TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, VARCHAR and DATE in
+    DuckDB's names."""
+    return (
+        t == ArrowType.BOOL
+        or t == ArrowType.INT8
+        or t == ArrowType.INT16
+        or t == ArrowType.INT32
+        or t == ArrowType.INT64
+        or t == ArrowType.FLOAT32
+        or t == ArrowType.FLOAT64
+        or t == ArrowType.STRING
+        or t == ArrowType.DATE32
+    )
+
+
+def orc_tvf_schema(path: String) raises -> Schema:
+    """The bind-time schema of `read_orc('path')`, read from the ORC FOOTER —
+    no stripe is opened and no row is decoded.
+
+    The derivation is `read_chunked -> read_orc_bytes_schema`, the schema the
+    ORC reader itself returns: the file's columns in file order, each nullable.
+    `read_chunked` maps the file, so bind touches only the tail pages.
+
+    ⛔ A GLOB PATH IS REFUSED BY NAME: DuckDB's orc extension reads globs, this
+    reads one file. ⛔ A FILE THAT CANNOT BE READ (missing, empty, not ORC) is
+    refused naming the path. ⛔ A COLUMN WHOSE TYPE IS NOT ONE OF THE NINE THE
+    SCAN DELIVERS (a struct, list, timestamp, decimal, binary ...) is refused
+    naming the path, the column and the type, so no query binds over a column
+    the source cannot hand back. ⛔ A HIVE ACID FILE is refused by name: its
+    columns are the lifted `row.*` struct's, which the reader decodes only
+    whole, never by column. ⛔ A FILE OF NO COLUMN, and a file that names two
+    columns alike (as SQL resolves names, ignoring case), are refused naming
+    the path: the first answers nothing a query can name, the second would
+    leave one of the two columns unreachable."""
+    if path_has_glob(path):
+        raise Error(
+            "SQL not supported: read_orc('" + path + "') names a glob; read_orc"
+            + " reads one file. Name the file."
+        )
+    var schema: Schema
+    var acid: Bool
+    try:
+        var buf = read_chunked(path)
+        var span = buf.view_range_ro(0, buf.len()).into_span()
+        schema = read_orc_bytes_schema(span)
+        acid = is_acid_schema(
+            OrcSchema.from_types(read_orc_tail(span).footer.types.copy())
+        )
+        _ = buf^
+    except e:
+        raise Error(
+            "SQL bind error: read_orc('" + path
+            + "') cannot read the file's footer: " + String(e)
+        )
+    if acid:
+        raise Error(
+            "SQL not supported: read_orc('" + path + "') is a Hive ACID file;"
+            + " read_orc reads plain ORC files"
+        )
+    if schema.num_columns() == 0:
+        raise Error(
+            "SQL not supported: read_orc('" + path + "') holds no column"
+        )
+    for i in range(schema.num_columns()):
+        for j in range(i):
+            if schema.field_name(i).lower() == schema.field_name(j).lower():
+                raise Error(
+                    "SQL not supported: read_orc('" + path + "'): column '"
+                    + schema.field_name(i) + "' appears twice"
+                )
+    for i in range(schema.num_columns()):
+        if not _orc_column_is_readable(schema.field_arrow_type(i)):
+            raise Error(
+                "SQL not supported: read_orc('" + path + "'): column '"
+                + schema.field_name(i) + "' is "
+                + String(schema.field_arrow_type(i))
+                + "; read_orc reads BOOLEAN, TINYINT, SMALLINT, INTEGER,"
+                + " BIGINT, FLOAT, DOUBLE, VARCHAR and DATE columns"
+            )
+    return schema^
+
+
 def tvf_relation_schema(imm rel: FromRelation) raises -> Schema:
-    """The bind-time schema of a non-footer TVF relation (CSV / JSONL / AVRO).
+    """The bind-time schema of a non-footer TVF relation (CSV / JSONL / AVRO / ORC).
 
     Avro is in this set because of the LEAF IT LOWERS TO (`SOURCE_KIND_ROW`),
     not because it lacks a self-describing schema — an OCF carries one in its
-    container header. The CSV/JSONL arms infer; the avro arm READS."""
+    container header. The CSV/JSONL arms infer; the avro and orc arms READ (the
+    container header, the file footer)."""
     var path = rel.tvf_path.value()
     if rel.tvf_kind == TVF_CSV:
         return csv_tvf_schema(path, rel.tvf_opts)
     if rel.tvf_kind == TVF_AVRO:
         return avro_tvf_schema(path)
+    if rel.tvf_kind == TVF_ORC:
+        return orc_tvf_schema(path)
     return json_tvf_schema(path)
 
 
 def tvf_relation_scan(imm rel: FromRelation) raises -> LogicalPlan:
-    """The LAZY scan leaf of a non-footer TVF relation (CSV / JSONL / AVRO).
+    """The LAZY scan leaf of a non-footer TVF relation (CSV / JSONL / AVRO / ORC).
 
-    ALL THREE arms build a binding-backed `SourceVariant` and go through
+    EVERY arm builds a binding-backed `SourceVariant` and go through
     `scan_from_source`. Each carries `source_kind == SOURCE_KIND_ROW`, DECLARED
-    by its kind (`komira.csv` / `komira.json` / `komira.avro`) rather than
+    by its kind (`komira.csv` / `komira.json` / `komira.avro` / `komira.orc`) rather than
     threaded by this caller.
 
     ⚠ THE CSV ARM CALLS `scan_from_source` DIRECTLY AND NOT
@@ -220,6 +312,8 @@ def tvf_relation_scan(imm rel: FromRelation) raises -> LogicalPlan:
     var path = rel.tvf_path.value()
     if rel.tvf_kind == TVF_AVRO:
         return _avro_tvf_scan(path)
+    if rel.tvf_kind == TVF_ORC:
+        return _orc_tvf_scan(path)
     if rel.tvf_kind == TVF_CSV:
         var o = _csv_read_options(rel.tvf_opts)
         var schema = csv_tvf_schema(path, rel.tvf_opts)
@@ -261,3 +355,18 @@ def _avro_tvf_scan(path: String) raises -> LogicalPlan:
         mtime_ns=UInt64(FileIdentity.stat_path(String(path)).mtime_ns),
     )
     return LogicalPlan.scan_from_source(SourceVariant(av^), schema^)
+
+
+def _orc_tvf_scan(path: String) raises -> LogicalPlan:
+    """The LAZY scan leaf of `read_orc('path')`: a binding-backed `SourceVariant`
+    (`komira.orc`) through `scan_from_source`, carrying the footer schema and
+    the file's mtime (the source folds the mtime into its identity, so two reads
+    of one path across a rewrite are two different sources)."""
+    var schema = orc_tvf_schema(path)
+    var os = OrcSource(
+        String(path),
+        schema.copy(),
+        List[Int](),
+        mtime_ns=UInt64(FileIdentity.stat_path(String(path)).mtime_ns),
+    )
+    return LogicalPlan.scan_from_source(SourceVariant(os^), schema^)
