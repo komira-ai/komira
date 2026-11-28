@@ -138,7 +138,7 @@ wildcard_origin	src/log/src/log/config.mojo	3	predates the lint
 wildcard_origin	src/log/src/log/engine/log_manager.mojo	2	predates the lint
 wildcard_origin	src/log/src/log/log_write.mojo	2	predates the lint
 wildcard_origin	src/log_query/search_seam.mojo	6	predates the lint
-wildcard_origin	src/lz4/src/lz4/codec.mojo	5	predates the lint
+wildcard_origin	src/lz4/src/lz4/codec.mojo	4	predates the lint
 wildcard_origin	src/metrics/src/metrics/metrics_set.mojo	3	predates the lint
 wildcard_origin	src/metrics_reader/reader.mojo	6	predates the lint
 wildcard_origin	src/morsel/scan_morsel_resolver.mojo	18	predates the lint

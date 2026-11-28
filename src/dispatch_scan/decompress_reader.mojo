@@ -318,8 +318,8 @@ def decompress_text_bytes_to_buffer(
     # the one in `parquet_codec/zstd/zstd_ffi.mojo`. The cap-and-grow
     # loop handles zstd files efficiently in practice: 1 retry covers ratios
     # up to 16x.
-    # The decompress call below uses `_parquet_decompress` which already
-    # owns the libzstd handle.
+    # The decompress call below uses `_parquet_decompress`, which calls the
+    # statically linked zstd.
 
     # ⚠ ONE FRAME PATH. A second frame decode loop ahead of the shared one
     # would return first, grow on ANY error, and refuse at the ceiling with a
