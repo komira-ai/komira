@@ -2,7 +2,9 @@
 and `Result`, the answer of one `Session.sql` call.
 
 A session registers Parquet, CSV and newline-delimited JSON files as tables,
-runs SQL over them (`komira_sql_stream`:
+and the rows of a frame or of an object with the Arrow C stream interface
+(`register`, which copies them into a table the library holds), runs SQL
+over them (`komira_sql_stream`:
 the library turns the text into a logical plan; this package builds no SQL)
 and is closed. A `Result` holds the query's Arrow C stream, already handed to
 pyarrow, and is read once, by `to_arrow`, `to_reader`, `to_pandas`,
@@ -167,6 +169,79 @@ class Session:
         path = _local_path(path)
         with self._held():
             self._native.register_json(self._live(), name, path)
+
+    def register(self, name: str, obj: object) -> None:
+        """Registers the rows of `obj`, a frame or Arrow data in memory, as
+        the table `name`, as DuckDB's `register(view_name, python_object)`
+        does: `sql` then reads `obj`'s rows under `name`.
+
+        `obj` is a komira frame (`komira.DataFrame` or a `komira.pl.LazyFrame`,
+        whose plan is run now, on the frame's own session), or any object with
+        the Arrow PyCapsule stream interface (`__arrow_c_stream__`): a
+        `pyarrow.Table`, `RecordBatch` or `RecordBatchReader`, a `Result`, and
+        a pandas or polars DataFrame of a release that has the interface.
+
+        The rows are copied into the session now and every later query reads
+        the copy: a change made to `obj` afterwards is not seen (register it
+        again to see it), and a query on the name never reads `obj` again. So
+        a `pyarrow.RecordBatchReader` is read to its end here, once, and its
+        table answers every query, where DuckDB scans a registered reader once,
+        at the first query. A `pyarrow.RecordBatchReader` once given to
+        `register`, whether or not that registration succeeded, raises
+        `KomiraError` when it is given again, since it may have no rows left;
+        another producer of a one-shot stream is not recognised. A `Result` is read by this
+        call as by any of its terminals.
+
+        Registering a name again replaces its table, of any kind (a file
+        registered with `register_csv` too) and in any case, as DuckDB's
+        `register` replaces a view of the name; a `Result` already returned
+        keeps the answer it has. A refused registration leaves the table of
+        the name as it was.
+
+        The rows reach the engine through pyarrow (`_arrow.engine_reader`):
+        a large or view string column registers as `string` and a large or
+        view binary column as `binary`, with the same values, as DuckDB reads
+        each family as one type; a sliced batch is copied whole. A column
+        whose type the engine does not hold is refused by name and registers
+        nothing: a list, struct or map column, or a union, is an
+        `UnsupportedOperation` with the code `TABLE_TYPE_UNSUPPORTED` naming
+        the column, and a type outside the engine's import (the null type,
+        large and fixed-size lists, run-end encoding) a `BindError` naming the
+        type's Arrow format, as is a stream that fails while it is read. A frame the engine refuses to run
+        raises its error from this call. A `name` that is not a non-empty `str`,
+        or that holds a NUL byte or a lone surrogate, and an `obj` with neither
+        form, raise `TypeError` or `ValueError` before anything is read; an
+        `__arrow_c_stream__` that returns no stream capsule raises `TypeError`
+        once it has been called. Needs libkomira ABI 1.9; an older one raises
+        `KomiraError` and reads nothing.
+
+        The session's lock is held while the library reads the stream, so the
+        producer's own code (a Python generator behind a reader, a pandas
+        export) runs under it: another thread's call on the session waits for
+        the read, and the producer calling this session raises `KomiraError`.
+        """
+        _check_name(name)
+        _native._c_string("name", name)
+        run = getattr(type(obj), "_komira_rows", None)
+        if run is None and not hasattr(type(obj), "__arrow_c_stream__"):
+            raise TypeError(
+                "register takes a komira frame or an object with the Arrow PyCapsule stream interface "
+                "(__arrow_c_stream__), such as a pyarrow.Table or RecordBatchReader, not {}".format(type(obj).__name__)
+            )
+        with self._held():
+            self._live()
+            # Refuse an older library before anything is read.
+            self._native._fn("komira_register_arrow_stream")
+        # The frame runs on its own session, which may be this one, so before
+        # this session's lock is taken again.
+        source = run(obj) if run is not None else obj
+        _claim_stream(source)
+        capsule = _arrow.engine_reader(source).__arrow_c_stream__()
+        address = _arrow.stream_address(capsule)
+        with self._held():
+            # The library releases the stream on every path; the capsule then
+            # finds it released and releases nothing.
+            self._native.register_arrow_stream(self._live(), name, address)
 
     def sql(self, query: str, *, progress: Callable[[int, int], object] | None = None) -> Result:
         """Runs the one SQL statement `query` over the session's tables and
@@ -431,6 +506,33 @@ def default_session() -> Session:
         if _default is None:
             _default = Session()
         return _default
+
+
+# The pyarrow.RecordBatchReader objects `Session.register` has been given, on
+# any session: one of them exported again would be a stream of the batches
+# left, none once it was read, so registering it again is refused instead of
+# answering fewer rows.
+_read_readers: weakref.WeakSet[object] = weakref.WeakSet()
+_read_readers_lock = threading.Lock()
+
+
+def _claim_stream(source: object) -> None:
+    """Records `source` when it is a `pyarrow.RecordBatchReader`, and refuses
+    one `Session.register` was given before, whether that registration was
+    refused or not. Only pyarrow's reader is known to be read once; another
+    producer of a one-shot stream is not recognised here."""
+    import pyarrow
+
+    if not isinstance(source, pyarrow.RecordBatchReader):
+        return
+    with _read_readers_lock:
+        if source in _read_readers:
+            raise KomiraError(
+                "this pyarrow.RecordBatchReader was given to register before, which reads a reader once: query "
+                "the name it was registered as, or register a pyarrow.Table (reader.read_all()) to register the "
+                "same rows under more than one name"
+            )
+        _read_readers.add(source)
 
 
 def _check_name(name: object) -> None:

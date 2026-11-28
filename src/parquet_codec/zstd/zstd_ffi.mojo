@@ -2,8 +2,8 @@
 # zstd/zstd_ffi.mojo
 # =============================================================================
 #
-# Zstandard for the page codec: compression's zstd_frame (which owns
-# libzstd: its soname, its process-lifetime handle and its FFI), with this
+# Zstandard for the page codec: compression's zstd_frame (which owns zstd,
+# linked statically as komira_zstd_*, and its FFI), with this
 # package's one policy on top: an empty ZSTD page is refused.
 #
 # # API (package-private: `compression.mojo` is the caller)

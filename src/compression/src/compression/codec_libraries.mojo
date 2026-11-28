@@ -2,19 +2,19 @@
 # codec_libraries.mojo: the codec shared libraries this package opens at run time
 # =============================================================================
 #
-# FFI-BOUNDARY: libzstd, libbz2 and liblzma, opened by soname with
-# OwnedDLHandle at first use and kept in one process-lifetime `_Global` slot
-# each (never closed). Nothing here owns a caller buffer; the codec modules
-# (zstd_frame.mojo, bzip2_buffer.mojo, xz_buffer.mojo and the Zstd conformer's
-# decompression contexts in compression_codecs.mojo) call through these
-# handles for one synchronous call at a time.
+# FFI-BOUNDARY: libbz2 and liblzma, opened by soname with OwnedDLHandle at
+# first use and kept in one process-lifetime `_Global` slot each (never
+# closed). Nothing here owns a caller buffer; the codec modules
+# (bzip2_buffer.mojo and xz_buffer.mojo) call through these handles for one
+# synchronous call at a time.
 #
 # This package is the one owner of every codec library a komira package
-# loads: the sonames below, plus libz and liblz4, which its implementation
-# layers zlib and lz4 open (each holds its own soname and
-# `_Global` slot, and only this package imports them). snappy is statically
-# linked and called in snappy_block.mojo. Other packages call the codec API of
-# this package and declare no codec FFI of their own.
+# loads: the two sonames below, plus libz, which its implementation layer
+# zlib opens (it holds its own soname and `_Global` slot, and only this
+# package imports it). snappy and zstd are statically linked (snappy_block.mojo
+# and zstd_frame.mojo), and so is lz4 (its implementation layer lz4): no host
+# needs a libzstd or a liblz4. Other packages call the codec API of this
+# package and declare no codec FFI of their own.
 #
 # A handle accessor aborts the process when its library cannot be loaded: a
 # `_Global` init function cannot raise, and without the library no stream of
@@ -22,25 +22,21 @@
 # init functions call; it raises, so a test can call it with a soname that
 # does not exist and check the message the abort would carry.
 #
-# `probe_codec_libraries` opens libzstd, libz and liblz4 through that raising
-# opener and drops each handle: a caller that must not die on a missing
-# library (libkomira) calls it before the first codec use, so a missing
-# library is a raise with the opener's message and the `_Global` init, which
-# runs later, finds the library. bz2 and lzma are not probed.
+# `probe_codec_libraries` opens libz through that raising opener and drops
+# the handle: a caller that must not die on a missing library (libkomira)
+# calls it before the first codec use, so a missing libz is a raise with the
+# opener's message and the `_Global` init, which runs later, finds the
+# library. bz2 and lzma are not probed.
 # =============================================================================
 
 from std.ffi import OwnedDLHandle, _Global
 from std.os import abort
 from std.sys.info import CompilationTarget
 
-from lz4.codec import LIBLZ4_SONAME
 from zlib import LIBZ_SONAME
 
 
 # The sonames, per OS.
-comptime LIBZSTD_SONAME: StaticString = (
-    "libzstd.dylib" if CompilationTarget.is_macos() else "libzstd.so.1"
-)
 comptime LIBBZ2_SONAME: StaticString = (
     "libbz2.dylib" if CompilationTarget.is_macos() else "libbz2.so.1.0"
 )
@@ -69,18 +65,17 @@ def probe_libraries(sonames: List[String]) raises:
 
 
 def codec_probe_sonames() -> List[String]:
-    """The libraries `probe_codec_libraries` opens, in order: libzstd, libz,
-    liblz4."""
+    """The libraries `probe_codec_libraries` opens: libz, the one codec
+    library a Parquet, CSV or JSON read or write opens at run time (zstd and
+    lz4 are linked in)."""
     var sonames = List[String]()
-    sonames.append(String(LIBZSTD_SONAME))
     sonames.append(String(LIBZ_SONAME))
-    sonames.append(String(LIBLZ4_SONAME))
     return sonames^
 
 
 def probe_codec_libraries() raises:
-    """Open libzstd, libz and liblz4 (`codec_probe_sonames`), raising the
-    opener's error naming the first that cannot be loaded."""
+    """Open libz (`codec_probe_sonames`), raising the opener's error when it
+    cannot be loaded."""
     probe_libraries(codec_probe_sonames())
 
 
@@ -94,11 +89,6 @@ def _open_or_abort(soname: String) -> OwnedDLHandle:
         abort(String(e))
 
 
-def _init_zstd_handle() -> OwnedDLHandle:
-    """`_Global` init function: open libzstd once per process."""
-    return _open_or_abort(LIBZSTD_SONAME)
-
-
 def _init_bz2_handle() -> OwnedDLHandle:
     """`_Global` init function: open libbz2 once per process."""
     return _open_or_abort(LIBBZ2_SONAME)
@@ -109,9 +99,6 @@ def _init_lzma_handle() -> OwnedDLHandle:
     return _open_or_abort(LIBLZMA_SONAME)
 
 
-comptime _ZSTD_GLOBAL = _Global[
-    "komira_compression_zstd_handle", _init_zstd_handle
-]
 comptime _BZ2_GLOBAL = _Global["komira_compression_bz2_handle", _init_bz2_handle]
 comptime _LZMA_GLOBAL = _Global[
     "komira_compression_lzma_handle", _init_lzma_handle
@@ -121,11 +108,6 @@ comptime _LZMA_GLOBAL = _Global[
 # The accessors. SAFETY: `get_or_create_ptr` returns a pointer into
 # process-lifetime static storage the runtime manages; `MutUntrackedOrigin` is
 # the stdlib `_Global` API's own return type. The handles are never freed.
-@always_inline
-def _zstd_handle() raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
-    return _ZSTD_GLOBAL.get_or_create_ptr()
-
-
 @always_inline
 def _bz2_handle() raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
     return _BZ2_GLOBAL.get_or_create_ptr()

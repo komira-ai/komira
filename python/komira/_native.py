@@ -59,6 +59,9 @@ DataFrame's terminal sends (komira/_frame.py). The run handle calls of ABI 1.6 (
 `run_cancel`, `run_progress`) and `sql_stream_run`, which runs a statement
 under a handle that another thread cancels and reads the progress of, are what
 `_run.run_sql` makes; `has` says whether the library has a call.
+`register_arrow_stream` (ABI 1.9) drains an Arrow C stream into a table
+held in memory, which `Session.register` hands it from a frame or any object
+with the Arrow PyCapsule stream interface.
 `add_sql_binding` (ABI 1.10) binds a SQL name to the bytes of a
 `WireBoundSource`, which `Session.add_sql_binding` makes of a `komira.files`
 source after it seals the source's credential. `register_csv` and
@@ -171,6 +174,7 @@ _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
         ctypes.c_int32,
         [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64, ctypes.POINTER(_arrow.ArrowArrayStream)],
     ),
+    "komira_register_arrow_stream": (9, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p]),
     "komira_add_sql_binding": (
         10,
         ctypes.c_int32,
@@ -744,6 +748,16 @@ class Native:
         stream = _arrow.ArrowArrayStream()
         self._check(op, ctx, fn(ctx, data, len(data), ctypes.byref(stream)))
         return stream
+
+    def register_arrow_stream(self, ctx: int, name: str, stream: int) -> None:
+        """Drains the Arrow C stream at the address `stream` into a table the
+        context holds in memory and registers it as `name`, replacing any
+        table of that name. The library calls the stream's `release` once,
+        whatever the status, unless it was released already; the caller
+        keeps the struct. Needs ABI 1.9."""
+        op = "komira_register_arrow_stream"
+        fn = self._fn(op)
+        self._check(op, ctx, fn(ctx, _c_string("name", name), stream))
 
     def add_sql_binding(self, ctx: int, name: str, source: bytes, scope: int = KOMIRA_BIND_SESSION) -> None:
         """Binds the SQL name `name` on the context to the source `source`,

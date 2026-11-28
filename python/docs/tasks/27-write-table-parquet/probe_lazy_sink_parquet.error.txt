@@ -1,1 +1,0 @@
-AttributeError: 'LazyFrame' object has no attribute 'sink_parquet'
