@@ -27,6 +27,10 @@
 #   * test_a_changed_table_names_each_changed_line: a changed line is its
 #     committed and its measured text, an added line and a dropped line are
 #     each named, and an equal table names none.
+#   * test_make_date_last_day_make_timestamp_equal_duckdb: in the committed
+#     function_coverage.tsv the lines of make_date, last_day and
+#     make_timestamp each read equal:n, n being the number of staged cases
+#     that call the name.
 #   * test_the_ladder_reader_reads_each_row_shape: aliases share a line, a
 #     refusal row names its family, an inline reason is named, a name held in
 #     a constant is kept, and a source without the function, a row without a
@@ -180,6 +184,53 @@ def test_a_changed_table_names_each_changed_line() raises:
         "- a\tFNK_X\tno_case\n+ a\tFNK_X\tequal:2\n+ d\tFNK_X\tdiffers:1\n- c\tFNK_X\tequal:1\n",
     )
     assert_equal(changed_lines(committed, committed), "")
+
+
+def _table_line(table: String, name: String) -> String:
+    """The line of `table` for `name`, or an empty string."""
+    for line in table.split("\n"):
+        if String(line).startswith(name + "\t"):
+            return String(line)
+    return String("")
+
+
+def _staged_cases_calling(name: String) raises -> Int:
+    var n = 0
+    var names = case_names()
+    for i in range(len(names)):
+        var query = String("")
+        for line in read_data("sql/" + names[i] + ".sql").split("\n"):
+            if not String(line).startswith("--"):
+                query += String(line) + "\n"
+        var calls = called_names(query)
+        for j in range(len(calls)):
+            if calls[j] == name:
+                n += 1
+                break
+    return n
+
+
+def test_make_date_last_day_make_timestamp_equal_duckdb() raises:
+    var committed = read_data("function_coverage.tsv")
+    var wanted = List[String]()
+    wanted.append("make_date")
+    wanted.append("last_day")
+    wanted.append("make_timestamp")
+    for i in range(len(wanted)):
+        var line = _table_line(committed, wanted[i])
+        var n = _staged_cases_calling(wanted[i])
+        assert_true(n > 0, wanted[i] + " has staged cases")
+        var fields = line.split("\t")
+        var outcome = String(fields[len(fields) - 1]) if len(fields) > 0 else String("")
+        if outcome != "equal:" + String(n):
+            assert_true(
+                False,
+                wanted[i]
+                + " is not equal to DuckDB over its "
+                + String(n)
+                + " staged cases in function_coverage.tsv; its line is: "
+                + line,
+            )
 
 
 def _def_source(rows: String) -> String:

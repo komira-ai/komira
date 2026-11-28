@@ -17,8 +17,9 @@
 #      an exponent, a float or column operand, TRY_CAST, a width past 38 and a
 #      scale past the precision are refused.
 #   3. make_timestamp / _ms / _ns label an integer tick count with its unit
-#      (`_ms` then scales to microseconds); the six-argument overload, a
-#      non-integer operand and a wrong count are refused.
+#      (`_ms` then scales to microseconds); the six-argument overload of
+#      constants folds to a TIMESTAMP literal; a non-integer operand and a
+#      wrong count are refused.
 #   4. TIMESTAMP / TIMESTAMPTZ literals: separators, partial times, a
 #      truncated sub-microsecond tail, `Z` / +HH / -HH:MM / +HHMM offsets,
 #      and every malformed shape.
@@ -318,9 +319,13 @@ def test_make_timestamp() raises:
         "Project(exprs=[Alias(Cast(Literal(ScalarValue(int64, 1)), int64, arrow=timestamp[us]), \"a\"), Alias(Cast(Cast(ColRef(k), int64, arrow=timestamp[ms]), int64, arrow=timestamp[us]), \"b\"), Alias(Cast(Cast(ColRef(i32), int64), int64, arrow=timestamp[ns]), \"c\")])\n"
         "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
+    # The six-argument overload computes the instant from its parts
+    # (sql_bind_civil; tested there): constants fold to DuckDB's
+    # `epoch_us(make_timestamp(2024, 10, 4, 12, 0, 0.0))`.
     _check(
         "SELECT make_timestamp(2024, 10, 4, 12, 0, 0.0) FROM t",
-        "ERR: SQL not supported: the SIX-ARGUMENT `make_timestamp(year, month, day, hour, minute, seconds)` MINTS A TEMPORAL VALUE from CALENDAR COMPONENTS, and THE MISSING PRIMITIVE IS CIVIL-CALENDAR-TO-DAYS — month lengths and the Gregorian leap rule — which no `EXPR_*` tag or binder desugar in this engine computes. THE ONE-ARGUMENT OVERLOAD OF THE SAME NAME IS SERVED, and the difference is not arity for its own sake: `make_timestamp(<n>)` is a MICROSECOND COUNT SINCE 1970-01-01 (measured DuckDB v1.5.5: `make_timestamp(1)` is `1970-01-01 00:00:00.000001`), i.e. a temporal quantity that only has to be LABELLED, while the six-argument form has to be COMPUTED. DO NOT 'FIX' THIS BY LOWERING IT TO THE SAME RELABEL: that reinterprets the YEAR as a microsecond count and answers a wrong instant with a success code. Spell the instant as a microsecond count, or use a TIMESTAMP literal."
+        "Project(exprs=[Literal(ScalarValue(timestamp[us], 1728043200000000))])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
         "SELECT make_timestamp(v) FROM t",
@@ -328,11 +333,11 @@ def test_make_timestamp() raises:
     )
     _check(
         "SELECT make_timestamp(k, k) FROM t",
-        "ERR: SQL bind error: `make_timestamp` takes exactly ONE argument here — an INTEGER tick count since 1970-01-01 — but got 2. (DuckDB v1.5.5 also gives `make_timestamp` a six-argument calendar overload; this engine refuses that one by name, because it needs civil-calendar arithmetic this engine does not have.)"
+        "ERR: SQL bind error: `make_timestamp` takes exactly ONE argument — an INTEGER tick count since 1970-01-01 (or six: make_timestamp(year, month, day, hour, minute, seconds)) — but got 2."
     )
     _check(
         "SELECT make_timestamp_ms() FROM t",
-        "ERR: SQL bind error: `make_timestamp_ms` takes exactly ONE argument here — an INTEGER tick count since 1970-01-01 — but got 0. (DuckDB v1.5.5 also gives `make_timestamp` a six-argument calendar overload; this engine refuses that one by name, because it needs civil-calendar arithmetic this engine does not have.)"
+        "ERR: SQL bind error: `make_timestamp_ms` takes exactly ONE argument — an INTEGER tick count since 1970-01-01 — but got 0."
     )
 
 

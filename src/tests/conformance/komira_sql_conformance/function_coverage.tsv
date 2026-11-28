@@ -401,7 +401,7 @@ json_valid	FNK_REFUSED	_R_JSONDOC	-	0	probe:refused_bind
 json_value	FNK_REFUSED	_R_JSONLEAFMODE	-	0	probe:refused_bind
 julian	FNK_REFUSED	_R_DATEMINT	-	0	probe:refused_bind
 lag	FNK_REFUSED	_R_AGGWINVALUE	-	0	probe:refused_bind
-last_day	FNK_REFUSED	_R_DATEMINT	yes	0	probe:refused_bind
+last_day	FNK_DESUGAR	-	yes	4	equal:4
 last_value	FNK_REFUSED	_R_AGGWINVALUE	-	0	probe:refused_bind
 lcase	FNK_STRING_FN	-	-	1	equal:1
 lcm	FNK_REFUSED	_R_INTPAIR	yes	0	probe:refused_bind
@@ -494,9 +494,9 @@ lower	FNK_STRING_FN	-	yes	1	equal:1
 lpad	FNK_STRING_FN_N	-	yes	2	equal:2
 ltrim	FNK_STRING_FN	-	yes	1	equal:1
 mad	FNK_REFUSED	_R_AGGRETAIN	-	0	probe:refused_bind
-make_date	FNK_REFUSED	_R_TSMINT	yes	0	probe:refused_bind
+make_date	FNK_DESUGAR	-	yes	7	equal:7
 make_time	FNK_REFUSED	_R_TSMINT	-	0	probe:refused_bind
-make_timestamp	FNK_DESUGAR	-	yes	1	equal:1
+make_timestamp	FNK_DESUGAR	-	yes	5	equal:5
 make_timestamp_ms	FNK_DESUGAR	-	-	1	equal:1
 make_timestamp_ns	FNK_DESUGAR	-	-	1	equal:1
 make_timestamptz	FNK_REFUSED	_R_TSMINT	-	0	probe:refused_bind

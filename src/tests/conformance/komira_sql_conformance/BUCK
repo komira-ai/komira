@@ -70,6 +70,14 @@ _WRITE = read_config("komira_sql_conformance", "write", "false") == "true"
     visibility = ["//src/sdk_exec/..."],
 ) for c in _CASES if c.split("/")[0] == "order_by_limit"]
 
+# The SELECT of each make_date, last_day and make_timestamp scalar_fn case as
+# `:scalar_fn_sql/<case>`, for sdk_exec's test_run_sql_make_date.
+[export_file(
+    name = "scalar_fn_sql/" + c[len("scalar_fn/"):],
+    src = "cases/" + c + ".sql",
+    visibility = ["//src/sdk_exec/..."],
+) for c in _CASES if c.split("/")[0] == "scalar_fn" and c.split("/")[1].startswith(("make_date", "last_day", "make_timestamp"))]
+
 # `:<corpus>` builds every case of a corpus, `:corpus` every case. A
 # filegroup is a source to the check set's roots (tools/build/ci), so the
 # aggregates are ci_aggregate targets: the pull request check builds
@@ -152,6 +160,7 @@ sql_oracle(
         "scalar_fn_t.parquet",
         "scalar_fn_e.parquet",
     ],
+    visibility = ["//src/tests/...", "//src/sdk_exec/..."],
 )
 
 _COVERAGE_DATA = {

@@ -31,6 +31,7 @@ from sql.sql_bind_ops import _bind_sql_division
 from sql.sql_bind_scope import (
     CteScope, BindScope,
 )
+from sql.sql_bind_civil import _bind_last_day, _bind_make_date
 from sql.sql_bind_timestamp import _bind_make_timestamp_epoch
 from sql.sql_catalog import SqlCatalog
 from sql.sql_fn_table import (
@@ -38,7 +39,8 @@ from sql.sql_fn_table import (
     DSG_COALESCE, DSG_DATE_DIFF, DSG_DATE_PART, DSG_DATE_SUB, DSG_DATE_TRUNC,
     DSG_DAYS_IN_MONTH, DSG_DECADE, DSG_ERA, DSG_EVEN, DSG_FDIV, DSG_FMOD, DSG_GREATEST,
     DSG_IFNULL, DSG_ISFINITE, DSG_ISINF, DSG_ISNAN, DSG_JSON_EXTRACT,
-    DSG_JSON_EXTRACT_TEXT, DSG_LEAST, DSG_LEFT, DSG_MAKE_TS_MS, DSG_MAKE_TS_NS,
+    DSG_JSON_EXTRACT_TEXT, DSG_LAST_DAY, DSG_LEAST, DSG_LEFT, DSG_MAKE_DATE,
+    DSG_MAKE_TS_MS, DSG_MAKE_TS_NS,
     DSG_MAKE_TS_US, DSG_MAP_EXTRACT_VALUE, DSG_MILLENNIUM, DSG_NANOSECOND, DSG_NULLIF,
     DSG_PI, DSG_RIGHT, DSG_STRING_SPLIT, DSG_STRUCT_EXTRACT, DSG_STRUCT_EXTRACT_AT,
     DSG_SUBSTRING, DSG_TRY_CAST, FNK_BINARY_OP, FNK_CONST, FNK_DESUGAR, FNK_EXTRACT_FIELD,
@@ -390,6 +392,10 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
         return _bind_nullif(sx, schema, scope, catalog, cte_scope, prebound)
     if dsg_op == DSG_DAYS_IN_MONTH:
         return _bind_days_in_month(sx, schema, scope, catalog, cte_scope, prebound)
+    if dsg_op == DSG_MAKE_DATE:
+        return _bind_make_date(sx, schema, scope, catalog, cte_scope, prebound)
+    if dsg_op == DSG_LAST_DAY:
+        return _bind_last_day(sx, schema, scope, catalog, cte_scope, prebound)
     if dsg_op == DSG_CAST or dsg_op == DSG_TRY_CAST:
         return _bind_cast(sx, dsg_op == DSG_TRY_CAST, schema, scope, catalog, cte_scope, prebound)
     if (

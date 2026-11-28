@@ -18,7 +18,7 @@ import { CONFORMANCE, loadEngine, runOnEngine } from "./staged.ts";
 loadEngine();
 
 /** The corpus's case count (its README, "The corpora"): a corpus staged in part is a failure, not a smaller run. */
-const CASES = 6393;
+const CASES = 6407;
 const CORPORA = 88;
 
 test("every corpus case answers as DuckDB, or is refused or differs as the lists say", async () => {

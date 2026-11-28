@@ -276,6 +276,40 @@ _TOPN_TEST_DATA.update({
     for c in _TOPN_CASES
 })
 
+# The make_date, last_day and make_timestamp cases of komira_sql_conformance's
+# scalar_fn corpus: test_run_sql_make_date runs each SELECT over the corpus's
+# table T and holds it to DuckDB's answer.
+_MAKE_DATE_CASES = [
+    "last_day_date_column",
+    "last_day_literals",
+    "last_day_of_make_date",
+    "last_day_timestamp_columns",
+    "make_date_columns",
+    "make_date_from_k",
+    "make_date_in_where",
+    "make_date_integer_columns",
+    "make_date_literals",
+    "make_date_null_argument",
+    "make_timestamp_columns",
+    "make_timestamp_epoch_micros",
+    "make_timestamp_integer_seconds",
+    "make_timestamp_literals",
+]
+
+_MAKE_DATE_TEST_DATA = {
+    "scalar_fn_t.parquet": "//src/tests/conformance/komira_sql_conformance:scalar_fn_t[scalar_fn_t.parquet]",
+}
+
+_MAKE_DATE_TEST_DATA.update({
+    "sql/" + c + ".sql": "//src/tests/conformance/komira_sql_conformance:scalar_fn_sql/" + c
+    for c in _MAKE_DATE_CASES
+})
+
+_MAKE_DATE_TEST_DATA.update({
+    "duckdb/" + c + ".tsv": "//src/tests/conformance/komira_sql_conformance:scalar_fn/" + c
+    for c in _MAKE_DATE_CASES
+})
+
 # DuckDB's tables and answers for test_run_sql_join_kinds:
 # tests/join_kinds/data.sql writes l, r, n, e and big (Parquet, small row
 # groups), and each line of tests/join_kinds/cases.sql runs one join over them
@@ -826,6 +860,7 @@ mojo_library(
         "tests/test_run_sql_cte.mojo": _CTE_TEST_DATA,
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,
         "tests/test_run_sql_expr_beside_agg.mojo": _EXPR_BESIDE_AGG_TEST_DATA,
+        "tests/test_run_sql_make_date.mojo": _MAKE_DATE_TEST_DATA,
         "tests/test_run_sql_topn.mojo": _TOPN_TEST_DATA,
         "tests/test_run_sql_window.mojo": _WINDOW_TEST_DATA,
         "tests/test_run_sql_window_frames.mojo": _WINDOW_FRAMES_TEST_DATA,
