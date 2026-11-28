@@ -21,10 +21,10 @@ by nothing and give one row. No SQL text is written.
 - `sum`, `mean`, `median`, `std` and `var` need a numeric or boolean column
   (ruling 4): a reduction of every column names the first one that is not,
   unless `numeric_only=True` leaves it out. pandas counts True as 1: a
-  boolean column is summed as `CASE WHEN b = true THEN 1 ELSE 0 END` (a
-  missing value adds 0, as it is skipped), and cast to int64 for
-  `sum(min_count=1)` and to float64 for the others, where a missing value
-  must stay missing.
+  boolean column is cast to int64 for `sum` (a missing value stays missing,
+  so the sum skips it) and to float64 for the others. The cast, not
+  `CASE WHEN b = true`, since the engine compares no computed boolean
+  with a boolean literal, and `df.isna().sum()` sums computed ones.
 - A sum of nothing is 0, as in pandas' `min_count=0` (ruling 10): the sum is
   read through `CASE WHEN s IS NOT NULL THEN s ELSE 0 END` above the
   aggregate. `min_count=1` keeps the missing sum.
@@ -36,6 +36,10 @@ by nothing and give one row. No SQL text is written.
   row, computed over the row's group by a window (komira/_windows.py). Under
   `dropna=True` a row whose key is missing is in no group, and its value is
   missing, as in pandas.
+- `drop_duplicates` over every column is a DISTINCT (an AGGREGATE for
+  `keep=False`); over fewer columns, a `subset`, it is a window that numbers
+  or counts the rows of each value, under a filter (komira/_windows.py), and
+  the row it keeps of a value is any one of them (a plan has no row order).
 """
 
 from __future__ import annotations
@@ -143,9 +147,7 @@ def _agg_node(dtypes: dict[str, str], item: _Item, where: str, hint: str) -> _op
             raise UnsupportedOperation(
                 f"{where} needs numeric or boolean columns, and the column {item.column!r} is {dtype}: {hint}"
             )
-        if dtype == "bool" and item.how == "sum" and item.zero:
-            ref = _ops.When(((_ops.Compare("eq", ref, _ops.Lit(True)), _ops.Lit(1)),), _ops.Lit(0))
-        elif dtype == "bool":
+        if dtype == "bool":
             ref = _ops.Cast(ref, "int64" if item.how == "sum" else "float64")
         elif dtype == "float32" and item.how == "median":
             # The engine's median keeps the values as doubles and refuses a
@@ -649,26 +651,47 @@ def agg_frame(frame: DataFrame, arg: object, named: dict[str, object]) -> DataFr
     return GroupBy._of(frame, (), False, False).agg(arg, **named)
 
 
-def drop_duplicates(frame: DataFrame, subset: object, keep: object) -> DataFrame:
-    """`df.drop_duplicates(subset, keep=...)` over every column: a DISTINCT,
-    or for `keep=False` the rows no other row equals (an AGGREGATE by every
-    column with count(*) = 1, then the columns)."""
+def subset_of(frame: DataFrame, subset: object, verb: str) -> tuple[str, ...]:
+    """The columns `subset` names for `verb` (`drop_duplicates`,
+    `duplicated`), each once in the order first given; every column of the
+    frame when it is None."""
     columns = frame._plan.columns
-    if subset is not None:
-        names = (subset,) if isinstance(subset, str) else subset
-        if not isinstance(names, (list, tuple)):
-            raise TypeError(f"drop_duplicates subset takes column names, not a {type(subset).__name__}")
-        for name in names:
-            if not isinstance(name, str):
-                raise TypeError(f"drop_duplicates subset takes column names, which are str, not {type(name).__name__}")
-        _ops.require_columns(tuple(names), columns)
-        if set(names) != set(columns):
-            listed = list(names)
-            raise UnsupportedOperation(
-                f"drop_duplicates(subset={listed!r}) keeps one whole row of each group of rows equal on "
-                f"those columns, which this release does not build: keep only those columns first, as "
-                f"df[{listed!r}].drop_duplicates()"
-            )
+    if subset is None:
+        return tuple(columns)
+    names = (subset,) if isinstance(subset, str) else subset
+    if not isinstance(names, (list, tuple)):
+        raise TypeError(f"{verb} subset takes column names, not a {type(subset).__name__}")
+    for name in names:
+        if not isinstance(name, str):
+            raise TypeError(f"{verb} subset takes column names, which are str, not {type(name).__name__}")
+    if not names:
+        raise ValueError(f"{verb} subset names no column: name at least one, or leave it out to compare every column")
+    _ops.require_columns(tuple(names), columns)
+    return tuple(dict.fromkeys(names))
+
+
+def check_keep(keep: object) -> object:
+    """`keep` of `drop_duplicates` and `duplicated`: "first", "last" or
+    False, which pandas also accepts as a value equal to it (0); returned as
+    "first", "last" or False."""
+    if keep not in ("first", "last", False):
+        raise ValueError("keep must be either \"first\", \"last\" or False")
+    return keep if keep in ("first", "last") else False
+
+
+def drop_duplicates(frame: DataFrame, subset: object, keep: object) -> DataFrame:
+    """`df.drop_duplicates(subset, keep=...)`. Over every column (no subset,
+    or one naming every column): a DISTINCT, or for `keep=False` the rows no
+    other row equals (an AGGREGATE by every column with count(*) = 1, then the
+    columns). Over fewer columns: the rows `duplicated(subset, keep)` holds
+    false, by a window (komira/_windows.py, `unique_rows`) over the frame with
+    its sort dropped. The answer has no row order."""
+    names = subset_of(frame, subset, "drop_duplicates")
+    keep = check_keep(keep)
+    columns = frame._plan.columns
+    if set(names) != set(columns):
+        plan = frame._plan.child if isinstance(frame._plan, _ops.Sort) else frame._plan
+        return frame._derive(_windows.unique_rows(plan, names, keep))
     if keep is False:
         count = "count"
         while count in columns:
@@ -676,8 +699,6 @@ def drop_duplicates(frame: DataFrame, subset: object, keep: object) -> DataFrame
         plan = _ops.aggregate(frame._plan, columns, ((count, _ops.Agg("count")),))
         plan = _ops.filter_(plan, _ops.Compare("eq", _ops.ColRef(count), _ops.Lit(1)))
         return frame._derive(_ops.select(plan, columns))
-    if keep not in ("first", "last"):
-        raise ValueError("keep must be either \"first\", \"last\" or False")
     # Rows equal on every column are the same row, so "first" and "last"
     # keep the same one.
     return frame._derive(_ops.distinct(frame._plan))

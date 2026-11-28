@@ -7,9 +7,9 @@
 # This is the framing Arrow IPC calls LZ4_FRAME. It is wire-incompatible with
 # the raw blocks of `codec.mojo`; the two share only the library.
 #
-# liblz4 is opened once per process: these entries use the same `_Global`
-# handle as `codec.mojo` (`komira_lz4_codec_handle`), so a process that uses
-# both framings holds one dlopen of liblz4.
+# The C library is the one `codec.mojo` calls: lz4 1.10.0, linked statically
+# with every symbol renamed komira_lz4_* (the frame API's LZ4F_X is
+# komira_lz4__LZ4F_X).
 #
 # # Encapsulation (FFI boundary)
 #
@@ -26,11 +26,11 @@
 #     per-worker cache); `decompress_into` resets it before each frame, and
 #     its destructor frees it.
 # The raw pointers (the `LZ4F_dctx*`, the buffers taken from the Spans, the
-# size in/out slots) stay inside this file; every `handle.call` site carries a
-# `# SAFETY:` comment.
+# size in/out slots) stay inside this file; every `external_call` site carries
+# a `# SAFETY:` comment.
 #
-# FFI-BOUNDARY: liblz4 (dlopen'd once per process by codec.mojo's `_Global`
-# handle, never closed). `Lz4FrameDecoder` owns its `LZ4F_dctx` (liblz4
+# FFI-BOUNDARY: liblz4 (linked statically, declared here with
+# `external_call`). `Lz4FrameDecoder` owns its `LZ4F_dctx` (liblz4
 # allocates it in LZ4F_createDecompressionContext) and frees it exactly once in
 # `__deinit__` (LZ4F_freeDecompressionContext); a one-shot decode owns a
 # decoder for the length of the call. liblz4 keeps no pointer to any caller
@@ -47,7 +47,7 @@
 # out of band (an Arrow IPC buffer records it).
 # =============================================================================
 
-from .codec import _default_lz4_codec_handle
+from std.ffi import external_call
 
 # lz4frame.h `#define LZ4F_VERSION 100`: passed to
 # LZ4F_createDecompressionContext for its ABI version check.
@@ -71,21 +71,19 @@ def _null_bytes() -> _UntrackedBytes:
 
 def _lz4f_is_error(code: Int) raises -> Bool:
     """liblz4's `unsigned LZ4F_isError(LZ4F_errorCode_t code)`."""
-    var handle_ptr = _default_lz4_codec_handle()
     # SAFETY: pure function of its integer argument; no pointer crosses.
-    return Int(handle_ptr[].call["LZ4F_isError", Int32](code)) != 0
+    return Int(external_call["komira_lz4__LZ4F_isError", Int32](code)) != 0
 
 
 def _lz4f_create_dctx() raises -> _UntrackedBytes:
     """A fresh `LZ4F_dctx*` from `LZ4F_createDecompressionContext`; the caller
     frees it with `_lz4f_free_dctx` exactly once."""
-    var handle_ptr = _default_lz4_codec_handle()
     var dctx = _null_bytes()
     # SAFETY: `dctx` is a local slot alive across this synchronous call;
     # liblz4 writes the new context's address into it and keeps no pointer to
     # the slot. The context itself is liblz4's allocation, owned by the caller
     # from here on.
-    var rc = handle_ptr[].call["LZ4F_createDecompressionContext", Int](
+    var rc = external_call["komira_lz4__LZ4F_createDecompressionContext", Int](
         UnsafePointer(to=dctx).unsafe_origin_cast[MutUntrackedOrigin](),
         _LZ4F_VERSION,
     )
@@ -100,16 +98,10 @@ def _lz4f_free_dctx(dctx: _UntrackedBytes):
     """Release a context from `_lz4f_create_dctx`. Null is a no-op."""
     if Int(dctx) == 0:
         return
-    try:
-        var handle_ptr = _default_lz4_codec_handle()
-        # SAFETY: `dctx` came from LZ4F_createDecompressionContext and is freed
-        # here once (its owner forgets it). The return code is 0 for a
-        # well-formed context and carries nothing a destructor can act on.
-        _ = handle_ptr[].call["LZ4F_freeDecompressionContext", Int](dctx)
-    except:
-        # The handle accessor raises only before liblz4 was ever opened, and a
-        # context cannot exist then.
-        pass
+    # SAFETY: `dctx` came from LZ4F_createDecompressionContext and is freed
+    # here once (its owner forgets it). The return code is 0 for a
+    # well-formed context and carries nothing a destructor can act on.
+    _ = external_call["komira_lz4__LZ4F_freeDecompressionContext", Int](dctx)
 
 
 def _lz4f_decode_once[
@@ -124,12 +116,12 @@ def _lz4f_decode_once[
     one-shot contract in the header); returns the bytes written."""
     var n = len(src)
     var cap = len(dst)
-    var handle_ptr = _default_lz4_codec_handle()
     if reset:
         # SAFETY: `dctx` is a live context its owner lent for this call.
-        # LZ4F_resetDecompressionContext returns void; the Int return type is
-        # declared only to satisfy `call` and is discarded.
-        _ = handle_ptr[].call["LZ4F_resetDecompressionContext", Int](dctx)
+        # LZ4F_resetDecompressionContext returns void.
+        external_call[
+            "komira_lz4__LZ4F_resetDecompressionContext", NoneType
+        ](dctx)
     # LZ4F_decompress reads `*dstSizePtr` / `*srcSizePtr` as capacities and
     # writes back the bytes produced / consumed.
     var dst_size = cap
@@ -144,7 +136,7 @@ def _lz4f_decode_once[
     # their Span origins, as are the two local size slots. liblz4 writes at
     # most `dst_size` bytes, reads at most `src_size`, and keeps no pointer
     # to any of them past the call (the context holds only its own state).
-    var result = handle_ptr[].call["LZ4F_decompress", Int](
+    var result = external_call["komira_lz4__LZ4F_decompress", Int](
         dctx,
         dst_ptr,
         UnsafePointer(to=dst_size).unsafe_origin_cast[MutUntrackedOrigin](),
@@ -194,9 +186,8 @@ def lz4_frame_compress_bound(src_len: Int) raises -> Int:
         raise Error(
             "lz4_frame_compress_bound: negative src_len " + String(src_len)
         )
-    var handle_ptr = _default_lz4_codec_handle()
     # SAFETY: NULL prefs selects the defaults; no buffer crosses.
-    return handle_ptr[].call["LZ4F_compressFrameBound", Int](
+    return external_call["komira_lz4__LZ4F_compressFrameBound", Int](
         src_len, _null_bytes()
     )
 
@@ -221,12 +212,11 @@ def lz4_frame_compress_into[
             + " bytes, below lz4_frame_compress_bound(" + String(n) + ") = "
             + String(need)
         )
-    var handle_ptr = _default_lz4_codec_handle()
     # SAFETY: `dst` holds `cap >= need > 0` writable bytes and `src` holds `n`
     # readable bytes, both alive across this synchronous call through their
     # Span origins; liblz4 writes at most `cap`, reads exactly `n` and keeps
     # neither pointer. NULL prefs selects the defaults.
-    var written = handle_ptr[].call["LZ4F_compressFrame", Int](
+    var written = external_call["komira_lz4__LZ4F_compressFrame", Int](
         dst.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
         cap,
         src.unsafe_ptr()
@@ -283,7 +273,6 @@ def lz4_frames_decompress_into[
     var src_size = len(src)
     var dst_capacity = len(dst)
     var decoder = Lz4FrameDecoder()
-    var handle_ptr = _default_lz4_codec_handle()
     var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
     var src_scratch = Array[UInt8, 1](fill=UInt8(0))
     var total_out = 0
@@ -319,7 +308,7 @@ def lz4_frames_decompress_into[
         # them alive across this synchronous call, as are the two local size
         # slots. liblz4 writes at most `dst_size` bytes, reads at most
         # `src_left`, and keeps no pointer to any of them past the call.
-        var hint = handle_ptr[].call["LZ4F_decompress", Int](
+        var hint = external_call["komira_lz4__LZ4F_decompress", Int](
             decoder._dctx,
             dst_ptr,
             UnsafePointer(to=dst_size).unsafe_origin_cast[MutUntrackedOrigin](),

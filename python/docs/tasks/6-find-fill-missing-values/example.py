@@ -31,9 +31,17 @@ with komira.Session() as s:
     )
     print(filled.to_arrow().to_pylist())
 
-# pandas-shaped: fillna takes a dict of a value per column, or one value for
-# every column of the frame.
+# pandas-shaped: isna() marks each missing value, so isna().sum() counts them
+# per column; a column's isna() filters on them and notna() makes a column.
 df = komira.read_csv("readings.csv")
+print(df.isna().sum().materialize().to_arrow().to_pylist())
+no_score = df[df["score"].isna()][["id"]]
+print(no_score.sort_values("id").materialize().to_arrow().to_pylist())
+marked = df.assign(has_score=df["score"].notna())[["id", "has_score"]]
+print(marked.sort_values("id").materialize().to_arrow().to_pylist())
+
+# fillna takes a dict of a value per column, or one value for every column of
+# the frame.
 by_column = df.fillna({"city": "unknown", "score": 0.0, "qty": 0})
 print(by_column.sort_values("id").materialize().to_arrow().to_pylist())
 numbers = df[["id", "score", "qty"]].fillna(0)

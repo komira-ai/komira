@@ -20,13 +20,11 @@ from std.testing import TestSuite, assert_equal, assert_true
 from compression.codec_libraries import (
     LIBBZ2_SONAME,
     LIBLZMA_SONAME,
-    LIBZSTD_SONAME,
     _open_codec_library,
     codec_probe_sonames,
     probe_codec_libraries,
     probe_libraries,
 )
-from lz4.codec import LIBLZ4_SONAME
 from zlib import LIBZ_SONAME
 
 
@@ -52,13 +50,8 @@ def _check_missing(soname: StaticString) raises:
 
 
 def test_every_owned_soname_opens() raises:
-    _ = _open_codec_library(LIBZSTD_SONAME)
     _ = _open_codec_library(LIBBZ2_SONAME)
     _ = _open_codec_library(LIBLZMA_SONAME)
-
-
-def test_a_missing_zstd_library_is_named() raises:
-    _check_missing(LIBZSTD_SONAME)
 
 
 def test_a_missing_bzip2_library_is_named() raises:
@@ -69,12 +62,10 @@ def test_a_missing_xz_library_is_named() raises:
     _check_missing(LIBLZMA_SONAME)
 
 
-def test_the_probe_opens_the_three_libraries() raises:
+def test_the_probe_opens_libz_only() raises:
     var sonames = codec_probe_sonames()
-    assert_equal(len(sonames), 3)
-    assert_equal(sonames[0], String(LIBZSTD_SONAME))
-    assert_equal(sonames[1], String(LIBZ_SONAME))
-    assert_equal(sonames[2], String(LIBLZ4_SONAME))
+    assert_equal(len(sonames), 1)
+    assert_equal(sonames[0], String(LIBZ_SONAME))
     probe_codec_libraries()
 
 
@@ -87,11 +78,11 @@ def _probe_message(sonames: List[String]) -> String:
 
 
 def test_the_probe_names_a_missing_library_after_present_ones() raises:
-    var absent = String(LIBLZ4_SONAME) + ".komira-absent"
+    var absent = String(LIBZ_SONAME) + ".komira-absent"
     var reason = _loader_error(absent)
     assert_true(reason.byte_length() > 0, absent + " opened")
     var sonames = List[String]()
-    sonames.append(String(LIBZSTD_SONAME))
+    sonames.append(String(LIBBZ2_SONAME))
     sonames.append(String(LIBZ_SONAME))
     sonames.append(absent)
     assert_equal(
@@ -100,7 +91,7 @@ def test_the_probe_names_a_missing_library_after_present_ones() raises:
     )
     var first = List[String]()
     first.append(absent)
-    first.append(String(LIBZSTD_SONAME))
+    first.append(String(LIBZ_SONAME))
     assert_equal(
         _probe_message(first),
         "compression: cannot load " + absent + ": " + reason,

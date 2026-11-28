@@ -86,8 +86,11 @@ def refuses(call, cls, message):
     assert type(e) is cls and e.args[0] == message, repr(e)
 
 
-# A bool summed with min_count=0: True is 1, False and a missing value 0.
-TRUE_IS_ONE = When(((Compare("eq", ColRef("ok"), Lit(True)), Lit(1)),), Lit(0))
+# A bool summed: True is 1 and False 0, a missing value skipped. With
+# min_count=0 the CASE above the aggregate makes a sum of nothing 0. A cast,
+# not a comparison with true: the engine compares no computed bool with a
+# bool literal, and the column may be one (df.isna().sum()).
+TRUE_IS_ONE = Cast(ColRef("ok"), "int64")
 
 
 def not_null(*keys):
@@ -554,15 +557,10 @@ def test_groupby_and_its_subscript_refuse_what_names_no_column():
     refuses(lambda: g[2], TypeError, "a GroupBy is subscripted with a column name or a list of names, not a int")
 
 
-def test_drop_duplicates_refuses_a_subset_inplace_and_an_unknown_keep():
+def test_drop_duplicates_refuses_a_bad_subset_inplace_and_an_unknown_keep():
+    # A subset of fewer columns is built (plan/test_frame_duplicates.py).
     df = Env().df
     pair = df[["a", "s"]]
-    refuses(lambda: pair.drop_duplicates(subset=["a"]), UnsupportedOperation,
-            "drop_duplicates(subset=['a']) keeps one whole row of each group of rows equal on those columns, "
-            "which this release does not build: keep only those columns first, as df[['a']].drop_duplicates()")
-    refuses(lambda: pair.drop_duplicates("s", keep=False), UnsupportedOperation,
-            "drop_duplicates(subset=['s']) keeps one whole row of each group of rows equal on those columns, "
-            "which this release does not build: keep only those columns first, as df[['s']].drop_duplicates()")
     refuses(lambda: pair.drop_duplicates(subset=["y"]), KeyError,
             "no column named 'y' in this frame; the frame's columns are: a, s")
     refuses(lambda: pair.drop_duplicates(subset=[1]), TypeError,

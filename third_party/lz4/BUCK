@@ -1,0 +1,141 @@
+load("@komira//tools/build/one_definition:libraries.bzl", "THIRD_PARTY_OWNERS")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@buildrules//rules/native:defs.bzl", "native_library")
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/native:defs.bzl", "checked_cxx_library", "prefix_header", "prefixed_archive_check")
+
+# lz4/lz4 1.10.0. The library (lib/) is BSD-2-Clause (lib/LICENSE in the
+# archive); the rest of the repository (the command-line program) is GPL-2.0
+# and none of it is built. Nothing of it is committed here: the archive is
+# fetched at build time, checked against its sha256, and the files below
+# extracted from it.
+pinned_file(
+    name = "lz4-1.10.0.tar.gz",
+    url = "https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.tar.gz",
+    sha256 = "537512904744b35e232912055ccf8ec66d768639ff3abe5788d90d792ec5f48b",
+    size_bytes = 387114,
+)
+
+# The raw block codec (lz4.c), its high-compression variant (lz4hc.c), the
+# frame format (lz4frame.c) and the xxHash the frame checksums use. lz4file.c
+# (stdio streams) is left out.
+_SRCS = [
+    "lib/lz4.c",
+    "lib/lz4frame.c",
+    "lib/lz4hc.c",
+    "lib/xxhash.c",
+]
+
+# The headers the sources include. lz4hc.c also includes lz4.c itself (with
+# LZ4_COMMONDEFS_ONLY, for its constants and helpers), so the older compile
+# below takes lz4.c as a header too; it is in the archive's files once, as a
+# source.
+_PRIVATE_HEADERS = [
+    "lib/lz4.h",
+    "lib/lz4frame.h",
+    "lib/lz4frame_static.h",
+    "lib/lz4hc.h",
+    "lib/xxhash.h",
+]
+
+archive_files(
+    name = "src",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":lz4-1.10.0.tar.gz",
+    one_tree = True,
+    files = ["lib/LICENSE"] + _SRCS + _PRIVATE_HEADERS,
+    strip_prefix = "lz4-1.10.0",
+    visibility = ["PUBLIC"],
+)
+
+# Every argument of the lz4 compile but the prefix (below): the library,
+# static, with its C API <lz4.h> and <lz4frame.h>. The sources include each
+# other by name from their own directory, found at their real paths in :src
+# (one_tree, raw_headers).
+_LZ4 = dict(
+    srcs = [":src[{}]".format(s) for s in _SRCS],
+    raw_headers = [":src[{}]".format(h) for h in _PRIVATE_HEADERS + ["lib/lz4.c"]],
+    compiler_flags = [
+        "-O2",
+        "-DNDEBUG",
+    ],
+    exported_headers = {
+        "lz4.h": ":src[lib/lz4.h]",
+        "lz4frame.h": ":src[lib/lz4frame.h]",
+    },
+    header_namespace = "",
+)
+
+# lz4 with upstream's names. Nothing links it: its archive's symbol table is
+# the list of names :prefix_symbols renames.
+cxx_library(
+    name = "lz4_unprefixed",
+    **_LZ4
+)
+
+# Every global symbol renamed komira_lz4_*: LZ4_X becomes komira_lz4_X
+# (LZ4_compress_default is komira_lz4_compress_default), any other global X
+# komira_lz4__X (the frame API LZ4F_compressFrame is
+# komira_lz4__LZ4F_compressFrame, xxHash's XXH32 komira_lz4__XXH32). An
+# unprefixed exported LZ4_* would interpose on, or be interposed by, another
+# liblz4 in the same process (a Python process that imports pyarrow holds
+# one).
+prefix_header(
+    name = "prefix_symbols",
+    archive = ":lz4_unprefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    header = "lz4_prefix_symbols.h",
+    min_symbols = 50,
+    prefix = "komira_lz4_",
+    strip = "LZ4_",
+    style = "strip",
+)
+
+cxx_library(
+    name = "lz4_prefixed",
+    exported_preprocessor_flags = ["-include", "$(location :prefix_symbols)"],
+    **_LZ4
+)
+
+# Every symbol :lz4_prefixed defines is komira_lz4_*, and it references
+# none of the library's unprefixed names.
+prefixed_archive_check(
+    name = "lz4_symbols",
+    archive = ":lz4_prefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    min_defined = 50,
+    original_names = [":prefix_symbols[symbols]"],
+    prefix = THIRD_PARTY_OWNERS["third_party/lz4"].prefix,
+)
+
+# lz4 as its users take it: the C API is komira_lz4_compress_default,
+# komira_lz4__LZ4F_compressFrame, ... (C callers that include <lz4.h> get the
+# renamed names), and :lz4_symbols gates every build holding it.
+checked_cxx_library(
+    name = "lz4",
+    checks = [":lz4_symbols"],
+    lib = ":lz4_prefixed",
+    visibility = ["PUBLIC"],
+)
+
+# lz4 as buildrules' native_library builds it, for the mopm package lz4
+# (`natives = {"libkomira_lz4.a": ...}`): `libkomira_lz4.a`, the same
+# sources, flags and renaming as :lz4 above, for linux and macOS alike (the
+# sources are C only). :lz4 is what the adopted label's `c_deps` names.
+native_library(
+    name = "lz4_native",
+    upstream = {
+        "url": "https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.tar.gz",
+        "sha256": "537512904744b35e232912055ccf8ec66d768639ff3abe5788d90d792ec5f48b",
+        "size": 387114,
+        "strip": "lz4-1.10.0",
+        "files": ["lib/LICENSE"] + _SRCS + _PRIVATE_HEADERS,
+    },
+    srcs = _SRCS,
+    includes = ["lib"],
+    exported_includes = ["lib"],
+    cflags = ["-DNDEBUG"],
+    prefix = {"name": "komira_lz4_", "strip": "LZ4_", "min": 50},
+    soname = "libkomira_lz4.a",
+)
