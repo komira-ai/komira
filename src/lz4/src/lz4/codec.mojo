@@ -8,16 +8,16 @@
 # leaf both depend on.
 #
 # The LZ4 FRAME entries (`LZ4F_*`, the interoperable Kafka/Arrow-IPC framing)
-# are a distinct codec (frame vs raw block) and live in `frame.mojo`, which
-# shares this file's liblz4 handle.
+# are a distinct codec (frame vs raw block) and live in `frame.mojo`, over
+# the same linked library.
 #
-# # Approach: runtime dlopen via OwnedDLHandle, singleton via stdlib `_Global`
+# # Approach: lz4 linked statically
 #
-# RUNTIME dlopen via OwnedDLHandle of the system liblz4, cached in a
-# process-lifetime `_Global` runtime slot (init-once, cross-compile-unit-
-# coherent). No env var and no `unsafe_from_address`. A distinct `_Global`
-# name keeps this handle independent of other packages' liblz4 singletons;
-# `frame.mojo` uses this same handle.
+# FFI-BOUNDARY: lz4 1.10.0, statically linked from //third_party/lz4 with
+# every symbol renamed komira_lz4_* (LZ4_compress_default is
+# komira_lz4_compress_default), and declared here with `external_call`. No
+# library is opened at run time, so no host needs a liblz4. liblz4 keeps no
+# pointer to a caller buffer past a call and owns no memory a caller sees.
 #
 # # Encapsulation (FFI boundary)
 #
@@ -35,68 +35,13 @@
 # compiler does not enforce it):
 #   * `_lz4_compress_ffi` / `_lz4_decompress_ffi` take raw pointers with
 #     caller-chosen origins (NOT wildcards), cast to an untracked origin ONLY
-#     at the handle.call site; `_lz4_compress_bound_ffi`. Only the safe
+#     at the `external_call` site; `_lz4_compress_bound_ffi`. Only the safe
 #     wrappers in this file call them.
-#   * The OwnedDLHandle singleton is a stdlib `_Global` runtime slot; its
-#     `get_or_create_ptr()` returns an untracked-origin pointer into
-#     process-lifetime static storage (NO env var, NO `unsafe_from_address`).
-#   * Every `handle.call` site carries a `# SAFETY:` comment.
+#   * Every `external_call` site carries a `# SAFETY:` comment.
 # =============================================================================
 
-from std.ffi import OwnedDLHandle, _Global
+from std.ffi import external_call
 from std.memory import alloc
-from std.os import abort
-from std.sys.info import CompilationTarget
-
-
-# -----------------------------------------------------------------------------
-# Per-OS soname.
-# -----------------------------------------------------------------------------
-
-comptime LIBLZ4_SONAME: StaticString = (
-    "liblz4.dylib" if CompilationTarget.is_macos() else "liblz4.so.1"
-)
-
-# -----------------------------------------------------------------------------
-# Process-lifetime OwnedDLHandle singleton via the stdlib `_Global` runtime slot.
-#
-# `_Global[name, init_fn]` provides a name-keyed, process-global, init-once,
-# cross-compile-unit-coherent slot managed by the KGEN runtime: no env var, no
-# address laundering. The distinct `_Global` name keeps this liblz4 handle
-# (raw-block and, through frame.mojo, frame entries) independent of any other
-# package's singleton.
-# -----------------------------------------------------------------------------
-
-
-def _init_lz4_codec_handle() -> OwnedDLHandle:
-    """`_Global` init_fn: dlopen liblz4 exactly once per process (KGEN-serialized).
-
-    SAFETY: `_Global`'s init_fn must be non-raising. The OwnedDLHandle ctor
-    raises only when the pinned dylib is unresolvable (a fatal provisioning
-    error), so we `abort`: without the library no LZ4 block can be read.
-    """
-    try:
-        return OwnedDLHandle(LIBLZ4_SONAME)
-    except e:
-        abort("liblz4 dlopen failed (lz4 raw-block handle init)")
-
-
-comptime _LZ4_CODEC_GLOBAL = _Global[
-    "komira_lz4_codec_handle", _init_lz4_codec_handle
-]
-
-
-@always_inline
-def _default_lz4_codec_handle() raises -> UnsafePointer[
-    OwnedDLHandle, MutUntrackedOrigin
-]:
-    """Return the process-lifetime liblz4 handle slot (init-once via `_Global`).
-
-    SAFETY: FFI boundary. Targets KGEN-runtime-managed static storage
-    (process-lifetime); `MutUntrackedOrigin` is the stdlib `_Global` API's own
-    return type, confined to this FFI helper. No env var, no `unsafe_from_address`.
-    """
-    return _LZ4_CODEC_GLOBAL.get_or_create_ptr()
 
 
 # -----------------------------------------------------------------------------
@@ -125,12 +70,11 @@ def _lz4_decompress_ffi[
 
     SAFETY: liblz4 reads exactly `src_size` bytes from `src` and writes up to
     `dst_capacity` bytes to `dst`. Both buffers are caller-owned for the
-    synchronous call; liblz4 retains no pointer past the call. The handle is a
-    process-lifetime singleton. Origins are cast to an untracked origin ONLY at
-    the call site. The raw pointers reach only this file's safe wrappers.
+    synchronous call; liblz4 retains no pointer past the call. Origins are cast
+    to an untracked origin ONLY at the call site. The raw pointers reach only
+    this file's safe wrappers.
     """
-    var handle_ptr = _default_lz4_codec_handle()
-    var result = handle_ptr[].call["LZ4_decompress_safe", Int32](
+    var result = external_call["komira_lz4_decompress_safe", Int32](
         src.unsafe_mut_cast[True]().unsafe_origin_cast[MutUntrackedOrigin](),
         dst.unsafe_origin_cast[MutUntrackedOrigin](),
         Int32(src_size),
@@ -163,8 +107,7 @@ def _lz4_compress_ffi[
 
     SAFETY: identical contract to `_lz4_decompress_ffi`.
     """
-    var handle_ptr = _default_lz4_codec_handle()
-    var result = handle_ptr[].call["LZ4_compress_default", Int32](
+    var result = external_call["komira_lz4_compress_default", Int32](
         src.unsafe_mut_cast[True]().unsafe_origin_cast[MutUntrackedOrigin](),
         dst.unsafe_origin_cast[MutUntrackedOrigin](),
         Int32(src_size),
@@ -188,9 +131,8 @@ def _lz4_compress_bound_ffi(src_size: Int) raises -> Int:
     Pure-arithmetic on the C side (`(inputSize) + ((inputSize)/255) + 16`), but
     we keep the FFI shape for parity with the lz4 ABI's bound contract.
     """
-    var handle_ptr = _default_lz4_codec_handle()
     return Int(
-        handle_ptr[].call["LZ4_compressBound", Int32](Int32(src_size))
+        external_call["komira_lz4_compressBound", Int32](Int32(src_size))
     )
 
 

@@ -345,6 +345,8 @@ _FLOOR = {
     "U": "microsecond",
 }
 _FLOOR_LISTED = "'D', 'h', 'min', 's', 'ms' or 'us'"
+# The calendar rules resample() takes, which floor() refuses as pandas does.
+_CALENDAR = frozenset({"W", "W-SUN", "MS", "ME", "M"})
 
 
 def _part(name: str, build, *, timestamp_only: bool = False) -> property:
@@ -415,6 +417,11 @@ class DatetimeMethods(_Accessor):
                 "leave both at their default"
             )
         unit = _FLOOR.get(freq)
+        if freq in _CALENDAR:
+            raise UnsupportedOperation(
+                f".dt.floor({freq!r}) cuts to a week or a month, which has no fixed length, and pandas "
+                f"refuses it too: bucket the rows with df.resample({freq!r}, on=column)"
+            )
         if unit is None:
             if freq[:1].isdigit():
                 raise UnsupportedOperation(

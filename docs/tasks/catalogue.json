@@ -39,10 +39,7 @@
     "slug": "find-fill-missing-values",
     "category": "Clean",
     "question": "How do I find and fill missing values?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2362"
-    ]
+    "status": "works"
   },
   {
     "rank": 7,
@@ -316,10 +313,7 @@
     "slug": "resample-time-series-daily-weekly-monthly",
     "category": "Time",
     "question": "How do I resample a time series to daily, weekly or monthly?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2392"
-    ]
+    "status": "works"
   },
   {
     "rank": 39,

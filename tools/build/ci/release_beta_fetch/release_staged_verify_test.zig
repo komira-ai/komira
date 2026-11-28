@@ -346,6 +346,7 @@ const NATIVES = [_][]const u8{
     "komira-ai/crypto",
     "komira-ai/libc",
     "komira-ai/log",
+    "komira-ai/lz4",
     "komira-ai/metrics",
 };
 
@@ -360,6 +361,7 @@ const SERVED = [_]Pkg{
     .{ .name = "komira-ai/json", .bytes = "json bytes, no dependency" },
     .{ .name = "komira-ai/libc", .bytes = "libc bytes and its archive" },
     .{ .name = "komira-ai/log", .bytes = "log bytes and its archive" },
+    .{ .name = "komira-ai/lz4", .bytes = "lz4 bytes and its archive" },
     .{ .name = "komira-ai/metrics", .bytes = "metrics bytes and its archive" },
     .{ .name = "komira-ai/uuid", .bytes = "uuid bytes", .deps = &.{ "komira-ai/clock", "komira-ai/awslc" } },
 };
@@ -570,8 +572,8 @@ test "add: prod serves the set; init, an add per package, then sync, and the loc
     defer log.deinit();
     var why: []const u8 = "";
     const rep = try runAdd(a, &tmp, &fake, &why, &log.writer);
-    try t.expectEqual(@as(usize, 9), rep.members);
-    try t.expectEqual(@as(usize, 10), rep.entries);
+    try t.expectEqual(@as(usize, 10), rep.members);
+    try t.expectEqual(@as(usize, 11), rep.entries);
     const cache = try path(a, &tmp, "work/cache");
     const want = [_][]const u8{
         "init --name release-check/prod_add",
@@ -583,6 +585,7 @@ test "add: prod serves the set; init, an add per package, then sync, and the loc
         "add komira-ai/crypto --registry prod",
         "add komira-ai/libc --registry prod",
         "add komira-ai/log --registry prod",
+        "add komira-ai/lz4 --registry prod",
         "add komira-ai/metrics --registry prod",
         try std.fmt.allocPrint(a, "sync --registry prod --cache {s}", .{cache}),
     };
@@ -686,7 +689,7 @@ test "add: prod also holds the release before, built for the Mojo init writes; t
     defer log.deinit();
     var why: []const u8 = "";
     const rep = try runAdd(a, &tmp, &fake, &why, &log.writer);
-    try t.expectEqual(@as(usize, 10), rep.entries);
+    try t.expectEqual(@as(usize, 11), rep.entries);
     // init's mopm.toml with only the [toolchain] mojo line changed
     const want = try std.mem.replaceOwned(u8, a, INIT_TOML, "mojo = \"" ++ INIT_MOJO ++ "\"", "mojo = \"" ++ RELEASE_MOJO ++ "\"");
     try t.expectEqualStrings(want, try tmp.dir.readFileAlloc(a, "work/project/mopm.toml", 1 << 20));
@@ -708,7 +711,7 @@ test "add: a mopm that locks for the Mojo init wrote gets the release before, an
     defer log.deinit();
     var why: []const u8 = "";
     try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
-    try t.expectEqualStrings("11 problem(s) with what `mopm add` installed from prod:\n" ++
+    try t.expectEqualStrings("12 problem(s) with what `mopm add` installed from prod:\n" ++
         "  mopm.lock is locked for mojo [1.0.0]; this release was built for mojo 1.1.0\n" ++
         "  komira-ai/async_api: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/awslc: the lock records version 0.1.8; this release published 0.1.9\n" ++
@@ -718,6 +721,7 @@ test "add: a mopm that locks for the Mojo init wrote gets the release before, an
         "  komira-ai/json: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/libc: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/log: the lock records version 0.1.8; this release published 0.1.9\n" ++
+        "  komira-ai/lz4: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/metrics: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/uuid: the lock records version 0.1.8; this release published 0.1.9", why);
 }
@@ -1131,9 +1135,9 @@ test "add on the command line: exit 0 and the summary when the checks pass, 1 an
     var err = sink();
     defer err.deinit();
     try t.expectEqual(@as(u8, 0), try rsv.cliAdd(a, &args, "linux-64", fake.runner(), &out.writer, &err.writer));
-    try t.expect(std.mem.endsWith(u8, out.written(), "release_staged_verify: `mopm add` of 9 package(s) from https://conda.mopm.dev/ locked 10 package(s) of this release and installed the published bytes (sha256 and size)\n"));
+    try t.expect(std.mem.endsWith(u8, out.written(), "release_staged_verify: `mopm add` of 10 package(s) from https://conda.mopm.dev/ locked 11 package(s) of this release and installed the published bytes (sha256 and size)\n"));
     try t.expectEqualStrings("", err.written());
-    try t.expectEqual(@as(usize, 11), fake.calls.items.len);
+    try t.expectEqual(@as(usize, 12), fake.calls.items.len);
 
     var tmp2 = t.tmpDir(.{});
     defer tmp2.cleanup();

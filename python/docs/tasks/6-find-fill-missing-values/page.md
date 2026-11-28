@@ -1,6 +1,6 @@
 # How do I find and fill missing values?
 
-Find them with `IS NULL` and `count(*) - count(column)` in SQL, or `col(...).is_null()` on the polars-shaped frame, and fill them with `COALESCE`, `fillna` or `fill_null`; the pandas-shaped frame cannot yet find them (komira-ai/komira#2362).
+Find them with `IS NULL` and `count(*) - count(column)` in SQL, `isna()` and `notna()` on the pandas-shaped frame, or `col(...).is_null()` on the polars-shaped frame, and fill them with `COALESCE`, `fillna` or `fill_null`.
 
 <!-- include example.py -->
 ```python
@@ -37,9 +37,17 @@ with komira.Session() as s:
     )
     print(filled.to_arrow().to_pylist())
 
-# pandas-shaped: fillna takes a dict of a value per column, or one value for
-# every column of the frame.
+# pandas-shaped: isna() marks each missing value, so isna().sum() counts them
+# per column; a column's isna() filters on them and notna() makes a column.
 df = komira.read_csv("readings.csv")
+print(df.isna().sum().materialize().to_arrow().to_pylist())
+no_score = df[df["score"].isna()][["id"]]
+print(no_score.sort_values("id").materialize().to_arrow().to_pylist())
+marked = df.assign(has_score=df["score"].notna())[["id", "has_score"]]
+print(marked.sort_values("id").materialize().to_arrow().to_pylist())
+
+# fillna takes a dict of a value per column, or one value for every column of
+# the frame.
 by_column = df.fillna({"city": "unknown", "score": 0.0, "qty": 0})
 print(by_column.sort_values("id").materialize().to_arrow().to_pylist())
 numbers = df[["id", "score", "qty"]].fillna(0)
@@ -71,6 +79,9 @@ Output:
 [{'id': 3}, {'id': 4}]
 [{'city_missing': 1, 'score_missing': 2, 'qty_missing': 3}]
 [{'id': 1, 'city': 'Oslo', 'score': 12.5, 'qty': 3}, {'id': 2, 'city': 'unknown', 'score': 8.0, 'qty': 0}, {'id': 3, 'city': 'Lima', 'score': 0.0, 'qty': 0}, {'id': 4, 'city': 'Rome', 'score': 0.0, 'qty': 0}]
+[{'id': 0, 'city': 1, 'score': 2, 'qty': 3}]
+[{'id': 3}, {'id': 4}]
+[{'id': 1, 'has_score': True}, {'id': 2, 'has_score': True}, {'id': 3, 'has_score': False}, {'id': 4, 'has_score': False}]
 [{'id': 1, 'city': 'Oslo', 'score': 12.5, 'qty': 3}, {'id': 2, 'city': 'unknown', 'score': 8.0, 'qty': 0}, {'id': 3, 'city': 'Lima', 'score': 0.0, 'qty': 0}, {'id': 4, 'city': 'Rome', 'score': 0.0, 'qty': 0}]
 [{'id': 1, 'score': 12.5, 'qty': 3}, {'id': 2, 'score': 8.0, 'qty': 0}, {'id': 3, 'score': 0.0, 'qty': 0}, {'id': 4, 'score': 0.0, 'qty': 0}]
 [{'city': 1, 'score': 2, 'qty': 3}]
@@ -81,8 +92,8 @@ Output:
 ## Notes
 
 - A missing value is NULL, and an empty CSV field reads as NULL. `count(*)` counts the rows and `count(column)` the values that are not NULL, so their difference is the number of missing values.
-- Not there yet: the pandas-shaped `DataFrame` and `Series` have no `isna()` or `notna()`, so `df.isna().sum()` cannot count missing values there: komira-ai/komira#2362. Count them with SQL or with the polars-shaped frame, as above.
-- `probe_isna.py` beside this page tries `df.isna().sum()` on a frame from `komira.read_csv` and must fail with the line in `probe_isna.error.txt`. The day it runs, the probe's target goes red, and the page, the catalogue status and the probe change with it.
+- On the pandas-shaped frame, `df.isna()` is a frame of booleans with the same column names, so `df.isna().sum()` gives one row with the count of missing values of each column; `df.notna()` is its negation. On a column, `df["score"].isna()` and `notna()` are boolean Series, never NULL, used as a filter or assigned as a column. `isnull` and `notnull` are the same methods.
+- On the pandas-shaped frame a NaN in a float column is missing as NULL is, for `isna`, `notna`, `dropna` and `fillna` alike; on the polars-shaped frame `is_null()` finds NULL only.
 - `fillna` on the pandas-shaped frame fills with a value of the column's own type: an int for an integer column, an int or a float for a float column, a str for a text column. A column keeps its type, so `df.fillna(0)` on a frame with a text column is refused: pass a dict of values by column, or select the number columns first, as above. A NaN in a float column is filled too.
 - `fillna` refuses `method=`, `limit=`, `axis=1` and `inplace=True`, and a Series or frame as the value: a frame has no row order or index to fill by. `ffill()`, `bfill()` and `interpolate()` are not supported yet.
 - `fill_null` on the polars-shaped frame takes a value: `strategy=` and `limit=` raise `UnsupportedOperation`, "fill_null: strategy= and limit= fill from neighbouring rows, which a plan does not order; fill with a value: fill_null(value)". A NaN is not null there.

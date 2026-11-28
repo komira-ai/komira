@@ -8,7 +8,16 @@ column's type; `df.dropna(how="any", subset=None)` (or `how="all"`) keeps the
 rows with no missing value (or not every one missing). In both, as in pandas, a
 NaN in a float column is missing as NULL is.
 
-`isna` and `notna` are not built yet. The aggregates still read a NaN as a
-value ([group-by](groupby.md)).
+`df.isna()` gives a frame of the same columns, each True where the value is
+missing and False elsewhere, so `df.isna().sum()` counts the missing values of
+each column; `df.notna()` is its negation, column by column. On a Series,
+`s.isna()` and `s.notna()` give a boolean Series, used as a filter
+(`df[df["score"].isna()]`) or as a column (`df.assign(m=df["score"].notna())`).
+A NaN in a float column is missing here too, and the answer is never NULL.
+`isnull` and `notnull` are the same methods. `isna` and `notna` replace every
+column, so a sorted frame's `isna()` is unordered; a filter by a Series'
+`isna()` keeps the order. The four methods are newer than the release above.
+
+The aggregates still read a NaN as a value ([group-by](groupby.md)).
 
 Back to [the DataFrame overview](overview.md).

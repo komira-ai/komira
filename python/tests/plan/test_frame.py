@@ -932,7 +932,7 @@ def test_a_chain_of_verbs_reaches_the_session_only_as_plan_bytes():
 
 FRAME_MODULES = (
     "_frame.py", "_groupby.py", "_series.py", "_refusals.py", "_verbs.py", "_missing.py", "_cast.py", "_accessors.py",
-    "_display.py", "_merge.py", "_windows.py", "_write.py", "_unpivot.py",
+    "_display.py", "_merge.py", "_windows.py", "_write.py", "_resample.py", "_unpivot.py",
 )
 PRIVATE_SESSION = {"_plan_stream", "_plan_render", "_plan_write", "_parquet_schema", "_csv_binding", "_json_binding"}
 ALLOWED_IMPORTS = {
@@ -948,6 +948,8 @@ ALLOWED_IMPORTS = {
     # a result's rows with pyarrow, and reads no stream.
     ".:_display", "html", "collections.abc:Sequence", "pyarrow", "pyarrow.compute",
     ".:_write", "collections.abc:Mapping",
+    # DataFrame.resample (komira/_resample.py) builds the bucket and a GroupBy.
+    ".:_resample", "._frame:DataFrame", "._groupby:GroupBy",
     # melt (komira/_unpivot.py): the plan it builds, and the Arrow name of a
     # value column's type.
     "._unpivot:unpivot_plan", "._plan._wire:arrow_name",
