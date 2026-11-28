@@ -27,8 +27,11 @@ them cannot do yet is the first question at the end. The count of such tasks is 
 - **Task**: one entry of `docs/tasks/catalogue.json`, a question such as "How do I read a CSV
   file?", with a rank and a short name (its *slug*, `read-csv-file`).
 - **Form**: one way to write a task's program, a language and the part of komira it uses. There are
-  five: `sql`, `python`, `typescript`, `mojo` (the Mojo session) and `mojo_plan` (the Mojo plan
-  builder, section 7).
+  five: `sql`, `python`, `typescript`, `mojo` ("Mojo": the untyped Mojo SDK, which calls the
+  shared library as Python and TypeScript do) and `mojo_plan` ("Mojo physical plan": the separate,
+  Mojo-only surface that writes physical plans, section 7).
+- **Shared library**: libkomira, the C interface every SDK calls. It has two ways in, SQL text and
+  a logical plan; SQL is turned into a logical plan inside it.
 - **Tree**: the folder that holds one form's examples, one sub-folder per task, named
   `<rank>-<slug>`. `python/docs/tasks/` is the Python tree.
 - **Page**: the `page.md` in a task's folder: the question, the program, what it prints, and notes.
@@ -49,7 +52,7 @@ them cannot do yet is the first question at the end. The count of such tasks is 
 1. **One tree per form, joined by slug.** A tree sits in the package whose runner runs its
    examples: Python in `python/docs/tasks/` (exists), TypeScript in `node/docs/tasks/`, Mojo in
    `src/komira/docs/tasks/` (the package the Mojo SDK design, komira-ai/komira#2496, proposes),
-   the Mojo plan builder in `src/komira/docs/mojo_plan_tasks/`, and SQL in
+   Mojo physical plan in `src/komira/docs/mojo_plan_tasks/`, and SQL in
    `python/docs/sql_tasks/`, beside the Python lines that run it. Each task folder keeps exactly `example.<ext>`,
    `expected_output.txt` and `page.md`, as today. The open komira.dev design
    (komira-ai/komira#2352) moves to these names.
@@ -121,7 +124,8 @@ them cannot do yet is the first question at the end. The count of such tasks is 
     (`src/sql/sql_parser.mojo`), and three Python examples use it to write files.
 - **The one `files` source.** Python has `komira.files(location, ...)` (`python/komira/_sources.py`),
   which `Session.add_sql_binding` binds to a SQL name. It reads Parquet today. The Mojo SDK
-  design proposes the same `files` for Mojo, Parquet only until its slice 6 adds CSV and JSON.
+  design proposes `files` for Mojo only as far as the shared library's binding call goes, so
+  Parquet today.
   TypeScript has no `files` yet: it has `registerParquet`. Every form that runs SQL text can read a
   CSV or JSON file in the SQL itself, `read_csv('<file>')`, without `files`.
 - **TypeScript.**
@@ -148,15 +152,28 @@ them cannot do yet is the first question at the end. The count of such tasks is 
     ([readme_e2e](../../tools/build/readme_e2e/README.md)). That run judges an example by its exit
     status only; nothing compares what it prints.
   - `mojo_binary(expected_stdout = "...")` compares a program's output with a string, not a file.
-  - `sdk_exec` runs SQL over Parquet, CSV and local Iceberg (`run_sql`, `EngineContext`).
+  - The owner's model of the Mojo SDKs: the untyped Mojo SDK is the package `komira`, a thin package
+    that calls the shared library through its C interface, as the Python and TypeScript packages
+    do, so installing it compiles no engine. Writing physical plans is a separate, Mojo-only
+    surface; it is the one that links the engine's Mojo libraries. The Mojo SDK design
+    (komira-ai/komira#2496) works this out.
+  - `sdk_exec` runs SQL over Parquet, CSV and local Iceberg (`run_sql`, `EngineContext`) inside the
+    engine; the physical-plan surface would rest on it.
   - `src/sdk/table_display.mojo` has
     `def format_table(batch: RecordBatch, max_rows: Int = 20) raises -> String`.
   - `sdk` and `sdk_exec` are unpublished because they depend on unpublished libraries, and so is
     the engine closure `sdk_exec` imports ([release/UNPUBLISHED.md](../../release/UNPUBLISHED.md)).
-    `arrow` has no blocker there; it is not yet in `release/readme_e2e/packages.bzl`. No library
-    a user can install runs a query.
-  - The Mojo packages are not built for linux-arm64 (the Mojo SDK design, komira-ai/komira#2496,
-    its platform row). This is listed with the gate's exceptions (question 1).
+    `arrow` has no blocker there; it is not yet in `release/readme_e2e/packages.bzl`. These block
+    only the physical-plan surface: `komira` depends on neither `sdk` nor `sdk_exec`, but on the
+    shared library. No Mojo package a user can install runs a query yet, because `komira` does not
+    exist yet.
+  - How the shared library reaches a Mojo user, the boundary of its C calls, how errors and the
+    Arrow C stream come back, and how `Result` prints, are the Mojo SDK design's to say. This
+    document relies only on `komira` running SQL text through the shared library, as Python and
+    TypeScript do.
+  - The shared library is not built for linux-arm64 yet, so neither the Python wheel nor the Mojo
+    `komira` package that calls it runs there (the Mojo SDK design, komira-ai/komira#2496, its
+    platform row). This is listed with the gate's exceptions (the question at the end).
 
 ## What each form can show
 
@@ -183,11 +200,11 @@ storage with a credential, which SQL text cannot name; ranks 22, 89 and 90 store
 |---|---|---|
 | Python | 80 (45 `works`, 35 `partial`) | 0. The 35 `partial` ones do part of their task |
 | SQL | 0 | between 6 and 69. At least the 6 of the search above. At most 69: of the 16 `sql-only` examples, 5 are among those 6 (22, 31, 89, 90, 93), so 11 can be written as SQL as they stand; each of the other 63 must be rewritten to see whether SQL can do it *[est]* |
-| TypeScript | 0 | between 6 and 69, the same 6 (the package has no credentials and no database writes yet), and the same rewrite for the rest *[est]* |
-| Mojo, the session | 0 | the same range as SQL, between 6 and 69: it runs SQL text, so it reads CSV and JSON through `read_csv('<file>')` as SQL and TypeScript do. Ranks 31 and 93 need a credential, which the session gets only with the Mojo SDK design's slice 7 (remote files) |
-| Mojo, the plan builder | 0 | all 80 until the builder exists (the Mojo SDK design) |
+| TypeScript | 0 | between 6 and 69, the same 6 today, and the same rewrite for the rest *[est]*. Ranks 31 and 93 leave the 6 once the package passes on credentials to the shared library's binding call |
+| Mojo | 0 | between 6 and 69 today, as SQL: it hands SQL text (or a logical plan) to the shared library, so it can show what SQL and logical plans can show, and reads CSV and JSON through `read_csv('<file>')` as SQL and TypeScript do. As for TypeScript, ranks 31 and 93 leave the 6 once credentials pass through `files`, so its floor is then 4 |
+| Mojo physical plan | 0 | all 80 until that surface exists (the Mojo SDK design) |
 
-Rank 75 reads two CSV files. Its Mojo session example reads them with `read_csv('<file>')` in the
+Rank 75 reads two CSV files. Its Mojo example reads them with `read_csv('<file>')` in the
 SQL text, as its TypeScript example does, so it can be shown as soon as `komira` is published.
 
 ## 1. Where the examples live, and what they are called
@@ -200,9 +217,9 @@ python/docs/tasks/<rank>-<slug>/             form python
     example.py    expected_output.txt  page.md  [probe_<name>.py    probe_<name>.error.txt]
 node/docs/tasks/<rank>-<slug>/               form typescript
     example.ts    expected_output.txt  page.md  [probe_<name>.ts    probe_<name>.error.txt]
-src/komira/docs/tasks/<rank>-<slug>/         form mojo (the session)
+src/komira/docs/tasks/<rank>-<slug>/         form mojo (Mojo)
     example.mojo  expected_output.txt  page.md  [probe_<name>.mojo  probe_<name>.error.txt]
-src/komira/docs/mojo_plan_tasks/<rank>-<slug>/   form mojo_plan (the plan builder)
+src/komira/docs/mojo_plan_tasks/<rank>-<slug>/   form mojo_plan (Mojo physical plan)
     example.mojo  expected_output.txt  page.md  [probe_<name>.mojo  probe_<name>.error.txt]
 python/docs/sql_tasks/<rank>-<slug>/         form sql
     example.sql   expected_output.txt  page.md  [probe_<name>.sql   probe_<name>.error.txt]
@@ -224,12 +241,13 @@ Why this layout, and not the other two:
 
 Where each tree sits:
 
-- **The Mojo tree** sits in the package of the library its examples import, `komira`
-  (`src/komira/`), as the Mojo SDK design (komira-ai/komira#2496) proposes (its decision D1). If that name
+- **The `mojo` tree** sits in the package its examples import, `komira` (`src/komira/`), the
+  working name the Mojo SDK design (komira-ai/komira#2496) uses. If that name
   changes, the path follows it. If `//:src_layout` reads the nested package as one of its own, the
   slice that adds the tree adds its row to [docs/architecture.md](../architecture.md).
-- **The plan builder** (section 7) is a second tree in the same package,
-  `src/komira/docs/mojo_plan_tasks/`, with its own tab.
+- **The `mojo_plan` tree** (Mojo physical plan, section 7) sits in the package of that surface,
+  with its own tab. The Mojo SDK design names that package; `src/komira/docs/mojo_plan_tasks/` is
+  the path agreed with it so far, and the tree follows the package if it differs.
 - **The SQL tree** is `python/docs/sql_tasks/`, beside `run_sql.py`, the Python lines that run it.
   Its per-task runs install the wheel, which `//:python_closure` allows only under `python/`, and
   they are declared from a glob of the tree's own folders, which only the tree's own BUCK file can
@@ -303,8 +321,8 @@ Output:
   non-gap entry with no record for a form. A page in one tree says nothing about the other forms;
   the catalogue and the site, which joins the pages, hold that, and the site generator's refusal
   (section 1) keeps the two the same.
-- **Tab order.** The design proposes SQL first, then Python, TypeScript, the Mojo session and the
-  Mojo plan builder: SQL is the one
+- **Tab order.** The design proposes SQL first, then Python, TypeScript, Mojo and Mojo physical
+  plan: SQL is the one
   form every SDK runs as written (79 of the 80 Python examples hold SQL text), and a reader who
   knows SQL needs no SDK to read it. The order is the site's to set, and the order of the profile
   table carries whatever it sets.
@@ -324,12 +342,13 @@ language would:
 | SQL | what `run_sql.py` and `run_sql.ts` print, the same bytes from both: per statement, a line of column names, then a line per row, tab-separated, a null as `NULL` (section 4) |
 | Python | as today: `to_pylist()` dict reprs (`{'id': 1, 'name': 'Ana'}`), `None`, `7.0`, dtype names (`int64 float64`). Each of the 7 lines of rank 1's `expected_output.txt` (read by hand) is Python `print` output of a dict, a list or dtype names |
 | TypeScript | the values the example reads from the `Table`, with `console.log`. `Result` has no printer. `apache-arrow` gives an Int64 value as a `bigint` *[inferred, not measured here]*. Slice 1 fixes the exact form by running rank 75 |
-| Mojo | `print(result)`, as the Mojo SDK design (komira-ai/komira#2496) proposes (§1 there): `Result` prints itself through `sdk`'s `format_table` |
+| Mojo | `print(result)`, as the Mojo SDK design (komira-ai/komira#2496) proposes: how `Result` prints is that design's (its section on `Result`) |
 
-For Mojo, `format_table` (`src/sdk/table_display.mojo`) prints an ASCII box with a row of column names, a row
-of type labels (`str`, `i64`) and a footer line `N rows`. Its unit test
-`test_exact_table_alignment` (`src/sdk/tests/test_table_display_direct.mojo`) holds that text
-exactly.
+The only Mojo table printer today is `format_table` (`src/sdk/table_display.mojo`): an ASCII box
+with a row of column names, a row of type labels (`str`, `i64`) and a footer line `N rows`, held
+exactly by its unit test `test_exact_table_alignment`. It is in `sdk`, which `komira` does not
+import, so whether `print(result)` uses it is the Mojo SDK design's open point. Mojo physical plan
+prints as that surface's design says; its runner and printing come with slice 6.
 
 One output file that every form prints byte for byte is not part of this design. It would need a
 printer on Python's and Node's `Result`, an API komira would invent, and every Python output would
@@ -350,7 +369,7 @@ every form:
 | Rule | `task_examples` in `python/task_examples.bzl` | `npm_task_examples` in `node/task_examples.bzl` | `mojo_task_examples` in `tools/build/mojo/task_examples.bzl` | `task_examples` in `python/task_examples.bzl`, running `run_sql.py`; and one Node target |
 | One target per folder / per probe | `//python/docs/tasks:<rank>-<slug>` / `<rank>-<slug>__probe_<name>` | `//node/docs/tasks:<rank>-<slug>` / `__probe_<name>` | `//src/komira/docs/tasks:<rank>-<slug>` / `__probe_<name>` | `//python/docs/sql_tasks:<rank>-<slug>` / `__probe_<name>`; `//node/docs:sql_tasks` for all |
 | The one target in the check's root files | `:examples` | `:examples` | `:examples` | `:examples` |
-| What the user gets | the built wheel in an empty environment of the hermetic CPython 3.13 | the packed npm package and the pinned `apache-arrow` closure, installed offline into an empty project | pull request: the `komira` library and its closure as the build holds them; release: the installed `.conda` | the built wheel, and the packed npm package, each as for its own form |
+| What the user gets | the built wheel in an empty environment of the hermetic CPython 3.13 | the packed npm package and the pinned `apache-arrow` closure, installed offline into an empty project | pull request: the `komira` package and the shared library, both as the same pull request builds them; release: the installed `.conda` | the built wheel, and the packed npm package, each as for its own form |
 | Before the run | none | `tsc --noEmit`, strict, over `example.ts` against the installed package's `.d.ts` | the compile, with the pinned Mojo | none |
 | Platforms in the pull request's check | linux-x86_64 | linux-x86_64, the pinned Node 24 | linux-x86_64 | linux-x86_64 |
 | After merge | `:examples_macos_arm64`, reporting | proposed: `:examples_macos_arm64`, in the macOS job that runs `//node:install_test_macos_arm64` today, reporting | the release's README e2e machinery, against the staged set | with its package's other macOS tests |
@@ -375,8 +394,11 @@ CPython. The install test keeps covering Node 22, 24 and 26.
 (komira-ai/komira#2496) uses it. The README e2e checks only that a program exits cleanly, and task
 pages need the printed table compared too. The compare is part of slice 5. So:
 
-- In the pull request's check, `mojo_task_examples` builds each `example.mojo` against `komira` and
-  its closure, the same compile the welded tests of README examples use. It runs the program from
+- In the pull request's check, `mojo_task_examples` builds each `example.mojo` against `komira` as
+  the build holds it, with the shared library beside it, the same compile the welded tests of
+  README examples use. A Mojo example compiles no engine: `komira` calls the shared library, so the
+  compile is of the example and the thin package only. (A Mojo physical plan example links the
+  engine's libraries and pays their compile.) It runs the program from
   an empty folder and compares the output with `expected_output.txt`. `mojo_binary`'s
   `expected_stdout` takes a string, and Starlark cannot read a file, so the compare is a step of the
   rule, which reads the file, as the Python and Node runners do.
@@ -387,9 +409,9 @@ pages need the printed table compared too. The compare is part of slice 5. So:
   request runs only the build and the unit tests).
   Decision 4 of `documentation_tests.md` (a page that works on main and not on the published package
   says "needs the next release") covers the time between the two.
-- A Mojo example prints with `print(result)`, as the Mojo SDK design's examples do. `print(result)`
-  writes `format_table`'s text, and `format_table` is declared `raises`; what `print(result)` does
-  when formatting fails is the sentence on it in that design's section on `Result`. An example's
+- A Mojo example prints with `print(result)`, as the Mojo SDK design's examples do. How `Result`
+  prints, and what `print(result)` does when formatting fails, are that design's section on
+  `Result`. An example's
   `expected_output.txt` holds only what a successful print writes. An example also makes its own
   input with `COPY ... TO`, as that design's README example does.
 
@@ -510,8 +532,8 @@ Each tree's root files name its `:pages`, `:examples` and `:refuses_*` targets, 
 
 **The one `files` source.** The owner asked for one files source passed into every SDK. A task
 example binds its input with `files` in every form whose SDK has it for the task's file kind:
-Python's `komira.files` and Mojo's `files`, both Parquet only today (Mojo's until the Mojo SDK
-design's slice 6). For any other kind, the example reads the file in the SQL text,
+Python's `komira.files` and Mojo's `files`. Both pass on the shared library's binding call, which
+reads Parquet today; a kind it lacks is a gap in the shared library, not in one SDK. For any other kind, the example reads the file in the SQL text,
 `read_csv('<file>')`, which needs no `files`; Python's older examples use `register_csv`. Each batch of slice 4 moves the examples it touches to `files` as each kind lands. TypeScript
 has no `files` yet; its examples read files in the SQL text until it does.
 
@@ -536,17 +558,17 @@ has no `files` yet; its examples read files in the SQL text until it does.
 ```
 
 - `forms` has exactly the profile names as keys: `sql`, `python`, `typescript`, `mojo` and,
-  once its profile row lands, `mojo_plan`.
+  once its profile row lands, `mojo_plan` (Mojo physical plan).
 - **A new form is a new key.** It comes with its profile row, and with a record in every non-gap
-  entry, in one commit. The plan builder's key is `mojo_plan` (section 7). Its records start as
-  `not-shown`, with the reason that the builder does not exist yet.
+  entry, in one commit. Mojo physical plan's key is `mojo_plan` (section 7). Its records start as
+  `not-shown`, with the reason that the surface does not exist yet.
 - Each value has a `status` of `works`, `partial` or `not-shown`, and an optional `issues` list in
   today's `komira-ai/<repo>#<n>` form. A form's `issues` are those that block that form only: a
   missing verb in its SDK, or its package unpublished. The entry's own `issues` stay as today: the
   issues that block the task as komira does it, required for a gap and allowed for a partial entry.
   An issue may appear in both.
 - A `not-shown` value also has a `reason`: one line, not empty. The checker does not require it to
-  name an issue; question 1 is whether the gate does.
+  name an issue; the question at the end is whether the gate does.
 - A gap entry has no `forms`. No form shows a gap.
 - **What "works" means.** A form's `works` means its example does the whole task. `partial` means
   the example does part of it, and its page says which part. The entry's `status` is held equal to
@@ -584,10 +606,10 @@ has no `files` yet; its examples read files in the SQL text until it does.
 | `python` | `python/docs/tasks` | `example.py` | `probe_<name>.py` | `python` | `py` |
 | `typescript` | `node/docs/tasks` | `example.ts` | `probe_<name>.ts` | `typescript` | `ts` |
 | `mojo` | none until `komira` is published (then `src/komira/docs/tasks`) | `example.mojo` | `probe_<name>.mojo` | `mojo` | `Mojo` |
-| `mojo_plan` | added with the plan builder (then `src/komira/docs/mojo_plan_tasks`) | `example.mojo` | `probe_<name>.mojo` | `mojo` | `Mojo` |
+| `mojo_plan` | added with Mojo physical plan (then `src/komira/docs/mojo_plan_tasks`) | `example.mojo` | `probe_<name>.mojo` | `mojo` | `Mojo` |
 
-Every profile has `expected_output.txt` (`text`), `page.md` and `probe_<name>.error.txt`. The plan
-builder is the fifth row, with its own tree, the same file names and the same fence word. Two rows
+Every profile has `expected_output.txt` (`text`), `page.md` and `probe_<name>.error.txt`. The
+`mojo_plan` row (Mojo physical plan) is the fifth row, with its own tree, the same file names and the same fence word. Two rows
 may share a fence word; no two rows share a tree.
 
 - **The new flag.** `tasks-check` takes `--profile <name>`, and it is required. Each tree's `:pages`
@@ -639,26 +661,29 @@ may share a fence word; no two rows share a tree.
 
 - **Which API the TypeScript and Mojo examples use.** The TypeScript package today runs SQL; a
   DataFrame builder is "explicitly later" in [typescript_package.md](typescript_package.md). The
-  Mojo SDK design's session runs SQL over `files`.
-- **The Mojo SDK's forms.** The Mojo SDK design (komira-ai/komira#2496) has three: the session
-  (`files` and SQL), first; the plan builder, whose code writes the physical plan directly, in the
-  same package, second; and a typed SDK, later, with its own design. Task pages show two of them,
-  each with its own tab:
-  - the session: form `mojo`, tree `src/komira/docs/tasks/`;
-  - the plan builder: form `mojo_plan`, tree `src/komira/docs/mojo_plan_tasks/`, with the same Mojo
-    runner.
+  untyped Mojo SDK hands the shared library SQL text or a logical plan, like Python and TypeScript.
+- **The Mojo surfaces.** The Mojo SDK design (komira-ai/komira#2496) works them out from the owner's
+  model. Task pages show two, each with its own tab:
+  - **Mojo**: the untyped Mojo SDK, the package `komira`, which calls the shared library. Its column
+    names and types are checked when the plan is bound in the library, at run time. Form `mojo`,
+    tree `src/komira/docs/tasks/`.
+  - **Mojo physical plan**: the separate, Mojo-only surface whose code writes physical plans. It
+    links the engine's Mojo libraries, so it needs them published. Form `mojo_plan`, tree
+    `src/komira/docs/mojo_plan_tasks/`, with the same Mojo runner, once it exists.
 
-  The typed SDK has no form here; its own design would add one, as a new profile row, tree and
-  catalogue key.
+  A typed Mojo SDK, whose column types are checked when the user's program is compiled, may come
+  later; the owner has not ruled on it. It has no form here; its own design would add one, as a
+  new profile row, tree and catalogue key. The keys and trees above follow the Mojo SDK design and
+  change with it.
 
 | | SQL only | Frame APIs too |
 |---|---|---|
 | Layout, file names, page rules, checker, runners, catalogue keys | as above | as above |
 | How many tasks each form shows | the ranges of [What each form can show](#what-each-form-can-show) | more, once a frame API exists |
-| Probes | a probe can only try SQL, since a frame call that does not exist is a type or compile error, not a run failure | a probe can try a frame verb that is refused by name at run time |
+| Probes | a probe can only try SQL. In TypeScript a call that does not exist is a type error; in Mojo it is a compile error. A missing column or type in untyped Mojo fails when the library binds the plan, at run time, which a probe can hold | a probe can try a frame verb that is refused by name at run time |
 
 A Mojo profile's tree is set only when its library is published. A page shows only what a reader
-can install and run. A Mojo example built against the unpublished `sdk_exec` in this repository
+can install and run. A Mojo example built against an unpublished `komira` in this repository
 would pass the pull request's check and fail for every reader.
 
 ## 8. The slices, in order
@@ -700,8 +725,10 @@ would pass the pull request's check and fail for every reader.
    tree, `mojo_task_examples` and its six `refuses_*` targets, the compare phase in the release's
    README e2e, the byte-for-byte compare of each output with its `expected_output.txt`, and the
    Mojo examples of the tasks it can show, rank 75 among them.
-6. **The plan builder's tree** (`mojo_plan`), once the Mojo SDK design's builder exists: its profile
-   row, tree, records and examples, with the runner of slice 5.
+6. **The Mojo physical plan tree** (`mojo_plan`), once that surface exists: its profile
+   row, tree, records and examples, with the runner of slice 5. Its examples link the engine's
+   Mojo libraries, so each pays the engine's compile, which the `mojo` examples do not; that
+   surface's design gives the cost.
 
 ## What each check proves
 
@@ -730,7 +757,7 @@ Every row has a negative case that must go red and name the line or the entry.
    - **Option 1:** every task that Python shows, and that the language can show at all, works in
      that language before the site publishes; the tasks a form can never show are listed by rank
      with the reason. Today that list is the 6 of [What each form can show](#what-each-form-can-show)
-     (ranks 22, 31, 60, 89, 90 and 93) for SQL; for TypeScript and the Mojo session, ranks 31 and
+     (ranks 22, 31, 60, 89, 90 and 93) for SQL; for TypeScript and Mojo, ranks 31 and
      93 are on it only until each has credentials. Cost: nothing publishes until every other task
      works in every form. Up to 63 tasks need their SQL written first, and some may need a frame
      API in TypeScript or Mojo, which has no design yet.
@@ -739,8 +766,8 @@ Every row has a negative case that must go red and name the line or the entry.
      checker today would accept any reason; if this is granted, the checker is changed to refuse a
      reason that names no issue.
 
-   Under either option, the list of exceptions also says that the Mojo packages are not built for
-   linux-arm64.
+   Under either option, the list of exceptions also says that the shared library, and so the Mojo
+   `komira` package, is not built for linux-arm64.
 
    The exact counts do not exist until the examples are written; the ranges are bounds.
 
