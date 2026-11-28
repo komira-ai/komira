@@ -16,7 +16,8 @@ is a `km.DataFrame`, `s` a `km.Series`, `lf` a `kpl.LazyFrame` and `expr` a `kpl
 This part has one section per capability of `CAPABILITIES` in
 [tests/surface_capability_matrix.bzl](../../tests/surface_capability_matrix.bzl), the sections in name
 order, for the matrix's `pandas` and `polars` columns. Each section gives the plan the verbs build, what
-the engine does with it today, and each skin's spellings, one per line in sorted order.
+the engine does with it today, and each skin's spellings, one per line in byte order (the order
+`LC_ALL=C sort` gives).
 
 "Engine today" says what the engine does with the plan, from
 [src/lowering/README.md](../../src/lowering/README.md) and [src/sdk_exec/README.md](../../src/sdk_exec/README.md):
