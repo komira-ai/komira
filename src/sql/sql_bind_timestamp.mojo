@@ -13,7 +13,7 @@ from plan_expr.expr_walk import (
     PlanColRefFields, walk_expr_field,
 )
 from plan_expr.scalar_value import ScalarValue
-from sql.sql_ast import SqlExpr
+from sql.sql_ast import SX_NULL, SqlExpr
 from sql.sql_bind_expr import _bind_scalar
 from sql.sql_bind_scope import (
     CteScope, _date_to_days, BindScope,
@@ -442,7 +442,10 @@ def _bind_strptime(
             "SQL bind error: `" + fname + "` takes two arguments, the text and"
             " a format string, but got " + String(len(cargs)) + "."
         )
-    var text = _bind_scalar(cargs[0], schema, scope, catalog, cte_scope, prebound)
+    # A bare NULL is not bindable on its own here, so the NULL format and the
+    # NULL text are answered before their arguments are bound.
+    if cargs[1].tag == SX_NULL:
+        return _null_timestamp()
     var fmt = _bind_scalar(cargs[1], schema, scope, catalog, cte_scope, prebound)
     if fmt.tag != EXPR_LITERAL:
         var fmissing = String("")
@@ -465,8 +468,9 @@ def _bind_strptime(
     # Compiling refuses an unserved directive by name and raises DuckDB's
     # own error for a malformed format.
     _ = compile_strptime_format(fval.string_val)
-    if text.tag == EXPR_LITERAL and text.literal_value().is_null():
+    if cargs[0].tag == SX_NULL:
         return _null_timestamp()
+    var text = _bind_scalar(cargs[0], schema, scope, catalog, cte_scope, prebound)
     var missing = String("")
     var at = walk_expr_field[PlanColRefFields](text, schema, missing).arrow_type
     if missing.byte_length() == 0 and at != ArrowType.STRING:

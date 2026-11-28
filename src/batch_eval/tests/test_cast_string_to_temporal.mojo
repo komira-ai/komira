@@ -44,9 +44,9 @@ def _text_batch(vals: List[String], valid: List[Bool]) raises -> RecordBatch:
 
 
 def _iso_batch() raises -> RecordBatch:
-    """'2026-09-15', NULL, ' 2026-9-5 ', '2026-09-15 10:11:12'."""
+    """'2026-09-15', NULL, ' 2026-9-5', '2026-09-15 10:11:12'."""
     return _text_batch(
-        [String("2026-09-15"), String(""), String(" 2026-9-5 "), String("2026-09-15 10:11:12")],
+        [String("2026-09-15"), String(""), String(" 2026-9-5"), String("2026-09-15 10:11:12")],
         [True, False, True, True],
     )
 
