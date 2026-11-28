@@ -1,4 +1,4 @@
-# The Mojo SDK: one entry library a stranger can install
+# The Mojo SDK: a thin package over the shared library, and a surface for physical plans
 
 Status: design, not built. **EXISTS** names code on `main`. **PROPOSED** is new. Statements the
 author deduced rather than read are marked *(inferred)*. The choices only the owner can make are
@@ -6,33 +6,42 @@ collected under [Decisions for the owner](#decisions-for-the-owner).
 
 ## What problem does this solve?
 
-A Python user runs `pip install komira` and gets SQL over their files, and the TypeScript package
-offers the same over the Node addon ([python_package.md](python_package.md),
-[typescript_package.md](typescript_package.md)). A Mojo user has nothing equivalent. **EXISTS:**
-- 66 Mojo libraries are packages on mopm, the registry the release publishes to: the `PACKAGES` of
-  [release/readme_e2e/packages.bzl](../../release/readme_e2e/packages.bzl).
-- The other 197 are not: the rows of [release/UNPUBLISHED.md](../../release/UNPUBLISHED.md).
-- None of the 66 is an engine, so no library a stranger can install reads a file and runs a query.
-- `sdk_exec` comes closest: SQL over Parquet, CSV and local Iceberg, run in-process
-  ([src/sdk_exec/README.md](../../src/sdk_exec/README.md)). It is unpublished, and so is most of
-  what it is built on. Its own surface is the engine's: `EngineContext` with public fields such as
-  the worker runtime, and a refusal value instead of an error.
+A Python user runs `pip install komira` and gets SQL over their files. The TypeScript package offers
+the same over the Node addon ([python_package.md](python_package.md),
+[typescript_package.md](typescript_package.md)). Both reach the engine the same way: through the C
+interface of the shared library `libkomira` (`src/so`,
+[libkomira_run_abi.md](libkomira_run_abi.md)). A Mojo user has nothing equivalent. **EXISTS:**
+- 66 Mojo libraries are packages on mopm, the registry the release publishes to (the `PACKAGES` of
+  [release/readme_e2e/packages.bzl](../../release/readme_e2e/packages.bzl)). The other 197 are not
+  (the rows of [release/UNPUBLISHED.md](../../release/UNPUBLISHED.md)).
+- None of the 66 runs a query, and no mopm package carries `libkomira`.
 - No Mojo library has a public `Session` type. `src/so/session.mojo` has an internal `Session`: the
-  state behind libkomira's C handle, inside the shared library, exported by no package. The
+  state behind libkomira's C handle, inside the shared library and exported by no package. The
   `komira.Session` of this design shares its name in a different package, so a user never sees both.
-  `src/sdk` is the plan-building half of a Mojo SDK, and its `__init__.mojo` exports nothing.
-- Python and Node do not import Mojo libraries. They reach the engine through the C calls of
-  `libkomira` (`src/so`, [libkomira_run_abi.md](libkomira_run_abi.md)).
 
-This document says what the Mojo SDK is: up to three forms, each with what it is, who it is for and
-what it rests on. The first is one page of code. The document also computes exactly what must be
-published for them, and lists the work in an order. It adds no code and publishes nothing.
+The owner has said what the Mojo SDKs are:
+- **The untyped Mojo SDK is the package `komira`.** It calls the shared library through its C
+  interface, as the Python and TypeScript packages do. The C interface has two ways in: SQL text
+  and a logical plan. SQL is turned into a logical plan inside the library. Asked whether the
+  untyped SDK calls the shared library and does not link the engine, the owner said: "yes we did
+  this because compiling the engine was so expensive that it didn't make sense for the untyped
+  path to do that".
+- **Writing physical plans is a separate, Mojo-only surface.** It looks different from the untyped
+  SDK, it has no counterpart in the C interface, and it is the one Mojo surface that links the
+  engine's Mojo libraries.
+- **A typed SDK**, where column types are checked when the user's program is compiled, may come
+  later. It is not ruled on.
+
+This document designs the first two, says what the third would rest on, and computes what must be
+published for each. It adds no code and publishes nothing.
 
 Fixed before this design, and not reopened here:
-- **One engine route.** SQL and plans share one route from the optimizer down, in `sdk_exec`
-  ([libkomira_run_abi.md](libkomira_run_abi.md), "SQL and plans share one route from the optimizer
-  down"). The Mojo SDK calls that route; it adds no second engine path.
-- **Sources are values.** Every SDK binds a table name to a source value with `add_sql_binding`.
+- **One C interface.** Every language's SDK uses the same calls
+  ([libkomira_run_abi.md](libkomira_run_abi.md)). This design adds no call to it. What `komira`
+  would want and the interface lacks is listed as a gap in the interface (§1), not built in Mojo
+  around it.
+- **Sources are values.** Every SDK is to bind a table name to a source value with
+  `add_sql_binding`. Python does today; Node registers with `registerParquet` until it does.
   Mojo spells it `session.add_sql_binding(name, source)`, as Python does
   ([credentials_and_writes.md](credentials_and_writes.md), decision 12). The owner prefers one
   `files` source to a reader name per format.
@@ -41,49 +50,52 @@ Fixed before this design, and not reopened here:
 
 ## Words this document uses
 
+- **the shared library**: `libkomira` (`libkomira.so` on Linux, `libkomira.dylib` on macOS), the
+  engine built once as one library with a C interface. The Python wheel carries it today.
+- **C interface**: the 26 functions the shared library exports (`src/so/abi/komira.tsv`, ABI 1.10).
 - **form**: one way to write a program: a language and the part of komira it uses. This is the word
-  of the task-examples design (komira-ai/komira#2495, `docs/design/task_examples_languages.md` on its
-  branch), which gives each form its own tree of task examples and its own tab on a task page. Mojo
-  has up to three: **the session** (form `mojo`), **the plan builder** (form `mojo_plan`) and **the
-  typed SDK**.
-- **published**: a package on mopm, the registry the release uploads to. In the repository that
-  means a member of `PACKAGES` in `release/readme_e2e/packages.bzl`.
+  of the task-examples design (komira-ai/komira#2495, `docs/design/task_examples_languages.md` on
+  its branch), which gives each form its own tree of task examples and its own tab on a task page.
+  Mojo has two forms in this design: **Mojo** (the untyped SDK, key `mojo`) and **Mojo physical
+  plan** (key `mojo_plan`).
+- **published**: a package on mopm. In the repository that means a member of `PACKAGES`.
 - **closure**: every library a library needs, directly or through the libraries it needs.
 - **wave**: a group of libraries that can be published together, because every library each of them
-  needs is published already or in an earlier wave (§4).
+  needs is published already or in an earlier wave (§5).
+- **FFI boundary**: the one module that holds foreign pointers (the library handle, C strings, the
+  Arrow stream) and turns them into Mojo values (rule M9).
 - **welded test**: a test the build runs before a library's package can exist, so a failing test
   fails the build.
 - **install test**: the release's README end-to-end test (`//release/readme_e2e/verify:<name>`). It
   installs the packages into an empty project, the way a user does, and runs the README examples
-  against them (§7).
-- **entry point**: a function the engine is called through, such as `run_sql`.
+  against them (§9).
+- **logical plan**: the plan of what a query computes, before it is cut into pipelines
+  (`komira.plan.v1`). SQL is turned into one inside the shared library.
+- **Arrow C stream**: the standard C struct of the Arrow format (`ArrowArrayStream`) through which
+  the library hands back a result in batches.
+- **sink**: the step that ends a pipeline and gathers its rows (aggregate, sort, collect, ...).
 - **physical plan**: the plan the executor runs: pipelines, the operators in each, and the step that
-  ends each pipeline, as data (`physical_plan`). Lowering makes it from a logical plan.
+  ends each pipeline, as data (`physical_plan`). The engine's lowering makes it from a logical plan.
 - **tree**: the directory of one form's task examples, with one directory per task.
 - **tab**: the part of a task page that shows one form's program and output.
 - **slice**: one step of the work, one or more pull requests, that ends with a test showing it works
-  (§9).
+  (§11).
 
-## The three forms
+## The Mojo SDKs
 
-The Mojo SDK can have up to three forms. They differ in what the user writes and in how much of the
-engine's route the user's code skips.
-
-| | The session (`mojo`) | The plan builder (`mojo_plan`), untyped | The typed SDK |
+| | Mojo: the untyped SDK, `komira` | Mojo physical plan, `komira_physical` | A typed SDK, possibly later |
 |---|---|---|---|
-| what the user writes | files and SQL text; reads rows back | the physical plan itself: pipelines, their operators and the step that ends each, with schemas as run-time values | a program whose schema is a compile-time value, run by operators specialised for it |
-| who it is for | anyone who would write SQL, the same users as Python and Node; the examples the komira.dev gate needs (examples in SQL, Python, TypeScript and Mojo) | Mojo authors who want a plan run exactly as written: no binder, no optimizer, no lowering | Mojo authors who know their schema when they compile and want the compiler to check columns and specialise the operators |
-| what it rests on | `sdk_exec.run_sql`: parse, bind, optimize, lower, execute, the route Python and Node take (§1) | the executor's entry point `sdk_exec.engine_execute.run_lowered_plan_with` and the physical plan of `physical_plan` and `lowering.lowered_plan`, behind a builder of its own (§2) | the typed operator tables (`op_agg_stage`, `op_sort`'s `Stage_Sort`, `op_window`'s top-n stages) and the compile-time schema descriptor (`plan_expr.typed_schema`, `sdk.auto_schema`); its front end is not in this repository (§3) |
-| libraries to publish | the 56 of §4, then `sdk_exec` and `komira` | none beyond the session's: the plan builder is a module of the same package (§2) | its own set, larger than the session's (§3) |
-| built | first | second | later, with a design of its own |
+| what the user writes | files and SQL text, and later logical plans; reads rows back | the physical plan itself: pipelines, their operators and the step that ends each, run as written | a program whose schema is a compile-time value |
+| when names and types are checked | at run time, when the library binds the plan | at run time, when the plan is submitted (§5) | when the user's program is compiled |
+| what it rests on | the shared library's C interface (§1 to §3) | the engine's Mojo libraries, linked into the user's program (§5) | the typed operator tables (§6) |
+| what installing it compiles | `komira` and two small libraries (`arrow`, `arrow_ipc`); no engine | the engine: 58 packages (§5) | not designed |
+| built | first | second | not planned; the owner has not ruled on it |
 
-Which forms exist at the end is owner decision 1. The order of the work is not a question for the
-owner. This design lists the session first, because the examples gate needs it and because the
-other two need every library it publishes. The plan builder comes second, because it adds no library
-and mostly needs a check at the executor's entry point (§2). The typed SDK comes later, because its
-front end has to be designed and written first.
+The untyped SDK comes first because the examples gate needs it and because it needs only three
+packages and one change to mopm (§4). The physical-plan surface needs the engine's closure
+published. The order of the work is not a question for the owner.
 
-## 1. The session: the page a stranger writes
+## 1. The untyped SDK, `komira`: the page a stranger writes
 
 **PROPOSED.** The whole program:
 
@@ -99,7 +111,8 @@ def main() raises:
     print(result)
 ```
 
-The setup around it, on Linux x86_64 or macOS on Apple silicon:
+The setup around it, on Linux x86_64 or macOS on Apple silicon (macOS is built, but the install test
+runs on Linux x86_64 only, so it is not yet proven there):
 
 ```sh
 mopm init --name hello
@@ -110,150 +123,314 @@ mopm build main.mojo -o main --prefix .mopm/.pixi/envs/default
 ./main
 ```
 
-`print(result)` writes the result as a table between `+---+` rules: column names, a row of short
-type names, one line per row (at most 20), then a line with the row count (`N rows`, with
-`(showing 20, ... M more rows)` when rows were cut). The printer is `sdk`'s `format_table`, which
-**EXISTS** ([src/sdk/table_display.mojo](../../src/sdk/table_display.mojo)). The exact text a
-release prints is whatever its README e2e runs (§7). This document invents no output.
-
-Three lines in the setup are sourced, not invented:
-- The `mopm init`, `[toolchain] mojo` and `mopm add komira-ai/<name>` lines are what the release's
-  `prod-add` job does as a user ([docs/ci.md](../ci.md), "prod-add").
+The setup lines are sourced, not invented:
+- `mopm init`, `[toolchain] mojo` and `mopm add komira-ai/<name>` are what the release's `prod-add`
+  job does as a user ([docs/ci.md](../ci.md), "prod-add").
 - `mopm sync` installs the compiler through pixi ([src/bench/README.md](../../src/bench/README.md)).
-- The `mopm build ... --prefix .mopm/.pixi/envs/default` line is that README's own way to build
-  an installed source.
+- The `mopm build ... --prefix .mopm/.pixi/envs/default` line is that README's own way to build an
+  installed source.
 
-*(inferred)* Building the user's own `main.mojo` the same way works too, since nothing in a package
-is specific to `bench`.
+*(inferred)* Building the user's own `main.mojo` the same way works too. The shared library comes
+with the package (§2), so the user installs nothing else.
 
-### Its names
+### Its names, and the C calls each one makes
 
-The package is `komira-ai/komira`, imported as `komira`. The session form has four names, `Session`,
-`files`, `Result` and `KomiraError`, and `Session` has two methods, `add_sql_binding` and `sql`.
+The package is `komira-ai/komira`, imported as `komira`. It has four names, `Session`, `files`,
+`Result` and `KomiraError`, and `Session` has two methods, `add_sql_binding` and `sql`. Each one is
+a call the C interface already has. The Python package makes the same calls
+(`python/komira/_native.py`, `_session.py`, `_sources.py`).
 
-| name | what it is | built on (**EXISTS**) |
+| name | what it is | the C calls (**EXISTS**, ABI version) |
 |---|---|---|
-| `Session(threads: Optional[Int] = None, memory_limit: Optional[Int] = None) raises` | one engine. It is `Movable`, not `Copyable`, and dropping it stops its workers | `EngineContext(EngineOptions(worker_count=threads, memory_budget_bytes=memory_limit))`, after `compression.codec_libraries.probe_codec_libraries()` |
-| `session.add_sql_binding(name: String, source: Files) raises` | `name` reads `source` in later `sql` calls; binding a name again replaces it | `sdk_exec.engine_catalog.register_parquet(ctx, name, path)` |
-| `session.sql(query: String) raises -> Result` | runs one statement and raises on any refusal | `sdk_exec.engine_sql.run_sql(ctx, query)` |
-| `files(location: String) raises -> Files` | a source value: a Parquet file, a glob or a directory; it does no I/O | **PROPOSED**, a `String` held as a value |
-| `KomiraError` | what `sql` and `add_sql_binding` raise: `code`, `step` and the message (Errors, below) | **PROPOSED**, filled from `SqlRefusal` |
-| `Result` | the answer: `num_rows()`, `num_columns()`, `column_names()`, `batch()` (a `ref [self] RecordBatch`), and it is `Writable` for `print` | the batch of `SqlOutcome.batches`, with its selection applied by `column_kernels`' `materialize_selection_if_present`, as `arrow_result` applies it |
-
-The parts of that table, each sourced:
-- `register_parquet` accepts a file, a glob or a directory
-  ([src/sdk_exec/engine_catalog.mojo](../../src/sdk_exec/engine_catalog.mojo)).
-- `run_sql` uses `LocalOnlyScanFs`, which reads local files only. A run appends one batch to
-  `SqlOutcome.batches` ([src/sdk_exec/engine_plan.mojo](../../src/sdk_exec/engine_plan.mojo)).
-- `RecordBatch` is `Movable` and not `Copyable` (`src/arrow/record_batch.mojo`). That is why
-  `Result` lends its batch by `ref` and does not copy it.
-
-**`print(result)` when formatting fails.**
-- `format_table` is declared `raises`. A cell it cannot render raises, for example.
-- `Writable`'s `write_to` cannot raise at the pinned compiler. Every one of the 67 `write_to`
-  methods under `src/` is declared without `raises` (`git grep -n "def write_to" -- 'src/*.mojo'`),
-  for example `def write_to[W: Writer](self, mut writer: W)` in `src/arrow/schema.mojo`.
-- So `Result` does not format inside `write_to`. `sql` formats the first 20 rows once, when it
-  builds the `Result`, and keeps the text. A formatting failure is raised by `sql` itself, as a
-  `KomiraError` with code `RESULT_NOT_PRINTABLE` and `format_table`'s message, at step
-  `execute`.
-- `print(result)` writes the kept text and cannot fail, so the user never sees a half-printed
-  table.
-- The cost is formatting at most 20 rows per query, whether or not the result is printed
-  *(inferred: small next to running the query)*.
+| `Session(threads: Optional[Int] = None, memory_limit: Optional[Int] = None) raises` | one engine in the shared library; `Movable`, not `Copyable`; dropping it frees the context | `komira_ctx_new` (1.0), or `komira_ctx_new_with_options(threads, memory_limit)` (1.4) when either is given; `komira_ctx_free` (1.0) on drop |
+| `files(location: String) raises -> Files` | a source value; it does no I/O | none: it holds the location |
+| `session.add_sql_binding(name: String, source: Files) raises` | `name` reads `source` in later `sql` calls; binding a name again replaces it | `komira_add_sql_binding(ctx, name, source, len, KOMIRA_BIND_SESSION)` (1.10), with the source as `komira.plan.v1.WireBoundSource` bytes, encoded with the published `plan_proto` and `proto_codec` |
+| `session.sql(query: String) raises -> Result` | runs one statement, raises on any refusal | `komira_sql_stream(ctx, sql, &stream)` (1.3), then the stream is read into Mojo values (§3) |
+| `Result` | the answer: `num_rows()`, `num_columns()`, `column_names()`, `table()` (a `ref [self] Table`), and `Writable` for `print` | the stream's batches, read once and released (§3) |
+| `KomiraError` | what each call raises: `code`, `step`, `status` and the message | `komira_last_error` (1.0), `komira_last_error_code` and `komira_last_error_step` (1.7) |
 
 The behaviour:
-- **Errors.**
-  - Python and Node already raise a `KomiraError` carrying `code` (the named code, such as
-    `SQL_SYNTAX_ERROR`), `step` (`parse`, `bind`, `optimize`, `lower` or `execute`) and the engine's
-    message `<step>: <reason>`. Each has subclasses chosen by the code:
-    - Python has `ParseError`, `BindError`, `UnsupportedOperation`, `MemoryLimitError`,
-      `CredentialsError`, `StorageError`, `LibraryLoadError` and `UnsupportedCpuError`
-      (`python/komira/_errors.py`).
-    - Node has `UnsupportedOperation`, `LibraryLoadError` and `UnsupportedCpuError`
-      (`node/src/errors.ts`).
-  - The Mojo session matches them. `sql` raises a `KomiraError` struct with `code:
-    Optional[String]`, `step: String` and the same message, and its text is the message. A parse
-    error's message ends ` at line <L>, column <C>`.
-  - Mojo structs have no inheritance. So the subclasses become the `code` the caller matches on, the
-    way Node's `errorClass` picks a class from the code.
-  - The step and message come from `SqlRefusal.step` and `SqlRefusal.reason`. The code comes from the
-    rule `so`'s `error_code` applies to the reason (`src/so/session.mojo`). That rule moves to
-    `sdk_exec` in slice 1, so both use one copy.
-  - This needs the pinned compiler's typed raises: `def sql(mut self, query: String) raises
-    KomiraError -> Result`. No function under `src/` declares one yet. So slice 1 first proves typed
-    raises on the pinned Mojo, with a standalone program that uses no komira code (rule M13).
-  - If typed raises do not work there, `sql` raises a plain `Error` with the same text, the code at
-    the start of the reason. A later move to `KomiraError` would then change `sql`'s signature, a
-    public interface change, so this is settled before the first release.
-- **Options.** `threads` and `memory_limit` have the meaning of Python's `Session(threads=...,
-  memory_limit=...)`: absent means the host profile's own value, and below 1 is refused with
-  `ENGINE_OPTIONS_INVALID`. Nothing reads an environment variable (rule S2;
-  `engine_options.mojo` reads none either).
+- **Options.** `threads` and `memory_limit` mean what they mean in Python's `Session(threads=...,
+  memory_limit=...)`. Absent means the host's own value, and below 1 is refused before the call, as
+  Python's `_option` refuses it. The library returns NULL when the engine does not start, and
+  `Session()` then raises a fixed message, since there is no context to ask. Nothing reads an
+  environment variable (rule S2).
 - **`files`.**
-  - An empty location is refused.
-  - A location that starts with a URL scheme (`<scheme>://`) is refused with `STORAGE_URL_REFUSED`,
-    the code the C calls already use for a URL they cannot serve. Remote files are slice 7.
-  - A relative path is made absolute against the working directory when `files` is called, as
-    Python's `komira.files` does (`python/komira/_sources.py`).
-  - `files` names Parquet, as Python's `files` does today. Choosing the format from the extension
-    comes later and is the same step for every SDK ([credentials_and_writes.md](credentials_and_writes.md),
-    "infers the format from the extension").
-- **Threads.** `sql` and `add_sql_binding` take `mut self`, so the compiler keeps a session to one
-  caller at a time. That is the C ABI's "one thread at a time" per handle, held by the type instead
-  of by a lock. Two sessions share nothing (`engine_context.mojo`: "two contexts share nothing").
-- **What is not there.** There is no `register_parquet` (the owner prefers one `files` source) and
-  no `read_csv`, `read_parquet` or other reader per format. There are no frames, no remote stores,
-  no credentials, no cancel or progress, and no write call: `COPY ... TO` in SQL already writes a
-  local file. `sql` has no per-call `bindings` argument yet: credentials_and_writes.md (decision
-  12) gives Mojo `session.sql(query, bindings)` with a `Dict[String, Source]`, which is a later,
-  additive overload. Each of these is a later slice (§9), added beside these names without
-  changing them.
+  - An empty location is refused. A leading `~` is expanded and a relative path is made absolute
+    against the working directory when `files` is called, as Python's `komira.files` does.
+  - The location may be a Parquet file or a glob, which is what the `files` arm of `WireBoundSource`
+    binds today (`src/so/bindings.mojo`).
+  - A location is passed to the library as written. The library refuses a scheme it does not read
+    (anything but `s3://`, `s3a://`, `az://`, `abfs://` and `abfss://`) with `STORAGE_URL_REFUSED`.
+    It refuses a readable remote scheme with no sealed credential with `CREDENTIALS_NOT_FOUND`
+    (`src/so/bindings.mojo`). `files` names no credential until slice 4.
+- **CSV and JSON.** The session runs SQL text, so it reads a CSV or JSON file through SQL's own
+  functions (`SELECT ... FROM read_csv('<file>')`), exactly as the SQL and TypeScript forms do.
+  That needs no `files`.
+- **Threads.** The C interface allows one thread at a time per context (`libkomira_run_abi.md`,
+  §7). `sql` and `add_sql_binding` take `mut self`, so the compiler holds a session to one caller
+  at a time. Two sessions share nothing.
+- **Faults.** A fault the library treats as fatal ends the process. It does so for Python's and
+  Node's callers too ([libkomira_run_abi.md](libkomira_run_abi.md), §8, the fail-fast list).
+  Missing codec libraries are not such a fault: the library probes them before each run and
+  refuses by name.
 
-Two cases outside the session rules:
-- **Missing codec libraries.** A missing system codec library (libzstd, libz, liblz4) is an error
-  from `Session()`, not an abort in the middle of a query. That is why `Session` calls
-  `probe_codec_libraries()` first, as libkomira does before each run
-  ([libkomira_run_abi.md](libkomira_run_abi.md), §8). `run_sql` itself does not probe.
-- **Faults in the engine.** A fault the engine treats as fatal still ends the process. It does so
-  in libkomira's callers too ([libkomira_run_abi.md](libkomira_run_abi.md), §8, the fail-fast
-  list).
+### Errors
 
-### Why `komira`, and why a new library
+- **Python and Node already raise a `KomiraError`.** It carries `code` (the named code, such as
+  `SQL_SYNTAX_ERROR`), `step` (`parse`, `bind`, `optimize`, `lower` or `execute`), the C call's
+  `status`, and the library's message `<step>: <reason>`.
+- **Each has subclasses chosen by the code, then the step.**
+  - Python has `ParseError`, `BindError`, `UnsupportedOperation`, `MemoryLimitError`,
+    `CredentialsError`, `StorageError`, `LibraryLoadError` and `UnsupportedCpuError`
+    (`python/komira/_errors.py`, `_CODE_CLASSES` and `_STEP_CLASSES`).
+  - Node has `UnsupportedOperation`, `LibraryLoadError` and `UnsupportedCpuError`
+    (`node/src/errors.ts`).
+- **`komira` matches them.** Every call raises a `KomiraError` struct with `code: Optional[String]`,
+  `step: Optional[String]`, `status: Optional[Int]` and the message. Its text is the message.
+- **Where each field comes from.** After a status other than 0, `komira` reads the three last-error
+  calls of the context before making any other call on it. The message comes from
+  `komira_last_error`, the code from `komira_last_error_code`, and the step from
+  `komira_last_error_step`. Its values 1 to 5 map to the step's name, and 0 means no step (`step`
+  is `None`).
+- **The same classes, as a value.** Mojo structs have no inheritance, so the class is a value, not a
+  type. `KomiraError.error_class()` returns the name Python and Node use for the same refusal:
+  `ParseError`, `BindError`, `UnsupportedOperation`, `MemoryLimitError`, `CredentialsError`,
+  `StorageError`, `LibraryLoadError`, `UnsupportedCpuError`, or else `KomiraError`. It picks the
+  name by the same code-then-step tables as Python's `_CODE_CLASSES` and `_STEP_CLASSES`, which
+  Node's `errorClass` also follows. The three codes `komira` raises itself (below) map to
+  `LibraryLoadError` (`LIBRARY_VERSION_UNSUPPORTED`), `UnsupportedCpuError` (`CPU_UNSUPPORTED`) and
+  `KomiraError` (`RESULT_NOT_PRINTABLE`).
+- **Three codes are new.** `LIBRARY_VERSION_UNSUPPORTED`, `CPU_UNSUPPORTED` and
+  `RESULT_NOT_PRINTABLE` are **PROPOSED** for `komira` alone: they come from checks `komira` makes
+  before or after the library is called. Python's `LibraryLoadError` and `UnsupportedCpuError` carry
+  no code.
+- **Typed raises.** A `KomiraError` raised by type needs the pinned compiler's typed raises:
+  `def sql(mut self, query: String) raises KomiraError -> Result`. No function under `src/`
+  declares one yet, so slice 1 first proves them on the pinned Mojo with a standalone program that
+  uses no komira code (rule M13).
+- **The fallback.** If typed raises do not work there, every call raises a plain `Error` with the
+  same text and the code at the start of the reason. A later move to `KomiraError` would change the
+  signatures, a public interface change, so this is settled before the first release.
 
-- **The name.** `komira` is the name the stranger already knows from `pip install komira` and the
-  npm package. mopm makes a package `<name>` into `komira-ai/<name>`, imported as `<name>`
-  ([packages.bzl](../../release/readme_e2e/packages.bzl)). Mojo's standard library lives under
-  `std.`, so a top-level `komira` collides with nothing. No `src/komira` exists, and `komira` is not
-  yet claimed on the prod registry (`release/prod_claimed_names.txt`). Owner decision 2.
-- **Not `sdk_exec` itself.** Its public surface is the engine's: `EngineContext`'s public fields
-  hold the catalog, the footer cache and the `async_rt` worker runtime, and it has 25 modules
-  (`ls src/sdk_exec/*.mojo | wc -l`) to import by name. Making that the public promise would freeze engine internals. `komira` keeps
-  them in a private field (`_ctx: EngineContext`), so `sdk_exec` can change underneath.
-- **Not `sdk`.** `sdk` builds plans and executes nothing ([docs/architecture.md](../architecture.md)).
-  A frame API belongs there later, not a session.
-- **Not a new engine.** Every call is one `sdk_exec` call, so the SDK holds no engine logic of its
-  own. That makes it the smallest set of names that is still honest about what runs.
+### `Result`, and `print(result)` when formatting fails
 
-### A Mojo frame API, later
+- **What it holds.** `Result` holds the `arrow.table.Table` read from the stream. `Table` is
+  `Movable`, so `Result` lends it by `ref` and does not copy it.
+- **How `print(result)` looks.** It writes the result as a table between `+---+` rules: column
+  names, a row of short type names, one line per row (at most 20), then the row count (`N rows`,
+  with `(showing 20, ... M more rows)` when rows were cut). A result with no columns prints `(empty:
+  0 columns, N rows)`.
+- **The printer.** It is `format_table`, which **EXISTS** in `sdk` (`src/sdk/table_display.mojo`)
+  and imports only `arrow`.
+  - It takes a `RecordBatch`, and a `Table` is chunked. So slice 1 moves it into `arrow` and gives
+    it a `Table` overload, which reads the first 20 rows across the chunks without consuming the
+    table.
+  - Its tests move with it: `src/sdk/tests/test_table_display_direct.mojo`,
+    `test_display_stats.mojo` and `test_display_width_non_ascii.mojo`, from `sdk`'s `test_srcs` to
+    `arrow`'s.
+  - `sdk`, its README and its other tests then import it from `arrow`. `komira` prints without
+    depending on `sdk`.
+- **When formatting fails.**
+  - `format_table` is declared `raises`. A cell it cannot render raises, for example.
+  - `Writable`'s `write_to` cannot raise at the pinned compiler. Every one of the 67 `write_to`
+    methods under `src/` is declared without `raises` (`git grep -n "def write_to" --
+    'src/*.mojo'`), for example `def write_to[W: Writer](self, mut writer: W)` in
+    `src/arrow/schema.mojo`.
+  - So `Result` does not format inside `write_to`. `sql` formats the first 20 rows once, when it
+    builds the `Result`, and keeps the text. A failure is raised by `sql` itself, as a `KomiraError`
+    with code `RESULT_NOT_PRINTABLE`, `format_table`'s message, and step `execute`.
+  - `print(result)` writes the kept text and cannot fail, so the user never sees a half-printed
+    table.
+  - The cost is formatting at most 20 rows per query *(inferred: small next to running it)*.
 
-This design does not include a frame API. One would rest on what **EXISTS**:
-- `sdk`'s plan builders (its `dataframe_*` modules), and `col`, which lives in `plan_expr`
-  (`src/plan_expr/col_expr.mojo`);
-- `sdk_exec.engine_plan.run_plan(ctx, plan)`, the plan entry point, which runs a built `LogicalPlan`
-  through the same route from the optimizer down with no SQL front end;
-- `plan_wire` for a plan that must cross a process.
+### Logical plans
 
-Python's two frame APIs ([dataframe_surface.md](dataframe_surface.md)) are the reference for
-its names. It would be one more name on `Session` that takes a frame, and changes none of the session's names.
-Its closure is the same as this one's, since `sdk` is already in it (§4).
+The C interface's other way in is a logical plan: `komira_plan_stream(ctx, plan, len, &stream)`
+(1.8), with a `komira.plan.v1.WirePlanEnvelope`. Python's DataFrame terminals send one today.
 
-## 2. The plan builder: writing the physical plan
+A Mojo logical-plan API over it rests only on what is published:
+- `plan_proto`'s `WirePlan` messages and `proto_codec`'s `encode_proto`;
+- the scan bindings `komira_parquet_schema`, `komira_csv_binding` and `komira_json_binding` (1.1),
+  which give each scan leaf its schema and fingerprint.
 
-**PROPOSED.** The user's code writes the physical plan: the pipelines, the operators inside each one,
-and the sink that ends each pipeline. The plan goes to the executor as written. There is no binder,
-no optimizer and no lowering, so nothing reorders, pushes down, fuses or chooses a sink for the user.
-Schemas are run-time values: the plan reads them from the sources when it is submitted.
+It is the untyped SDK's frame API, not the physical-plan builder of §5. Its names belong with
+Python's two frame APIs ([dataframe_surface.md](dataframe_surface.md)), and it gets a design of its
+own (slice 5). It adds no library to publish.
+
+### What the C interface does not offer
+
+These are gaps in the C interface, listed for its own design. `komira` does not build around them
+in Mojo:
+- **`files` over CSV or JSON.** `WireFileSource` has no format field, so a `files` source is
+  Parquet. CSV and JSON register only one file at a time (`komira_register_csv`,
+  `komira_register_json`). SQL's `read_csv` and `read_json` cover the session meanwhile.
+- **A spill directory.** A context takes only a worker count and a memory budget
+  (`src/so/README.md`, "Not done").
+- **Cancel and progress for a plan run.** Only `komira_sql_stream_run` takes a run handle; there is
+  no `komira_plan_stream_run`.
+- **A way to report which Mojo runtime the library was built with.** Python compares the runtime
+  libraries' build ids itself (`python/komira/_runtime.py`). A call returning the build's Mojo
+  version would let every binding check it the same way (§2).
+- **A printer of a result.** The library returns Arrow only. Each SDK prints in its own code. A
+  shared printer is the task-examples design's question (komira-ai/komira#2495, section 3).
+
+## 2. How the shared library reaches a Mojo user
+
+**What the package carries, per platform.** The library already exists as the self-contained
+directory `//src/so:libkomira[dist]`, which the wheel copies whole into `komira/_lib/`
+(`python/BUCK`). `komira` carries the same files except the three Mojo runtime libraries, which the
+user's own Mojo already has (below).
+
+| platform | files | built today |
+|---|---|---|
+| Linux x86_64 | `libkomira.so`, and the 11 native libraries it needs (`libkomira_<owner>_native.so.1`). Sizes: 3,752,832 bytes for the library, about 4.9 MB for the 11 (`src/so/README.md`, its size table) | yes |
+| macOS arm64 | `libkomira.dylib` alone: the native code is linked into it, with install name `@rpath/libkomira.dylib` | yes, on the farm's Macs |
+| Linux arm64 | none | no |
+
+The Mojo packages are not built for linux-arm64, and this is listed with the gate's exceptions
+(owner decision 3).
+
+**mopm cannot carry it yet.** What a mopm package can declare today:
+- `[native.<id>]`: a static archive only, linked into the user's program (`mopm pack` refuses
+  anything else);
+- `[native-dependencies]`: a library from conda-forge, opened at run time (`mode = "load"`), as
+  `compression` opens libzstd.
+
+Both facts come from mopm's `docs/configuration.md` in komira-ai/mopm. Neither route carries a
+library komira builds itself as a shared library.
+
+**PROPOSED: a third kind in mopm.**
+- mopm's manifest already reads `[native.<id>] kind = "shared"`, but `mopm pack` and
+  `mopm publish` refuse it. komira-ai/mopm learns to pack and publish one: prebuilt shared
+  libraries that mopm installs into the environment's `lib/`, beside the conda-forge ones.
+- Whether the 11 native libraries land flat beside `libkomira.so` or in a `lib/` below it, as in
+  `[dist]`, is that design's choice. The run path `$ORIGIN/lib:$ORIGIN` finds either.
+- That is mopm's own pull request and design, then a bump of the mopm pin here.
+- mopm's limits allow it *(inferred)*. The Linux package file is about 9 MB, under its 100 MB
+  limit per package file and 512 MiB unpacked. The 12 libraries are files inside one package file,
+  so the limit of 20 package files per version does not count them.
+
+**How `komira` opens it.**
+- `komira` opens `libkomira.so` (`libkomira.dylib` on macOS) by name. That is the same way
+  `compression` opens `libzstd.so.1` from the environment's `lib/` *(inferred: through the same
+  search path mopm gives a `mode = "load"` library)*.
+- The 11 native libraries are found through its run path `$ORIGIN/lib:$ORIGIN`.
+- The host's C++ runtime (`libstdc++.so.6`, `libgcc_s.so.1`), which `[dist]` leaves out for the
+  host to give, must be in the environment or on the host. Which one gives it in a mopm project is
+  not verified yet *(inferred: the Mojo compiler's own environment has it)*, and slice 1's install
+  test settles it.
+- The user gives no path and sets no environment variable (rule S2).
+- The library is opened once per process and never closed:
+  - the library is linked `DF_1_NODELETE`, because the Mojo standard library's process-wide
+    values must outlive it (`tools/build/mojo/shared_lib.bzl`);
+  - the release callbacks of every stream it returns are its own code
+    ([libkomira_run_abi.md](libkomira_run_abi.md)).
+
+**One Mojo runtime in the process.**
+- The library needs `libKGENCompilerRTShared` and the two runtime libraries it needs in turn. A Mojo
+  program has them loaded already.
+- The loader matches a needed library by name against the libraries already loaded. So the shared
+  library binds to the user's own runtime, and a second copy is never mapped *(inferred)*.
+- That is the first row of the measured table in
+  [mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md), which was measured in a Python
+  process with Modular's runtime loaded first. A Mojo program built by `mopm build` is not measured
+  yet. Slice 1's install test is that measurement.
+- That is safe only for the same build of the runtime:
+  - `komira`'s `mopm.toml` says `mojo = ["1.1.0"]`, the pin the library is built with
+    (`tools/build/platforms/table.bzl`, every row);
+  - `mopm add` resolves a package only for the project's Mojo.
+  - So a program on another Mojo does not get this build of `komira`.
+- Python also compares the runtime's build ids before it loads the library (`_runtime.py`). The same
+  check in Mojo waits on the C interface gap of §1: a call that reports the build's Mojo version.
+
+**The CPU.**
+- On Linux the library is built for x86-64-v3. `komira` reads the CPU's flags before it opens the
+  library. On a CPU without them it raises a `KomiraError` with code `CPU_UNSUPPORTED` naming the
+  missing flags, where Python raises `UnsupportedCpuError`.
+- The variants directory of [isa_variants.md](isa_variants.md) (a `VARIANTS` manifest and an
+  x86-64-v2 floor) needs the same selector in Mojo as in Python. That is slice 3.
+
+**Licences.**
+- `komira` carries no Modular runtime library, so no Modular licence file *(inferred)*.
+- It carries the notices of the third-party code inside the library and its native libraries, as
+  the wheel does ([wheel_licence_audit.md](wheel_licence_audit.md)).
+
+## 3. The FFI boundary
+
+The FFI boundary is one private module, `komira._lib` (rule M9). It owns every foreign pointer, and
+its `# FFI-BOUNDARY:` header says who owns and frees each one. Every `UnsafePointer` in it has an
+adjacent `# SAFETY:` comment (M3). The wildcard origins appear only there (M4). The repository
+already has the pattern in three places:
+- `src/so/tests/gate/*.mojo` and `src/tests/helpers/komira_plan_harness/door.mojo` open libkomira
+  from Mojo and call it;
+- `compression/codec_libraries.mojo` has a process-wide handle slot and a raising opener.
+
+| foreign thing | who owns it | who frees it, and when |
+|---|---|---|
+| the library handle (`OwnedDLHandle`) | `komira._lib`, in one process-wide slot, opened on the first `Session()` | never: the library stays open (§2) |
+| the context (`void *` from `komira_ctx_new*`) | the `Session`, as a private `Int` word | `komira_ctx_free`, once, when the `Session` is dropped |
+| C strings (name, path, SQL text) | `komira._lib`: a NUL-terminated copy of the Mojo `String`, built for the call; a `String` holding a NUL is refused first, as Python refuses one | the copy is dropped after the call. The library copies what it keeps |
+| `WireBoundSource` bytes | `komira._lib`, a `List[UInt8]` from `encode_proto` | dropped after the call; the library copies them |
+| error text and code (the two-call protocol) | `komira._lib`: it asks for the length, then allocates exactly that and asks again | dropped once copied into the `KomiraError` |
+| the `ArrowArrayStream` struct | `komira._lib`, allocated on the heap and zeroed. `arrow_ipc/c_data_stream.mojo` records that a stack slot is unsound for its scratch schema and array structs, because the compiler may reuse the slot; the same holds for the stream struct *(inferred)* | the library fills it only on success. `arrow_ipc.c_stream_table.drain_record_batch_stream_table` copies every buffer into a `Table` and calls the stream's `release` once, on every path, unless the stream is already released. Then `komira._lib` frees the struct |
+
+The steps on the first `Session()`:
+1. Open the library.
+2. Resolve `komira_abi_version` alone and call it. A major other than 1 is refused. So is a minor
+   below 10, because `add_sql_binding` needs 1.10. The refusal is a `KomiraError` with code
+   `LIBRARY_VERSION_UNSUPPORTED` that names both versions.
+3. Resolve the other calls.
+
+No public name takes or returns a pointer (M1):
+- `Session` holds an `Int`;
+- `Files` holds a `String`;
+- `Result` holds a `Table`;
+- `KomiraError` holds strings and an `Int`.
+
+`arrow_ipc`'s `CArrowArrayStream` is a public struct with pointer fields, so `komira` imports it
+only inside `komira._lib` and never names it in its own API.
+
+## 4. What `komira` needs published
+
+`komira` imports `arrow` (for `Table` and `format_table`), `arrow_ipc` (to read the stream) and
+`plan_proto` with `proto_codec` (for `WireBoundSource`). Their closures, from `./buck2 uquery
+"deps(//src/<name>:<name>)" --output-attribute deps` with the `deps` attribute walked and test
+dependencies left out:
+- `arrow` (11 libraries, with itself): `arrow`, `atomic_alias`, `byte_buffer`, `compression`,
+  `containers`, `counters`, `host_probe`, `libc`, `lz4`, `simd_ops` and `zlib`.
+- `arrow_ipc`: `arrow`'s closure, plus `async_api` and itself.
+- `plan_proto` (5 libraries, with itself): `encoding`, `json`, `plan_proto`, `proto_codec` and
+  `protobuf`.
+
+Of those 18, all are published except two:
+- `arrow`: UNPUBLISHED.md's reason is "none". Its README has examples and every library it imports
+  is published.
+- `arrow_ipc`: its reason is "depends on an unpublished library", namely `arrow`.
+
+So the untyped SDK publishes **three packages**, `arrow`, `arrow_ipc` and `komira`, plus the mopm
+change of §2. Two notes on them:
+- **Coverage.** By the census of 2026-10-10 (each library's `coverage_census.tsv`), `arrow` has
+  67.8% line coverage of 7,042 lines and `arrow_ipc` 86.1% of 6,827. Rule T1 holds a touched package
+  to 99% line and branch, so both need tests first. The pull request's check measures again.
+- **Names.** `arrow` and `arrow_ipc` are claimed on the prod registry already
+  (`release/prod_claimed_names.txt`). `komira` is not.
+
+The engine is compiled once, by the release, into the shared library, as it is for the wheel. A
+user who installs `komira` compiles `komira`, `arrow` and `arrow_ipc`, and no engine library.
+
+## 5. Mojo physical plan: `komira_physical`
+
+**PROPOSED.** A separate package, `komira_physical`, imported as `komira_physical`. The user's code
+writes the physical plan: the pipelines, the operators inside each one, and the step that ends each
+pipeline. The plan goes to the executor as written. There is no binder, no optimizer and no
+lowering, so nothing reorders, pushes down, fuses or chooses a sink for the user. Schemas are
+run-time values: the plan reads them from the sources when it is submitted.
+
+It looks different from the untyped SDK and has no counterpart in the C interface. It is the one
+Mojo surface that links the engine's Mojo libraries, so its user pays the engine's compile time.
+Its engine is an `Engine` value of its own, over `sdk_exec`'s `EngineContext`, in the user's
+process. It does not use the shared library.
 
 ### What exists to build on
 
@@ -262,36 +439,35 @@ All of this is **EXISTS** and public:
   `SegmentDescPod`, one per pipeline. Each holds a source (`SourceSpecPod`, for example
   `SourceSpecPod.parquet(path, projection, pushed_filter, spec_is_total, fs)`), a chain of
   `MorselOp` (`filter`, `project`, `limit`, `join_probe`), and a sink tag (`SINK_AGG`,
-  `SINK_COLLECT`, `SINK_SORT`, `SINK_TOPN`, `SINK_HASH_BUILD`, ...). The sink also has a key type tag,
-  an orientation, an order key and its dependencies with their edge tags.
+  `SINK_COLLECT`, `SINK_SORT`, `SINK_TOPN`, `SINK_HASH_BUILD`, ...). The sink also has a key type
+  tag, an orientation, an order key and its dependencies with their edge tags.
 - **The plan as lowering emits it.** `LoweredPlan(segments, params, result_seg_id)`
   (`src/lowering/lowered_plan.mojo`). Its `ParamTable` holds each sink's data by index. For example
   `AggSinkData(group_by_exprs, agg_exprs, output_schema, ...)` (`src/physical_plan/sink_data.mojo`).
 - **Expressions.** `Expr` is an owned tree with factories (`Expr.col_ref(name)`, `Expr.col_idx(i)`,
   `Expr.literal(ScalarValue...)`, `Expr.binary(op, l, r)`). `AggExpr(func, child, alias)` holds an
   aggregate (`src/plan_expr`).
-- **The executor's entry point.** `run_lowered_plan_with(ctx, lowered, opener) raises -> RecordBatch`
-  (`src/sdk_exec/engine_execute.mojo`). It feeds the `ParamTable` to the segment builder in index
-  order and runs the segments on the context's workers.
+- **The executor's entry point.** `run_lowered_plan_with(ctx, lowered, opener) raises ->
+  RecordBatch` (`src/sdk_exec/engine_execute.mojo`). It feeds the `ParamTable` to the segment
+  builder in index order and runs the segments on the context's workers.
 - **A precedent.** `src/pipeline_exec/tests/test_group_agg_plan.mojo` builds a scan, filter and
   grouped-aggregate plan by hand. `src/pipeline_exec/plan_harness.mojo` has its helpers, which are
   test support.
 
-None of those public signatures takes or returns a pointer (§5).
+None of those public signatures takes or returns a pointer (§7).
 
 ### What the user writes, for one real pipeline
 
 One local Parquet file, scanned, filtered, grouped and aggregated, then printed. In SQL this is
-`SELECT city, count(*) AS trips, sum(fare) AS total FROM 'trips.parquet' WHERE fare > 10 GROUP BY city`.
-*(PROPOSED; the spelling of list arguments follows whatever the pinned compiler accepts for lists of
-the SDK's `Expr`.)*
+`SELECT city, count(*) AS trips, sum(fare) AS total FROM 'trips.parquet' WHERE fare > 10 GROUP BY
+city`. *(PROPOSED; the spelling of list arguments follows whatever the pinned compiler accepts for
+lists of the SDK's `Expr`.)*
 
 ```mojo
-from komira import Session
-from komira.physical import PhysicalPlan, parquet, col, lit, count_rows, sum_of
+from komira_physical import Engine, PhysicalPlan, parquet, col, lit, count_rows, sum_of
 
 def main() raises:
-    var session = Session()
+    var engine = Engine()
     var plan = PhysicalPlan()
     # One pipeline: a Parquet scan, a filter, and a hash aggregate, the sink that ends it.
     var trips = plan.pipeline(parquet("trips.parquet", columns=["city", "fare"]))
@@ -299,8 +475,8 @@ def main() raises:
     plan.hash_aggregate(trips, keys=[col("city")],
                         aggregates=[count_rows("trips"), sum_of(col("fare"), "total")])
     plan.set_result(trips)
-    print(session.schema_of(plan, trips))   # the pipeline's output schema, a run-time value
-    var result = session.run(plan^)          # check the plan, then run it as written
+    print(engine.schema_of(plan, trips))    # the pipeline's output schema, a run-time value
+    var result = engine.run(plan^)           # check the plan, then run it as written
     print(result)
 ```
 
@@ -314,11 +490,11 @@ Each call maps to the IR, and the builder fills the fields the user does not cho
 | no sink named | `SINK_COLLECT` |
 | `plan.pipeline(output_of(p))` | `SourceSpecPod.from_sink_output(p)`, with `p` in the new pipeline's `deps` and the waiting edge `EDGE_E3_PUBLISH_WAIT` |
 | later: `sort`, `top_n`, `hash_join(build=p1, probe=p2, ...)` | `SINK_SORT`, `SINK_TOPN`, and `SINK_HASH_BUILD` on `p1` with `MorselOp.join_probe` on `p2` |
-| `session.run(plan)` | reads each source's schema, checks the whole plan (below), builds the `LoweredPlan`, and calls `run_lowered_plan_with(ctx, lowered, LocalOnlyScanFs())` |
+| `engine.run(plan)` | reads each source's schema, checks the whole plan (below), builds the `LoweredPlan`, and calls `run_lowered_plan_with(ctx, lowered, LocalOnlyScanFs())` |
 
 The user chooses the shape: how the plan is cut into pipelines, where a filter runs, which sink ends
-each pipeline, and which side of a join is built. That is what the plan builder has and the session
-does not. The builder
+each pipeline, and which side of a join is built. That is what this surface has and the untyped
+SDK does not. The builder
 chooses only what follows from those choices.
 
 ### What lowering guarantees today, and how the plan builder checks it instead
@@ -328,9 +504,9 @@ chooses only what follows from those choices.
 - `RealBuilder` checks each pipeline as it builds it, after earlier pipelines have already run.
 - A few things nothing checks.
 
-A hand-built plan could break any of them, so the plan builder's rule is a check at submit, before any pipeline
-runs. A broken plan is refused by name and never crashes. The table shows what the executor does
-today with a broken plan and what the plan builder does.
+A hand-built plan could break any of them, so the plan builder's rule is a check at submit, before
+any pipeline runs. A broken plan is refused by name and never crashes. The table shows what the
+executor does today with a broken plan and what the plan builder does.
 
 | invariant | today, for a plan `lower` did not build | the plan builder |
 |---|---|---|
@@ -355,12 +531,12 @@ Two changes make this hold, both **PROPOSED**:
   goes in `run_lowered_plan_with` in `sdk_exec`, before it calls `run_plan`. Today a missing
   result is named only after the whole run (`out.take(lowered.result_seg_id)`). A lowered plan
   passes both checks, and the table becomes the one list `lowering` and the executor share.
-- **In `komira.physical`.** The checks that need schemas: column names, types and output schemas.
+- **In `komira_physical`.** The checks that need schemas: column names, types and output schemas.
   The builder holds the flowing schema of each pipeline when the plan is submitted, so it can run
   them.
 
-Each refusal is a `KomiraError` (§1) whose code is the name above and whose message names the
-pipeline, the operator and the column, the same kind of error the session raises.
+Each refusal is a `KomiraError` of §1's shape whose code is the name above and whose message names
+the pipeline, the operator and the column.
 
 ### What is stable enough to expose, and what is not
 
@@ -377,7 +553,7 @@ The physical IR is not stable, and the design documents say so:
 So:
 - **Exposed.** The builder's own vocabulary:
   - `PhysicalPlan` and `PipelineId` (an id, not an `Int`);
-  - the sources: `parquet` now, and CSV and JSON when the session's `files` reads them;
+  - the sources: `parquet` now, and CSV and JSON later;
   - the operators `filter`, `project` and `limit`;
   - the sinks `hash_aggregate` and collect, then `sort`, `top_n` and `hash_join`;
   - the expressions: `col`, `lit`, comparisons, arithmetic, `and`, `or`, `not`, `is_null`;
@@ -389,88 +565,54 @@ So:
 - **Not exposed.** `SegmentDescPod`, `SourceSpecPod`, `MorselOp`, `ParamTable`, sink indices, edge
   tags, `ir_version`, key type and orientation tags, order keys, morsel sizes, the estimates and the
   slots. The builder writes them. When the IR changes, the change updates the builder and its welded
-  tests in the same pull request, because `komira` is built in this repository. A user's program
+  tests in the same pull request, because `komira_physical` is built in this
+  repository. A user's program
   does not change.
 
-One design statement bears on the plan builder. lowering_and_pipeline.md (§2.2, "Exit condition") says no consumer
-of the interim IR exists outside `pipeline_exec`, and nothing serializes a `LoweredPlan`, until the
-self-contained IR lands. The plan builder adds a second producer, in the same process and the same
-build, and nothing serializes its plans. This document reads that as allowed. Read the other way,
-as also closing the IR to a second producer, it would make the plan builder wait for the
-self-contained IR. That is a question of when, not of what exists at the end, so this design settles it by the
-reading above ("What the design decides, and why").
+One design statement bears on the plan builder. lowering_and_pipeline.md (§2.2, "Exit condition")
+says no consumer of the interim IR exists outside `pipeline_exec`, and nothing serializes a
+`LoweredPlan`, until the self-contained IR lands. The plan builder adds a second producer, in the
+same process and the same build, and nothing serializes its plans. This document reads that as
+allowed. Read the other way, as also closing the IR to a second producer, it would make the plan
+builder wait for the self-contained IR. That is a question of when, not of what exists at the end,
+so this design settles it by the reading above ("What the design decides, and why").
 
-### Which libraries the plan builder needs
+### Which libraries it needs
 
-**It lives in the same package**, as the module `komira.physical`, over the same `Session`. Every
-library it imports is already in the session's closure of 86:
-- `physical_plan`, `plan_expr`, `plan_ir`;
-- `lowering`, for `LoweredPlan` and `ParamTable`;
-- `pipeline_exec`, for `LocalOnlyScanFs`;
-- `parquet_footers`, for the schema of a source;
-- `sdk_exec` and `arrow`.
+`komira_physical` links the engine: `sdk_exec` for `EngineContext` and `run_lowered_plan_with`, and
+`physical_plan`, `plan_expr`, `plan_ir`, `lowering`, `pipeline_exec` and `parquet_footers` for the
+plan and its schemas. So it needs the engine's closure published, which the next section computes.
 
-So it adds no library to publish (§4). The one change outside `komira` is the executor check above,
-in `physical_plan` and `pipeline_exec`.
-
-**A separate package without the SQL front end is possible, but not recommended now.** The executor
-alone is smaller. Computed the same way as §4:
+The executor alone is smaller, computed the same way:
 - `pipeline_exec`'s closure is 69 libraries, 45 of them unpublished, with no `sql`, `optimizer` or
   `lowering`;
 - `lowering`'s is 21.
 
-The entry point it uses needs `EngineContext`, though, which holds the SQL catalog (`sql`) and the footer
-cache (`parquet_footers`, whose closure has `sql` and `lowering`). A package without them needs an
-execution context outside `sdk_exec`. Since the session publishes every library the plan builder needs anyway, that split
-saves nothing on the road this document sets *(inferred)*.
+The entry point the builder uses needs `EngineContext`, though. That holds the SQL catalog (`sql`)
+and the footer cache (`parquet_footers`, whose closure has `sql` and `lowering`). A narrower package
+would need an execution context outside `sdk_exec`. That is a later refactor, not this design.
 
 ### How the plan builder is tested
 
-The tests are the same kind as the session's (§7, §8):
-- **The README example.** The README of `komira` gains the plan above, writing its Parquet file
-  first with the session's `COPY`. It asserts the rows, so the install test runs it against the
-  installed packages.
-- **Task pages.** The plan builder is its own form, `mojo_plan`, with its own tree of task examples
-  and its own tab on the task pages, as komira-ai/komira#2495 lays out for a second Mojo form (§7).
-  A task is shown in that form only when the builder can write its plan. Until slice 4 lands, every
-  task's `mojo_plan` record is `not-shown`, with the reason that the builder does not exist yet.
+- **The README example.** The README of `komira_physical` holds the plan above. It writes its input
+  file first, with `komira_physical`'s `write_parquet(batch, path)` over `sdk_exec`'s
+  `write_parquet_result`, and asserts the rows. So the install test runs it against the installed
+  packages.
+- **Task pages.** This surface is the form "Mojo physical plan", key `mojo_plan`. Its tree is
+  `src/komira_physical/docs/tasks/`, in its own package, as komira-ai/komira#2495 places a tree, and
+  it has its own tab. A task is shown in that form only when the builder can write its plan. Until
+  the builder lands, every task's `mojo_plan` record is `not-shown`, with that reason.
 - **Welded tests.**
-  - The same query through the session and through the plan builder gives the same rows.
+  - The same query through `komira` and through `komira_physical` gives the same rows.
   - Each submit refusal of the table above is asserted by its exact message: an unknown column, a
     filter that is not boolean, a sum over a string, an unserved sink, a result pipeline that is
     not the root, and a pipeline that reads the output of a pipeline that does not exist.
   - Under the executor change, a hand-made `LoweredPlan` with an unserved sink and one with a stray
     root are refused before any pipeline runs.
 
-## 3. The typed SDK
+### The engine's closure
 
-A typed program has a schema that is a compile-time value. A column is named by type parameters,
-so a missing column is a compile error. The compiler specialises each operator for the program's
-key and aggregate types. [lowering_and_pipeline.md](lowering_and_pipeline.md) §4.1 names this as
-the shape the typed operator tables are for, and explains why a run-time plan cannot use them.
-
-What **EXISTS**:
-- the operator tables `op_agg_stage`'s `HashAggTable[KB, *Aggs]`, `op_sort`'s `Stage_Sort`, and
-  `op_window`'s top-n stages;
-- the `ExprX` traits and the `Stage[Program]` vocabulary in `expr`;
-- the compile-time schema descriptor in `plan_expr.typed_schema`;
-- `sdk.auto_schema`'s `derive_schema[T]()`, which makes a descriptor from a Mojo struct.
-
-What does not exist is its front end: a typed frame, typed columns, and the driver that runs a typed
-program from a source to a sink. The port left them out on purpose ("Typed execution path not
-kept", [port_audit/sdk_group.md](port_audit/sdk_group.md)). No test runs a typed program end to end.
-The tests drive one typed operator at a time by hand.
-
-The typed SDK is later, with a design of its own. It needs the front end written, and it runs on the
-typed tables, not on the physical plan the session and the plan builder share. It would publish its
-own libraries (`eval`, `op_agg_stage` and `op_join_stage` among them) beyond the session's; `expr`,
-`op_sort` and `op_window` are already in the session's closure. `op_typed_source_api` is not part
-of it: its
-"typed" means a source whose file system is a type, not a schema.
-
-## 4. The exact closure
-
-### How it was computed
+#### How it was computed
 
 From the BUCK graph, not estimated:
 - `./buck2 uquery "deps(//src/sdk_exec:sdk_exec)" --output-attribute deps --output-format json`
@@ -486,7 +628,7 @@ The result:
 
 | | libraries |
 |---|---|
-| `sdk_exec`'s closure | **93** |
+| `sdk_exec`'s closure, not counting `sdk_exec` | **93** |
 | published (in `PACKAGES`) | 32 |
 | not published | 61 |
 | of the 61: depends on an unpublished library | 36 |
@@ -497,8 +639,8 @@ The result:
 Three facts about the graph:
 - **The declared `deps` are incomplete.** `sdk_exec`'s own `deps` list 87 of the 93. The other 6
   (`decimal_literal`, `iceberg`, `op_agg_hash`, `op_fused_kernels`, `op_join_build`, `rowcell`) are
-  reached only through its dependencies. Rule M11 asks for the full closure. Slice 0 adds the 4 of them that
-  stay in the recommended closure (`iceberg` and `rowcell` leave it).
+  reached only through its dependencies. Rule M11 asks for the full closure. Slice 6 adds the 4 of
+  them that stay in the recommended closure (`iceberg` and `rowcell` leave it).
 - **The ledger's import lists can be shorter.** For several libraries the "imports" in
   UNPUBLISHED.md (each library's own imports) name fewer libraries than its BUCK `deps` (which hold
   the full closure). Two examples:
@@ -511,12 +653,12 @@ Three facts about the graph:
 - **Iceberg brings in the whole HTTP stack.** One module of `sdk_exec`, `engine_iceberg.mojo`
   (`register_iceberg_table`), imports `iceberg_catalog`. That alone brings in `http_client`,
   `http_core` (with s2n-tls), `net` and `iceberg`. No other module of `sdk_exec` imports any of
-  them. SQL's `iceberg_scan('<path>')` does not need them: `engine_lower.mojo` imports `iceberg_scan`,
-  which stays.
+  them. SQL's `iceberg_scan('<path>')` does not need them: `engine_lower.mojo` imports
+  `iceberg_scan`, which stays.
 
-### The recommended closure: without `engine_iceberg`
+#### The recommended closure: without `engine_iceberg`
 
-**PROPOSED**: slice 0 moves `engine_iceberg.mojo` into a library of its own, `sdk_exec_iceberg`.
+**PROPOSED**: slice 6 moves `engine_iceberg.mojo` into a library of its own, `sdk_exec_iceberg`.
 - No `.mojo` file outside `sdk_exec` imports it. `src/so/BUCK` lists `iceberg_catalog` and
   `iceberg_scan` among its deps, but no source under `src/so` names `engine_iceberg` or
   `register_iceberg_table`.
@@ -532,32 +674,35 @@ The same walk over the imports of `sdk_exec`'s other modules then gives:
 |---|---|
 | closure | **86**, plus `sdk_exec` |
 | published | 30 (`rowcell` and `uuid` leave the closure) |
-| to publish | **56**, then `sdk_exec`, then `komira`: **58 packages** |
+| to publish | **56**, then `sdk_exec`, then `komira_physical`: **58 packages** |
 | of the 56: depends on an unpublished library | 33 |
 | of the 56: no README example | 16 |
 | of the 56: native dependency pending | 5: `async_rt`, `fs`, `objectstore`, `parquet_codec`, `scan_source` |
 | of the 56: none | 2: `arrow`, `secret_store` |
-| left for slice 8 (Iceberg catalogs) | `http_client`, `http_core`, `iceberg`, `iceberg_catalog`, `net`, `sdk_exec_iceberg` |
+| left out of the physical-plan surface's first package (Iceberg catalogs) | `http_client`, `http_core`, `iceberg`, `iceberg_catalog`, `net`, `sdk_exec_iceberg` |
 
 The split matters most for `http_core`. It is the one native library with no path in a single pull
 request: s2n-tls built on komira's renamed aws-lc (`komira_s2n_*` called by `external_call`) would
-become a new `native_library`, and its renaming build runs on linux-x86_64 only today. Leaving it out
-of the first slice keeps the hardest native step off the road to the first query. Iceberg
-catalogs stay in the end state (slice 8). This changes only when they come.
+become a new `native_library`, and its renaming build runs on linux-x86_64 only today. Leaving it
+out keeps the hardest native step off the road to the first physical plan. The untyped SDK reads
+Iceberg tables through the shared library meanwhile, since the library links all of this already.
 
-### Published already (30 of the 86)
+#### Published already (30 of the 86)
 
-`async_api`, `atomic_alias`, `awslc`, `byte_buffer`, `clock`, `compression`, `containers`, `counters`,
-`crypto`, `dynamic_filter`, `encoding`, `fork_join`, `hashing`, `host_probe`, `json`, `libc`, `log`,
-`lz4`, `metrics`, `name_registry`, `parquet_api`, `plan_proto`, `proto_codec`, `protobuf`,
-`scalar_arithmetic`, `simd_ops`, `spsc_ring`, `sync`, `trace`, `zlib`.
+`async_api`, `atomic_alias`, `awslc`, `byte_buffer`, `clock`, `compression`, `containers`,
+`counters`, `crypto`, `dynamic_filter`, `encoding`, `fork_join`, `hashing`, `host_probe`, `json`,
+`libc`, `log`, `lz4`, `metrics`, `name_registry`, `parquet_api`, `plan_proto`, `proto_codec`,
+`protobuf`, `scalar_arithmetic`, `simd_ops`, `spsc_ring`, `sync`, `trace`, `zlib`.
 
 `sdk_exec`'s `deps` also name `runtime_paths` (published) through the alias
 `//tools/build/mojo/runtime_paths`. No source of `sdk_exec` outside `tests/` imports it, so it is a
 test dependency. The walk does not count it, and a package lists it under `[dev-dependencies]`, as
 `log` does.
 
-### The 56, in publishing order
+#### The 56, in publishing order
+
+`arrow` and `arrow_ipc` (waves 1 and 2) are published by slice 1 for the untyped SDK (§4), so 54
+are left when this surface starts.
 
 The wave of a library is one more than the highest wave among its unpublished BUCK `deps`. Wave 1
 needs only published libraries. Libraries in the same wave do not depend on each other, so they can
@@ -634,9 +779,9 @@ The columns:
 | 14 | `op_join_probe` | depends on an unpublished library | not measured | 16 | measure coverage; reach 99% if short; claim the name |
 | 15 | `pipeline_exec` | depends on an unpublished library | not measured | 37 | measure coverage; reach 99% if short; claim the name |
 | 16 | `sdk_exec` | depends on an unpublished library | not measured | 56 | measure coverage; reach 99% if short; claim the name |
-| 17 | `komira` | new | new | 57 | the package of §1 with its README example; claim the name |
+| 17 | `komira_physical` | new | new | 57 | the package of §5 with its README example; claim the name |
 
-### What each kind of row takes
+#### What each kind of row takes
 
 - **One pull request each, nothing before it except its wave.** These need only their place in the
   order and a claimed name: `secret_store`, `plan_wire`, `op_agg_state`, `jsonl`, `avro`, `parquet`,
@@ -644,16 +789,17 @@ The columns:
   `mopm_migrate` tool does: the layout `src/<name>/src/<name>/`, then `mopm.toml`,
   `mopm-toolchain.toml`, `mopm.lock`, `buildrules.mojo.bzl` and its lock, `coverage_floor.txt`, the
   `PACKAGES` and `mopm_native_ids.bzl` rows, the UNPUBLISHED.md row deleted with its count, and the
-  dependents' rows rewritten ([tools/build/mopm_migrate/README.md](../../tools/build/mopm_migrate/README.md),
+  dependents' rows rewritten
+  ([tools/build/mopm_migrate/README.md](../../tools/build/mopm_migrate/README.md),
   [release/UNPUBLISHED.md](../../release/UNPUBLISHED.md)).
 - **A README example to write (16).** The release refuses a package whose README holds no `mojo`
   example. Most of these are engine internals (`lowering`, `op_window`, `engine_runtime`, ...), so
   the example shows the library's own public call on a small input, as the published packages'
   READMEs do. It can be written in the same pull request as the move.
-- **Coverage first (25 below 99% by the old census, 20 not measured, 11 at or above 99%).** T1 holds a touched package
-  to 99%, and a move touches every file. *(inferred)* This is the largest part of the work: `arrow`
-  (67.8% of 7,042 lines), `column_kernels` (67.0% of 7,061) and `udf` (17.5% of 674) are the
-  biggest gaps. The real numbers come from each pull request's check.
+- **Coverage first (25 below 99% by the old census, 20 not measured, 11 at or above 99%).** T1 holds
+  a touched package to 99%, and a move touches every file. *(inferred)* This is the largest part of
+  the work: `arrow` (67.8% of 7,042 lines), `column_kernels` (67.0% of 7,061) and `udf` (17.5% of
+  674) are the biggest gaps. The real numbers come from each pull request's check.
 - **Native code to package (5).** `mopm_migrate` refuses a library that owns C or links one, so
   each of the five is moved by hand, after the published precedents. Each one's C must also build
   for macOS, since the pull request check builds every package's library for darwin-arm64
@@ -668,44 +814,52 @@ The columns:
   | `objectstore` | 9 | `_objectstore_shim.c`, 374 lines; it calls `fs`'s shim symbols | the same, with `fs` as a dependency | 10 |
 
   The last column counts the libraries whose BUCK closure holds the native library, and `sdk_exec`
-  and `komira` wait for all five. Each is one pull request *(inferred)*. `async_rt` is the largest
-  C, and `scan_source` holds back the most libraries.
+  and `komira_physical` wait for all five. Each is one pull request *(inferred)*. `async_rt` is the
+  largest C, and `scan_source` holds back the most libraries.
 - **Names to claim (50 of the 58).** Already claimed: `arrow`, `arrow_ipc`, `column_format`,
   `column_kernels`, `plan_expr`, `plan_stats`, `secret_registry`, `secret_store`. The other 50,
-  `komira` among them, are claimed by the owner on the registry, each before its wave's pull
-  request. Only the owner can do it, and it happens outside this repository (owner decision 2).
+  `komira_physical` among them, are claimed by the owner on the registry, each before its wave's
+  pull request. Only the owner can do it, and it happens outside this repository (owner decision 2).
 
-*(inferred)* The lower bound is 15 publishing pull requests (one per wave of the 56), then `sdk_exec`
-and `komira`. Five of them carry a native move. The coverage and README work comes before or within
-them. Libraries of one wave that are ready can share a pull request, and a library that needs tests
-first goes in a later one of the same wave.
+*(inferred)* The lower bound is 15 publishing pull requests (one per wave of the 56), then
+`sdk_exec` and `komira_physical`. Five of them carry a native move. The coverage and README work
+comes before or within them. Libraries of one wave that are ready can share a pull request, and a
+library that needs tests first goes in a later one of the same wave.
 
-## 5. The Mojo rules, and what a user's build needs
+## 6. A typed SDK, possibly later
 
-How `komira` obeys the rules:
-- **M1, no pointer type in a public API.** None of the session's names takes or returns a pointer.
-  - `Session` holds its `EngineContext` in a private field.
-  - `Result` lends its batch as `ref [self] RecordBatch`.
-  - `Files` holds a `String`.
-  - The plan builder's `komira.physical` exposes only its own values (`PhysicalPlan`, `PipelineId`, its
-    `Expr` and aggregates) and `arrow`'s `Schema` and `RecordBatch`. The IR it emits is pointer-free
-    in its public fields too (`physical_plan.mojo`'s header: inert data, no `UnsafePointer`), and
-    `Expr` keeps its `OwnedPointer` children in private fields.
-  - The `sdk_exec` calls it wraps take and return values. A search of `engine_*.mojo`,
-    `arrow_result.mojo`, `run_control.mojo` and `sdk/table_display.mojo` for `UnsafePointer`,
-    `OpaquePointer` and the wildcard origins finds none.
-- **M3 to M10.** `komira` has no `UnsafePointer`, no wildcard origin, no FFI and no slab. Native
-  code stays in the five owners above, each behind its own pointer-free functions (M9). `//:pointer_lint`
-  runs over it like every library under `src/`.
+A typed program has a schema that is a compile-time value: a column is named by type parameters, so
+a missing column is a compile error, and the compiler specialises each operator for the program's
+key and aggregate types ([lowering_and_pipeline.md](lowering_and_pipeline.md), §4.1). Its operator
+tables **EXISTS** (`op_agg_stage`'s `HashAggTable[KB, *Aggs]`, `op_sort`'s `Stage_Sort`,
+`op_window`'s top-n stages, `expr`'s `ExprX` traits, `plan_expr.typed_schema` and
+`sdk.auto_schema`'s `derive_schema[T]()`), but its front end does not. The port left it out on
+purpose ("Typed execution path not kept", [port_audit/sdk_group.md](port_audit/sdk_group.md)), and
+no test runs a typed program end to end. Like the physical-plan surface it would link the engine,
+and it would publish its own libraries beyond it (`eval`, `op_agg_stage` and `op_join_stage` among
+them). Whether it exists at the end is owner decision 1, and this design gives it no slices.
+
+## 7. The Mojo rules, and what a user's build needs
+
+How the two packages obey the rules:
+- **M1, no pointer type in a public API.**
+  - `komira`'s public names hold values: an `Int`, a `String`, a `Table`, strings (§3).
+  - `komira_physical` exposes its own values (`Engine`, `PhysicalPlan`, `PipelineId`, its
+    expressions and aggregates) and `arrow`'s `Schema` and `RecordBatch`.
+  - The IR it emits is pointer-free in its public fields too (`physical_plan.mojo`'s header says it
+    is inert data with no `UnsafePointer`). `Expr` keeps its `OwnedPointer` children in private
+    fields.
+- **M3, M4, M9.** `komira`'s foreign pointers live in `komira._lib` alone, with `# SAFETY:` and
+  `# FFI-BOUNDARY:` comments (§3). `komira_physical` has no FFI of its own: native code stays in
+  the engine libraries that own it. `//:pointer_lint` runs over both, like every library under
+  `src/`.
 - **M11, packaging is `.mojoc`.**
-  - `komira` is a `mojo_package` from its first commit, so its library is a `.mojoc` and its
-    package is a `.conda` with `mopm.toml`.
-  - Its BUCK `deps` are the whole closure: `sdk_exec` and its 86.
-  - Its `mopm.toml` `[dependencies]` names only what it imports: `sdk_exec`, `sdk` (for
-    `format_table`), `arrow`, `column_kernels` and `compression`. With the plan builder it also names
-    `physical_plan`, `plan_expr`, `plan_ir`, `lowering`, `pipeline_exec` and `parquet_footers`, all
-    already in the closure. mopm resolves the rest from each
-    package's own dependencies (`>=0.1,<0.2` per dependency, [docs/ci.md](../ci.md)).
+  - Both are `mojo_package`s from their first commit, so each library is a `.mojoc` and each
+    package a `.conda` with a `mopm.toml`.
+  - Their BUCK `deps` are their whole closures: 18 libraries for `komira` (§4); `sdk_exec` and its
+    86 for `komira_physical` (§5).
+  - Each `mopm.toml` `[dependencies]` names only what the package imports. mopm resolves the rest
+    from each package's own dependencies (`>=0.1,<0.2`, [docs/ci.md](../ci.md)).
 - **M15, T6, T18.** Every file stays under 1,000 lines, every test file is in `test_srcs`, and every
   public name appears in a README example.
 
@@ -713,252 +867,196 @@ A user's build needs:
 
 | | what | where it is fixed |
 |---|---|---|
-| Mojo | `1.1.0`, the one Mojo every package is built for | `MOJO` in [packages.bzl](../../release/readme_e2e/packages.bzl), `mojo = ["1.1.0"]` in each `mopm.toml` |
-| mopm | a mopm with pixi on `PATH`; the repository builds and tests with mopm 0.0.138 | `MOPM` in packages.bzl, `mopm-toolchain.toml` |
+| Mojo | `1.1.0`, the one Mojo every package and the shared library are built for | `MOJO` in [packages.bzl](../../release/readme_e2e/packages.bzl), `mojo = ["1.1.0"]` in each `mopm.toml`, `tools/build/platforms/table.bzl` |
+| mopm | a mopm with pixi on `PATH`. `komira` needs the first mopm with shared natives (§2); the repository builds with mopm 0.0.138 today | `MOPM` in packages.bzl, `mopm-toolchain.toml` |
 | the project | `mopm init`, `[toolchain] mojo = "1.1.0"` (init writes mopm's own default, and `mopm add` resolves the newest build for the project's Mojo), `mopm add komira-ai/komira`, `mopm sync` | the `prod-add` job ([docs/ci.md](../ci.md)) |
-| platform | Linux on x86_64 or macOS on arm64. The Mojo packages are not built for linux-arm64, and this is listed with the gate's exceptions (owner decision 3) | [docs/releases.md](../releases.md), [docs/install.md](../install.md) |
-| host | *(inferred)* what the Python wheel needs on Linux: glibc 2.35 or newer and an x86-64-v3 CPU, since both are built by the same toolchain for the same target CPU | [docs/install.md](../install.md), [mojo_rules_and_toolchain.md](mojo_rules_and_toolchain.md) |
+| platform | Linux on x86_64 or macOS on arm64. The Mojo packages are not built for linux-arm64, and this is listed with the gate's exceptions (owner decision 3) | [docs/releases.md](../releases.md) |
+| host | what the Python wheel needs on Linux: glibc 2.35 or newer and an x86-64-v3 CPU, since the same shared library is inside it | [docs/install.md](../install.md) |
 | system libraries | `compression` opens libzstd, libbz2 and liblzma, and `zlib` and `lz4` open libz and liblz4, at run time. Each package declares them as `[native-dependencies]`, so `mopm sync` installs them from conda-forge | those packages' `mopm.toml`, `tools/build/package/system_libs.bzl` |
 
-A user adds one package, `komira-ai/komira`, and nothing else: its dependencies come with it.
-The natives are static archives inside the packages, which `mopm build` links
-([tools/build/readme_e2e/README.md](../../tools/build/readme_e2e/README.md), "link").
+## 8. The relation to the C interface
 
-## 6. The relation to the C ABI
-
-The route from the optimizer down is the same for all three languages:
+`komira` makes the same `komira_sql_stream` call as the Python and Node packages, and the same
+`komira_add_sql_binding` call as Python (Node registers with `komira_register_parquet`). So every
+language takes the same route from the C interface down:
 
 ```
-Python Session.sql ──┐
-                     ├── komira_sql_stream ── so.sql_result ── sdk_exec.run_sql_with ──┐
-Node   Session.sql ──┘                                                                  │
-                                                                                        ├── parse, bind,
-Mojo   Session.sql ────────────────────────────────────────── sdk_exec.run_sql ─────────┘   then run_plan_batch:
-                                                                                            optimize, lower, execute
+Python  Session.sql ──┐
+Node    Session.sql ──┼── komira_sql_stream ── libkomira: parse, bind, optimize, lower, execute ──
+Arrow C stream
+Mojo    Session.sql ──┘
 ```
 
-- **Python and Node.** `komira_sql_stream` calls `so`'s `sql_result`. That function probes the codec
-  libraries, builds the object-store opener from the session's credentials, and calls `run_sql_with`.
-  Then `arrow_result` and `build_record_batch_stream` hand the batch across as an Arrow C stream
-  ([libkomira_run_abi.md](libkomira_run_abi.md)).
-- **Mojo.** `komira.Session.sql` calls `run_sql` in the same process, with no C call in between.
-  `run_sql` is `run_sql_with(..., LocalOnlyScanFs())`. From `run_plan_batch` down, optimize, lower
-  and execute are the same code.
+What differs for a Mojo caller, beside Python:
 
-What differs for a Mojo caller:
-
-| | Python and Node (libkomira) | Mojo (`komira`) |
+| | Python | Mojo (`komira`) |
 |---|---|---|
-| the result | an Arrow C stream that crosses the C boundary; `arrow_result` refuses a column the export cannot carry | the `RecordBatch` itself, no export, so no such refusal |
-| errors | a status code, then `komira_last_error`, `_code` and `_step`; the binding raises its `KomiraError` | a `KomiraError` with the same code, step and message (or, without typed raises, an `Error` with the same text; §1) |
-| input checks | the C layer bounds text at 64 MiB and checks NUL bytes and UTF-8 | a Mojo `String`, so those checks do not apply; the engine's own limits (parse depth, plan bytes) still do |
-| options | `komira_ctx_new_with_options`: two integers | `Session(threads, memory_limit)`, the same two; `EngineOptions.spill_directory` is a later, additive argument |
-| threads | one thread per handle at a time; Python adds a lock, Node a session thread | the compiler holds it (`mut self`) |
-| cancel and progress | a run handle (`komira_run_new`, ABI 1.6) | `RunControl`, which **EXISTS** in `sdk_exec`; a later `sql` overload |
-| remote stores and credentials | `so`'s bindings and credentials | not in the first slices (slice 7) |
-| native code | one `libkomira.so` linked on its native owners, loaded by the binding | static archives in each package, linked into the user's program by `mopm build` |
-| abort containment | libkomira probes codec libraries before each run; a fail-fast abort still ends the host | `Session()` probes once; a fail-fast abort ends the program |
+| opening the library | `ctypes.CDLL` on the copy in the wheel's `_lib/` | `OwnedDLHandle` by name, from the environment's `lib/` (§2) |
+| the Mojo runtime | the wheel carries its own three runtime libraries, and checks build ids against any already loaded | the user's own Mojo runtime, at the same pin (§2) |
+| the result | the Arrow C stream handed to pyarrow, read once | the stream read into an `arrow` `Table`, released at once (§3) |
+| errors | `KomiraError` and its subclasses from code and step | `KomiraError` with the same code, step, status and message (§1) |
+| threads | a lock per session | the compiler holds it (`mut self`) |
 
-The SDK adds no C call and changes no libkomira behaviour. A plan built in Mojo later (the frame
-API) would take the plan entry point, `run_plan`, which is also where libkomira's
-`komira_plan_stream` leads.
+The physical-plan surface has no C counterpart, and it never crosses a process or a build. So the
+physical IR needs no wire form for it.
 
-The plan builder has no C counterpart. libkomira has two entry points, SQL text and a logical plan,
-and both go through the optimizer and lowering. The plan builder enters below them, at
-`run_lowered_plan_with`. From there down it is the same executor and the same segment builder as
-every other route. The plan builder never crosses a process or a build, so the physical IR needs no wire form for it.
+## 9. How Mojo examples are tested
 
-## 7. How Mojo examples are tested
-
-There are two kinds of Mojo example, and they follow the one documentation and test framework
+The two kinds of Mojo example follow the one documentation and test framework
 ([documentation_tests.md](documentation_tests.md)) the other languages use.
 
 ### README examples
 
-Two tests run every README example of `komira`, and both run in the pull request check.
+Every README example of `komira` and of `komira_physical` runs twice in the pull request check.
 
-1. **The welded README gate (EXISTS for every library).** Each `mojo` fence of the README is cut
-   into a program, compiled against the library's `.mojoc` and its closure in the build, and run.
-   The library's package exists only once these pass ([tools/build/mojo/README.md](../../tools/build/mojo/README.md)).
-2. **The install test (EXISTS: `//release/readme_e2e/verify:<name>`).**
-   It is what a stranger does, run offline
-   ([tools/build/readme_e2e/README.md](../../tools/build/readme_e2e/README.md)):
+1. **The welded README gate** (**EXISTS** for every library). Each `mojo` fence of the README is
+   cut into a program, compiled against the library's `.mojoc` and its closure in the build, and
+   run ([tools/build/mojo/README.md](../../tools/build/mojo/README.md)). For `komira` the run needs
+   the shared library on the loader's path:
+   - **PROPOSED**: `komira`'s tests are given `//src/so:libkomira[dist]`'s directory the way
+     buildrules gives a package's conda-forge libraries to its tests, by a library directory
+     (`--lib-dir`).
+   - A test run is not a user's configuration, so this is not an environment variable rule S2
+     forbids *(inferred)*.
+2. **The install test** (**EXISTS**: `//release/readme_e2e/verify:<name>`). It is what a stranger
+   does, run offline ([tools/build/readme_e2e/README.md](../../tools/build/readme_e2e/README.md)):
    - it makes an empty project (`mopm.toml` with a name and version, `[toolchain] mojo` and an empty
      `[dependencies]`);
-   - it runs `mopm add komira-ai/komira@=<version> --overlay <staged set>`, the same `.conda` files
-     the release uploads. `--registry` points at a loopback server that serves only the registry's
-     configuration and refuses every other request, so a package outside the staged set fails the
-     run;
+   - it runs `mopm add komira-ai/<name>@=<version> --overlay <staged set>`, the same `.conda` files
+     the release uploads, against a loopback registry that refuses everything else;
    - it checks each locked file against the staged one byte for byte;
-   - it unpacks the prefix and links the static archives mopm names;
-   - it compiles each README example with the pinned Mojo with only the installed prefix on the path,
-     and runs it through the welded tests' runner (`gate mojo`) with an empty `share/` directory of
-     its test root as the working directory.
+   - it compiles each README example with the pinned Mojo against the installed prefix only, and
+     runs it with an empty working directory.
 
-   `//release/readme_e2e/verify:all` is in `//ci:pr`. When `komira` has a `mopm.toml` it is a member
-   of `PACKAGES`, and `//:readme_e2e_complete` refuses the tree until it is covered, so its e2e
-   cannot be left out.
+   Today the tool links static archives only. For `komira`, **PROPOSED** in slice 1:
+   - the tool installs the shared native into the prefix's `lib/`, and the program finds it there;
+   - a scenario of the tool's own holds this, with a negative case: a package whose shared native is
+     missing fails at `run`, naming the library.
 
-What the tool gives an example, and what the example does:
-- **No data files.** The e2e gives an example no files, so the README example writes its own Parquet
-  file first, with SQL, into that working directory *(inferred: the runner's test root is a directory
-  it made, so writable; the welded README gate already runs `sdk_exec`'s `COPY` examples)*.
-  `COPY (SELECT ...) TO 'trips.parquet'` already **EXISTS** in `run_sql`, and `sdk_exec`'s README
-  uses it. This is the rule for every documentation example: "the example writes
-  its own sample data into its working directory, so a page hides no input"
-  ([documentation_tests.md](documentation_tests.md)). No change to the e2e tool is needed.
-- **Judged by exit status.** documentation_tests.md judges a README example by its exit status:
-  the example asserts in its own code (`std.testing`), or has an `expected_output.txt` beside it
-  once that exists for READMEs. So the README example asserts the rows it reads back and also prints
-  the table. Task-page examples are different: they are compared byte for byte (below).
-
-The example of slice 1, *(PROPOSED)*:
-
-````markdown
-<!-- mojo-hidden from std.testing import assert_equal -->
-```mojo
-from komira import Session, files
-
-var session = Session()
-_ = session.sql("COPY (SELECT 'Lisbon' AS city UNION ALL SELECT 'Oslo' UNION ALL SELECT 'Oslo') TO 'trips.parquet'")
-session.add_sql_binding("trips", files("trips.parquet"))
-var result = session.sql("SELECT city, count(*) AS trips FROM trips GROUP BY city ORDER BY city")
-assert_equal(result.num_rows(), 2)
-print(result)
-```
-````
-
-The release adds one more check. *(PROPOSED)* `komira` joins the list of packages the `prod-add`
-job adds from the prod registry after each release ([docs/ci.md](../ci.md), "prod-add"). Every
-release then also proves that the real registry serves `komira-ai/komira` and its closure to
-`mopm add` and `mopm sync`. That job runs in the release workflow, not in the pull request check
-(rule B9).
+A README example writes its own input first, with SQL's `COPY (SELECT ...) TO 'trips.parquet'`,
+which runs through the shared library like any query. It asserts the rows it reads back, as
+documentation_tests.md judges README examples by exit status. The release then adds `komira` to the
+packages the `prod-add` job installs from the prod registry ([docs/ci.md](../ci.md)). That runs in
+the release workflow, not in the pull request check (rule B9).
 
 ### Task-page examples
 
 The task pages ([docs/tasks/](../tasks/README.md)) follow komira-ai/komira#2495, which owns the
-runner. This design adds no runner of its own, and names only what that design leaves to the Mojo
-SDK: the library, the forms and the trees.
+runner.
+- **The runner.** komira-ai/komira#2495's `mojo_task_examples` builds each `example.mojo` in the
+  pull request's check, runs it from an empty directory, and compares what it prints with
+  `expected_output.txt`, byte for byte. It is given the shared library as the README gate is. After
+  merge, the release runs the same examples against the installed packages, with
+  komira-ai/komira#2495's exact compare added to the install test's phases (its slice 5).
+- **The output.** It is `format_table`'s text, since `print(result)` writes it.
+- **The trees, one per form, each in its package:**
+  - Mojo (key `mojo`): `src/komira/docs/tasks/<rank>-<slug>/`;
+  - Mojo physical plan (key `mojo_plan`): `src/komira_physical/docs/tasks/<rank>-<slug>/`.
 
-- **The runner** is #2495's `mojo_task_examples` (`tools/build/mojo/task_examples.bzl`).
-  - In the pull request's check it builds each `example.mojo` against `komira` and its closure, runs
-    it from an empty directory, and compares what it prints with `expected_output.txt`, byte for
-    byte.
-  - After merge, the release runs the same examples against the installed `.conda` through the
-    install test's phases, with #2495's exact compare added to them (its slice 5).
-  - Each form has its `refuses_*` targets, which must fail, as #2495 lists them.
-- **The output** is `format_table`'s text, since `print(result)` writes it. #2495 recommends the same
-  table form for its SQL command, so a Mojo task's `expected_output.txt` can read like the SQL one.
-- **The trees.** Both forms import `komira`, so both trees are in its package. #2495 puts a second
-  form beside the first as `docs/<form>_tasks/` when both import one library:
-  - the session: `src/komira/docs/tasks/<rank>-<slug>/`, form `mojo`;
-  - the plan builder: `src/komira/docs/mojo_plan_tasks/<rank>-<slug>/`, form `mojo_plan`.
-
-  Each task directory holds `example.mojo`, `expected_output.txt` and `page.md`, as #2495
-  specifies. The typed SDK gets no tree until it exists.
-- **Tabs.** Each form gets a tab, the session's first, as #2495's table of forms lists them. A form
-  draws its tab only once its package is published (#2495, section 1).
-- **Input data.** Each example writes its own input files first, with `COPY (SELECT ...) TO`, as
-  every example does under #2495. A task needs no hidden input file.
-
-How many of the 80 tasks the session can show at publish time:
-- **It is the SQL form's range.** The Mojo session runs SQL text, so it reads a CSV or JSON file
-  through SQL's own functions (`read_csv('<file>')`), exactly as the SQL and TypeScript forms do.
-  That does not need `files`. `files` reads Parquet only until slice 6, so an example binds its input
-  through `files` only for the kinds `files` reads at that time.
-- **The counts are #2495's.** It writes out the one text search that counts the examples using no
-  frame API, and it lists the tasks SQL can never show for reasons other than missing work. Today
-  those are:
+  Each holds `example.mojo`, `expected_output.txt` and `page.md`. A form draws its tab only once its
+  package is published (komira-ai/komira#2495, section 1).
+- **How many of the 80 tasks the Mojo form can show.** The same range as the SQL form, because it
+  runs SQL text. The counts are komira-ai/komira#2495's: it writes out the one text search, and it
+  lists the tasks SQL can never show for reasons other than missing work. Today those are:
   - rank 60, which holds no SQL;
   - ranks 31 and 93, which read cloud storage with a credential;
   - ranks 22, 89 and 90, which store rows with Python's `sqlite3`.
 
-  This design does not count them again. In Mojo, ranks 31 and 93 can come with slice 7, which
-  brings remote files and credentials.
-- Every other task is shown once slice 2 writes its SQL, or is `not-shown` in form `mojo` with its
-  reason and an issue.
-- **The plan builder.** It shows fewer tasks: only those whose plan it can write after slice 4,
-  and more after slice 5.
+  In the Mojo form, ranks 31 and 93 can come with slice 4, which brings credentials. This design
+  does not count them again.
 
-## 8. Tests of the library itself
+## 10. Tests of `komira` itself
 
 The welded tests in `src/komira/tests/`, each in `test_srcs` (T6), cover the following.
 
 The happy path:
 - one session, one binding, one query, over a Parquet file the test writes with `COPY`;
-- a glob and a directory of two files;
+- a glob of two files;
+- a CSV file read through `read_csv` in the SQL;
 - binding a name again replaces it;
 - two sessions in one process share nothing;
 - `Result` over zero rows, and over more than 20 rows (the printer's "more rows" line).
 
-Refusals, each asserted by its exact message and by the `code` and `step` of its `KomiraError`:
-- a parse error (step `parse`, with the line and column);
+Refusals, each asserted by its exact message and by the `code`, `step` and `status` of its
+`KomiraError`:
+- a parse error, with the line and column;
 - an unknown table (`bind`);
 - a missing file;
-- a glob that matches nothing (`PARQUET_GLOB_NO_MATCH`);
+- a glob that matches nothing;
 - `files("")`;
-- `files("s3://...")` (`STORAGE_URL_REFUSED`);
-- `Session(threads=0)` and `Session(memory_limit=0)` (`ENGINE_OPTIONS_INVALID`).
+- `files("http://...")` (`STORAGE_URL_REFUSED`) and `files("s3://b/k.parquet")` with no credential
+  (`CREDENTIALS_NOT_FOUND`);
+- a NULL context from the library (the fixed message), and a library that cannot be opened
+  (`LibraryLoadError` from `error_class()`);
+- a CPU without the x86-64-v3 flags (`CPU_UNSUPPORTED`), given stand-in flags by the test;
+- a cell `format_table` cannot render (`RESULT_NOT_PRINTABLE`), and a `print` of the kept text;
+- `error_class()` for one code of each class and for a step with no code;
+- a relative path and a `~` path made absolute by `files`;
+- `Session(threads=0)` and `Session(memory_limit=0)`;
+- a SQL text holding a NUL;
+- a library whose ABI major is not 1, or whose minor is below 10 (`LIBRARY_VERSION_UNSUPPORTED`),
+  given a stand-in library built for the test.
 
-That list covers each branch of the session's names: each argument's refusal, each step `sql` can fail
-at, and each way a binding can fail. Everything beneath those branches is `sdk_exec`'s, already
-tested there.
+That list covers each branch of `komira`'s names and of `komira._lib`:
+- each argument's refusal;
+- each step at which a C call can fail;
+- each way the library can be refused.
 
-## 9. Slices, in order
+Everything below the C interface is libkomira's, already tested by its gate drivers.
+
+## 11. Slices, in order
 
 | slice | what lands | ends with |
 |---|---|---|
-| 0 | one pull request: `engine_iceberg.mojo` and its test `sdk_exec/tests/test_run_sql_iceberg.mojo` move to `sdk_exec_iceberg` (no other source imports it), and `sdk_exec`'s `deps` drop `iceberg_catalog` and gain the 4 libraries of the 86 they lack, `decimal_literal`, `op_agg_hash`, `op_fused_kernels` and `op_join_build` (M11). No behaviour changes | `sdk_exec`'s closure is the 86 of §4 |
-| 1 | the 56 in the order of §4, then `sdk_exec`, then `komira` with the session of §1, its tests (§8) and its README example (§7); before `komira`'s first release, the standalone proof that the pinned compiler's typed raises work and the move of `so`'s `error_code` rule into `sdk_exec`, so `KomiraError` is settled before anything ships (§1) | **the install test**: `//release/readme_e2e/verify:komira` installs `komira-ai/komira` and its closure from the staged set into an empty project, compiles the README example against the installed packages only, and runs one query over one local Parquet file; then `prod-add` does `mopm add komira-ai/komira` from the prod registry on the next release |
-| 2 | Session: the Mojo task examples in `src/komira/docs/tasks/`, form `mojo`, run by komira-ai/komira#2495's `mojo_task_examples`: built against `komira` in the pull request's check, its output compared byte for byte with `expected_output.txt`; then #2495's compare added to the install test's phases for the release (#2495 slice 5) | every task SQL can answer shown in Mojo, the rest `not-shown` with a reason (§7) |
-| 3 | Plan builder: the executor's own checks: the sink capability table moves to `physical_plan` and `check_plan` refuses an unserved sink, and `run_lowered_plan_with` refuses a missing result or a stray root, both before any pipeline runs (§2) | a hand-made `LoweredPlan` with either fault refused by name |
-| 4 | Plan builder: `komira.physical`: `PhysicalPlan`, `parquet`, `filter`, `project`, `limit`, `hash_aggregate`, collect, the expressions and aggregates, the checks at submit, and `session.run` (§2). No new library to publish | the README example of §2 run by the README e2e against the installed packages; the same query through the session and the plan builder gives the same rows; the `mojo_plan` tree in `src/komira/docs/mojo_plan_tasks/` with its first task |
-| 5 | Plan builder: `sort`, `top_n`, `output_of` and `hash_join` | a two-pipeline join plan run as written |
-| 6 | Session: `files` chooses the format from the extension (CSV, newline-delimited JSON), in step with Python ([credentials_and_writes.md](credentials_and_writes.md)) | CSV and JSON over the same names |
-| 7 | Session: remote files and credentials: `files("s3://...", credential=...)`, the Mojo credential values and an opener over `objectstore_s3`, `gcs` and `azure_blob`. This brings in `http_core`, whose s2n-tls must first be a `native_library` (the hard native) | `run_sql_with` with an opener, the same as `so`'s |
-| 8 | Session: Iceberg catalogs: `sdk_exec_iceberg`, `iceberg_catalog` and the HTTP stack published, and the `iceberg` source of credentials_and_writes.md | a catalog table bound by name |
-| 9 | a Mojo frame API: its own design, over `sdk`'s plan builders and `run_plan` (§1) | — |
-| 10 | Typed SDK: its own design first: the front end over the typed operator tables (§3) | — |
+| 1 | the first query through the shared library, in this order: komira-ai/mopm gains `[native.<id>] kind = "shared"` and the mopm pin is bumped here; the install test learns to install and find a shared native, with its scenario and negative case; `arrow` (with `format_table` moved into it) and `arrow_ipc` published, tests to 99% first; a sub-target of `//src/so:libkomira` that leaves out the Mojo runtime; the standalone proof that the pinned compiler's typed raises work; then `komira`: `komira._lib` with its CPU check, `Session`, `files`, `add_sql_binding`, `sql`, `Result`, `KomiraError`, its tests (§10) and its README example | **the install test**: `//release/readme_e2e/verify:komira` installs `komira-ai/komira` into an empty project and runs one SQL query over one local Parquet file through the shared library. Then `prod-add` does `mopm add komira-ai/komira` from the prod registry on the next release |
+| 2 | Mojo task examples in `src/komira/docs/tasks/`, form `mojo`, run by komira-ai/komira#2495's `mojo_task_examples` with its byte-for-byte compare (komira-ai/komira#2495 slice 5) | every task SQL can answer shown in Mojo; the rest `not-shown` with a reason (§9) |
+| 3 | the CPU-level variants: the `VARIANTS` selector in `komira._lib`, as in [isa_variants.md](isa_variants.md) | `komira` runs on an x86-64-v2 CPU |
+| 4 | cancel and progress (`komira_run_*`, `komira_sql_stream_run`), and credentials with remote files (`komira_credential_*`, `files("s3://...", credential=...)`) | a cancelled query refused by name; a query over a bucket through a fake object store |
+| 5 | logical plans: a design for the Mojo frame API, then that API over `plan_proto` and `komira_plan_stream` | a plan run through the shared library gives the same rows as its SQL |
+| 6 | the physical-plan surface's first step: `engine_iceberg.mojo` and its test `sdk_exec/tests/test_run_sql_iceberg.mojo` move to `sdk_exec_iceberg`, and `sdk_exec`'s `deps` drop `iceberg_catalog` and gain the 4 libraries of the 86 they lack (M11). No behaviour changes | `sdk_exec`'s closure is the 86 of §5 |
+| 7 | the 54 libraries left of the engine's closure, in the waves of §5, then `sdk_exec` | `sdk_exec` published |
+| 8 | the executor's own checks: the sink capability table moves to `physical_plan` and `check_plan` refuses an unserved sink; `run_lowered_plan_with` refuses a missing result or a stray root, before any pipeline runs (§5) | a hand-made `LoweredPlan` with either fault refused by name |
+| 9 | `komira_physical`: `Engine`, `PhysicalPlan`, `parquet`, `filter`, `project`, `limit`, `hash_aggregate`, collect, the expressions and aggregates, the checks at submit, `run`, its README example and the `mojo_plan` tree | the install test runs its README example; the same query through `komira` and `komira_physical` gives the same rows |
+| 10 | `sort`, `top_n`, `output_of` and `hash_join` in `komira_physical` | a two-pipeline join plan run as written |
 
-Slice 1 has many pull requests and is the bulk of the work (§4, "What each kind of row takes"). It
-is the one slice whose order the dependency graph fixes. The slices after it go in any order the
-dependencies allow, and no slice waits on an answer about order. Slice 1 uses the name `komira`
-(owner decision 2); another name would change only the package's name. Slice 4 needs slice 3, and slice 5 needs slice 4. Slice 2, the gate's examples, needs only slice 1, and
-slices 6 to 8 can go in any order after it.
+The order inside slice 1 is fixed by what each part needs. The slices after it go in any order the
+dependencies allow, and no slice waits on an answer about order:
+- 7 needs 6;
+- 9 needs 7 and 8;
+- 10 needs 9;
+- 2 to 5 need only 1.
+
+Slice 1 uses the name `komira` (owner decision 2); another name would change only the package's
+name.
 
 ## Decisions for the owner
 
 Three questions, each about what exists at the end. The order of the work is not among them.
 
-1. **Which Mojo SDKs exist at the end?** The candidates are the session, where you run SQL; the
-   untyped plan builder, where you write the physical plan; and the typed SDK, where the column
-   types are checked when the program is compiled. A second question goes with it: should the plan
-   builder fill in the low-level plan fields for the user, or expose the raw plan structures?
-   - *All three, with the builder filling in the low-level fields.* The plan structures change about
-     weekly: 12, 25 and 23 commits since 2026-10-01 in `physical_plan`, `lowering` and
-     `pipeline_exec` (§2). So the builder is kept up to date in each such change. The typed SDK needs
-     a front end that was left out of the port, and a design of its own.
-   - *The session and the plan builder, no typed SDK.* This drops the typed SDK the lowering design
-     mentions, so the Mojo story is weaker than the Python one.
-   - *The session only.* Then there is no way to write a physical plan, which the owner has said is probably wanted.
-   - **Recommended:** all three at the end, with the builder filling in the low-level fields, so a
-     user's program does not break each time the plan structures change.
-2. **Is the Mojo package called `komira`** (`from komira import Session, files`)?
-   - *`komira`*, as on PyPI and npm. The name is not claimed yet, and only the owner can claim it.
-   - *`komira_sdk`*. It reads twice and differs from the other two SDKs.
-   - **Recommended:** `komira`. Either way the owner claims the package names on the production
-     registry before each wave is published: 50 names, listed in §4's table (every row marked "claim
-     the name"), as each wave comes or all at once.
+1. **Does a typed SDK exist at the end?** It would check column types when the user's program is
+   compiled (§6).
+   - *Yes, later.* It needs a front end that the port left out and a design of its own, and it
+     links the engine like the physical-plan surface.
+   - *No.* The Mojo SDKs are then `komira` and `komira_physical`. The typed operator tables stay
+     engine internals.
+   - **Recommended:** decide after `komira` and `komira_physical` exist. Nothing in this design
+     depends on the answer.
+2. **Is the untyped Mojo package called `komira`** (`from komira import Session, files`)? The
+   owner's words were "I think the untyped sdk is komira?", and this design uses it as the working
+   name.
+   - Confirming it means claiming `komira` on the production registry before slice 1 publishes.
+     `arrow` and `arrow_ipc` are claimed already.
+   - The physical-plan surface needs 50 more names before its waves are published, listed in §5's
+     table (every row marked "claim the name"), as each wave comes or all at once.
+   - **Recommended:** `komira`, the name on PyPI and npm.
 3. **What does the komira.dev gate mean for a task a language cannot show?** The gate is that the
    examples work in SQL, Python, TypeScript and Mojo. Must every task that Python shows work in all
    four, or may a task be left out of one language when a tracked issue says why?
    - *Every task that Python shows, and that the language can show at all, works in that language
-     before the site publishes.* The tasks a form can never show are listed by rank with the
-     reason. For SQL, and so for the Mojo session (§7), these are ranks 60, 31, 93, 22, 89 and 90
-     today, except that the Mojo session can show 31 and 93 once slice 7 brings credentials;
-     komira-ai/komira#2495 keeps the list. Before publishing, Mojo then needs slice 2's
-     examples for every other task. The tasks that need a frame API wait for one, and it has no
-     design yet. The Mojo packages are not built for linux-arm64, and this is listed with the gate's
+     before the site publishes.* The tasks a form can never show are listed by rank with the reason.
+     For SQL, and so for the Mojo form (§9), these are ranks 60, 31, 93, 22, 89 and 90 today. The
+     Mojo form can show 31 and 93 once slice 4 brings credentials. komira-ai/komira#2495 keeps the
+     list. The Mojo packages are not built for linux-arm64, and this is listed with the gate's
      exceptions.
    - *A task may be marked not shown in a language, with a reason naming an issue.* The site
      publishes with holes, and the number of holes is not counted yet. komira-ai/komira#2495's
@@ -971,40 +1069,50 @@ Three questions, each about what exists at the end. The order of the work is not
 
 These are engineering choices, not the owner's. Each says what the design does and why.
 
-- **The order: the session, then the plan builder, then the typed SDK.** The session is what the
-  examples gate needs, and its libraries are the ones the others need. The plan builder adds no
-  library. The typed SDK needs a design first.
-- **Iceberg catalogs come after the first query (slice 0 and slice 8).** Moving
-  `engine_iceberg.mojo` out of `sdk_exec` takes `http_core` and its s2n-tls build, the native step
-  with no one-pull-request path, off the road to the first query. Iceberg catalogs stay in the end
-  state, and SQL's `iceberg_scan('<path>')` keeps working throughout.
-- **Brotli ships as a static archive in `parquet_codec`, as snappy does.** It keeps "neither library
-  is needed at run time" and the renamed `komira_brotli_*` symbols the Mojo code calls. Loading
-  conda-forge's `libbrotlidec` at run time would make `mopm_migrate` refuse every package above
-  `parquet_codec` (its README), so those would all be moved by hand.
-- **Errors match Python and Node.** The session raises a `KomiraError` with the same code, step and
-  message, or a plain `Error` with the same text if the pinned compiler's typed raises do not work
-  (§1).
+- **`komira` rests on the shared library, and adds no C call.** This is the owner's model. Each
+  gap the Mojo session meets is listed as a gap in the C interface (§1).
+- **The shared library reaches a Mojo user through a new mopm kind, a shared native, not through a
+  download.** A download at install or run time is what the TypeScript design refused for the same
+  reason: binaries somewhere no test of the package ran
+  ([typescript_package.md](typescript_package.md), section 3).
+- **The package carries no Mojo runtime.** The user's Mojo at the same pin already holds one, and a
+  second copy would not be mapped anyway (§2).
+- **Errors match Python and Node**, with plain `Error` as the fallback if typed raises fail on the
+  pinned compiler (§1).
+- **`format_table` moves into `arrow`.** Then `komira` can print without depending on `sdk`.
 - **What is copied from Python as it ships:**
   - `add_sql_binding(name, files(...))`;
   - `Session(threads, memory_limit)`;
   - `files` making a local path absolute;
   - the result printed as a table.
 
-  Each is the behaviour of `python/komira/_session.py` and `_sources.py` on main. The pandas- and
-  polars-shaped reader verbs over a files value belong to the frame API, which is later.
+  Each is the behaviour of `python/komira/_session.py` and `_sources.py` on main, over the same C
+  calls.
+- **The physical-plan surface is its own package, `komira_physical`, with its own `Engine`.** It is
+  the only surface that links the engine, and a user of `komira` must not compile the engine.
+- **The physical-plan builder fills in the low-level plan fields.** The plan structures change
+  about weekly: 12, 25 and 23 commits since 2026-10-01 in `physical_plan`, `lowering` and
+  `pipeline_exec` (§5). So a user's program written against the builder's words does not break each
+  time they change.
+- **Iceberg catalogs leave the engine's first package (slice 6).** That takes `http_core` and its
+  s2n-tls build off the road to the first physical plan. The untyped SDK reads Iceberg tables
+  through the shared library meanwhile.
+- **Brotli ships as a static archive in `parquet_codec`, as snappy does.** It keeps "neither library
+  is needed at run time".
 - **The plan builder reads lowering_and_pipeline.md's exit condition as allowing a second producer
-  in the same build** (§2). The other reading only delays it.
+  in the same build** (§5).
 
 ## What this design does not change
 
-- No libkomira call, no wire format and no Python or TypeScript behaviour.
+- No C call, no wire format, and no Python or TypeScript behaviour. The shared library gains only a
+  build sub-target without the Mojo runtime.
 - No published package changes. Publishing goes on as it does today: every push to main publishes
   each member of `PACKAGES` ([docs/releases.md](../releases.md)).
 - Two documents disagree with the code they describe, and this design leaves them as they are:
-  - [native_packaging.md](native_packaging.md) plans one shared library per native owner. The
-    published natives are static archives in their packages, the route §4 follows.
-  - Python's documented module-level `sql` and `register_parquet` are not exported
-    ([python_package.md](python_package.md)).
+  - [native_packaging.md](native_packaging.md) plans one shared library per native owner, while the
+    published natives are static archives;
+  - [mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md) says toolchain 1.0.0 where the
+    pin is 1.1.0.
 
   Each is for its own document's owner to settle.
+
