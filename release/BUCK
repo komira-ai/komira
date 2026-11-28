@@ -11,6 +11,7 @@
 load("@komira//tools/build/lint:doc_tree.bzl", "docs_checked")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "MOJO_DEFAULT", "MOJO_NEXT")
 load("@komira//tools/build/selftest:defs.bzl", "graph_check")
 load(":darwin_libs.bzl", "DARWIN_PACKAGES", "mopm_darwin_libs")
 load(":exec_tools.bzl", "exec_tool_cases")
@@ -80,12 +81,14 @@ mopm_artifacts(
 )
 
 # The set the plan `mopm stage` writes must be (plan_expectation.bzl): every package of packages.bzl with a
-# file for linux-64, and a file for osx-arm64 exactly when it is one of DARWIN_PACKAGES, written from those
-# lists as JSON. release.yml's `mopm-stage` builds it and runs `release_staged_verify expect` with it on the
-# staged set's plan.json right after `mopm stage`, before anything reaches the registry (docs/ci.md).
+# file for linux-64, and a file for osx-arm64 exactly when it is one of DARWIN_PACKAGES, and each of those for
+# each of the two Mojo versions the release publishes, written from those lists as JSON. release.yml's
+# `mopm-stage` builds it and runs `release_staged_verify expect` with it on the staged set's plan.json
+# right after `mopm stage`, before anything reaches the registry (docs/ci.md).
 mopm_plan_expectation(
     name = "mopm_plan_expectation",
     darwin = DARWIN_PACKAGES,
+    mojos = [MOJO_DEFAULT, MOJO_NEXT],
     namespace = README_E2E_NAMESPACE,
     packages = sorted(README_E2E_PACKAGES.keys()),
     visibility = ["PUBLIC"],

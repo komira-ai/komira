@@ -21,7 +21,7 @@ const t = std.testing;
 const STAGE_JOB = "mopm-stage";
 const BUILD_EXPECTATION = "          args: build //release:mopm_plan_expectation --out ${{ runner.temp }}/mopm-publish/plan_expectation.json";
 const ASSERT = "          assert-remote: ${{ steps.assert.outputs.path }}";
-const MOPM_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.1.0 --out release/staged_set --registry prod'";
+const MOPM_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"1.1.0=$RUNNER_TEMP/mopm-publish/artifacts-1.1.0\" --artifacts \"1.2.0=$RUNNER_TEMP/mopm-publish/artifacts-1.2.0\" --out release/staged_set --registry prod'";
 const EXPECT_NAME = "      - name: the staged set is every package on every platform";
 const EXPECT_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" expect --staged release/staged_set --expect \"$RUNNER_TEMP/mopm-publish/plan_expectation.json\"'";
 const BETA_STAGE_NEEDS = "    needs: [release, mopm-stage]";

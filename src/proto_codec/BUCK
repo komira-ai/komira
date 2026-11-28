@@ -4,6 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":buildrules.mojo.bzl", "mojo_package")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 # The `Serializable` / `WireFormat` codec runtime every generated protobuf
 # message conforms to: one message description, serialized as protobuf-binary
@@ -52,7 +53,7 @@ mojo_conda(
         "../json": "//src/json:mopm.toml",
         "../protobuf": "//src/protobuf:mopm.toml",
     },
-    mojo = "1.1.0",
+    mojo = mojo_version(),
     mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/proto_codec",
     version = "0.1.0",

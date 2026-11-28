@@ -6,8 +6,8 @@ MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "ed0c1b0b3572d1403e257ac008e80cc3cc8cc9dfb3ce20600dc720d2bc943ede",
-    "mopm.toml": "755f28d482214e4edb0ca62d26570b6bd8903f691108753583a9315544de97a5",
+    "mopm.lock": "070cf6e0421b391006b44de87c9af46fd75bb78944aa38770e9a7f4794c853b9",
+    "mopm.toml": "65d843d26ee433bb5129a8c757168f952e03314ff0976f970dddad10b064c6aa",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -543,4 +543,537 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/scalar_arithmetic@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/scalar_arithmetic/src/scalar_arithmetic",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/__init__.mojo", "sha256": "c272e34bbfb5af2b0a15c2ffbc23d37a86a0dc913a05492f880871a9b015f366"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal256_arith.mojo", "sha256": "d12d42bc599a904a64944a8d60f1bb63cc576e7d876f39b9e8440f7fe2cb60d3"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal_arith.mojo", "sha256": "39a22189aadb0d37ba66f05f0867993d281a0a59344d1f29e2a62ad9e70c633a"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal_avg.mojo", "sha256": "3f33a29151aedb42a8031c462d18e5fd5da0bc9e89b0c4c1e921ce9895bd8e1e"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal_cast.mojo", "sha256": "8f8b590a86fb566c9dc898114695460d88cad431413537a35e2870bfe2e5f3e5"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal_compare.mojo", "sha256": "2cd1d144a582f1749ca3a27eca7f51359f90237ebf6dddac07c2296588533d09"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/int_overflow.mojo", "sha256": "36c18e841d509a71c3a328de60e972ab3240fe9b5351b31e96d6b89000d15718"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["scalar_arithmetic.mojoc"],
+      "key": "9b226b35b5a89dcc4ee963249a7f53123c9ec1ba378d42e9f756067c21288de4"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal256_arith.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal256_arith.mojo", "sha256": "62459a98ca1679ca26dfe1adba37e183ffd7e2c1439fab43336cd68c2e7629c8"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal256_arith.pass"],
+      "key": "c87f2d1609028a7783e68b1c9fa136050e3c3e94cf1722c183d08bcfe28c3526"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal256_bounds.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal256_bounds.mojo", "sha256": "10ed729d609bcb307c8271550d49c404b917ed39bb51e6b62218c7506346b080"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal256_bounds.pass"],
+      "key": "f7b413a837d68662f624548ddd4cd9779c5f9b77bacf8e341be2067ad8a3d806"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_arith.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_arith.mojo", "sha256": "27c18214df2b55654fc4921408f270fe0b780101963a8c48e1f810f14a8104bb"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_arith.pass"],
+      "key": "0c87408b17cdf45882fa029f25e8d6549b053e3a5e979d6e1e62278905e3cd14"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_avg.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_avg.mojo", "sha256": "ee43027d4f1afd6ff20b5c0e37a9b980e95f7d9e292606e9b7787318d9c416da"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_avg.pass"],
+      "key": "19a6c41a1ec3af0025c2f0364ef62ef86feb7151b9ed3c598bcf95c657d86d1f"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_cast.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_cast.mojo", "sha256": "1e85eeb839ce693a87e73238feeca6bfdd9e2fb7589b5504258d0978659aeeca"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_cast.pass"],
+      "key": "fdcd5276dc70e1c95cf8c79524dca9cc3889e2d59ee158ba7aafe9d61bbbfc06"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_compare.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_compare.mojo", "sha256": "d5ae531ef1dfe9313c44a4283bb49b0fc9236425c6225426050d53f9ed42270a"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_compare.pass"],
+      "key": "161d70ee34c96d26ac5d4672b5d3b7711b24a6b5687bdc2329c5a1747836d5a4"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_parse.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_parse.mojo", "sha256": "475c2d563c1b831797ce52f8462b2e3de3460ea55fb52942922cfa4faa1fcb7a"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_parse.pass"],
+      "key": "9c9d01995170afa0560b66bc8344cb442a293e6e64ef5ffac81f473117bd0590"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_wrap_and_refusals.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_wrap_and_refusals.mojo", "sha256": "486f8a78bab8e09cd8e30b66c0f4d750c47d01c711d9de893edb15e806833e24"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_wrap_and_refusals.pass"],
+      "key": "1cc2e1597258607fa45f4a50dd7d8b5a48b52fdfa4a1e752f5ee80c668b07ff5"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_int_overflow.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_int_overflow.mojo", "sha256": "d5c15667f68dd7daf7e6431ff86a74d1f4ee33f8f9a5581f520120af4068d11d"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_int_overflow.pass"],
+      "key": "477d712920a7f36312a4ad98c4b58c09e3b47f27cc5da34b3d2800d7bff6e986"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/scalar_arithmetic@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/scalar_arithmetic/src/scalar_arithmetic",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/__init__.mojo", "sha256": "c272e34bbfb5af2b0a15c2ffbc23d37a86a0dc913a05492f880871a9b015f366"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal256_arith.mojo", "sha256": "d12d42bc599a904a64944a8d60f1bb63cc576e7d876f39b9e8440f7fe2cb60d3"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal_arith.mojo", "sha256": "39a22189aadb0d37ba66f05f0867993d281a0a59344d1f29e2a62ad9e70c633a"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal_avg.mojo", "sha256": "3f33a29151aedb42a8031c462d18e5fd5da0bc9e89b0c4c1e921ce9895bd8e1e"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal_cast.mojo", "sha256": "8f8b590a86fb566c9dc898114695460d88cad431413537a35e2870bfe2e5f3e5"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal_compare.mojo", "sha256": "2cd1d144a582f1749ca3a27eca7f51359f90237ebf6dddac07c2296588533d09"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/int_overflow.mojo", "sha256": "36c18e841d509a71c3a328de60e972ab3240fe9b5351b31e96d6b89000d15718"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["scalar_arithmetic.mojoc"],
+      "key": "a310a619c6467e7810251e9b78ab4bd196f542f4f6f046aca9b3720546cc7951"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal256_arith.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal256_arith.mojo", "sha256": "62459a98ca1679ca26dfe1adba37e183ffd7e2c1439fab43336cd68c2e7629c8"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal256_arith.pass"],
+      "key": "97de736dd3c06d8cca7836302d4a48abc106319122933887f1f44ea982172169"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal256_bounds.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal256_bounds.mojo", "sha256": "10ed729d609bcb307c8271550d49c404b917ed39bb51e6b62218c7506346b080"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal256_bounds.pass"],
+      "key": "b91b687916d66c9e2eb4f15c3b63edd7ec15dfd276eef17867a70761174738ce"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_arith.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_arith.mojo", "sha256": "27c18214df2b55654fc4921408f270fe0b780101963a8c48e1f810f14a8104bb"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_arith.pass"],
+      "key": "50cbdb95727d4acdecf70f3bfd94c0cc79429f5e29a08b4d5a95a501cf712207"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_avg.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_avg.mojo", "sha256": "ee43027d4f1afd6ff20b5c0e37a9b980e95f7d9e292606e9b7787318d9c416da"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_avg.pass"],
+      "key": "11e647ab183291d820ef02af024647364afdd84356b0342ad54b12ddcad940ac"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_cast.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_cast.mojo", "sha256": "1e85eeb839ce693a87e73238feeca6bfdd9e2fb7589b5504258d0978659aeeca"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_cast.pass"],
+      "key": "82e6d7413700689b11cea96af3e71d44f44739128d6b19e8b9159ba37ead1151"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_compare.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_compare.mojo", "sha256": "d5ae531ef1dfe9313c44a4283bb49b0fc9236425c6225426050d53f9ed42270a"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_compare.pass"],
+      "key": "d80915a99194c4497e4320e073a8b914e69424b2ab9afa9498c7741edc8b8142"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_parse.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_parse.mojo", "sha256": "475c2d563c1b831797ce52f8462b2e3de3460ea55fb52942922cfa4faa1fcb7a"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_parse.pass"],
+      "key": "711928a7fdda305dc2d4425962e53ed6b4ffcea15a2ed6d4ca7a87586bfac6c5"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_wrap_and_refusals.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_wrap_and_refusals.mojo", "sha256": "486f8a78bab8e09cd8e30b66c0f4d750c47d01c711d9de893edb15e806833e24"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_wrap_and_refusals.pass"],
+      "key": "f81f3fec087556315bc888ba7c75e758b4e28fee0daf7fdb3f742c57cd350d72"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_int_overflow.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_int_overflow.mojo", "sha256": "d5c15667f68dd7daf7e6431ff86a74d1f4ee33f8f9a5581f520120af4068d11d"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_int_overflow.pass"],
+      "key": "849ad2fc95c562a12f2529b07cd00970cbe0153d3b4c0609ff1c586edc284021"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/scalar_arithmetic@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/scalar_arithmetic/src/scalar_arithmetic",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/__init__.mojo", "sha256": "c272e34bbfb5af2b0a15c2ffbc23d37a86a0dc913a05492f880871a9b015f366"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal256_arith.mojo", "sha256": "d12d42bc599a904a64944a8d60f1bb63cc576e7d876f39b9e8440f7fe2cb60d3"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal_arith.mojo", "sha256": "39a22189aadb0d37ba66f05f0867993d281a0a59344d1f29e2a62ad9e70c633a"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal_avg.mojo", "sha256": "3f33a29151aedb42a8031c462d18e5fd5da0bc9e89b0c4c1e921ce9895bd8e1e"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal_cast.mojo", "sha256": "8f8b590a86fb566c9dc898114695460d88cad431413537a35e2870bfe2e5f3e5"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/decimal_compare.mojo", "sha256": "2cd1d144a582f1749ca3a27eca7f51359f90237ebf6dddac07c2296588533d09"},
+        {"path": "src/scalar_arithmetic/src/scalar_arithmetic/int_overflow.mojo", "sha256": "36c18e841d509a71c3a328de60e972ab3240fe9b5351b31e96d6b89000d15718"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["scalar_arithmetic.mojoc"],
+      "key": "db5406ed04e89f358780a692b091b0be7900a2d123b570b60ffb52f7a9c0e56f"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal256_arith.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal256_arith.mojo", "sha256": "62459a98ca1679ca26dfe1adba37e183ffd7e2c1439fab43336cd68c2e7629c8"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal256_arith.pass"],
+      "key": "6b18bb751c7c697e967c706a57afe3d7b62c3ef02e2ba2499d9faf0c547d73bb"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal256_bounds.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal256_bounds.mojo", "sha256": "10ed729d609bcb307c8271550d49c404b917ed39bb51e6b62218c7506346b080"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal256_bounds.pass"],
+      "key": "b9d69536a6c3c98674ccb34ffbd89d36b33f0381662953ae32f4c3808f0479b0"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_arith.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_arith.mojo", "sha256": "27c18214df2b55654fc4921408f270fe0b780101963a8c48e1f810f14a8104bb"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_arith.pass"],
+      "key": "2319c07e817c784c4305227493dafdb660b44980df36cadcf668e71eb39127cc"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_avg.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_avg.mojo", "sha256": "ee43027d4f1afd6ff20b5c0e37a9b980e95f7d9e292606e9b7787318d9c416da"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_avg.pass"],
+      "key": "ec9d0246cfe3919101a61bce5cdbb59770f79e7ebc1cd8207ea034832312340d"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_cast.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_cast.mojo", "sha256": "1e85eeb839ce693a87e73238feeca6bfdd9e2fb7589b5504258d0978659aeeca"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_cast.pass"],
+      "key": "6b65c0502186bf06464b1a414b6af3bf83458d9a5c74a0124d5228f149bdbe39"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_compare.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_compare.mojo", "sha256": "d5ae531ef1dfe9313c44a4283bb49b0fc9236425c6225426050d53f9ed42270a"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_compare.pass"],
+      "key": "fb14f2b7eea7e943ca03a2248928c564132a808be0d471c1f881d348b6e14372"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_parse.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_parse.mojo", "sha256": "475c2d563c1b831797ce52f8462b2e3de3460ea55fb52942922cfa4faa1fcb7a"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_parse.pass"],
+      "key": "d94c94c81c4d71d124b70461e5b1980e678cb9ac0ddce4978678561ae41f267c"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_decimal_wrap_and_refusals.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_decimal_wrap_and_refusals.mojo", "sha256": "486f8a78bab8e09cd8e30b66c0f4d750c47d01c711d9de893edb15e806833e24"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_decimal_wrap_and_refusals.pass"],
+      "key": "6e1d62ccb4877b9278d121b873a02b441abdc9ff69587f9a6a6dac264ac89643"
+    },
+    {
+      "id": "komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/test:src/scalar_arithmetic/tests/test_int_overflow.mojo",
+      "package": "komira-ai/scalar_arithmetic",
+      "import": "scalar_arithmetic",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/scalar_arithmetic/tests/test_int_overflow.mojo", "sha256": "d5c15667f68dd7daf7e6431ff86a74d1f4ee33f8f9a5581f520120af4068d11d"}
+      ],
+      "deps": ["komira-ai/scalar_arithmetic@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_int_overflow.pass"],
+      "key": "81b25fe42a5e98f31927e8597c2250702c0ca66b07e8805b2dbde8ba995876f6"
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

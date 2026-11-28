@@ -1,6 +1,6 @@
 """The set a release's `plan.json` must stage, written as data for `release_staged_verify expect`.
 
-    mopm_plan_expectation(name = "mopm_plan_expectation", namespace = NAMESPACE, packages = PACKAGES, darwin = DARWIN_PACKAGES)
+    mopm_plan_expectation(name = "mopm_plan_expectation", namespace = NAMESPACE, packages = PACKAGES, darwin = DARWIN_PACKAGES, mojos = [MOJO_DEFAULT, MOJO_NEXT])
 
 `mopm stage` packs one `.conda` per subdir a member has a library in, and writes `plan.json`. Nothing in
 `mopm stage` says the set is whole: a tree that lost a platform, or a package, stages a shorter set that
@@ -9,14 +9,18 @@ the packages of release/readme_e2e/packages.bzl (`PACKAGES`), each for linux-64,
 release/darwin_libs.bzl's `DARWIN_PACKAGES` (every package not in `DARWIN_EXCLUDED`) for osx-arm64 as well.
 This rule writes that, from those lists and from no other, as one JSON file:
 
-    {"members": [{"name": "<namespace>/<name>", "subdirs": ["linux-64", "osx-arm64"]}, ...]}
+    {"mojos": ["1.1.0", "1.2.0"], "members": [{"name": "<namespace>/<name>", "subdirs": ["linux-64", "osx-arm64"]}, ...]}
 
 one entry per package of `packages`, sorted by name, each with the subdirs it must have a file in and may
-have one in (`linux-64`; `osx-arm64` too when it is in `darwin`). release.yml's `mopm-stage` builds it and
-runs `release_staged_verify expect` with it on the plan `mopm stage` just wrote (plan_expect.zig).
+have one in (`linux-64`; `osx-arm64` too when it is in `darwin`), and `mojos`, the Mojo versions the release
+publishes (tools/build/toolchains/mojo_versions.bzl): `mopm stage` is given one build of every package per
+Mojo, so each package must have one file for every subdir and every Mojo. release.yml's `mopm-stage`
+builds it and runs `release_staged_verify expect` with it on the plan `mopm stage` just wrote
+(plan_expect.zig).
 
-It refuses, at analysis, no package, an empty namespace, and a `darwin` name that is not a package of
-`packages`, so the file never names a package the release does not build. `plan_expectation_cases`
+It refuses, at analysis, no package, an empty namespace, a `darwin` name that is not a package of
+`packages`, no Mojo version and a Mojo version twice, so the file never names a package the release does not
+build. `plan_expectation_cases`
 holds `plan_expectation_members` to its cases.
 """
 
@@ -40,6 +44,21 @@ def plan_expectation_members(namespace, packages, darwin):
         subdirs = [LINUX_SUBDIR, DARWIN_SUBDIR] if name in darwin else [LINUX_SUBDIR]
         members.append({"name": "{}/{}".format(namespace, name), "subdirs": subdirs})
     return members, None
+
+def plan_expectation_mojos(mojos):
+    """`(mojos, None)`, the Mojo versions of the expectation in the order given, or `(None, why)`."""
+    if not mojos:
+        return None, "no Mojo version: an expectation of no compiler would let a plan with no Mojo build through"
+    for i, m in enumerate(mojos):
+        if m in mojos[:i]:
+            return None, "the Mojo version {} is listed twice".format(m)
+    return list(mojos), None
+
+_MOJO_CASES = [
+    ("two versions", ["1.1.0", "1.2.0"], ["1.1.0", "1.2.0"], None),
+    ("no version", [], None, "no Mojo version: an expectation of no compiler would let a plan with no Mojo build through"),
+    ("a version twice", ["1.1.0", "1.2.0", "1.1.0"], None, "the Mojo version 1.1.0 is listed twice"),
+]
 
 _CASES = [
     (
@@ -82,18 +101,28 @@ def plan_expectation_cases():
             fail("plan_expectation_members, case '{}': the reason is {}, want {}".format(name, repr(why), repr(want_why)))
         if got != want:
             fail("plan_expectation_members, case '{}': the members are {}, want {}".format(name, repr(got), repr(want)))
+    for name, mojos, want, want_why in _MOJO_CASES:
+        got, why = plan_expectation_mojos(mojos)
+        if why != want_why:
+            fail("plan_expectation_mojos, case '{}': the reason is {}, want {}".format(name, repr(why), repr(want_why)))
+        if got != want:
+            fail("plan_expectation_mojos, case '{}': the versions are {}, want {}".format(name, repr(got), repr(want)))
 
 def _impl(ctx):
     members, why = plan_expectation_members(ctx.attrs.namespace, ctx.attrs.packages, ctx.attrs.darwin)
     if why:
         fail("{}: {}".format(ctx.label, why))
-    out = ctx.actions.write_json("{}.json".format(ctx.label.name), {"members": members})
+    mojos, why = plan_expectation_mojos(ctx.attrs.mojos)
+    if why:
+        fail("{}: {}".format(ctx.label, why))
+    out = ctx.actions.write_json("{}.json".format(ctx.label.name), {"mojos": mojos, "members": members})
     return [DefaultInfo(default_output = out)]
 
 mopm_plan_expectation = rule(
     impl = _impl,
     attrs = {
         "darwin": attrs.list(attrs.string()),
+        "mojos": attrs.list(attrs.string()),
         "namespace": attrs.string(),
         "packages": attrs.list(attrs.string()),
     },

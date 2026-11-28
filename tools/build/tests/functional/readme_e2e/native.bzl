@@ -1,6 +1,7 @@
 """A mopm package of a real Mojo library and a real static archive, made by the pinned `mopm pack`."""
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 def _impl(ctx):
     package = ctx.attrs.package
@@ -35,7 +36,7 @@ _native_conda = rule(
         "archive": attrs.dep(),
         "lib": attrs.dep(),
         "manifest": attrs.source(),
-        "mojo": attrs.string(default = "1.1.0"),
+        "mojo": attrs.string(doc = "The compiler the package is packed for (the macro: the target platform's, mojo_version())."),
         "mopm": attrs.exec_dep(providers = [RunInfo]),
         "native_id": attrs.string(),
         "package": attrs.string(),
@@ -44,4 +45,6 @@ _native_conda = rule(
 )
 
 def native_conda(**kwargs):
+    if "mojo" not in kwargs:
+        kwargs["mojo"] = mojo_version()
     _native_conda(exec_compatible_with = LINUX_X86_64, **kwargs)

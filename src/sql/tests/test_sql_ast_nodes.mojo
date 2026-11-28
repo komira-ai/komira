@@ -187,16 +187,16 @@ def test_contains_aggregate_in_every_slot() raises:
     assert_false(SqlExpr(SX_LIKE).contains_aggregate())
     # A CASE: the aggregate in a condition, in a result, in the ELSE.
     assert_true(
-        SqlExpr.case(_one(_sum_x()), _one(SqlExpr.int_lit(1)), Slab[SqlExpr]()).contains_aggregate()
+        SqlExpr.case_when(_one(_sum_x()), _one(SqlExpr.int_lit(1)), Slab[SqlExpr]()).contains_aggregate()
     )
     assert_true(
-        SqlExpr.case(_one(SqlExpr.column("b")), _one(_sum_x()), Slab[SqlExpr]()).contains_aggregate()
+        SqlExpr.case_when(_one(SqlExpr.column("b")), _one(_sum_x()), Slab[SqlExpr]()).contains_aggregate()
     )
     assert_true(
-        SqlExpr.case(_one(SqlExpr.column("b")), _one(SqlExpr.int_lit(1)), _one(_sum_x())).contains_aggregate()
+        SqlExpr.case_when(_one(SqlExpr.column("b")), _one(SqlExpr.int_lit(1)), _one(_sum_x())).contains_aggregate()
     )
     assert_false(
-        SqlExpr.case(
+        SqlExpr.case_when(
             _one(SqlExpr.column("b")), _one(SqlExpr.int_lit(1)), _one(SqlExpr.int_lit(0))
         ).contains_aggregate()
     )
@@ -209,11 +209,11 @@ def test_empty_slots_walk_to_false_and_copy_empty() raises:
     # Each loop of contains_aggregate() and copy() runs zero times here: a
     # CASE with no ELSE, a CASE with no branches at all, a call with no
     # arguments. None holds an aggregate, and a copy keeps the empty slot.
-    var no_else = SqlExpr.case(
+    var no_else = SqlExpr.case_when(
         _one(SqlExpr.column("b")), _one(SqlExpr.int_lit(1)), Slab[SqlExpr]()
     )
     assert_false(no_else.contains_aggregate())
-    var bare = SqlExpr.case(Slab[SqlExpr](), Slab[SqlExpr](), Slab[SqlExpr]())
+    var bare = SqlExpr.case_when(Slab[SqlExpr](), Slab[SqlExpr](), Slab[SqlExpr]())
     assert_false(bare.contains_aggregate())
     var now = SqlExpr.call("now", Slab[SqlExpr]())
     assert_false(now.contains_aggregate())
@@ -266,7 +266,7 @@ def test_copy_is_deep_for_every_slot() raises:
     assert_equal(ca[1].int_val, Int64(2))
 
     # CASE conditions, results and ELSE.
-    var cs = SqlExpr.case(
+    var cs = SqlExpr.case_when(
         _one(SqlExpr.column("c")), _one(SqlExpr.int_lit(1)), _one(SqlExpr.int_lit(0))
     )
     var cs2 = cs.copy()
@@ -278,7 +278,7 @@ def test_copy_is_deep_for_every_slot() raises:
     assert_equal(cd.results[0].int_val, Int64(1))
     assert_equal(len(cd.otherwise), 1)
     assert_equal(cd.otherwise[0].int_val, Int64(0))
-    var cs_empty = SqlExpr.case(Slab[SqlExpr](), Slab[SqlExpr](), Slab[SqlExpr]())
+    var cs_empty = SqlExpr.case_when(Slab[SqlExpr](), Slab[SqlExpr](), Slab[SqlExpr]())
     assert_equal(len(cs_empty.copy()._case.value().otherwise), 0)
 
     # Window metadata, and a LIKE child.

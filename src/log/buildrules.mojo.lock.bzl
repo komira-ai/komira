@@ -5,19 +5,19 @@ MOPM = {"version": "0.0.138", "origin": "builtin", "workspace_root": True}
 MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
-    "../atomic_alias/mopm.toml": "397daeb6e28dc079575eeb7efc7155ab0afc5eecf3a9c888e95201b1fe5e3f7c",
-    "../clock/mopm.toml": "80f57ee22ddfd46df4346b42887971d129650c1ae49f24203010f6a445287177",
-    "../containers/mopm.toml": "2bfb7cf9fa4b3adb0e6bac637fa6da32c6376c6e72b1f4ed06a0ca88459f9eac",
-    "../hashing/mopm.toml": "ce9872d597a5b9d0e8d55e07d412ade7b1b791d5bf918dadaebe045b0f09c85b",
-    "../libc/mopm.toml": "7536db87cec8e40e3c514afe4830af8035f7052481feb535737a8778a52cf84c",
-    "../metrics/mopm.toml": "c12c1dbecb52abe1e38af89aefdd882da4a05e93ed6317e8b1af4b3de608a639",
-    "../name_registry/mopm.toml": "d2d567f158f4b86af07958a1ac4afe6f1a239e609173a27a52283e7374cd6b6b",
-    "../runtime_paths/mopm.toml": "95ce396f765fc49c9999077bf8ea09b368359dcbeb699001c73265053f61089d",
-    "../spsc_ring/mopm.toml": "0c0336e33e8a46cd5b38f78c8fb0cf3984787cb67cfbd18af7ced154fcc40979",
-    "../trace/mopm.toml": "3efecf2f6603e264a7a869ceb8a5271728aa17f72021166de0872ba881433490",
+    "../atomic_alias/mopm.toml": "9238845410fd79d05a66396487bd5c884ecbf9f465bd99540c46444214d5058c",
+    "../clock/mopm.toml": "751ae8aadcec9ed1e4f7c608fd039523e3ec8e8262bec1f5ed6e5a4ce3556d08",
+    "../containers/mopm.toml": "0d2d031562c8c7bed39bd01e3c92b1717f293334500af4c82068dd383d520938",
+    "../hashing/mopm.toml": "fb71614773e25155a30c193a69b33ecf37c6e10d8c9bf733eb280664dbc7633f",
+    "../libc/mopm.toml": "b6b808cc29f7d69536de8df770fd3ebb3dd5b2497cb6eeeedc6dbf3dcc314178",
+    "../metrics/mopm.toml": "03e6011942c30fbb280a9832357ad97fd4d22901d222538381f514dc5a67ec8f",
+    "../name_registry/mopm.toml": "5617d14f6334b30bfb58821db6c1314fa639f0e4594cc77d7a3d73e8c672b0c5",
+    "../runtime_paths/mopm.toml": "5f6dfe871e4d9f8c334765b0d73d355569e4c2a0bbde1df7bdd126f8025cea2f",
+    "../spsc_ring/mopm.toml": "2adddd4282c5138e135df0e54c51fdcf855b713bdcdc493624a95979783b019b",
+    "../trace/mopm.toml": "109333fd740fd08e36d76fc30bada0b725818eb6adfc647cf3d29e434ee58dc7",
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "2988b9a0b2e959428d3cc5adad6f86d1b1d40b7d4cdb7c8d1dc1d239ab9e945d",
-    "mopm.toml": "b15ba43dbfff650c70583bf7ab8767e29cdd4b730f0db0fbf8ea82f66ef74037",
+    "mopm.lock": "70ea79b71b86bac10f104f6067622794ec35e31a0781c242b8d19b593f90f2fa",
+    "mopm.toml": "0db05625b300018f7d52030b709536d4216c42a1e2125fa0001e6f36a04c859a",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -3067,4 +3067,3051 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/log@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/atomic_alias",
+      "import": "atomic_alias",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/atomic_alias/src/atomic_alias",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["atomic_alias.mojoc"]
+    },
+    {
+      "id": "komira-ai/clock@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/clock",
+      "import": "clock",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/clock/src/clock",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["clock.mojoc"]
+    },
+    {
+      "id": "komira-ai/containers@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/containers",
+      "import": "containers",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/containers/src/containers",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["containers.mojoc"]
+    },
+    {
+      "id": "komira-ai/hashing@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/hashing",
+      "import": "hashing",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/hashing/src/hashing",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["hashing.mojoc"]
+    },
+    {
+      "id": "komira-ai/libc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/libc/src/libc",
+      "deps": [],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["libc.mojoc"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/log/src/log",
+      "srcs": [
+        {"path": "src/log/src/log/__init__.mojo", "sha256": "4a4db29d0f046ca7f7809523d14da7f83fb4d75353542bb554fd2be90bfb2b7e"},
+        {"path": "src/log/src/log/config.mojo", "sha256": "eb5e9e44280ed51a39b073c2b2ba781f0ae5d434ad7b9212507e92374891b4b3"},
+        {"path": "src/log/src/log/engine/__init__.mojo", "sha256": "203a75298e1e5e01cdb63cd4831cb1b06c24676042397613d5a2dafccc743bd0"},
+        {"path": "src/log/src/log/engine/calibration.mojo", "sha256": "62fded00968d9e365acbbaa4fe12b710f7fb596c807162b0bf610962984a5b97"},
+        {"path": "src/log/src/log/engine/drain.mojo", "sha256": "6efe3212def34ca28be546da723a6cea5e887e1b3470cfd70183cef98e63efb1"},
+        {"path": "src/log/src/log/engine/emit.mojo", "sha256": "4bb4252dd8986e857ef3dec9dcef53658f30d72cec3633d013bb1249e8e371e3"},
+        {"path": "src/log/src/log/engine/fs_ops.mojo", "sha256": "58af0a2bae1adc09119365b218038dcdac8420749e47d4b5f1a4340769586079"},
+        {"path": "src/log/src/log/engine/log_event_record.mojo", "sha256": "e121bfbbe7e6be5baaf7bd9e622ee2edf87aa2ef26180692416131ea4ca88465"},
+        {"path": "src/log/src/log/engine/log_manager.mojo", "sha256": "ecd2d33fd5591965c8cd0e6c0559edd78667d815affe84bd480fa0a2260846e9"},
+        {"path": "src/log/src/log/engine/log_record_view.mojo", "sha256": "6177ab7795f7bb02dfb26b9dfc190f72bb4c9e00ea80f3770d7560981f8769ce"},
+        {"path": "src/log/src/log/engine/merge.mojo", "sha256": "0ced6e263f098a48fe77df4a61a026a55c77dc09a2d0c4dab7cba4c4719ac075"},
+        {"path": "src/log/src/log/engine/metric_emit.mojo", "sha256": "7e1977e13fa7c017eb9b0d2c79bb5e797789b4148a337d6a8821b6db49c10270"},
+        {"path": "src/log/src/log/engine/metric_sink.mojo", "sha256": "9d451250afa5256df54ea7adc27de1d714b4ef3dca74b6a343dff7486ccdbfd4"},
+        {"path": "src/log/src/log/engine/output_sink.mojo", "sha256": "0b54a0ca27284c689e8f892aa376c20804a158594b89a020bfa5d9df0ba775eb"},
+        {"path": "src/log/src/log/engine/record_ring.mojo", "sha256": "a43dabae06b1cdfa1b66f230cc2bf45b312e2a8812aea4047caea368d23d973c"},
+        {"path": "src/log/src/log/engine/rotation.mojo", "sha256": "9a3c2c7f28406d326b9faabe82a5d25f870fbd80cb8b2b43b4beff67cbae826f"},
+        {"path": "src/log/src/log/engine/shared_engine.mojo", "sha256": "92c50039f9d77ef37f74bb612b5606ef92f368a02fed6698d185b02043706a6d"},
+        {"path": "src/log/src/log/engine/site_dictionary.mojo", "sha256": "b8e0c2399b74da97f5472ed123d85b9fb3768409300b006de5b36421d2e8b434"},
+        {"path": "src/log/src/log/engine/span_context.mojo", "sha256": "06e1656dad669ab3545e1bb8522e7e35b9386c5f33ee378ca23008b2d92cff86"},
+        {"path": "src/log/src/log/engine/span_drain.mojo", "sha256": "7cdd388bda3067fb7c343756fce965c590a2d7a68104e6f1ffd5e6b60d37d83a"},
+        {"path": "src/log/src/log/engine/span_emit.mojo", "sha256": "de9fdf4bd976246403e08a12184bb4a8b9a9da72cf640454d9369f99c498b772"},
+        {"path": "src/log/src/log/engine/worker_id_tls.mojo", "sha256": "00953d00038ff6d58287558d0ea6b37a4849a78da89f2687a86a6caae4861d33"},
+        {"path": "src/log/src/log/env_filter.mojo", "sha256": "4d7d96ec6136363cf6f1ceb453130d18885d730b7c9c869b5441c0ec1d386b73"},
+        {"path": "src/log/src/log/facade.mojo", "sha256": "a460dad70dcb67d156e3241a3e05db0d63f5dd829025b2343f6040b0258dc568"},
+        {"path": "src/log/src/log/levels.mojo", "sha256": "6c8556f1698b5d54e2f79e898646eed0dfa5282ec8be008d7574a3d0767ecd70"},
+        {"path": "src/log/src/log/log_arg.mojo", "sha256": "c67d1c9f8bdc90bd8f9ffb7994e238d21bc6f603977501ea3086b7b373c8b807"},
+        {"path": "src/log/src/log/log_value.mojo", "sha256": "9f4e474815b5e137f6cfc15649081168bb6842196a1eb8a995a345c2b014f2d3"},
+        {"path": "src/log/src/log/log_write.mojo", "sha256": "95a803b31af6c1fbab5ae42cb9cd764ffb2370b7ef06f748aae8d2cc4c96493e"},
+        {"path": "src/log/src/log/logger.mojo", "sha256": "43263bfbbac6a29aaecd2bb3d880b14779209e491143f38e857919ab98a0003c"},
+        {"path": "src/log/src/log/logger_erased.mojo", "sha256": "168adcbf32887ae3cce32881a271c5c2c423737adf5e4db02c4da82a06d1bec8"},
+        {"path": "src/log/src/log/pattern_layout.mojo", "sha256": "c7e9e8dba2c3f1fe5e2b8e83b309f3ac126efd2433a442e4cb9d3f3cba953190"},
+        {"path": "src/log/src/log/stderr_sink.mojo", "sha256": "6c9dee968f782ad1b7c819d95be0584bf022c6f0149ad6dc764720130c18d8ef"},
+        {"path": "src/log/src/log/structured_log.mojo", "sha256": "125f10c79404b20fbafc952d9642230a15457bdb3c1cf08d9c2a190dd504376e"},
+        {"path": "src/log/src/log/tracer.mojo", "sha256": "1557db443e8408b2633ad8822777a553c7d7054d15b867a3f9b9e795715e3205"}
+      ],
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/clock@0.1.0#mojo1.2.0/lib", "komira-ai/containers@0.1.0#mojo1.2.0/lib", "komira-ai/hashing@0.1.0#mojo1.2.0/lib", "komira-ai/libc@0.1.0#mojo1.2.0/lib", "komira-ai/metrics@0.1.0#mojo1.2.0/lib", "komira-ai/spsc_ring@0.1.0#mojo1.2.0/lib", "komira-ai/trace@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["log.mojoc"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_env_filter_bytes_non_ascii.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_env_filter_bytes_non_ascii.mojo", "sha256": "27f673f1048b6ab26738f1b24d64da39dba44a5b6bb465d32efec5d8d7cb8519"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_env_filter_bytes_non_ascii.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_anchor_refresh_and_uncalled_helpers.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_anchor_refresh_and_uncalled_helpers.mojo", "sha256": "b1e9f39e2bb9fa2878aff6d580254b95fe73f536753b25b82116a1e8cdfcde94"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_anchor_refresh_and_uncalled_helpers.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_arg_blob_writer_overflow.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_arg_blob_writer_overflow.mojo", "sha256": "342e401e5f2f1042d9bbf3e80d04e52ef1ab0d5ee0d40399d4cdd127399fa7dc"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_arg_blob_writer_overflow.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_bytes_non_ascii.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_bytes_non_ascii.mojo", "sha256": "2eb7e4a0d5448eafbe8990bdcf0211511556c308e6c444db28ceb6f0d6d499aa"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_bytes_non_ascii.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_config_first_init.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_config_first_init.mojo", "sha256": "b5fb243a25026cc2b0956b9f1b01c7aa04738cc83a53f4e516de187fdfa096d7"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_config_first_init.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_config_init_from_spec.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_config_init_from_spec.mojo", "sha256": "7a9db2e1aa2241738062ebc3783d810a901afb878fb706926b2012abaaa802c5"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_config_init_from_spec.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_decode_arg_arms.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_decode_arg_arms.mojo", "sha256": "335815a195b8c6971cee9920ad2dbeb6617116c9c1fedf244f08acbbf2dbabec"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_decode_arg_arms.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_drain_corrupt_header_guard.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_drain_corrupt_header_guard.mojo", "sha256": "f0235c1a58a463b0da8f45a7ddfa1a061b55cec3d730e99804eb943f937d3267"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_drain_corrupt_header_guard.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_drain_metric_point_all_drains.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_drain_metric_point_all_drains.mojo", "sha256": "de9f472a17e19367c291690258464872904c076efefc30420c2467a508bde141"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_drain_metric_point_all_drains.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_drain_span_retained_all_drains.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_drain_span_retained_all_drains.mojo", "sha256": "cb24766d73120b21719317d3b0272ff69b3f26b2c400ef8fc1e9261f456451b1"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_drain_span_retained_all_drains.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_drain_unknown_kind_closed_default.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_drain_unknown_kind_closed_default.mojo", "sha256": "653c08e76d79366e72d9999e27deeab61a485fd4743699024d0fe1d28756a9e3"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_drain_unknown_kind_closed_default.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_effective_level_resolution.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_effective_level_resolution.mojo", "sha256": "2a3273376094971177a29c57a94e099137d23ce408053f05eb880dee08dab325"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_effective_level_resolution.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_engine.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_engine.mojo", "sha256": "3a40113843754c76fb2afe521c0bea3f48eb438660ae1a32b5a957544ff9de25"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_engine.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_erased_emit.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_erased_emit.mojo", "sha256": "b2567ec9839c1ce01d80e5ca2af7ee7e2e9dc8784b7cc22960822e62e852de80"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_erased_emit.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_erased_emit_perf.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_erased_emit_perf.mojo", "sha256": "554f0b681a5685c131072159f67f0232f50b3416af494bbb0049da2758ae7817"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_erased_emit_perf.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_facade_cold_gates.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_facade_cold_gates.mojo", "sha256": "8e1ddd205cca3b5366825a2ebe4bc9bc8f6c42f55d0f94394f08e075e1d9c1d1"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_facade_cold_gates.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_facade_error_escalation.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_facade_error_escalation.mojo", "sha256": "e87e13a007fde486a524b026623f8afce5a7e0461c9080d85e5979dcfe54dfe0"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_facade_error_escalation.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_facade_smoke.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_facade_smoke.mojo", "sha256": "7a4acfa2853a23a5386e62a45b221edae1d6aa778b6408dfe23772b572931e80"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_facade_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_global_logger_levels.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_global_logger_levels.mojo", "sha256": "09747140793e2bd2c4202135ed7535e6aa1a2e6f7550eb769bf286532770fd34"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_global_logger_levels.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_json_severity.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_json_severity.mojo", "sha256": "51184ed54cef2935d18e1f20620e71472086cce0bfe654a875957c3e707132ef"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_json_severity.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_layout_init_order.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_layout_init_order.mojo", "sha256": "77121b5bf1df96609815d9fb23b0ad56846176fed32fcd0ffc3ca362a1672c4f"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_layout_init_order.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_level_config.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_level_config.mojo", "sha256": "a6e6ae05546499a84594a57dfe4ca4ef28654f09327431bd6b05e0401e41af4a"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_level_config.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_logger_cold_paths.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_logger_cold_paths.mojo", "sha256": "a671e989f87c25384ccaf7f0946e8f6167fcf62a7ab11b772f2f3179d785218f"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_logger_cold_paths.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_manager_global.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_manager_global.mojo", "sha256": "1c3c02ff943ef388e01c528ad0da1a0b42fbf008f57c582153eb17026c6c95a8"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_manager_global.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_metric_sink.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_metric_sink.mojo", "sha256": "a413640b86fbe685ceef891c1cc5a096df7ace791e7bb929d5ad49e8799cd5f5"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_metric_sink.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p1.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p1.mojo", "sha256": "c8c9ce2bf26c3633155ff2631b293aa2588acdc81a1f72167523dd2728882ab3"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p1.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p2b_aot_perf.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p2b_aot_perf.mojo", "sha256": "7e89e0d99ca4c61088ad8554af3f3c74b58db46a2720e526e778d3d651ff3a1b"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p2b_aot_perf.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p2b_integration.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p2b_integration.mojo", "sha256": "17d65c78821fcd9c0f9cd0ee4485d43f9bd5008493cbe0f6e91689da628b8f3b"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p2b_integration.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p2c_aot_perf.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p2c_aot_perf.mojo", "sha256": "5c36cd2f3da581529677deb7f87089ab9c837116ee2fd157c0e9f29efe6bb56b"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p2c_aot_perf.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p3_output.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p3_output.mojo", "sha256": "0e254396f07fd31da1e4747a99802095795913a3d419aa47b68120f1f2465392"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p3_output.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p4a_span.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p4a_span.mojo", "sha256": "4af6757a793a6bc33d5cab931903fc7cf1a44983b04e0d93a2b4a45cfe9d13ae"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p4a_span.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p4b_ambient_span.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p4b_ambient_span.mojo", "sha256": "4bc860b3063afa06be46cbc348fca8092fb165ebcebb8eb7bdc8631e427af6ac"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p4b_ambient_span.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_pure_edges.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_pure_edges.mojo", "sha256": "987edd342a31a3f566b443ffe725d970a6ec5f9499e0eab25e1ce30eef44a77e"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_pure_edges.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_ring_bounded_drain_arena.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_ring_bounded_drain_arena.mojo", "sha256": "42fe053a9caf0425c40ed1936e3b4252e2f561b18e219f9cfed2eb9556788dba"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_ring_bounded_drain_arena.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_sink_and_engine_edges.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_sink_and_engine_edges.mojo", "sha256": "262afcfa93c63e12057e24ee4b63d891dd3558594c5c1b24f116cdf957ad45a3"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_sink_and_engine_edges.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_sink_error_evidence.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_sink_error_evidence.mojo", "sha256": "d5df9e1b2b3a4708a34a44e4dc69bfc1eb800e0e37840f3eda4ce059448a0592"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_sink_error_evidence.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_sink_write_loss_is_counted_and_announced.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_sink_write_loss_is_counted_and_announced.mojo", "sha256": "59e41e40f0e80e90241275d016be477b4bd5258a5c5839256a424e2a37a6060c"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_sink_write_loss_is_counted_and_announced.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_text_emit.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_text_emit.mojo", "sha256": "6610121e24ab34a84a77e13fba0b768a7fc535b2d9bdc9cc36f47170eae76dbe"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_text_emit.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_tls_key_exhaustion.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_tls_key_exhaustion.mojo", "sha256": "a871a212cc40fdb8236f55d5b44ba5d4a84a4560d3b84b49f4ea16cbe8adfbc7"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_tls_key_exhaustion.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_typed_never_drop_contract.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_typed_never_drop_contract.mojo", "sha256": "21cbc637083777d5fe6f0a0ddf399177392e1a95d5a42882e1e7250866d6b0db"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_typed_never_drop_contract.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_write_retry_and_loss_accounting.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_write_retry_and_loss_accounting.mojo", "sha256": "045131601cb9c30923dc166ea1ead3fdc1f604ecb16417af8ab995430e9ab7d6"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_write_retry_and_loss_accounting.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_ring_lazy_slots.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_ring_lazy_slots.mojo", "sha256": "95143580a69a7c81bf6eb65e22b231dc9408a29fe059e99a5fed45e964038b7a"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ring_lazy_slots.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_shared_engine_tls_key_reclaimed.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_shared_engine_tls_key_reclaimed.mojo", "sha256": "b2a2152f1137c7ac81de5e996e29c3e06fc2e4cb35b3f13eb1963685648cf2c5"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_shared_engine_tls_key_reclaimed.pass"]
+    },
+    {
+      "id": "komira-ai/metrics@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/metrics",
+      "import": "metrics",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/metrics/src/metrics",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/clock@0.1.0#mojo1.2.0/lib", "komira-ai/containers@0.1.0#mojo1.2.0/lib", "komira-ai/hashing@0.1.0#mojo1.2.0/lib", "komira-ai/name_registry@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["metrics.mojoc"]
+    },
+    {
+      "id": "komira-ai/name_registry@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/name_registry",
+      "import": "name_registry",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/name_registry/src/name_registry",
+      "deps": ["komira-ai/hashing@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["name_registry.mojoc"]
+    },
+    {
+      "id": "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/runtime_paths",
+      "import": "runtime_paths",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/runtime_paths/src/runtime_paths",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["runtime_paths.mojoc"]
+    },
+    {
+      "id": "komira-ai/spsc_ring@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/spsc_ring",
+      "import": "spsc_ring",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/spsc_ring/src/spsc_ring",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/containers@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["spsc_ring.mojoc"]
+    },
+    {
+      "id": "komira-ai/trace@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/trace",
+      "import": "trace",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/trace/src/trace",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/clock@0.1.0#mojo1.2.0/lib", "komira-ai/containers@0.1.0#mojo1.2.0/lib", "komira-ai/name_registry@0.1.0#mojo1.2.0/lib", "komira-ai/spsc_ring@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["trace.mojoc"]
+    },
+    {
+      "id": "native:komira-ai/libc/komira_libc_posix",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_libc_posix.a",
+      "srcs": [
+        {"path": "src/libc/native/komira_libc_posix.c", "sha256": "e622c2f2dd393e3c8bde188b95fd931dd516f11cab67af25cad6c47b841c3a6d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_libc_posix.a"],
+      "key": "cf999f64bdecac4774d0205cbd5a8f5de3538479d0e0d9e3e10792926ea0027c"
+    },
+    {
+      "id": "native:komira-ai/log/komira_log_holder",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_log_holder.a",
+      "srcs": [
+        {"path": "src/log/native/komira_log_holder.c", "sha256": "3879568ae4f1b9e5a8437549871444f385db506316f769457449dffc710626f2"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_log_holder.a"],
+      "key": "93220b1c9bb3e38a5514b321704362f6a07840393b527d9ffcc147f128f00ddf"
+    },
+    {
+      "id": "native:komira-ai/metrics/komira_metrics_ea_flag",
+      "package": "komira-ai/metrics",
+      "import": "metrics",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_metrics_ea_flag.a",
+      "srcs": [
+        {"path": "src/metrics/native/komira_metrics_ea_flag.c", "sha256": "b981f23ef5b55c414e5277a12fb4ee827dea33ab2c8d0a51da7790f8d9eed1fd"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_metrics_ea_flag.a"],
+      "key": "88b4688abacbbbfd95584c621c45b78cd4ae7bd87ab186eafadc1ba15e7fb007"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/log@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/atomic_alias",
+      "import": "atomic_alias",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/atomic_alias/src/atomic_alias",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["atomic_alias.mojoc"]
+    },
+    {
+      "id": "komira-ai/clock@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/clock",
+      "import": "clock",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/clock/src/clock",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["clock.mojoc"]
+    },
+    {
+      "id": "komira-ai/containers@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/containers",
+      "import": "containers",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/containers/src/containers",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["containers.mojoc"]
+    },
+    {
+      "id": "komira-ai/hashing@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/hashing",
+      "import": "hashing",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/hashing/src/hashing",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["hashing.mojoc"]
+    },
+    {
+      "id": "komira-ai/libc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/libc/src/libc",
+      "deps": [],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["libc.mojoc"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/log/src/log",
+      "srcs": [
+        {"path": "src/log/src/log/__init__.mojo", "sha256": "4a4db29d0f046ca7f7809523d14da7f83fb4d75353542bb554fd2be90bfb2b7e"},
+        {"path": "src/log/src/log/config.mojo", "sha256": "eb5e9e44280ed51a39b073c2b2ba781f0ae5d434ad7b9212507e92374891b4b3"},
+        {"path": "src/log/src/log/engine/__init__.mojo", "sha256": "203a75298e1e5e01cdb63cd4831cb1b06c24676042397613d5a2dafccc743bd0"},
+        {"path": "src/log/src/log/engine/calibration.mojo", "sha256": "62fded00968d9e365acbbaa4fe12b710f7fb596c807162b0bf610962984a5b97"},
+        {"path": "src/log/src/log/engine/drain.mojo", "sha256": "6efe3212def34ca28be546da723a6cea5e887e1b3470cfd70183cef98e63efb1"},
+        {"path": "src/log/src/log/engine/emit.mojo", "sha256": "4bb4252dd8986e857ef3dec9dcef53658f30d72cec3633d013bb1249e8e371e3"},
+        {"path": "src/log/src/log/engine/fs_ops.mojo", "sha256": "58af0a2bae1adc09119365b218038dcdac8420749e47d4b5f1a4340769586079"},
+        {"path": "src/log/src/log/engine/log_event_record.mojo", "sha256": "e121bfbbe7e6be5baaf7bd9e622ee2edf87aa2ef26180692416131ea4ca88465"},
+        {"path": "src/log/src/log/engine/log_manager.mojo", "sha256": "ecd2d33fd5591965c8cd0e6c0559edd78667d815affe84bd480fa0a2260846e9"},
+        {"path": "src/log/src/log/engine/log_record_view.mojo", "sha256": "6177ab7795f7bb02dfb26b9dfc190f72bb4c9e00ea80f3770d7560981f8769ce"},
+        {"path": "src/log/src/log/engine/merge.mojo", "sha256": "0ced6e263f098a48fe77df4a61a026a55c77dc09a2d0c4dab7cba4c4719ac075"},
+        {"path": "src/log/src/log/engine/metric_emit.mojo", "sha256": "7e1977e13fa7c017eb9b0d2c79bb5e797789b4148a337d6a8821b6db49c10270"},
+        {"path": "src/log/src/log/engine/metric_sink.mojo", "sha256": "9d451250afa5256df54ea7adc27de1d714b4ef3dca74b6a343dff7486ccdbfd4"},
+        {"path": "src/log/src/log/engine/output_sink.mojo", "sha256": "0b54a0ca27284c689e8f892aa376c20804a158594b89a020bfa5d9df0ba775eb"},
+        {"path": "src/log/src/log/engine/record_ring.mojo", "sha256": "a43dabae06b1cdfa1b66f230cc2bf45b312e2a8812aea4047caea368d23d973c"},
+        {"path": "src/log/src/log/engine/rotation.mojo", "sha256": "9a3c2c7f28406d326b9faabe82a5d25f870fbd80cb8b2b43b4beff67cbae826f"},
+        {"path": "src/log/src/log/engine/shared_engine.mojo", "sha256": "92c50039f9d77ef37f74bb612b5606ef92f368a02fed6698d185b02043706a6d"},
+        {"path": "src/log/src/log/engine/site_dictionary.mojo", "sha256": "b8e0c2399b74da97f5472ed123d85b9fb3768409300b006de5b36421d2e8b434"},
+        {"path": "src/log/src/log/engine/span_context.mojo", "sha256": "06e1656dad669ab3545e1bb8522e7e35b9386c5f33ee378ca23008b2d92cff86"},
+        {"path": "src/log/src/log/engine/span_drain.mojo", "sha256": "7cdd388bda3067fb7c343756fce965c590a2d7a68104e6f1ffd5e6b60d37d83a"},
+        {"path": "src/log/src/log/engine/span_emit.mojo", "sha256": "de9fdf4bd976246403e08a12184bb4a8b9a9da72cf640454d9369f99c498b772"},
+        {"path": "src/log/src/log/engine/worker_id_tls.mojo", "sha256": "00953d00038ff6d58287558d0ea6b37a4849a78da89f2687a86a6caae4861d33"},
+        {"path": "src/log/src/log/env_filter.mojo", "sha256": "4d7d96ec6136363cf6f1ceb453130d18885d730b7c9c869b5441c0ec1d386b73"},
+        {"path": "src/log/src/log/facade.mojo", "sha256": "a460dad70dcb67d156e3241a3e05db0d63f5dd829025b2343f6040b0258dc568"},
+        {"path": "src/log/src/log/levels.mojo", "sha256": "6c8556f1698b5d54e2f79e898646eed0dfa5282ec8be008d7574a3d0767ecd70"},
+        {"path": "src/log/src/log/log_arg.mojo", "sha256": "c67d1c9f8bdc90bd8f9ffb7994e238d21bc6f603977501ea3086b7b373c8b807"},
+        {"path": "src/log/src/log/log_value.mojo", "sha256": "9f4e474815b5e137f6cfc15649081168bb6842196a1eb8a995a345c2b014f2d3"},
+        {"path": "src/log/src/log/log_write.mojo", "sha256": "95a803b31af6c1fbab5ae42cb9cd764ffb2370b7ef06f748aae8d2cc4c96493e"},
+        {"path": "src/log/src/log/logger.mojo", "sha256": "43263bfbbac6a29aaecd2bb3d880b14779209e491143f38e857919ab98a0003c"},
+        {"path": "src/log/src/log/logger_erased.mojo", "sha256": "168adcbf32887ae3cce32881a271c5c2c423737adf5e4db02c4da82a06d1bec8"},
+        {"path": "src/log/src/log/pattern_layout.mojo", "sha256": "c7e9e8dba2c3f1fe5e2b8e83b309f3ac126efd2433a442e4cb9d3f3cba953190"},
+        {"path": "src/log/src/log/stderr_sink.mojo", "sha256": "6c9dee968f782ad1b7c819d95be0584bf022c6f0149ad6dc764720130c18d8ef"},
+        {"path": "src/log/src/log/structured_log.mojo", "sha256": "125f10c79404b20fbafc952d9642230a15457bdb3c1cf08d9c2a190dd504376e"},
+        {"path": "src/log/src/log/tracer.mojo", "sha256": "1557db443e8408b2633ad8822777a553c7d7054d15b867a3f9b9e795715e3205"}
+      ],
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/clock@0.1.0#mojo1.2.0/lib", "komira-ai/containers@0.1.0#mojo1.2.0/lib", "komira-ai/hashing@0.1.0#mojo1.2.0/lib", "komira-ai/libc@0.1.0#mojo1.2.0/lib", "komira-ai/metrics@0.1.0#mojo1.2.0/lib", "komira-ai/spsc_ring@0.1.0#mojo1.2.0/lib", "komira-ai/trace@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["log.mojoc"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_env_filter_bytes_non_ascii.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_env_filter_bytes_non_ascii.mojo", "sha256": "27f673f1048b6ab26738f1b24d64da39dba44a5b6bb465d32efec5d8d7cb8519"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_env_filter_bytes_non_ascii.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_anchor_refresh_and_uncalled_helpers.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_anchor_refresh_and_uncalled_helpers.mojo", "sha256": "b1e9f39e2bb9fa2878aff6d580254b95fe73f536753b25b82116a1e8cdfcde94"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_anchor_refresh_and_uncalled_helpers.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_arg_blob_writer_overflow.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_arg_blob_writer_overflow.mojo", "sha256": "342e401e5f2f1042d9bbf3e80d04e52ef1ab0d5ee0d40399d4cdd127399fa7dc"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_arg_blob_writer_overflow.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_bytes_non_ascii.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_bytes_non_ascii.mojo", "sha256": "2eb7e4a0d5448eafbe8990bdcf0211511556c308e6c444db28ceb6f0d6d499aa"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_bytes_non_ascii.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_config_first_init.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_config_first_init.mojo", "sha256": "b5fb243a25026cc2b0956b9f1b01c7aa04738cc83a53f4e516de187fdfa096d7"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_config_first_init.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_config_init_from_spec.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_config_init_from_spec.mojo", "sha256": "7a9db2e1aa2241738062ebc3783d810a901afb878fb706926b2012abaaa802c5"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_config_init_from_spec.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_decode_arg_arms.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_decode_arg_arms.mojo", "sha256": "335815a195b8c6971cee9920ad2dbeb6617116c9c1fedf244f08acbbf2dbabec"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_decode_arg_arms.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_drain_corrupt_header_guard.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_drain_corrupt_header_guard.mojo", "sha256": "f0235c1a58a463b0da8f45a7ddfa1a061b55cec3d730e99804eb943f937d3267"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_drain_corrupt_header_guard.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_drain_metric_point_all_drains.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_drain_metric_point_all_drains.mojo", "sha256": "de9f472a17e19367c291690258464872904c076efefc30420c2467a508bde141"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_drain_metric_point_all_drains.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_drain_span_retained_all_drains.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_drain_span_retained_all_drains.mojo", "sha256": "cb24766d73120b21719317d3b0272ff69b3f26b2c400ef8fc1e9261f456451b1"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_drain_span_retained_all_drains.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_drain_unknown_kind_closed_default.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_drain_unknown_kind_closed_default.mojo", "sha256": "653c08e76d79366e72d9999e27deeab61a485fd4743699024d0fe1d28756a9e3"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_drain_unknown_kind_closed_default.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_effective_level_resolution.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_effective_level_resolution.mojo", "sha256": "2a3273376094971177a29c57a94e099137d23ce408053f05eb880dee08dab325"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_effective_level_resolution.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_engine.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_engine.mojo", "sha256": "3a40113843754c76fb2afe521c0bea3f48eb438660ae1a32b5a957544ff9de25"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_engine.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_erased_emit.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_erased_emit.mojo", "sha256": "b2567ec9839c1ce01d80e5ca2af7ee7e2e9dc8784b7cc22960822e62e852de80"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_erased_emit.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_erased_emit_perf.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_erased_emit_perf.mojo", "sha256": "554f0b681a5685c131072159f67f0232f50b3416af494bbb0049da2758ae7817"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_erased_emit_perf.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_facade_cold_gates.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_facade_cold_gates.mojo", "sha256": "8e1ddd205cca3b5366825a2ebe4bc9bc8f6c42f55d0f94394f08e075e1d9c1d1"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_facade_cold_gates.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_facade_error_escalation.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_facade_error_escalation.mojo", "sha256": "e87e13a007fde486a524b026623f8afce5a7e0461c9080d85e5979dcfe54dfe0"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_facade_error_escalation.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_facade_smoke.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_facade_smoke.mojo", "sha256": "7a4acfa2853a23a5386e62a45b221edae1d6aa778b6408dfe23772b572931e80"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_facade_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_global_logger_levels.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_global_logger_levels.mojo", "sha256": "09747140793e2bd2c4202135ed7535e6aa1a2e6f7550eb769bf286532770fd34"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_global_logger_levels.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_json_severity.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_json_severity.mojo", "sha256": "51184ed54cef2935d18e1f20620e71472086cce0bfe654a875957c3e707132ef"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_json_severity.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_layout_init_order.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_layout_init_order.mojo", "sha256": "77121b5bf1df96609815d9fb23b0ad56846176fed32fcd0ffc3ca362a1672c4f"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_layout_init_order.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_level_config.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_level_config.mojo", "sha256": "a6e6ae05546499a84594a57dfe4ca4ef28654f09327431bd6b05e0401e41af4a"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_level_config.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_logger_cold_paths.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_logger_cold_paths.mojo", "sha256": "a671e989f87c25384ccaf7f0946e8f6167fcf62a7ab11b772f2f3179d785218f"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_logger_cold_paths.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_manager_global.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_manager_global.mojo", "sha256": "1c3c02ff943ef388e01c528ad0da1a0b42fbf008f57c582153eb17026c6c95a8"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_manager_global.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_metric_sink.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_metric_sink.mojo", "sha256": "a413640b86fbe685ceef891c1cc5a096df7ace791e7bb929d5ad49e8799cd5f5"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_metric_sink.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p1.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p1.mojo", "sha256": "c8c9ce2bf26c3633155ff2631b293aa2588acdc81a1f72167523dd2728882ab3"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p1.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p2b_aot_perf.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p2b_aot_perf.mojo", "sha256": "7e89e0d99ca4c61088ad8554af3f3c74b58db46a2720e526e778d3d651ff3a1b"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p2b_aot_perf.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p2b_integration.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p2b_integration.mojo", "sha256": "17d65c78821fcd9c0f9cd0ee4485d43f9bd5008493cbe0f6e91689da628b8f3b"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p2b_integration.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p2c_aot_perf.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p2c_aot_perf.mojo", "sha256": "5c36cd2f3da581529677deb7f87089ab9c837116ee2fd157c0e9f29efe6bb56b"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p2c_aot_perf.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p3_output.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p3_output.mojo", "sha256": "0e254396f07fd31da1e4747a99802095795913a3d419aa47b68120f1f2465392"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p3_output.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p4a_span.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p4a_span.mojo", "sha256": "4af6757a793a6bc33d5cab931903fc7cf1a44983b04e0d93a2b4a45cfe9d13ae"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p4a_span.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p4b_ambient_span.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p4b_ambient_span.mojo", "sha256": "4bc860b3063afa06be46cbc348fca8092fb165ebcebb8eb7bdc8631e427af6ac"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p4b_ambient_span.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_pure_edges.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_pure_edges.mojo", "sha256": "987edd342a31a3f566b443ffe725d970a6ec5f9499e0eab25e1ce30eef44a77e"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_pure_edges.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_ring_bounded_drain_arena.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_ring_bounded_drain_arena.mojo", "sha256": "42fe053a9caf0425c40ed1936e3b4252e2f561b18e219f9cfed2eb9556788dba"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_ring_bounded_drain_arena.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_sink_and_engine_edges.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_sink_and_engine_edges.mojo", "sha256": "262afcfa93c63e12057e24ee4b63d891dd3558594c5c1b24f116cdf957ad45a3"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_sink_and_engine_edges.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_sink_error_evidence.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_sink_error_evidence.mojo", "sha256": "d5df9e1b2b3a4708a34a44e4dc69bfc1eb800e0e37840f3eda4ce059448a0592"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_sink_error_evidence.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_sink_write_loss_is_counted_and_announced.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_sink_write_loss_is_counted_and_announced.mojo", "sha256": "59e41e40f0e80e90241275d016be477b4bd5258a5c5839256a424e2a37a6060c"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_sink_write_loss_is_counted_and_announced.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_text_emit.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_text_emit.mojo", "sha256": "6610121e24ab34a84a77e13fba0b768a7fc535b2d9bdc9cc36f47170eae76dbe"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_text_emit.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_tls_key_exhaustion.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_tls_key_exhaustion.mojo", "sha256": "a871a212cc40fdb8236f55d5b44ba5d4a84a4560d3b84b49f4ea16cbe8adfbc7"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_tls_key_exhaustion.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_typed_never_drop_contract.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_typed_never_drop_contract.mojo", "sha256": "21cbc637083777d5fe6f0a0ddf399177392e1a95d5a42882e1e7250866d6b0db"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_typed_never_drop_contract.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_write_retry_and_loss_accounting.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_write_retry_and_loss_accounting.mojo", "sha256": "045131601cb9c30923dc166ea1ead3fdc1f604ecb16417af8ab995430e9ab7d6"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_write_retry_and_loss_accounting.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_ring_lazy_slots.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_ring_lazy_slots.mojo", "sha256": "95143580a69a7c81bf6eb65e22b231dc9408a29fe059e99a5fed45e964038b7a"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ring_lazy_slots.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_shared_engine_tls_key_reclaimed.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_shared_engine_tls_key_reclaimed.mojo", "sha256": "b2a2152f1137c7ac81de5e996e29c3e06fc2e4cb35b3f13eb1963685648cf2c5"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_shared_engine_tls_key_reclaimed.pass"]
+    },
+    {
+      "id": "komira-ai/metrics@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/metrics",
+      "import": "metrics",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/metrics/src/metrics",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/clock@0.1.0#mojo1.2.0/lib", "komira-ai/containers@0.1.0#mojo1.2.0/lib", "komira-ai/hashing@0.1.0#mojo1.2.0/lib", "komira-ai/name_registry@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["metrics.mojoc"]
+    },
+    {
+      "id": "komira-ai/name_registry@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/name_registry",
+      "import": "name_registry",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/name_registry/src/name_registry",
+      "deps": ["komira-ai/hashing@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["name_registry.mojoc"]
+    },
+    {
+      "id": "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/runtime_paths",
+      "import": "runtime_paths",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/runtime_paths/src/runtime_paths",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["runtime_paths.mojoc"]
+    },
+    {
+      "id": "komira-ai/spsc_ring@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/spsc_ring",
+      "import": "spsc_ring",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/spsc_ring/src/spsc_ring",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/containers@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["spsc_ring.mojoc"]
+    },
+    {
+      "id": "komira-ai/trace@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/trace",
+      "import": "trace",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/trace/src/trace",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/clock@0.1.0#mojo1.2.0/lib", "komira-ai/containers@0.1.0#mojo1.2.0/lib", "komira-ai/name_registry@0.1.0#mojo1.2.0/lib", "komira-ai/spsc_ring@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["trace.mojoc"]
+    },
+    {
+      "id": "native:komira-ai/libc/komira_libc_posix",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_libc_posix.a",
+      "srcs": [
+        {"path": "src/libc/native/komira_libc_posix.c", "sha256": "e622c2f2dd393e3c8bde188b95fd931dd516f11cab67af25cad6c47b841c3a6d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_libc_posix.a"],
+      "key": "3c3134af6ad936c5c8018446a7757e784527494753d8df774a52f54829b6d194"
+    },
+    {
+      "id": "native:komira-ai/log/komira_log_holder",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_log_holder.a",
+      "srcs": [
+        {"path": "src/log/native/komira_log_holder.c", "sha256": "3879568ae4f1b9e5a8437549871444f385db506316f769457449dffc710626f2"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_log_holder.a"],
+      "key": "cb9e1083e52d3bae471d495bb2cc2b97ce3cbeb1e6900ee451b178fcc565e841"
+    },
+    {
+      "id": "native:komira-ai/metrics/komira_metrics_ea_flag",
+      "package": "komira-ai/metrics",
+      "import": "metrics",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_metrics_ea_flag.a",
+      "srcs": [
+        {"path": "src/metrics/native/komira_metrics_ea_flag.c", "sha256": "b981f23ef5b55c414e5277a12fb4ee827dea33ab2c8d0a51da7790f8d9eed1fd"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_metrics_ea_flag.a"],
+      "key": "195db23c6469cc8da9b1771d93bbade77a48d1840064b70e8cb669058d4a0a3b"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/log@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/atomic_alias",
+      "import": "atomic_alias",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/atomic_alias/src/atomic_alias",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["atomic_alias.mojoc"]
+    },
+    {
+      "id": "komira-ai/clock@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/clock",
+      "import": "clock",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/clock/src/clock",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["clock.mojoc"]
+    },
+    {
+      "id": "komira-ai/containers@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/containers",
+      "import": "containers",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/containers/src/containers",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["containers.mojoc"]
+    },
+    {
+      "id": "komira-ai/hashing@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/hashing",
+      "import": "hashing",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/hashing/src/hashing",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["hashing.mojoc"]
+    },
+    {
+      "id": "komira-ai/libc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/libc/src/libc",
+      "deps": [],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["libc.mojoc"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/log/src/log",
+      "srcs": [
+        {"path": "src/log/src/log/__init__.mojo", "sha256": "4a4db29d0f046ca7f7809523d14da7f83fb4d75353542bb554fd2be90bfb2b7e"},
+        {"path": "src/log/src/log/config.mojo", "sha256": "eb5e9e44280ed51a39b073c2b2ba781f0ae5d434ad7b9212507e92374891b4b3"},
+        {"path": "src/log/src/log/engine/__init__.mojo", "sha256": "203a75298e1e5e01cdb63cd4831cb1b06c24676042397613d5a2dafccc743bd0"},
+        {"path": "src/log/src/log/engine/calibration.mojo", "sha256": "62fded00968d9e365acbbaa4fe12b710f7fb596c807162b0bf610962984a5b97"},
+        {"path": "src/log/src/log/engine/drain.mojo", "sha256": "6efe3212def34ca28be546da723a6cea5e887e1b3470cfd70183cef98e63efb1"},
+        {"path": "src/log/src/log/engine/emit.mojo", "sha256": "4bb4252dd8986e857ef3dec9dcef53658f30d72cec3633d013bb1249e8e371e3"},
+        {"path": "src/log/src/log/engine/fs_ops.mojo", "sha256": "58af0a2bae1adc09119365b218038dcdac8420749e47d4b5f1a4340769586079"},
+        {"path": "src/log/src/log/engine/log_event_record.mojo", "sha256": "e121bfbbe7e6be5baaf7bd9e622ee2edf87aa2ef26180692416131ea4ca88465"},
+        {"path": "src/log/src/log/engine/log_manager.mojo", "sha256": "ecd2d33fd5591965c8cd0e6c0559edd78667d815affe84bd480fa0a2260846e9"},
+        {"path": "src/log/src/log/engine/log_record_view.mojo", "sha256": "6177ab7795f7bb02dfb26b9dfc190f72bb4c9e00ea80f3770d7560981f8769ce"},
+        {"path": "src/log/src/log/engine/merge.mojo", "sha256": "0ced6e263f098a48fe77df4a61a026a55c77dc09a2d0c4dab7cba4c4719ac075"},
+        {"path": "src/log/src/log/engine/metric_emit.mojo", "sha256": "7e1977e13fa7c017eb9b0d2c79bb5e797789b4148a337d6a8821b6db49c10270"},
+        {"path": "src/log/src/log/engine/metric_sink.mojo", "sha256": "9d451250afa5256df54ea7adc27de1d714b4ef3dca74b6a343dff7486ccdbfd4"},
+        {"path": "src/log/src/log/engine/output_sink.mojo", "sha256": "0b54a0ca27284c689e8f892aa376c20804a158594b89a020bfa5d9df0ba775eb"},
+        {"path": "src/log/src/log/engine/record_ring.mojo", "sha256": "a43dabae06b1cdfa1b66f230cc2bf45b312e2a8812aea4047caea368d23d973c"},
+        {"path": "src/log/src/log/engine/rotation.mojo", "sha256": "9a3c2c7f28406d326b9faabe82a5d25f870fbd80cb8b2b43b4beff67cbae826f"},
+        {"path": "src/log/src/log/engine/shared_engine.mojo", "sha256": "92c50039f9d77ef37f74bb612b5606ef92f368a02fed6698d185b02043706a6d"},
+        {"path": "src/log/src/log/engine/site_dictionary.mojo", "sha256": "b8e0c2399b74da97f5472ed123d85b9fb3768409300b006de5b36421d2e8b434"},
+        {"path": "src/log/src/log/engine/span_context.mojo", "sha256": "06e1656dad669ab3545e1bb8522e7e35b9386c5f33ee378ca23008b2d92cff86"},
+        {"path": "src/log/src/log/engine/span_drain.mojo", "sha256": "7cdd388bda3067fb7c343756fce965c590a2d7a68104e6f1ffd5e6b60d37d83a"},
+        {"path": "src/log/src/log/engine/span_emit.mojo", "sha256": "de9fdf4bd976246403e08a12184bb4a8b9a9da72cf640454d9369f99c498b772"},
+        {"path": "src/log/src/log/engine/worker_id_tls.mojo", "sha256": "00953d00038ff6d58287558d0ea6b37a4849a78da89f2687a86a6caae4861d33"},
+        {"path": "src/log/src/log/env_filter.mojo", "sha256": "4d7d96ec6136363cf6f1ceb453130d18885d730b7c9c869b5441c0ec1d386b73"},
+        {"path": "src/log/src/log/facade.mojo", "sha256": "a460dad70dcb67d156e3241a3e05db0d63f5dd829025b2343f6040b0258dc568"},
+        {"path": "src/log/src/log/levels.mojo", "sha256": "6c8556f1698b5d54e2f79e898646eed0dfa5282ec8be008d7574a3d0767ecd70"},
+        {"path": "src/log/src/log/log_arg.mojo", "sha256": "c67d1c9f8bdc90bd8f9ffb7994e238d21bc6f603977501ea3086b7b373c8b807"},
+        {"path": "src/log/src/log/log_value.mojo", "sha256": "9f4e474815b5e137f6cfc15649081168bb6842196a1eb8a995a345c2b014f2d3"},
+        {"path": "src/log/src/log/log_write.mojo", "sha256": "95a803b31af6c1fbab5ae42cb9cd764ffb2370b7ef06f748aae8d2cc4c96493e"},
+        {"path": "src/log/src/log/logger.mojo", "sha256": "43263bfbbac6a29aaecd2bb3d880b14779209e491143f38e857919ab98a0003c"},
+        {"path": "src/log/src/log/logger_erased.mojo", "sha256": "168adcbf32887ae3cce32881a271c5c2c423737adf5e4db02c4da82a06d1bec8"},
+        {"path": "src/log/src/log/pattern_layout.mojo", "sha256": "c7e9e8dba2c3f1fe5e2b8e83b309f3ac126efd2433a442e4cb9d3f3cba953190"},
+        {"path": "src/log/src/log/stderr_sink.mojo", "sha256": "6c9dee968f782ad1b7c819d95be0584bf022c6f0149ad6dc764720130c18d8ef"},
+        {"path": "src/log/src/log/structured_log.mojo", "sha256": "125f10c79404b20fbafc952d9642230a15457bdb3c1cf08d9c2a190dd504376e"},
+        {"path": "src/log/src/log/tracer.mojo", "sha256": "1557db443e8408b2633ad8822777a553c7d7054d15b867a3f9b9e795715e3205"}
+      ],
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/clock@0.1.0#mojo1.2.0/lib", "komira-ai/containers@0.1.0#mojo1.2.0/lib", "komira-ai/hashing@0.1.0#mojo1.2.0/lib", "komira-ai/libc@0.1.0#mojo1.2.0/lib", "komira-ai/metrics@0.1.0#mojo1.2.0/lib", "komira-ai/spsc_ring@0.1.0#mojo1.2.0/lib", "komira-ai/trace@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["log.mojoc"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_env_filter_bytes_non_ascii.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_env_filter_bytes_non_ascii.mojo", "sha256": "27f673f1048b6ab26738f1b24d64da39dba44a5b6bb465d32efec5d8d7cb8519"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_env_filter_bytes_non_ascii.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_anchor_refresh_and_uncalled_helpers.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_anchor_refresh_and_uncalled_helpers.mojo", "sha256": "b1e9f39e2bb9fa2878aff6d580254b95fe73f536753b25b82116a1e8cdfcde94"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_anchor_refresh_and_uncalled_helpers.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_arg_blob_writer_overflow.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_arg_blob_writer_overflow.mojo", "sha256": "342e401e5f2f1042d9bbf3e80d04e52ef1ab0d5ee0d40399d4cdd127399fa7dc"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_arg_blob_writer_overflow.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_bytes_non_ascii.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_bytes_non_ascii.mojo", "sha256": "2eb7e4a0d5448eafbe8990bdcf0211511556c308e6c444db28ceb6f0d6d499aa"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_bytes_non_ascii.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_config_first_init.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_config_first_init.mojo", "sha256": "b5fb243a25026cc2b0956b9f1b01c7aa04738cc83a53f4e516de187fdfa096d7"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_config_first_init.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_config_init_from_spec.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_config_init_from_spec.mojo", "sha256": "7a9db2e1aa2241738062ebc3783d810a901afb878fb706926b2012abaaa802c5"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_config_init_from_spec.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_decode_arg_arms.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_decode_arg_arms.mojo", "sha256": "335815a195b8c6971cee9920ad2dbeb6617116c9c1fedf244f08acbbf2dbabec"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_decode_arg_arms.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_drain_corrupt_header_guard.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_drain_corrupt_header_guard.mojo", "sha256": "f0235c1a58a463b0da8f45a7ddfa1a061b55cec3d730e99804eb943f937d3267"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_drain_corrupt_header_guard.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_drain_metric_point_all_drains.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_drain_metric_point_all_drains.mojo", "sha256": "de9f472a17e19367c291690258464872904c076efefc30420c2467a508bde141"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_drain_metric_point_all_drains.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_drain_span_retained_all_drains.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_drain_span_retained_all_drains.mojo", "sha256": "cb24766d73120b21719317d3b0272ff69b3f26b2c400ef8fc1e9261f456451b1"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_drain_span_retained_all_drains.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_drain_unknown_kind_closed_default.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_drain_unknown_kind_closed_default.mojo", "sha256": "653c08e76d79366e72d9999e27deeab61a485fd4743699024d0fe1d28756a9e3"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_drain_unknown_kind_closed_default.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_effective_level_resolution.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_effective_level_resolution.mojo", "sha256": "2a3273376094971177a29c57a94e099137d23ce408053f05eb880dee08dab325"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_effective_level_resolution.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_engine.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_engine.mojo", "sha256": "3a40113843754c76fb2afe521c0bea3f48eb438660ae1a32b5a957544ff9de25"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_engine.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_erased_emit.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_erased_emit.mojo", "sha256": "b2567ec9839c1ce01d80e5ca2af7ee7e2e9dc8784b7cc22960822e62e852de80"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_erased_emit.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_erased_emit_perf.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_erased_emit_perf.mojo", "sha256": "554f0b681a5685c131072159f67f0232f50b3416af494bbb0049da2758ae7817"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_erased_emit_perf.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_facade_cold_gates.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_facade_cold_gates.mojo", "sha256": "8e1ddd205cca3b5366825a2ebe4bc9bc8f6c42f55d0f94394f08e075e1d9c1d1"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_facade_cold_gates.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_facade_error_escalation.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_facade_error_escalation.mojo", "sha256": "e87e13a007fde486a524b026623f8afce5a7e0461c9080d85e5979dcfe54dfe0"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_facade_error_escalation.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_facade_smoke.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_facade_smoke.mojo", "sha256": "7a4acfa2853a23a5386e62a45b221edae1d6aa778b6408dfe23772b572931e80"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_facade_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_global_logger_levels.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_global_logger_levels.mojo", "sha256": "09747140793e2bd2c4202135ed7535e6aa1a2e6f7550eb769bf286532770fd34"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_global_logger_levels.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_json_severity.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_json_severity.mojo", "sha256": "51184ed54cef2935d18e1f20620e71472086cce0bfe654a875957c3e707132ef"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_json_severity.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_layout_init_order.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_layout_init_order.mojo", "sha256": "77121b5bf1df96609815d9fb23b0ad56846176fed32fcd0ffc3ca362a1672c4f"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_layout_init_order.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_level_config.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_level_config.mojo", "sha256": "a6e6ae05546499a84594a57dfe4ca4ef28654f09327431bd6b05e0401e41af4a"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_level_config.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_logger_cold_paths.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_logger_cold_paths.mojo", "sha256": "a671e989f87c25384ccaf7f0946e8f6167fcf62a7ab11b772f2f3179d785218f"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_logger_cold_paths.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_manager_global.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_manager_global.mojo", "sha256": "1c3c02ff943ef388e01c528ad0da1a0b42fbf008f57c582153eb17026c6c95a8"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_manager_global.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_metric_sink.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_metric_sink.mojo", "sha256": "a413640b86fbe685ceef891c1cc5a096df7ace791e7bb929d5ad49e8799cd5f5"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_metric_sink.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p1.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p1.mojo", "sha256": "c8c9ce2bf26c3633155ff2631b293aa2588acdc81a1f72167523dd2728882ab3"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p1.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p2b_aot_perf.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p2b_aot_perf.mojo", "sha256": "7e89e0d99ca4c61088ad8554af3f3c74b58db46a2720e526e778d3d651ff3a1b"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p2b_aot_perf.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p2b_integration.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p2b_integration.mojo", "sha256": "17d65c78821fcd9c0f9cd0ee4485d43f9bd5008493cbe0f6e91689da628b8f3b"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p2b_integration.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p2c_aot_perf.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p2c_aot_perf.mojo", "sha256": "5c36cd2f3da581529677deb7f87089ab9c837116ee2fd157c0e9f29efe6bb56b"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p2c_aot_perf.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p3_output.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p3_output.mojo", "sha256": "0e254396f07fd31da1e4747a99802095795913a3d419aa47b68120f1f2465392"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p3_output.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p4a_span.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p4a_span.mojo", "sha256": "4af6757a793a6bc33d5cab931903fc7cf1a44983b04e0d93a2b4a45cfe9d13ae"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p4a_span.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_p4b_ambient_span.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_p4b_ambient_span.mojo", "sha256": "4bc860b3063afa06be46cbc348fca8092fb165ebcebb8eb7bdc8631e427af6ac"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_p4b_ambient_span.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_pure_edges.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_pure_edges.mojo", "sha256": "987edd342a31a3f566b443ffe725d970a6ec5f9499e0eab25e1ce30eef44a77e"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_pure_edges.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_ring_bounded_drain_arena.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_ring_bounded_drain_arena.mojo", "sha256": "42fe053a9caf0425c40ed1936e3b4252e2f561b18e219f9cfed2eb9556788dba"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_ring_bounded_drain_arena.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_sink_and_engine_edges.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_sink_and_engine_edges.mojo", "sha256": "262afcfa93c63e12057e24ee4b63d891dd3558594c5c1b24f116cdf957ad45a3"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_sink_and_engine_edges.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_sink_error_evidence.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_sink_error_evidence.mojo", "sha256": "d5df9e1b2b3a4708a34a44e4dc69bfc1eb800e0e37840f3eda4ce059448a0592"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_sink_error_evidence.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_sink_write_loss_is_counted_and_announced.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_sink_write_loss_is_counted_and_announced.mojo", "sha256": "59e41e40f0e80e90241275d016be477b4bd5258a5c5839256a424e2a37a6060c"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_sink_write_loss_is_counted_and_announced.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_text_emit.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_text_emit.mojo", "sha256": "6610121e24ab34a84a77e13fba0b768a7fc535b2d9bdc9cc36f47170eae76dbe"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_text_emit.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_tls_key_exhaustion.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_tls_key_exhaustion.mojo", "sha256": "a871a212cc40fdb8236f55d5b44ba5d4a84a4560d3b84b49f4ea16cbe8adfbc7"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_tls_key_exhaustion.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_typed_never_drop_contract.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_typed_never_drop_contract.mojo", "sha256": "21cbc637083777d5fe6f0a0ddf399177392e1a95d5a42882e1e7250866d6b0db"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_typed_never_drop_contract.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_log_write_retry_and_loss_accounting.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_log_write_retry_and_loss_accounting.mojo", "sha256": "045131601cb9c30923dc166ea1ead3fdc1f604ecb16417af8ab995430e9ab7d6"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_write_retry_and_loss_accounting.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_ring_lazy_slots.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_ring_lazy_slots.mojo", "sha256": "95143580a69a7c81bf6eb65e22b231dc9408a29fe059e99a5fed45e964038b7a"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ring_lazy_slots.pass"]
+    },
+    {
+      "id": "komira-ai/log@0.1.0#mojo1.2.0/test:src/log/tests/test_shared_engine_tls_key_reclaimed.mojo",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/log/tests/test_shared_engine_tls_key_reclaimed.mojo", "sha256": "b2a2152f1137c7ac81de5e996e29c3e06fc2e4cb35b3f13eb1963685648cf2c5"}
+      ],
+      "deps": ["komira-ai/log@0.1.0#mojo1.2.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira-ai/log", "kind": "static", "built": "native:komira-ai/log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_shared_engine_tls_key_reclaimed.pass"]
+    },
+    {
+      "id": "komira-ai/metrics@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/metrics",
+      "import": "metrics",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/metrics/src/metrics",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/clock@0.1.0#mojo1.2.0/lib", "komira-ai/containers@0.1.0#mojo1.2.0/lib", "komira-ai/hashing@0.1.0#mojo1.2.0/lib", "komira-ai/name_registry@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira-ai/metrics", "kind": "static", "built": "native:komira-ai/metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["metrics.mojoc"]
+    },
+    {
+      "id": "komira-ai/name_registry@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/name_registry",
+      "import": "name_registry",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/name_registry/src/name_registry",
+      "deps": ["komira-ai/hashing@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["name_registry.mojoc"]
+    },
+    {
+      "id": "komira-ai/runtime_paths@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/runtime_paths",
+      "import": "runtime_paths",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/runtime_paths/src/runtime_paths",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["runtime_paths.mojoc"]
+    },
+    {
+      "id": "komira-ai/spsc_ring@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/spsc_ring",
+      "import": "spsc_ring",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/spsc_ring/src/spsc_ring",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/containers@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["spsc_ring.mojoc"]
+    },
+    {
+      "id": "komira-ai/trace@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/trace",
+      "import": "trace",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/trace/src/trace",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/clock@0.1.0#mojo1.2.0/lib", "komira-ai/containers@0.1.0#mojo1.2.0/lib", "komira-ai/name_registry@0.1.0#mojo1.2.0/lib", "komira-ai/spsc_ring@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["trace.mojoc"]
+    },
+    {
+      "id": "native:komira-ai/libc/komira_libc_posix",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_libc_posix.a",
+      "srcs": [
+        {"path": "src/libc/native/komira_libc_posix.c", "sha256": "e622c2f2dd393e3c8bde188b95fd931dd516f11cab67af25cad6c47b841c3a6d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_libc_posix.a"],
+      "key": "222f2a6e74d4b0380ea980b2cf9d2af60b98432f7be764be68bc30ae58c2d783"
+    },
+    {
+      "id": "native:komira-ai/log/komira_log_holder",
+      "package": "komira-ai/log",
+      "import": "log",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_log_holder.a",
+      "srcs": [
+        {"path": "src/log/native/komira_log_holder.c", "sha256": "3879568ae4f1b9e5a8437549871444f385db506316f769457449dffc710626f2"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_log_holder.a"],
+      "key": "b92feabc7b8591715a6294a7c585cff5e8099528293803b065d6b27427795bf8"
+    },
+    {
+      "id": "native:komira-ai/metrics/komira_metrics_ea_flag",
+      "package": "komira-ai/metrics",
+      "import": "metrics",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_metrics_ea_flag.a",
+      "srcs": [
+        {"path": "src/metrics/native/komira_metrics_ea_flag.c", "sha256": "b981f23ef5b55c414e5277a12fb4ee827dea33ab2c8d0a51da7790f8d9eed1fd"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_metrics_ea_flag.a"],
+      "key": "a06e6d688684126910dad7dbc5c5bf6b4bd111a20d761fe4b63451a46a0069b4"
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

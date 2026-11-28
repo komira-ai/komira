@@ -195,6 +195,32 @@ mojo_gcp_client(
     deps = _RUNTIME,
 )
 
+# `match` and `case` became keywords in Mojo 1.2.0; a module so named is refused
+# the same way.
+mojo_gcp_client(
+    name = "module_names_keyword_match",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    module_names = {"example/shop/v1/item.proto": "match"},
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
+mojo_gcp_client(
+    name = "module_names_keyword_case",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    module_names = {"example/shop/v1/item.proto": "case"},
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
 # "which is not a Mojo module name: give it one in `module_names`": a
 # generated file whose stem is not a module name, and that `module_names`
 # does not rename, is refused at analysis rather than written as a module no

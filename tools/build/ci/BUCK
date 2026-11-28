@@ -310,7 +310,7 @@ zig_test(
 
 # `release_staged_verify expect` (plan_expect.zig): the plan `mopm stage` wrote holds the set the release
 # builds, //release:mopm_plan_expectation (every package of packages.bzl on linux-64, the macOS set on
-# osx-arm64 too). release.yml's `mopm-stage` runs it right after `mopm stage`. Its cases run on plans
+# osx-arm64 too, each built for both Mojo versions of the release). release.yml's `mopm-stage` runs it right after `mopm stage`. Its cases run on plans
 # written in the test and on scratch directories, and the last two on the release's own expectation (`data`).
 zig_test(
     name = "plan_expect_unit",

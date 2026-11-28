@@ -6,8 +6,8 @@ MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "ed0c1b0b3572d1403e257ac008e80cc3cc8cc9dfb3ce20600dc720d2bc943ede",
-    "mopm.toml": "5c1a88816f25acb6410d0d6f3bea7107813cbf510b876b10d196954d439b9dbe",
+    "mopm.lock": "070cf6e0421b391006b44de87c9af46fd75bb78944aa38770e9a7f4794c853b9",
+    "mopm.toml": "4ef57e63c2ae7ae9dcfdcf4e10c6e9f43e4e670a42ca1fb2883b0ab4ed30b190",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -399,4 +399,393 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/protobuf@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/protobuf/src/protobuf",
+      "srcs": [
+        {"path": "src/protobuf/src/protobuf/__init__.mojo", "sha256": "93c0c71a3ec2ddc1268e9eece56e03f4d586418161189d617c6d06ba52130170"},
+        {"path": "src/protobuf/src/protobuf/reader.mojo", "sha256": "29ec894c5061b731363ab17c74c3ad418fb08201c733a96e0bdedcc21d43ae88"},
+        {"path": "src/protobuf/src/protobuf/wire_types.mojo", "sha256": "0bd9e9286e2efd7c7dbeb44438ebaa7b64fb04c27264002812a684cc9f07618c"},
+        {"path": "src/protobuf/src/protobuf/writer.mojo", "sha256": "02f6180609f789882f19e4d3e0f18f21e2f776378363514f40896927e1054f99"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["protobuf.mojoc"],
+      "key": "bf080b6e61ced0202f72b175c28c80d91dd6c1b6b1ab1194e6c3bbccd961bf98"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_cursor_guards.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_cursor_guards.mojo", "sha256": "4df991a128c92154938330e0e9f3c628178940b860c15f1fb20338592fefb5a2"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_cursor_guards.pass"],
+      "key": "4a5b6ce7e265fd14b2e10f40e9156af20446c25aa85817c2acbc6631f0ca2d9e"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_malformed.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_malformed.mojo", "sha256": "23e8e70ee0aee50541deaf4be37a5d2bfd96df6d1562658ed395594fcaf91e87"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_malformed.pass"],
+      "key": "43a3b071a0d194c58da53c28c27f2f11c3596df9be6c10746da3f1e9ee2cd5d5"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_packed_bounds.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_packed_bounds.mojo", "sha256": "1618914498cf6b12e1d3cba359d3808a361534706b7a0b94f8198f1ac21ed0d0"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_packed_bounds.pass"],
+      "key": "6e337fa4ea24589a33324cc427db01b532c3708fd71970368cc0fb13efff651b"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_prost_crosscheck.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_prost_crosscheck.mojo", "sha256": "c7e5077c9ed15f96695389cccf46742351c7edc71ea5e51cad62ff7e54db49b7"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_prost_crosscheck.pass"],
+      "key": "2f628d981e7026cf8d4bd452caa6064bea2a52388bb41db4ddd397be608c72cc"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_roundtrip.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_roundtrip.mojo", "sha256": "1f2e113db440f6dcd784ad21c7a828485ce0fcb54bd17df8c30e6c69949ae7e0"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_roundtrip.pass"],
+      "key": "34bbf4af004fc4b4197487f40999d1c95493c89190638869cd72b1fca04d84c0"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_sint32_encode.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_sint32_encode.mojo", "sha256": "227a38dd97d433f7369d61bb725e289deadd02f6e1059f28b3d4867e060818ae"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_sint32_encode.pass"],
+      "key": "807a3ad0bcc3a6153d88f99591e281fe38a8d01f51b45d9dd2766424f9bbd0fe"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/protobuf@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/protobuf/src/protobuf",
+      "srcs": [
+        {"path": "src/protobuf/src/protobuf/__init__.mojo", "sha256": "93c0c71a3ec2ddc1268e9eece56e03f4d586418161189d617c6d06ba52130170"},
+        {"path": "src/protobuf/src/protobuf/reader.mojo", "sha256": "29ec894c5061b731363ab17c74c3ad418fb08201c733a96e0bdedcc21d43ae88"},
+        {"path": "src/protobuf/src/protobuf/wire_types.mojo", "sha256": "0bd9e9286e2efd7c7dbeb44438ebaa7b64fb04c27264002812a684cc9f07618c"},
+        {"path": "src/protobuf/src/protobuf/writer.mojo", "sha256": "02f6180609f789882f19e4d3e0f18f21e2f776378363514f40896927e1054f99"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["protobuf.mojoc"],
+      "key": "cc07ace478d2ebda2d892725bb02a58ab9524d09416e6d7ce4f4504e1d874dec"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_cursor_guards.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_cursor_guards.mojo", "sha256": "4df991a128c92154938330e0e9f3c628178940b860c15f1fb20338592fefb5a2"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_cursor_guards.pass"],
+      "key": "2dd6e01f3c4928b0d4c3c6cdf063624991b5d4161fd175709896869683dd4b12"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_malformed.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_malformed.mojo", "sha256": "23e8e70ee0aee50541deaf4be37a5d2bfd96df6d1562658ed395594fcaf91e87"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_malformed.pass"],
+      "key": "e8f8045eb4886fd4c3723c284b734598c6cd863df2f100d86e021a0b53eae540"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_packed_bounds.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_packed_bounds.mojo", "sha256": "1618914498cf6b12e1d3cba359d3808a361534706b7a0b94f8198f1ac21ed0d0"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_packed_bounds.pass"],
+      "key": "79a59de4eaba998b1bde1a78e0ac51f30f072020fcf10fb999a89e0773a54b43"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_prost_crosscheck.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_prost_crosscheck.mojo", "sha256": "c7e5077c9ed15f96695389cccf46742351c7edc71ea5e51cad62ff7e54db49b7"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_prost_crosscheck.pass"],
+      "key": "b84239302b0bdf0ddf3f75065183c35c4c63edf0226f1e228149ffa541d356f6"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_roundtrip.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_roundtrip.mojo", "sha256": "1f2e113db440f6dcd784ad21c7a828485ce0fcb54bd17df8c30e6c69949ae7e0"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_roundtrip.pass"],
+      "key": "eceec7139c32a8204d1ec0c9a970fb07174733a18d898664ba19521ea5d7586f"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_sint32_encode.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_sint32_encode.mojo", "sha256": "227a38dd97d433f7369d61bb725e289deadd02f6e1059f28b3d4867e060818ae"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_sint32_encode.pass"],
+      "key": "d305a6aaf3cd4dbad5d82eec6a41a0361a47ae670196835f1ef0881e7e01c792"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/protobuf@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/protobuf/src/protobuf",
+      "srcs": [
+        {"path": "src/protobuf/src/protobuf/__init__.mojo", "sha256": "93c0c71a3ec2ddc1268e9eece56e03f4d586418161189d617c6d06ba52130170"},
+        {"path": "src/protobuf/src/protobuf/reader.mojo", "sha256": "29ec894c5061b731363ab17c74c3ad418fb08201c733a96e0bdedcc21d43ae88"},
+        {"path": "src/protobuf/src/protobuf/wire_types.mojo", "sha256": "0bd9e9286e2efd7c7dbeb44438ebaa7b64fb04c27264002812a684cc9f07618c"},
+        {"path": "src/protobuf/src/protobuf/writer.mojo", "sha256": "02f6180609f789882f19e4d3e0f18f21e2f776378363514f40896927e1054f99"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["protobuf.mojoc"],
+      "key": "52b8c2adfd14ed4a1cdb3b1b5b25e70b69d32a287507664ada74e3cc66a4360b"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_cursor_guards.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_cursor_guards.mojo", "sha256": "4df991a128c92154938330e0e9f3c628178940b860c15f1fb20338592fefb5a2"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_cursor_guards.pass"],
+      "key": "6a90101720af9f620c4019a6e1928c5aca7f138e15357c501875ef8c9219925c"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_malformed.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_malformed.mojo", "sha256": "23e8e70ee0aee50541deaf4be37a5d2bfd96df6d1562658ed395594fcaf91e87"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_malformed.pass"],
+      "key": "2ed0386eddf5228128791f3024aa18ffbe9cd308cfe3053c0fa6c00a4b3795a8"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_packed_bounds.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_packed_bounds.mojo", "sha256": "1618914498cf6b12e1d3cba359d3808a361534706b7a0b94f8198f1ac21ed0d0"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_packed_bounds.pass"],
+      "key": "65939a6339c23e5a38d43294faff1bdc372b3c6c5f6eb992dd8b26c3784a0a51"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_prost_crosscheck.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_prost_crosscheck.mojo", "sha256": "c7e5077c9ed15f96695389cccf46742351c7edc71ea5e51cad62ff7e54db49b7"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_prost_crosscheck.pass"],
+      "key": "e6c81ebef87fff7f6a396fa4f368a8abb0a13f19c32492b2c78679e8ead03e7f"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_roundtrip.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_roundtrip.mojo", "sha256": "1f2e113db440f6dcd784ad21c7a828485ce0fcb54bd17df8c30e6c69949ae7e0"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_roundtrip.pass"],
+      "key": "91bac3c7f4f146ca6d8a0ac55f8f5305fc4ab86205e1ec09e6e92fbd62c688ef"
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/test:src/protobuf/tests/test_protobuf_sint32_encode.mojo",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/protobuf/tests/test_protobuf_sint32_encode.mojo", "sha256": "227a38dd97d433f7369d61bb725e289deadd02f6e1059f28b3d4867e060818ae"}
+      ],
+      "deps": ["komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_sint32_encode.pass"],
+      "key": "843a04bb3c40fdd6231d2d49ff60bdc185e45a5c69e40c059bf1d90acfc798de"
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

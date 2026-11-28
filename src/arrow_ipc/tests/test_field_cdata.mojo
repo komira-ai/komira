@@ -146,7 +146,9 @@ def test_export_schema_format_string_int32() raises:
     var schema = export_schema(field)
 
     # Read the format string from the C pointer
-    var fmt = String(unsafe_from_utf8_ptr=schema.format)
+    # SAFETY: `schema.format` is the NUL-terminated string `schema` owns, alive for this read;
+    # Int8 to UInt8 is the same width (Mojo 1.2 types a C string pointer `c_char`, not Int8).
+    var fmt = String(unsafe_from_utf8_ptr=schema.format.unsafe_bitcast[UInt8]())
     assert_equal(fmt, "i")
 
 
@@ -155,7 +157,9 @@ def test_export_schema_format_string_float64() raises:
     var field = Field("y", ArrowType.FLOAT64, nullable=True)
     var schema = export_schema(field)
 
-    var fmt = String(unsafe_from_utf8_ptr=schema.format)
+    # SAFETY: `schema.format` is the NUL-terminated string `schema` owns, alive for this read;
+    # Int8 to UInt8 is the same width (Mojo 1.2 types a C string pointer `c_char`, not Int8).
+    var fmt = String(unsafe_from_utf8_ptr=schema.format.unsafe_bitcast[UInt8]())
     assert_equal(fmt, "g")
 
 
@@ -164,7 +168,9 @@ def test_export_schema_name() raises:
     var field = Field("my_column", ArrowType.INT64, nullable=False)
     var schema = export_schema(field)
 
-    var name = String(unsafe_from_utf8_ptr=schema.name)
+    # SAFETY: `schema.name` is the NUL-terminated string `schema` owns, alive for this read;
+    # Int8 to UInt8 is the same width (Mojo 1.2 types a C string pointer `c_char`, not Int8).
+    var name = String(unsafe_from_utf8_ptr=schema.name.unsafe_bitcast[UInt8]())
     assert_equal(name, "my_column")
 
 

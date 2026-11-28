@@ -62,6 +62,18 @@ const ROWS = [_]lib.Row{
         .also = &.{ "tests//negative/mojo_gcp_client:module_names_keyword_gen (" },
     },
     .{
+        .name = "gcp_client_module_names_keyword_match",
+        .target = "tests//negative/mojo_gcp_client:module_names_keyword_match",
+        .text = "`module_names` gives `example/shop/v1/item.proto` the module `match`, which is not a Mojo module name the generated package can hold",
+        .also = &.{ "tests//negative/mojo_gcp_client:module_names_keyword_match_gen (" },
+    },
+    .{
+        .name = "gcp_client_module_names_keyword_case",
+        .target = "tests//negative/mojo_gcp_client:module_names_keyword_case",
+        .text = "`module_names` gives `example/shop/v1/item.proto` the module `case`, which is not a Mojo module name the generated package can hold",
+        .also = &.{ "tests//negative/mojo_gcp_client:module_names_keyword_case_gen (" },
+    },
+    .{
         .name = "gcp_client_module_names_unrenamed",
         .target = "tests//negative/mojo_gcp_client:module_names_unrenamed_stem",
         .text = "`example/neg/v1/thing.min.proto` would be generated as module `thing.min`, which is not a Mojo module name: give it one in `module_names`",

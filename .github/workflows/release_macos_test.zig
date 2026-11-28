@@ -18,8 +18,10 @@
 //!  - release.yml holds no macOS job: no job `release-macos`, no job `needs` it or reads its result;
 //!    the one place it names macOS is its job `mopm-stage`, which publishes the packages of both platforms:
 //!    the lines of MOPM_STAGE_MACOS, exactly as written, each once in the file and all in that job (the macOS
-//!    keys passed to farm-connect in a buckconfig of their own, and the one build that names that file and
-//!    builds //release:mopm_release_artifacts, whose transition configures the macOS set for darwin-arm64);
+//!    keys passed to farm-connect in a buckconfig of their own, and the two builds (one per Mojo) that name that
+//!    file and build //release:mopm_release_artifacts, whose transition configures the macOS set for
+//!    darwin-arm64); in release.yml the Linux platform of the second Mojo (MOJO_NEXT_PLATFORM) is no macOS platform, and any
+//!    other `--target-platforms`, the macOS rows included, is refused;
 //!    any other non-comment line naming a macOS platform, worker set or runner (a `--target-platforms`, a
 //!    macOS runner, the keys in another job) is refused;
 //!  - the job `release-macos` of release-macos.yml exists once and builds the macOS set on the farm: it runs on
@@ -41,8 +43,11 @@
 //!    skips the job;
 //!  - it is not triggered on a pull request: neither macOS-naming workflow's `on:` names one, and no
 //!    workflow that runs on a pull request (pr.yml, coverage.yml) has a non-comment line naming darwin,
-//!    macOS, osx or `--target-platforms`, with two exceptions, both in pr.yml and exactly as written: the
-//!    lines of its macOS part (PR_MACOS_PART) and the line that analyses the macOS set (ANALYSIS_ARGS, a
+//!    macOS, osx or `--target-platforms`, with three exceptions, all in pr.yml and exactly as written: the
+//!    lines of its macOS part (PR_MACOS_PART), the lines of its Mojo 1.2.0 part on linux (PR_MOJO_NEXT; a
+//!    line that names the platform of that Mojo and is none of them is refused, and so is each of them in
+//!    coverage.yml) and
+//!    the line that analyses the macOS set (ANALYSIS_ARGS, a
 //!    `bxl` of release/darwin_analysis.bxl, which configures and analyses and runs no action); the same
 //!    lines in coverage.yml are refused;
 //!  - pr.yml's macOS part holds its contract: each of its lines once; the macOS keys passed to
@@ -50,6 +55,15 @@
 //!    the targets chosen by darwin.bxl from the linux part's list; the build of darwin-arm64 through the
 //!    buck2-farm action with its remote assertion, only when there is a target, bounded at 60 minutes,
 //!    never with --no-remote-cache; and the part after the step `test` and before the analysis;
+//!  - pr.yml's Mojo 1.2.0 part on linux (five steps: the selection of tools/build/ci/mojo_next.bxl over the
+//!    list of the linux part, the labels of its log, the build and the standalone tests of that selection,
+//!    and the test, for linux-x86_64-mojo-1.2.0) holds its contract: its lines once, exactly as written (the
+//!    one other place a pull request workflow names `--target-platforms`), the selection, the build and the
+//!    test through the buck2-farm action with its remote assertion, the selection reading the list of the
+//!    step `build`, the build reading the selected list and the test the selected list without the tests
+//!    cell, the build and the test under their `if:`s and bounds, in the order select, targets, build,
+//!    standalone tests, test, after the step `test` and before the selection of the macOS targets, and no
+//!    macOS key or config file in them;
 //!  - pr.yml does analyse the macOS set: that line is there once, in a buck2-farm step with its remote
 //!    assertion, so a change that makes the set unanalysable fails its own pull request;
 //!  - pypi.yml, the release workflow of both wheels, runs on no pull request or merge group; its ten Linux jobs
@@ -100,12 +114,16 @@ const DARWIN_HOSTS = "          darwin-macos-hosts: ${{ vars.FARM_DARWIN_MACOS_H
 const QOS = "          farm-qos: batch";
 const MACOS_LIBS = "          macos-library-dirs: ${{ vars.FARM_MACOS_LIBRARY_DIRS }}";
 const MAC_CONFIG_INPUT = "          darwin-config-file: ${{ runner.temp }}/darwin.buckconfig";
-const PACKAGES_BUILD = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts";
+const PACKAGES_BUILD = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts-1.1.0";
+/// The same build for the second Mojo: the platform names the Linux row built with it, and the transition of the
+/// release target picks the macOS row for the same compiler.
+const MOJO_NEXT_PLATFORM = "--target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0";
+const PACKAGES_BUILD_NEXT = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true " ++ MOJO_NEXT_PLATFORM ++ " //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts-1.2.0";
 /// The job of release.yml that stages and publishes the packages of both platforms, and the only lines of release.yml
 /// that may name macOS: its farm connection's macOS keys, written to a buckconfig of their own, and the build of the
 /// packages, the one step that names that file.
 const MOPM_STAGE = "mopm-stage";
-const MOPM_STAGE_MACOS = [_][]const u8{ DARWIN_PROPS, DARWIN_HOSTS, MACOS_LIBS, MAC_CONFIG_INPUT, PACKAGES_BUILD };
+const MOPM_STAGE_MACOS = [_][]const u8{ DARWIN_PROPS, DARWIN_HOSTS, MACOS_LIBS, MAC_CONFIG_INPUT, PACKAGES_BUILD, PACKAGES_BUILD_NEXT };
 const BOUND = "    timeout-minutes: 90";
 const CONTINUE_ON_ERROR = "    continue-on-error: true";
 const RESULT_JOB = "release-macos-result";
@@ -213,11 +231,21 @@ fn startsWithAny(lines: []const []const u8, prefix: []const u8) bool {
     return false;
 }
 
-/// Whether a non-comment line of `lines` names a macOS platform, worker set or runner.
+/// Whether a line names a macOS platform, worker set or runner, or any `--target-platforms`. A pull request
+/// workflow is read with this: the Linux platform of the second Mojo counts too, and only checkPullRequestWorkflow
+/// exempts the PR_MOJO_NEXT lines of pr.yml.
 fn namesMacos(line: []const u8) bool {
     const words = [_][]const u8{ "darwin", "macos", "osx", "target-platforms" };
     for (words) |w| if (std.ascii.indexOfIgnoreCase(line, w) != null) return true;
     return false;
+}
+
+/// Like namesMacos, but the Linux platform of the second Mojo (MOJO_NEXT_PLATFORM) is the one
+/// `--target-platforms` that names no macOS platform. The release workflows are read with this.
+fn namesMacosBesidesMojoNext(raw: []const u8) bool {
+    const line = std.mem.replaceOwned(u8, std.heap.page_allocator, raw, MOJO_NEXT_PLATFORM, "") catch return true;
+    defer std.heap.page_allocator.free(line);
+    return namesMacos(line);
 }
 
 /// The value of `key` (`group` or `cancel-in-progress`) under the top-level `concurrency:`, or null.
@@ -259,7 +287,7 @@ fn checkRelease(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     }
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |line| {
-        if (isComment(line) or !namesMacos(line)) continue;
+        if (isComment(line) or !namesMacosBesidesMojoNext(line)) continue;
         var allowed = false;
         for (MOPM_STAGE_MACOS) |l| allowed = allowed or std.mem.eql(u8, line, l);
         if (!allowed) return try std.fmt.allocPrint(ar, "release.yml names a macOS platform, worker set or runner outside mopm-stage's macOS keys and its build of the packages: {s}", .{std.mem.trim(u8, line, " ")});
@@ -386,7 +414,7 @@ fn checkPullRequestWorkflow(name: []const u8, text: []const u8) ?[]const u8 {
         if (isComment(line)) continue;
         // the analysis of the macOS set runs no action: the one line that may name it, as written
         if (std.mem.eql(u8, line, ANALYSIS_ARGS)) continue;
-        if (is_pr and isMacosPartLine(line)) continue;
+        if (is_pr and (isMacosPartLine(line) or isMojoNextLine(line))) continue;
         if (namesMacos(line)) return "a workflow that runs on a pull request names a macOS platform, worker set or runner outside pr.yml's macOS part (its lines are PR_MACOS_PART, as written)";
     }
     return null;
@@ -412,6 +440,42 @@ const PR_MACOS_PART = [_][]const u8{
     PR_BUILD_IF,
     PR_BUILD_ARGS,
 };
+
+/// The non-comment lines of pr.yml's Mojo 1.2.0 part on linux: the selection of the targets the linux part
+/// built, the file of their labels, the build and the test of that selection for the platform that selects
+/// Mojo 1.2.0. Each exactly as written (the `if:` and bound lines that other steps repeat are held by
+/// the step checks of checkMojoNext).
+const PR_MOJO_NEXT = [_][]const u8{
+    NEXT_SELECT_NAME,
+    NEXT_SELECT_ARGS,
+    NEXT_TARGETS_NAME,
+    NEXT_TARGETS_ID,
+    NEXT_TARGETS_RUN,
+    NEXT_BUILD_NAME,
+    NEXT_BUILD_BOUND,
+    NEXT_BUILD_ARGS,
+    NEXT_TESTS_NAME,
+    NEXT_TESTS_ID,
+    NEXT_TESTS_RUN,
+    NEXT_TEST_NAME,
+    NEXT_TEST_ARGS,
+};
+const NEXT_SELECT_NAME = "      - name: select the Mojo 1.2.0 targets";
+const NEXT_SELECT_ARGS = "          args: bxl komira//tools/build/ci/mojo_next.bxl:select @tools/build/ci/mojo_next_affected.args @${{ runner.temp }}/targets.txt";
+const NEXT_TARGETS_NAME = "      - name: the Mojo 1.2.0 targets to build";
+const NEXT_TARGETS_ID = "        id: next";
+const NEXT_TARGETS_RUN = "        run: grep -E '^[a-z_]+//[^ ]+$' \"$RUNNER_TEMP/buck2-farm.log\" > \"$RUNNER_TEMP/next_targets.txt\" && echo \"any=true\" >> \"$GITHUB_OUTPUT\" || true";
+const NEXT_BUILD_NAME = "      - name: build with Mojo 1.2.0";
+const NEXT_BUILD_IF = "        if: steps.next.outputs.any == 'true'";
+const NEXT_BUILD_BOUND = "        timeout-minutes: 120";
+const NEXT_BUILD_ARGS = "          args: build --keep-going --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 @${{ runner.temp }}/next_targets.txt";
+const NEXT_TESTS_NAME = "      - name: the Mojo 1.2.0 standalone test targets";
+const NEXT_TESTS_ID = "        id: next_tests";
+const NEXT_TESTS_RUN = "        run: grep -v '^tests//' \"$RUNNER_TEMP/next_targets.txt\" > \"$RUNNER_TEMP/next_test_targets.txt\" && echo \"any=true\" >> \"$GITHUB_OUTPUT\" || true";
+const NEXT_TEST_NAME = "      - name: test with Mojo 1.2.0";
+const NEXT_TEST_IF = "        if: steps.next_tests.outputs.any == 'true'";
+const NEXT_TEST_BOUND = "        timeout-minutes: 60";
+const NEXT_TEST_ARGS = "          args: test --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 @${{ runner.temp }}/next_test_targets.txt";
 const DARWIN_FILE = "          darwin-config-file: ${{ runner.temp }}/darwin.buckconfig";
 const SELECT_NAME = "      - name: select the macOS targets";
 const SELECT_ARGS = "          args: bxl komira//tools/build/ci/darwin.bxl:select @tools/build/ci/darwin_affected.args @${{ runner.temp }}/targets.txt";
@@ -427,6 +491,11 @@ const PR_BUILD_IF = "        if: steps.darwin.outputs.any == 'true'";
 const PR_BUILD_BOUND = "        timeout-minutes: 60";
 const PR_BUILD_ARGS = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going @${{ runner.temp }}/darwin_targets.txt";
 const PR_TEST_NAME = "      - name: test";
+
+fn isMojoNextLine(line: []const u8) bool {
+    for (PR_MOJO_NEXT) |l| if (std.mem.eql(u8, line, l)) return true;
+    return false;
+}
 
 fn isMacosPartLine(line: []const u8) bool {
     for (PR_MACOS_PART) |l| if (std.mem.eql(u8, line, l)) return true;
@@ -479,6 +548,53 @@ fn checkMacosPart(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (!(tst < sel and sel < ids and ids < build and build < analysis))
         return "pr.yml's macOS part is not after the step `test` and before the analysis of the macOS set, in the order select, targets, build";
     if (!(tool < ids)) return "pr.yml builds the macOS targets tool after the step that runs it";
+    return null;
+}
+
+/// Null if pr.yml's Mojo 1.2.0 part on linux holds its contract, else the refusal: every line of it is
+/// there once; the selection reads the list the step `build` builds; the selection, the build and the
+/// test run through the buck2-farm action with its remote assertion, the build under the `if:` on the
+/// selection's labels and the test under the `if:` on the standalone test targets, both bounded; the build
+/// reads the selected list and the test the selected list without the tests cell; and the part stands after
+/// the step `test`, in the order select, targets, build, standalone tests, test, before the selection of
+/// the macOS targets (which reads the log of the step before it).
+fn checkMojoNext(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
+    var lines = std.ArrayList([]const u8).empty;
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |l| if (!isComment(l)) try lines.append(ar, l);
+    const ls = lines.items;
+    for (PR_MOJO_NEXT) |want| {
+        var n: usize = 0;
+        for (ls) |l| if (std.mem.eql(u8, l, want)) {
+            n += 1;
+        };
+        if (n != 1) return try std.fmt.allocPrint(ar, "pr.yml holds {d} times, not once, the line of its Mojo 1.2.0 part: {s}", .{ n, std.mem.trim(u8, want, " ") });
+    }
+    if (mentions(ls, "--no-remote-cache")) return "pr.yml builds with --no-remote-cache";
+    const sel = lineAt(ls, NEXT_SELECT_ARGS).?;
+    if (!stepIs(ls, sel, NEXT_SELECT_NAME, &.{}))
+        return "pr.yml selects the Mojo 1.2.0 targets outside its buck2-farm step `select the Mojo 1.2.0 targets` with its remote assertion";
+    // the selection reads the list the linux part's step `build` builds
+    if (lineAt(ls, "          args: build --keep-going @${{ runner.temp }}/targets.txt") == null)
+        return "pr.yml's step `build` does not build the list that the Mojo 1.2.0 selection reads";
+    const ids = lineAt(ls, NEXT_TARGETS_ID).?;
+    if (!consecutive(ls, ids, &.{ NEXT_TARGETS_NAME, NEXT_TARGETS_ID, NEXT_TARGETS_RUN }))
+        return "pr.yml's step `the Mojo 1.2.0 targets to build` is not its name, `id: next` and the one command that writes next_targets.txt";
+    const build = lineAt(ls, NEXT_BUILD_ARGS).?;
+    if (!stepIs(ls, build, NEXT_BUILD_NAME, &.{ NEXT_BUILD_IF, NEXT_BUILD_BOUND }))
+        return "pr.yml's step `build with Mojo 1.2.0` is not: its name, `if: steps.next.outputs.any == 'true'`, `timeout-minutes: 120`, the buck2-farm action with the build and its remote assertion";
+    const standalone = lineAt(ls, NEXT_TESTS_ID).?;
+    if (!consecutive(ls, standalone, &.{ NEXT_TESTS_NAME, NEXT_TESTS_ID, NEXT_BUILD_IF, NEXT_TESTS_RUN }))
+        return "pr.yml's step `the Mojo 1.2.0 standalone test targets` is not its name, `id: next_tests`, `if: steps.next.outputs.any == 'true'` and the one command that writes next_test_targets.txt";
+    const tests = lineAt(ls, NEXT_TEST_ARGS).?;
+    if (!stepIs(ls, tests, NEXT_TEST_NAME, &.{ NEXT_TEST_IF, NEXT_TEST_BOUND }))
+        return "pr.yml's step `test with Mojo 1.2.0` is not: its name, `if: steps.next_tests.outputs.any == 'true'`, `timeout-minutes: 60`, the buck2-farm action with the test and its remote assertion";
+    const tst = lineAt(ls, PR_TEST_NAME) orelse return "pr.yml has no step `test`";
+    const macos = lineAt(ls, SELECT_NAME) orelse return "pr.yml does not select the macOS targets";
+    if (!(tst < sel and macos > tests))
+        return "pr.yml's Mojo 1.2.0 part is not after the step `test` and before the selection of the macOS targets";
+    if (!(sel < ids and ids < build and build < standalone and standalone < tests))
+        return "pr.yml's Mojo 1.2.0 part is not in the order select, targets to build, build, standalone test targets, test";
     return null;
 }
 
@@ -948,6 +1064,10 @@ test "each edit of the real workflows that breaks the macOS build's separation i
     try expectRefusedRelease(ar, try replaced(ar, rel, "  mopm-stage:\n    runs-on: ubuntu-24.04\n", "  mopm-stage:\n    runs-on: macos-15\n"), "its build of the packages: runs-on: macos-15");
     // the build of the packages, spelled another way (a --target-platforms of the whole build), is not mopm-stage's line
     try expectRefusedRelease(ar, try replaced(ar, rel, PACKAGES_BUILD, PACKAGES_BUILD ++ " --target-platforms komira//tools/build/platforms:darwin-arm64"), "outside mopm-stage's macOS keys");
+    // the second Mojo's build with a macOS platform of its own is not mopm-stage's line either: only the Linux row of
+    // MOJO_NEXT_PLATFORM is allowed, the release target's transition picks the macOS half
+    try expectRefusedRelease(ar, try replaced(ar, rel, PACKAGES_BUILD_NEXT, try std.mem.replaceOwned(u8, ar, PACKAGES_BUILD_NEXT, "linux-x86_64-mojo-1.2.0", "darwin-arm64-mojo-1.2.0")), "outside mopm-stage's macOS keys");
+    try expectRefusedRelease(ar, try replaced(ar, rel, "--out ${{ runner.temp }}/mopm-publish/release_staged_verify\n", "--out ${{ runner.temp }}/mopm-publish/release_staged_verify --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 --target-platforms komira//tools/build/platforms:darwin-arm64\n"), "outside mopm-stage's macOS keys");
     // the macOS keys in another job, or twice, or missing from mopm-stage
     try expectRefusedRelease(ar, try replaced(ar, rel, "  prod-test:\n", "  prod-test:\n    env:\n" ++ DARWIN_PROPS ++ "\n"), "is mopm-stage's, once");
     try expectRefusedRelease(ar, try replaced(ar, rel, DARWIN_HOSTS ++ "\n", ""), "mopm-stage does not hold `darwin-macos-hosts");
@@ -1090,6 +1210,11 @@ test "the reader of pull request workflows sees each macOS line added to the rea
         "          args: bxl --config-file release/darwin_analysis.buckconfig --target-platforms komira//tools/build/platforms:darwin-arm64 komira//release/darwin_analysis.bxl:check",
         "          args: test --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check",
         ANALYSIS_ARGS ++ " //release:mopm_darwin_libs",
+        // the Mojo 1.2.0 lines' exception is those lines only: a platform of another Mojo or another
+        // architecture, or a test of it, is a build for a platform
+        "          args: build --keep-going --target-platforms komira//tools/build/platforms:linux-arm64-mojo-1.2.0 @${{ runner.temp }}/targets.txt",
+        "          args: build --keep-going --target-platforms komira//tools/build/platforms:darwin-arm64-mojo-1.2.0 @${{ runner.temp }}/targets.txt",
+        NEXT_TEST_ARGS ++ " --no-remote-cache --target-platforms komira//tools/build/platforms:darwin-arm64",
     };
     for (added) |line| {
         const bad = try std.fmt.allocPrint(ar, "{s}\n{s}\n", .{ pr, line });
@@ -1103,7 +1228,21 @@ test "the reader of pull request workflows sees each macOS line added to the rea
     // the lines of pr.yml's macOS part are pr.yml's alone: in coverage.yml each is refused
     const coverage = try readData(ar, &.{ "workflows", "coverage.yml" });
     try t.expect(checkPullRequestWorkflow("coverage.yml", coverage) == null);
+    // a line of the Mojo 1.2.0 part that carries `--target-platforms` is refused too (its two lines: the build and the test)
+    var next_platform_lines: usize = 0;
+    for (PR_MOJO_NEXT) |line| {
+        if (std.mem.indexOf(u8, line, "--target-platforms") == null) continue;
+        next_platform_lines += 1;
+        try t.expect(namesMacos(line));
+        try t.expect(checkPullRequestWorkflow("coverage.yml", try std.fmt.allocPrint(ar, "{s}\n{s}\n", .{ coverage, line })) != null);
+    }
+    try t.expectEqual(@as(usize, 2), next_platform_lines);
+    // a line of the Mojo 1.2.0 platform that is none of pr.yml's own lines is refused in pr.yml: building //x:y
+    // with it is not the part's build
+    const stray_next = "          args: build --keep-going " ++ MOJO_NEXT_PLATFORM ++ " //x:y";
+    try expectMsg(checkPullRequestWorkflow("pr.yml", try std.fmt.allocPrint(ar, "{s}\n{s}\n", .{ pr, stray_next })), "names a macOS platform, worker set or runner outside pr.yml's macOS part");
     for (PR_MACOS_PART) |line| {
+        if (!namesMacos(line)) continue; // a step name or a bound is no platform
         if (checkPullRequestWorkflow("coverage.yml", try std.fmt.allocPrint(ar, "{s}\n{s}\n", .{ coverage, line })) == null) {
             std.debug.print("coverage.yml with a line of pr.yml's macOS part was accepted: {s}\n", .{line});
             return error.Accepted;
@@ -1407,6 +1546,78 @@ test "pr.yml's macOS part holds its contract, and each edit that breaks it is re
     const tool_step = TOOL_NAME ++ "\n" ++ TOOL_ID ++ "\n" ++ TOOL_RUN ++ "\n";
     const tool_late = try replacedPr(ar, try replacedPr(ar, pr, tool_step, ""), PR_BUILD_NAME ++ "\n", tool_step ++ PR_BUILD_NAME ++ "\n");
     try expectMsg(try checkMacosPart(ar, tool_late), "builds the macOS targets tool after the step that runs it");
+    // a second macOS build, for the next Mojo's platform, is no part of the pull request check (the release
+    // builds the macOS libraries with it): a step added to pr.yml that builds darwin_targets.txt for
+    // darwin-arm64-mojo-1.2.0 is a line that names a macOS platform outside the part's lines, and is refused
+    const second_build = "      - name: build for macOS with Mojo 1.2.0\n" ++ PR_BUILD_IF ++ "\n" ++ PR_BUILD_BOUND ++ "\n" ++ BUCK2_FARM ++ "\n        with:\n" ++
+        "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig --target-platforms komira//tools/build/platforms:darwin-arm64-mojo-1.2.0 --keep-going @${{ runner.temp }}/darwin_targets.txt\n" ++ ASSERT ++ "\n";
+    try expectMsg(checkPullRequestWorkflow("pr.yml", try replacedPr(ar, pr, build_step, build_step ++ second_build)), "names a macOS platform, worker set or runner outside pr.yml's macOS part");
+}
+
+test "pr.yml's Mojo 1.2.0 part on linux holds its contract, and each edit that breaks it is refused with its message" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const pr = try readData(ar, &.{ "workflows", "pr.yml" });
+    try t.expect((try checkMojoNext(ar, pr)) == null);
+    const farm = "\n" ++ BUCK2_FARM ++ "\n        with:\n";
+    const select_next = NEXT_SELECT_NAME ++ farm ++ NEXT_SELECT_ARGS ++ "\n" ++ ASSERT ++ "\n";
+    const targets_step = NEXT_TARGETS_NAME ++ "\n" ++ NEXT_TARGETS_ID ++ "\n" ++ NEXT_TARGETS_RUN ++ "\n";
+    const build_step = NEXT_BUILD_NAME ++ "\n" ++ NEXT_BUILD_IF ++ "\n" ++ NEXT_BUILD_BOUND ++ farm ++ NEXT_BUILD_ARGS ++ "\n" ++ ASSERT ++ "\n";
+    const standalone_step = NEXT_TESTS_NAME ++ "\n" ++ NEXT_TESTS_ID ++ "\n" ++ NEXT_BUILD_IF ++ "\n" ++ NEXT_TESTS_RUN ++ "\n";
+    const test_step = NEXT_TEST_NAME ++ "\n" ++ NEXT_TEST_IF ++ "\n" ++ NEXT_TEST_BOUND ++ farm ++ NEXT_TEST_ARGS ++ "\n" ++ ASSERT ++ "\n";
+    const cases = [_]struct { from: []const u8, to: []const u8, want: []const u8 }{
+        // a step lost, or written twice
+        .{ .from = select_next, .to = "", .want = "0 times, not once, the line of its Mojo 1.2.0 part: - name: select the Mojo 1.2.0 targets" },
+        .{ .from = build_step, .to = "", .want = "0 times, not once, the line of its Mojo 1.2.0 part: - name: build with Mojo 1.2.0" },
+        .{ .from = test_step, .to = "", .want = "0 times, not once, the line of its Mojo 1.2.0 part: - name: test with Mojo 1.2.0" },
+        .{ .from = build_step, .to = build_step ++ build_step, .want = "2 times, not once" },
+        // the selection reading another list than the one the step `build` builds
+        .{ .from = "mojo_next_affected.args @${{ runner.temp }}/targets.txt", .to = "mojo_next_affected.args @${{ runner.temp }}/test_targets.txt", .want = "0 times, not once, the line of its Mojo 1.2.0 part: args: bxl komira//tools/build/ci/mojo_next.bxl:select" },
+        // the selection not run through the action with its assertion
+        .{ .from = NEXT_SELECT_ARGS ++ "\n" ++ ASSERT, .to = NEXT_SELECT_ARGS, .want = "selects the Mojo 1.2.0 targets outside its buck2-farm step" },
+        // the linux part's own build renamed: the selection would read a list nothing builds
+        .{ .from = "          args: build --keep-going @${{ runner.temp }}/targets.txt", .to = "          args: build @${{ runner.temp }}/targets.txt", .want = "`build` does not build the list that the Mojo 1.2.0 selection reads" },
+        // the labels' step: its command changed, or a line between its name and its id
+        .{ .from = "grep -E '^[a-z_]+//[^ ]+$' \"$RUNNER_TEMP/buck2-farm.log\" > \"$RUNNER_TEMP/next_targets.txt\"", .to = "grep -E '^[a-z_]+//[^ ]+$' \"$RUNNER_TEMP/buck2-farm.log\" > \"$RUNNER_TEMP/targets.txt\"", .want = "0 times, not once, the line of its Mojo 1.2.0 part: run: grep -E" },
+        .{ .from = NEXT_TARGETS_NAME ++ "\n" ++ NEXT_TARGETS_ID, .to = NEXT_TARGETS_NAME ++ "\n        if: always()\n" ++ NEXT_TARGETS_ID, .want = "`the Mojo 1.2.0 targets to build` is not its name" },
+        // the platform of the build dropped or another's (the step would repeat the Mojo 1.1.0 build)
+        .{ .from = NEXT_BUILD_ARGS, .to = "          args: build --keep-going @${{ runner.temp }}/next_targets.txt --target-platforms komira//tools/build/platforms:linux-x86_64", .want = "0 times, not once, the line of its Mojo 1.2.0 part: args: build --keep-going --target-platforms" },
+        .{ .from = "linux-x86_64-mojo-1.2.0 @${{ runner.temp }}/next_test_targets.txt", .to = "linux-x86_64 @${{ runner.temp }}/next_test_targets.txt", .want = "0 times, not once, the line of its Mojo 1.2.0 part: args: test --target-platforms" },
+        // the build reading the unselected list, or the test another list than the standalone targets
+        .{ .from = "linux-x86_64-mojo-1.2.0 @${{ runner.temp }}/next_targets.txt", .to = "linux-x86_64-mojo-1.2.0 @${{ runner.temp }}/targets.txt", .want = "0 times, not once, the line of its Mojo 1.2.0 part: args: build --keep-going --target-platforms" },
+        .{ .from = "linux-x86_64-mojo-1.2.0 @${{ runner.temp }}/next_test_targets.txt", .to = "linux-x86_64-mojo-1.2.0 @${{ runner.temp }}/test_targets.txt", .want = "0 times, not once, the line of its Mojo 1.2.0 part: args: test --target-platforms" },
+        .{ .from = "grep -v '^tests//' \"$RUNNER_TEMP/next_targets.txt\"", .to = "grep -v '^tests//' \"$RUNNER_TEMP/targets.txt\"", .want = "0 times, not once, the line of its Mojo 1.2.0 part: run: grep -v" },
+        // unbounded, the build unguarded or its guard misplaced (it would build an empty list), the
+        // standalone step unguarded, the test unguarded
+        .{ .from = NEXT_BUILD_BOUND ++ "\n", .to = "", .want = "0 times, not once, the line of its Mojo 1.2.0 part: timeout-minutes: 120" },
+        .{ .from = NEXT_BUILD_NAME ++ "\n" ++ NEXT_BUILD_IF ++ "\n", .to = NEXT_BUILD_NAME ++ "\n", .want = "`build with Mojo 1.2.0` is not: its name, `if: steps.next.outputs.any == 'true'`" },
+        .{ .from = NEXT_BUILD_NAME ++ "\n" ++ NEXT_BUILD_IF ++ "\n" ++ NEXT_BUILD_BOUND ++ "\n", .to = NEXT_BUILD_NAME ++ "\n" ++ NEXT_BUILD_BOUND ++ "\n" ++ NEXT_BUILD_IF ++ "\n", .want = "`build with Mojo 1.2.0` is not: its name, `if: steps.next.outputs.any == 'true'`" },
+        .{ .from = NEXT_TESTS_ID ++ "\n" ++ NEXT_BUILD_IF ++ "\n", .to = NEXT_TESTS_ID ++ "\n", .want = "`the Mojo 1.2.0 standalone test targets` is not its name" },
+        .{ .from = NEXT_TEST_IF ++ "\n" ++ NEXT_TEST_BOUND ++ farm ++ NEXT_TEST_ARGS, .to = NEXT_TEST_BOUND ++ farm ++ NEXT_TEST_ARGS, .want = "`test with Mojo 1.2.0` is not: its name, `if: steps.next_tests" },
+        // run directly, where a local action would not be caught, or not asserted remote
+        .{ .from = NEXT_BUILD_BOUND ++ "\n" ++ BUCK2_FARM, .to = NEXT_BUILD_BOUND ++ "\n        run: ./buck2 build @next_targets.txt", .want = "`build with Mojo 1.2.0` is not: its name" },
+        .{ .from = NEXT_TEST_ARGS ++ "\n" ++ ASSERT, .to = NEXT_TEST_ARGS, .want = "`test with Mojo 1.2.0` is not: its name" },
+        // a cold cache
+        .{ .from = "      - name: Stop buck2\n", .to = "      - name: cold\n        run: ./buck2 build --no-remote-cache //x:y\n      - name: Stop buck2\n", .want = "--no-remote-cache" },
+    };
+    for (cases) |c| try expectMsg(try checkMojoNext(ar, try replacedPr(ar, pr, c.from, c.to)), c.want);
+    // the order: the selection after the build, the test before the build, the standalone tests after the test
+    const select_late = try replacedPr(ar, try replacedPr(ar, pr, select_next, ""), build_step, build_step ++ select_next);
+    try expectMsg(try checkMojoNext(ar, select_late), "in the order select, targets to build, build, standalone test targets, test");
+    const test_first = try replacedPr(ar, try replacedPr(ar, pr, test_step, ""), build_step, test_step ++ build_step);
+    try expectMsg(try checkMojoNext(ar, test_first), "in the order select, targets to build, build, standalone test targets, test");
+    const standalone_late = try replacedPr(ar, try replacedPr(ar, pr, standalone_step, ""), test_step, test_step ++ standalone_step);
+    try expectMsg(try checkMojoNext(ar, standalone_late), "in the order select, targets to build, build, standalone test targets, test");
+    // the part after the macOS selection, or before the step `test`
+    const all_next = select_next ++ targets_step ++ build_step ++ standalone_step ++ test_step;
+    const macos_select = SELECT_NAME ++ farm ++ SELECT_ARGS ++ "\n" ++ ASSERT ++ "\n";
+    var without = pr;
+    for ([_][]const u8{ select_next, targets_step, build_step, standalone_step, test_step }) |step| without = try replacedPr(ar, without, step, "");
+    const after_select = try replacedPr(ar, without, macos_select, macos_select ++ all_next);
+    try expectMsg(try checkMojoNext(ar, after_select), "is not after the step `test` and before the selection of the macOS targets");
+    const before_test = try replacedPr(ar, without, PR_TEST_NAME ++ "\n", all_next ++ PR_TEST_NAME ++ "\n");
+    try expectMsg(try checkMojoNext(ar, before_test), "is not after the step `test` and before the selection of the macOS targets");
 }
 
 fn replacedPr(ar: std.mem.Allocator, text: []const u8, from: []const u8, to: []const u8) ![]const u8 {

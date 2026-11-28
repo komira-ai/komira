@@ -28,13 +28,20 @@
 #      guard that it reaches no Python, and the cases of the selector and the
 #      guard;
 #   5. `test` of the list's standalone tests;
+#   5b. the selection once more with Mojo 1.2.0, the next compiler
+#      (tools/build/toolchains/mojo_versions.bzl), by naming the platform
+#      linux-x86_64-mojo-1.2.0: tools/build/ci/mojo_next.bxl selects the list minus the
+#      coverage roots and the Python surface (both built with the default compiler only), `build` and
+#      `test` of that selection run, so a change that only 1.2.0 refuses fails its own
+#      pull request while 1.1.0, the default, stays what ships;
 #   6. the macOS part (docs/ci.md, "The macOS part of the check"): the libraries
 #      of the macOS set the list reaches (tools/build/ci/darwin.bxl, its labels
 #      read by tools/build/ci/darwin_targets), or the
 #      whole set when the list is the aggregate, built for darwin-arm64 on the
 #      farm's macOS workers, their welded tests included, bounded at 60 minutes;
 #      only this step names the file of the macOS keys, so no other step
-#      configures a macOS platform;
+#      configures a macOS platform; the macOS libraries are built with Mojo 1.2.0 by
+#      the release before it stages (release.yml, `build the packages for Mojo 1.2.0`);
 #   7. the configuration and analysis of the release's whole macOS set and its
 #      macOS Python harness tests, for their platform, with every Zig tool their
 #      actions run held to the platform it runs on: no action runs
@@ -294,6 +301,53 @@ jobs:
         uses: ./.github/actions/buck2-farm
         with:
           args: test @${{ runner.temp }}/test_targets.txt
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The same change with Mojo 1.2.0, the next compiler: the platform
+      # linux-x86_64-mojo-1.2.0 is the linux platform plus the buildrules constraint
+      # mojo_1_2_0, which komira's toolchain and every Mojo package select on, so no
+      # target changes. The selector (tools/build/ci/mojo_next.bxl) prints the targets
+      # above minus the coverage roots and the Python surface, or their twin aggregate:
+      # coverage is measured with the default compiler only, so one compiler's figures
+      # are the floors, and the wheel bundles the default compiler's runtime
+      # (tools/build/ci/mojo_next.bzl). Every target of the selection is configured
+      # anew under that platform, so its actions, the non-Mojo ones (Zig, Rust,
+      # protobuf) included, are new to the farm's cache the first time. Bounded at
+      # 120: the longest check of the recorded runs took 91 minutes end to end with
+      # both steps above, so a second pass that waits longer is a stall. After the
+      # 1.1.0 test, so a red 1.1.0 build spends no 1.2.0 time.
+      - name: select the Mojo 1.2.0 targets
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/ci/mojo_next.bxl:select @tools/build/ci/mojo_next_affected.args @${{ runner.temp }}/targets.txt
+          assert-remote: ${{ steps.assert.outputs.path }}
+        timeout-minutes: 30
+      # The labels of the selection's log into next_targets.txt, and `any` set when there is
+      # one (nothing is printed when the change reaches only targets left to the default compiler).
+      - name: the Mojo 1.2.0 targets to build
+        id: next
+        run: grep -E '^[a-z_]+//[^ ]+$' "$RUNNER_TEMP/buck2-farm.log" > "$RUNNER_TEMP/next_targets.txt" && echo "any=true" >> "$GITHUB_OUTPUT" || true
+        timeout-minutes: 5
+      - name: build with Mojo 1.2.0
+        if: steps.next.outputs.any == 'true'
+        timeout-minutes: 120
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --keep-going --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 @${{ runner.temp }}/next_targets.txt
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The standalone tests of the selection (the tests cell is built, never run).
+      - name: the Mojo 1.2.0 standalone test targets
+        id: next_tests
+        if: steps.next.outputs.any == 'true'
+        run: grep -v '^tests//' "$RUNNER_TEMP/next_targets.txt" > "$RUNNER_TEMP/next_test_targets.txt" && echo "any=true" >> "$GITHUB_OUTPUT" || true
+        timeout-minutes: 5
+      # Bounded at 60 (the 1.1.0 test is at 90): its tests were welded into the
+      # build above, so this runs what that build already ran.
+      - name: test with Mojo 1.2.0
+        if: steps.next_tests.outputs.any == 'true'
+        timeout-minutes: 60
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: test --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 @${{ runner.temp }}/next_test_targets.txt
           assert-remote: ${{ steps.assert.outputs.path }}
       # The macOS part (docs/ci.md, "The macOS part of the check"): of the targets above,
       # the libraries of the macOS set (//release:mopm_darwin_libs) the change reaches, or

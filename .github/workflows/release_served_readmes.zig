@@ -12,8 +12,9 @@
 //!  - the command: `served` of its own registry (`--stage beta` in the beta job, `--stage prod` in the prod job),
 //!    on the set `mopm-stage` kept and on no other artifact (a registry's staged directory holds the files before the
 //!    commit, not what it serves), writing `release/staged_set` and nothing else writing it, run once;
-//!  - the e2e: `-c komira_release.staged=stage` at this run's version, after `served`, asserted remote, the job's one
-//!    farm build;
+//!  - the e2e: `-c komira_release.staged=stage` at this run's version, after `served`, asserted remote, and again
+//!    under the Mojo 1.2.0 target platform (the set holds a build for each Mojo), after the first, asserted remote:
+//!    the job's two farm builds;
 //!  - no line names a registry-writing verb, the OIDC exchange or a hand-made write.
 //! Each defect is written into the real release.yml and must be refused with its message.
 
@@ -76,9 +77,13 @@ fn checkOne(ar: std.mem.Allocator, text: []const u8, comptime r: []const u8) !?[
     const e2e_at = wf.lineAt(job, wf.PROD_E2E_RUN) orelse return name ++ " does not run the e2e on the served set (staged=stage at this run's version)";
     if (!(served_at < e2e_at)) return name ++ " runs the e2e before served wrote the set";
     if (!(connect_at < e2e_at)) return name ++ " runs the e2e before it joins the farm";
-    // the e2e is the job's one farm build, and it is asserted remote
-    if (count(job, "uses: ./.github/actions/buck2-farm") != 1) return name ++ " has a farm build other than the e2e";
-    if (e2e_at + 1 >= job.len or !std.mem.eql(u8, job[e2e_at + 1], wf.E2E_ASSERT) or count(job, "assert-remote:") != 1)
+    // the same e2e again for the second Mojo, after the first
+    const e2e_next_at = wf.lineAt(job, wf.PROD_E2E_NEXT) orelse return name ++ " does not run the e2e on the served set for the second Mojo (--target-platforms ...mojo-1.2.0, staged=stage at this run's version)";
+    if (!(served_at < e2e_next_at)) return name ++ " runs the e2e for the second Mojo before served wrote the set";
+    if (!(e2e_at < e2e_next_at)) return name ++ " runs the e2e for the second Mojo before the first";
+    // the two e2e runs are the job's only farm builds, and each is asserted remote
+    if (count(job, "uses: ./.github/actions/buck2-farm") != 2) return name ++ " has a farm build other than the e2e";
+    if (e2e_at + 1 >= job.len or !std.mem.eql(u8, job[e2e_at + 1], wf.E2E_ASSERT) or e2e_next_at + 1 >= job.len or !std.mem.eql(u8, job[e2e_next_at + 1], wf.E2E_ASSERT) or count(job, "assert-remote:") != 2)
         return name ++ " has a farm step that is not asserted remote";
     return null;
 }
@@ -142,6 +147,8 @@ test "each edit of a served job's steps that breaks the contract is refused with
         const run = comptime servedRun(r);
         const served_step = "      - name: download what " ++ r ++ " serves and check it against the plan\n" ++ run ++ nl;
         const e2e_step = "      - name: the README e2e against what " ++ r ++ " serves\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ wf.PROD_E2E_RUN ++ nl ++ wf.E2E_ASSERT ++ nl;
+        const e2e_next_step = "      - name: the README e2e against what " ++ r ++ " serves for Mojo 1.2.0\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ wf.PROD_E2E_NEXT ++ nl ++ wf.E2E_ASSERT ++ nl;
+        const next_name = "      - name: the README e2e against what " ++ r ++ " serves for Mojo 1.2.0\n        uses: ./.github/actions/buck2-farm\n        with:\n";
         const download = "          name: mopm-staged-${{ github.sha }}\n          path: ${{ runner.temp }}/" ++ r ++ "-served\n";
         // served of its own registry, on the set mopm-stage kept, into release/staged_set
         try wf.expectRefused(ar, try wf.replaced(ar, text, served_step, ""), name ++ " does not run release_staged_verify served --stage " ++ r);
@@ -161,6 +168,15 @@ test "each edit of a served job's steps that breaks the contract is refused with
         try wf.expectRefused(ar, try wf.replaced(ar, try wf.replaced(ar, text, served_step, ""), e2e_step, e2e_step ++ served_step), name ++ " runs the e2e before served wrote the set");
         try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_step, "      - name: the README e2e against what " ++ r ++ " serves\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ wf.PROD_E2E_RUN ++ nl), name ++ " has a farm step that is not asserted remote");
         try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_step, "      - name: build something else\n        uses: ./.github/actions/buck2-farm\n        with:\n          args: build //x\n" ++ wf.E2E_ASSERT ++ nl ++ e2e_step), name ++ " has a farm build other than the e2e");
+        // the e2e again for the second Mojo: there, with that platform and this run's version, after the first, asserted remote
+        const next_missing = name ++ " does not run the e2e on the served set for the second Mojo";
+        try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_next_step, ""), next_missing);
+        try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_next_step, next_name ++ wf.PROD_E2E_RUN ++ nl ++ wf.E2E_ASSERT ++ nl), next_missing);
+        try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_next_step, next_name ++ "          args: build --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.1.0 -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all\n" ++ wf.E2E_ASSERT ++ nl), next_missing);
+        try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_next_step, next_name ++ wf.PROD_E2E_NEXT ++ nl), name ++ " has a farm step that is not asserted remote");
+        try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_step ++ e2e_next_step, e2e_next_step ++ e2e_step), name ++ " runs the e2e for the second Mojo before the first");
+        try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_next_step, e2e_next_step ++ e2e_next_step), name ++ " has a farm build other than the e2e");
+        try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_next_step, e2e_next_step ++ "        continue-on-error: true\n"), name ++ " ignores a failure");
         try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_step, e2e_step ++ "        continue-on-error: true\n"), name ++ " ignores a failure");
         try wf.expectRefused(ar, try wf.replaced(ar, text, run, run[0 .. run.len - 1] ++ " || true'"), name ++ " ignores a failure");
         // it only reads: no write to a registry, no identity

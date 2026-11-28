@@ -183,7 +183,7 @@ _MOJO_KEYWORDS = [
     "lambda", "mut", "None", "nonlocal", "not", "or", "out", "owned", "pass",
     "raise", "raises", "read", "ref", "return", "self", "struct", "trait",
     "True", "try", "var", "while", "with", "yield",
-    "imm", "deinit",
+    "imm", "deinit", "match", "case",
 ]
 
 def _is_module_name(m):

@@ -1,6 +1,7 @@
 # The staged set of the release, for the README e2e (tools/build/readme_e2e/README.md).
 load("@komira//tools/build/readme_e2e:defs.bzl", "readme_e2e_staged")
-load(":packages.bzl", "MOJO", "NAMESPACE", "PACKAGES")
+load(":packages.bzl", "NAMESPACE", "PACKAGES")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 # Every package moved to mopm, as `mopm stage` writes the set (it cannot run as a build
 # action: it asks the registry, see //release/staged_set): plan.json, each
@@ -18,7 +19,7 @@ readme_e2e_staged(
         )
         for name, version in PACKAGES.items()
     },
-    mojo = MOJO,
+    mojo = mojo_version(),
     visibility = ["//ci:", "//release/readme_e2e/verify:"],
 )
 

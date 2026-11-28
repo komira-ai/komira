@@ -43,6 +43,7 @@ Nothing here runs buck2 or sends anything: the targets are dependencies.
 """
 
 load("//release/readme_e2e:packages.bzl", "NAMESPACE")
+load("//tools/build/toolchains:mojo_versions.bzl", "MOJO_NEXT", "MOJO_NEXT_CONSTRAINT")
 load(":mopm_native_ids.bzl", "NATIVE_IDS")
 
 def mojoc_path(subdir, name):
@@ -191,11 +192,20 @@ def merge_tree_cases():
 def _darwin_arm64_impl(platform, refs):
     # the platform `--target-platforms komira//tools/build/platforms:darwin-arm64` names, unchanged: the libraries
     # are configured exactly as release-macos.yml and pr.yml's macOS part configure them, so their actions are the
-    # same actions (and the same cache entries); `platform`, the dependent's, is not read
-    _ = platform
+    # same actions (and the same cache entries). Of `platform`, the dependent's, only the Mojo compiler is read: a
+    # dependent built with the second compiler (`<row>-mojo-<version>`, toolchains/mojo_versions.bzl) gets
+    # `darwin-arm64-mojo-<version>`, so both halves of one artifacts directory are built with one compiler.
+    nxt = refs.mojo_next[ConstraintValueInfo]
+    chosen = platform.configuration.constraints.get(nxt.setting.label)
+    if chosen and chosen.label == nxt.label:
+        return refs.darwin_arm64_next[PlatformInfo]
     return refs.darwin_arm64[PlatformInfo]
 
-_DARWIN_ARM64 = transition(impl = _darwin_arm64_impl, refs = {"darwin_arm64": "komira//tools/build/platforms:darwin-arm64"})
+_DARWIN_ARM64 = transition(impl = _darwin_arm64_impl, refs = {
+    "darwin_arm64": "komira//tools/build/platforms:darwin-arm64",
+    "darwin_arm64_next": "komira//tools/build/platforms:darwin-arm64-mojo-" + MOJO_NEXT,
+    "mojo_next": MOJO_NEXT_CONSTRAINT,
+})
 
 def _release_impl(ctx):
     linux = ctx.attrs.linux[MopmTreeInfo]

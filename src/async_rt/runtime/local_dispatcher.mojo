@@ -65,9 +65,8 @@
 
 from std.memory import OwnedPointer, UnsafePointer, alloc
 from atomic_alias import AtomicI32, AtomicI64, AtomicU8
-from std.sys import num_physical_cores, size_of
+from std.sys import num_physical_cores, size_of, stderr
 from std.ffi import external_call
-from std.io import FileDescriptor
 from std.time import perf_counter_ns
 
 from async_rt.cancellation.token import CancellationToken
@@ -139,7 +138,7 @@ from async_api.parallel_dispatch import ParallelDispatch
 # `print(file=...)` needs no FFI declaration of its own.
 # -----------------------------------------------------------------------------
 
-comptime _STDERR: FileDescriptor = FileDescriptor(2)
+comptime _STDERR = stderr
 
 
 # =============================================================================

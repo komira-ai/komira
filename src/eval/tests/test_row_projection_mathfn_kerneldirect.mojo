@@ -36,7 +36,8 @@
 # unsafe_from_address / take_pointee. eval surface only. `fn` style.
 # =============================================================================
 
-from std.math import sqrt, sin, cos, asin, atan2, pi
+from std.ffi import external_call
+from std.math import sqrt, sin, cos, asin, pi
 
 from std.testing import TestSuite, assert_true
 
@@ -196,7 +197,8 @@ def test_atan2_f64() raises:
 
     for r in range(rb.n_rows):
         _approx(
-            exec._eval_f64_from_source(cs, 2, r), atan2(a[r], b[r]),
+            exec._eval_f64_from_source(cs, 2, r),
+            external_call["atan2", Float64](a[r], b[r]),
             "atan2 row " + String(r),
         )
 

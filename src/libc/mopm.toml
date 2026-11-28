@@ -5,7 +5,7 @@ description = "The libc and POSIX layer every package shares: one getenv, the ac
 license = "Apache-2.0"
 repository = "https://github.com/komira-ai/komira"
 readme = "README.md"
-mojo = ["1.1.0"]
+mojo = ["1.1.0", "1.2.0"]
 
 [native.komira_libc_posix]
 kind = "static"

@@ -50,7 +50,7 @@
 # no stale-pointer hazard across destroy and recreate.
 # =============================================================================
 
-from std.math import sqrt, sin, cos, asin, atan2, pi, ceil, floor
+from std.math import sqrt, sin, cos, asin, pi, ceil, floor
 
 from arrow.arrow_types import ArrowType
 from arrow.record_batch import RecordBatch
@@ -81,7 +81,7 @@ from column_kernels.string_comparison import like_match_string
 # the column kernel in `column_kernels.scalar_math` are FOUR evaluators
 # of ONE SQL op, so they share one named kernel rather than four spellings that
 # can drift; the full measurement lives on `libm_pow`.
-from column_kernels.scalar_math import libm_pow, _apply_unary
+from column_kernels.scalar_math import libm_atan2, libm_pow, _apply_unary
 from scalar_arithmetic.int_overflow import (
     checked_add,
     checked_sub,
@@ -3545,7 +3545,7 @@ struct ExpressionExecutor(Movable, Deinitable):
             )
             var k = 0
             while k < n_sel:
-                out.append(atan2(y_vals[k], x_vals[k]))
+                out.append(libm_atan2(y_vals[k], x_vals[k]))
                 k = k + 1
             return
 
@@ -6019,7 +6019,7 @@ struct ExpressionExecutor(Movable, Deinitable):
         if kind == EXPR_ATAN2_F64:
             var yv = self._eval_f64_from_source[CS](src, node.left, row)
             var xv = self._eval_f64_from_source[CS](src, node.right, row)
-            return atan2(yv, xv)
+            return libm_atan2(yv, xv)
         if kind == EXPR_POW_F64:
             var bv = self._eval_f64_from_source[CS](src, node.left, row)
             var ev = self._eval_f64_from_source[CS](src, node.right, row)

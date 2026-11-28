@@ -21,10 +21,10 @@
 #      column is looked up outside (DuckDB binds a column in the innermost
 #      scope where it resolves), and refused when the outer FROM does not
 #      answer to it.
-#   4. A qualified outer reference in a subquery no WHERE holds (HAVING,
-#      CASE) is refused by name. Otherwise the error would be an unknown column.
-#   5. Nested subqueries: the outer scope is the immediately enclosing FROM;
-#      a qualifier only a FROM two levels out answers to is unknown there.
+#
+# Kept apart from test_sql_bind_outer_refs_scope.mojo:
+# Mojo 1.2.0 does not finish compiling the two as one file, while each
+# compiles in minutes.
 
 from std.testing import TestSuite, assert_equal
 
@@ -212,31 +212,6 @@ def test_the_inner_relation_shadows_the_outer() raises:
     _check(
         "SELECT k FROM kk WHERE EXISTS (SELECT 1 FROM u AS t WHERE t.v = 1)",
         "ERR: SQL bind error: unknown column 'v' in correlated subquery",
-    )
-
-
-def test_a_qualified_outer_reference_outside_a_where_is_refused() raises:
-    var tail = String(
-        "` in a subquery that is not an AND / OR / NOT / comparison operand of a WHERE clause"
-    )
-    _check(
-        "SELECT k FROM t GROUP BY k HAVING EXISTS (SELECT 1 FROM mm WHERE mm.k = t.k)",
-        "ERR: SQL not supported: a qualified outer reference `t.k" + tail,
-    )
-    _check(
-        "SELECT k FROM t WHERE CASE WHEN EXISTS (SELECT 1 FROM mm WHERE mm.k = t.k) THEN true ELSE false END",
-        "ERR: SQL not supported: a qualified outer reference `t.k" + tail,
-    )
-
-
-def test_nested_subqueries_use_the_enclosing_from() raises:
-    _check(
-        "SELECT k FROM t WHERE EXISTS (SELECT 1 FROM u WHERE EXISTS (SELECT 1 FROM mm WHERE mm.k = u.k))",
-        "Project(exprs=[ColRef(k)])\n  Filter(predicate=" + _corr(0, 0) + ")\n    " + _T,
-    )
-    _check(
-        "SELECT k FROM t WHERE EXISTS (SELECT 1 FROM u WHERE EXISTS (SELECT 1 FROM mm WHERE mm.k = t.k))",
-        "ERR: SQL bind error: unknown column 't.k'",
     )
 
 

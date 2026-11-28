@@ -116,7 +116,7 @@
 
 from atomic_alias import AtomicI64
 from std.ffi import _Global
-from std.io import FileDescriptor
+from std.sys import stderr
 from std.memory import OwnedPointer, UnsafePointer, alloc
 
 from arrow.arrow_types import ArrowType
@@ -132,7 +132,7 @@ from .join_key_cse import JoinKeyAliasMap
 # there is not a log line, it is a CORRUPTED ANSWER. Same spelling and same
 # reason as `komira_engine_operators/join_layout_counter.mojo:67`, which is
 # this marker family's other three members.
-comptime _PAY_STDERR: FileDescriptor = FileDescriptor(2)
+comptime _PAY_STDERR = stderr
 
 comptime JOIN_KN_WORDS: Int = 2
 

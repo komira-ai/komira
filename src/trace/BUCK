@@ -2,6 +2,7 @@ load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
 load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":buildrules.mojo.bzl", "mojo_package")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 # The span tracer: per-worker span-packet rings, the Tracer, the name registry
 # lookups it shares with the exporter, and the JSONL span exporter, including
@@ -66,7 +67,7 @@ mojo_conda(
         "../name_registry": "//src/name_registry:mopm.toml",
         "../spsc_ring": "//src/spsc_ring:mopm.toml",
     },
-    mojo = "1.1.0",
+    mojo = mojo_version(),
     mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/trace",
     version = "0.1.0",

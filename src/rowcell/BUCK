@@ -2,6 +2,7 @@ load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
 load("@buildrules//rules/mojo:pack.bzl", "mojo_conda")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":buildrules.mojo.bzl", "mojo_package")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 # The typed table-cell value model (`RowCell`, its six type tags, typed
 # constructors, value equality). A zero-dependency leaf: the empty dependency
@@ -36,7 +37,7 @@ mojo_conda(
     name = "conda",
     lib = ":lib",
     manifest = "mopm.toml",
-    mojo = "1.1.0",
+    mojo = mojo_version(),
     mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/rowcell",
     version = "0.1.0",

@@ -2,6 +2,7 @@ load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
 load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":buildrules.mojo.bzl", "mojo_package")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 # A per-run id minted inside the test process from the wall clock and 64
 # random bits, never derived from inputs, plus the `WallClock` / `Entropy`
@@ -53,7 +54,7 @@ mojo_conda(
         "../clock": "//src/clock:mopm.toml",
         "../validation_run": "//src/validation_run:mopm.toml",
     },
-    mojo = "1.1.0",
+    mojo = mojo_version(),
     mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/test_run_id",
     version = "0.1.0",

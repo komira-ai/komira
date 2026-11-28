@@ -22,6 +22,8 @@
 # Exit status: 0 done and every file usable, 1 the run failed or a file failed
 # verification, 2 the arguments are wrong (nothing was run).
 
+from std.sys import stderr
+
 from bench_duckdb import DEFAULT_DUCKDB_VERSION, open_pinned
 
 from .manifest import find_manifest, tpch_manifest
@@ -223,7 +225,7 @@ def run_stage(args: List[String]) -> Int:
     """The binary's whole life, over the arguments after the program name: the
     exit status (module header). A refusal or a failure is printed on stderr."""
     if len(args) == 0:
-        print("usage: komira-bench-stage tpch|verify [flags]; see the module header", file=FileDescriptor(2))
+        print("usage: komira-bench-stage tpch|verify [flags]; see the module header", file=stderr)
         return EXIT_USAGE
     var command = args[0].copy()
     var flags = Flags()
@@ -252,12 +254,12 @@ def run_stage(args: List[String]) -> Int:
         else:
             raise Error(String("unknown command '") + command + String("'"))
     except e:
-        print(String(e), file=FileDescriptor(2))
+        print(String(e), file=stderr)
         return EXIT_USAGE
     try:
         if command == String("tpch"):
             return _run_tpch(flags, scale_factor, memory_gib, silence_minutes)
         return _run_verify(flags)
     except e:
-        print(String(e), file=FileDescriptor(2))
+        print(String(e), file=stderr)
         return EXIT_FAILED

@@ -185,6 +185,24 @@ test "the pull request check bounds its build and test steps well under the job"
     try t.expect(build * 2 <= job);
 }
 
+test "the Mojo 1.2.0 steps of the pull request check are bounded like the build and test they repeat, each under half the job" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const path = try std.fs.path.join(ar, &.{ try workDir(ar), "pr.yml" });
+    const text = try std.fs.cwd().readFileAlloc(ar, path, 1 << 20);
+    const job = (try minutes(text, "    ")) orelse return error.JobHasNoTimeout;
+    const build = (try minutes(try prStep(text, "build with Mojo 1.2.0"), "        ")) orelse return error.NextBuildHasNoTimeout;
+    const tests = (try minutes(try prStep(text, "test with Mojo 1.2.0"), "        ")) orelse return error.NextTestHasNoTimeout;
+    // the same floor as the steps they repeat: the longest recorded check took 91 minutes end to end
+    try t.expect(build >= 120);
+    try t.expect(tests >= 60);
+    // each ends the job's check before the job's own limit, though the bounds of all the steps together
+    // add up to more than it: the bounds are stall detectors, and the job's limit is the one budget
+    try t.expect(build * 2 <= job);
+    try t.expect(tests * 2 <= job);
+}
+
 /// The steps of pr.yml's check (each from its `      - ` line to the next) that
 /// set no `timeout-minutes` of their own, or set one not under the job's.
 fn unboundedSteps(ar: std.mem.Allocator, text: []const u8, job: u32) ![]const []const u8 {

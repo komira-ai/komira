@@ -3,10 +3,14 @@
 // check, so that the check runs no shell.
 //! doc_check: the checks of `mojo_doc_json` (doc.bzl) on a `mojo doc` JSON.
 //!
-//! usage: doc_check <json> <golden or -> <inspect dir or -> <out> <label> [<symbol>...]
+//! usage: doc_check [--compiler-version <v>] <json> <golden or -> <inspect dir or -> <out> <label> [<symbol>...]
 //!
 //! With a golden, the JSON must equal it byte for byte; a difference is shown as
 //! the golden's lines with `-` and the JSON's with `+` (the first 40 lines).
+//! `mojo doc` writes the compiler's version into the JSON (its top-level
+//! `version`), so one golden serves every compiler the tree builds with: with
+//! `--compiler-version`, each `@MOJO_VERSION@` of the golden is that version
+//! before the comparison (goldenAsCompared()); every other byte is compared as it is.
 //! With symbols, `<inspect>/inspect json <json>` (the JSON as one line per leaf,
 //! path elements, key and value, tab-separated) is read for the declarations: an
 //! object with a `name` leaf under `decl` / packages / modules / functions /
@@ -133,13 +137,30 @@ pub fn differences(a: std.mem.Allocator, golden: []const u8, json: []const u8, m
     return out.toOwnedSlice(a);
 }
 
+/// The placeholder of a golden that stands for the compiler's version.
+pub const VERSION_PLACEHOLDER = "@MOJO_VERSION@";
+
+/// The golden as compared: `raw` with each VERSION_PLACEHOLDER replaced by
+/// `version`, or `raw` itself with no version.
+pub fn goldenAsCompared(a: std.mem.Allocator, raw: []const u8, version: ?[]const u8) ![]const u8 {
+    const v = version orelse return raw;
+    return std.mem.replaceOwned(u8, a, raw, VERSION_PLACEHOLDER, v);
+}
+
 pub fn main() !void {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena_state.allocator();
-    const argv = try std.process.argsAlloc(a);
-    if (argv.len < 6) die("usage: doc_check <json> <golden or -> <inspect dir or -> <out> <label> [<symbol>...]", .{});
+    const all = try std.process.argsAlloc(a);
+    var version: ?[]const u8 = null;
+    var argv = all;
+    if (all.len >= 3 and std.mem.eql(u8, all[1], "--compiler-version")) {
+        if (all[2].len == 0) die("--compiler-version is empty", .{});
+        version = all[2];
+        argv = try std.mem.concat(a, [:0]u8, &.{ all[0..1], all[3..] });
+    }
+    if (argv.len < 6) die("usage: doc_check [--compiler-version <v>] <json> <golden or -> <inspect dir or -> <out> <label> [<symbol>...]", .{});
     const json_path = argv[1];
-    const golden = argv[2];
+    const golden_path = argv[2];
     const inspect = argv[3];
     const out_path = argv[4];
     const label = argv[5];
@@ -147,10 +168,11 @@ pub fn main() !void {
 
     const json = std.fs.cwd().readFileAlloc(a, json_path, 1 << 28) catch |e| die("cannot read {s}: {s}", .{ json_path, @errorName(e) });
     var bad = false;
-    if (!std.mem.eql(u8, golden, "-")) {
-        const want = std.fs.cwd().readFileAlloc(a, golden, 1 << 28) catch |e| die("cannot read {s}: {s}", .{ golden, @errorName(e) });
+    if (!std.mem.eql(u8, golden_path, "-")) {
+        const raw = std.fs.cwd().readFileAlloc(a, golden_path, 1 << 28) catch |e| die("cannot read {s}: {s}", .{ golden_path, @errorName(e) });
+        const want = try goldenAsCompared(a, raw, version);
         if (!std.mem.eql(u8, want, json)) {
-            std.debug.print("mojo_doc_json: {s}: the JSON differs from its golden {s} (first differences, golden first):\n{s}", .{ label, golden, try differences(a, want, json, 40) });
+            std.debug.print("mojo_doc_json: {s}: the JSON differs from its golden {s} (first differences, golden first):\n{s}", .{ label, golden_path, try differences(a, want, json, 40) });
             bad = true;
         }
     }

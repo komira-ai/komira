@@ -2,6 +2,7 @@ load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
 load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":buildrules.mojo.bzl", "mojo_package")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 # An O(1)-reset bump allocator over a fixed-capacity byte region. Its public
 # API returns `ByteView` and typed scalars, never a raw pointer.
@@ -53,7 +54,7 @@ mojo_conda(
         "../libc": "//src/libc:mopm.toml",
         "../simd_ops": "//src/simd_ops:mopm.toml",
     },
-    mojo = "1.1.0",
+    mojo = mojo_version(),
     mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/bump_arena",
     version = "0.1.0",

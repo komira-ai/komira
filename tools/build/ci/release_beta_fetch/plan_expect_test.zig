@@ -12,8 +12,11 @@ const t = std.testing;
 
 const SHA = "a" ** 64;
 
-/// One member of a plan under test: its full name and the subdirs it has a file in.
-const M = struct { name: []const u8, subdirs: []const []const u8 };
+/// One member of a plan under test: its full name, the subdirs it has a file in, and the Mojo versions it has a
+/// build for in each of them (one file per pair).
+const M = struct { name: []const u8, subdirs: []const []const u8, mojos: []const []const u8 = &.{"1.1.0"} };
+
+const TWO = &[_][]const u8{ "1.1.0", "1.2.0" };
 
 const BOTH = &[_][]const u8{ "linux-64", "osx-arm64" };
 const LINUX = &[_][]const u8{"linux-64"};
@@ -37,9 +40,11 @@ fn planJson(a: std.mem.Allocator, members: []const M) ![]const u8 {
         const slash = std.mem.indexOfScalar(u8, m.name, '/').?;
         const dotted = try std.fmt.allocPrint(a, "{s}.{s}", .{ m.name[0..slash], m.name[slash + 1 ..] });
         try w.writer.print("{s}{{\"name\":\"{s}\",\"version\":\"0.1.9\",\"action\":\"upload\",\"readme\":\"{s}/README.md\",\"files\":[", .{ if (i == 0) "" else ",", m.name, m.name });
-        for (m.subdirs, 0..) |s, j| {
-            try w.writer.print("{s}{{\"subdir\":\"{s}\",\"filename\":\"mojo-{s}-0.1.9-mojo1.1.0_0.conda\",\"sha256\":\"{s}\",\"size\":1}}", .{ if (j == 0) "" else ",", s, dotted, SHA });
-        }
+        var j: usize = 0;
+        for (m.subdirs) |s| for (m.mojos) |v| {
+            try w.writer.print("{s}{{\"subdir\":\"{s}\",\"filename\":\"mojo-{s}-0.1.9-mojo{s}_0.conda\",\"sha256\":\"{s}\",\"size\":1}}", .{ if (j == 0) "" else ",", s, dotted, v, SHA });
+            j += 1;
+        };
         try w.writer.writeAll("]}");
     }
     try w.writer.writeAll("]}");
@@ -180,6 +185,114 @@ test "every difference is listed at once, in the expectation's order and then th
     }, try pe.differences(a, p, try expectation(a, EXPECT)));
 }
 
+// ---- the plan against an expectation that lists Mojo versions --------------------------------------
+
+/// EXPECT with the two Mojo versions the release publishes: every package needs a build for each.
+const EXPECT_TWO =
+    \\{"mojos":["1.1.0","1.2.0"],"members":[
+    \\ {"name":"ns/a","subdirs":["linux-64","osx-arm64"]},
+    \\ {"name":"ns/b","subdirs":["linux-64","osx-arm64"]},
+    \\ {"name":"ns/c","subdirs":["linux-64"]}
+    \\]}
+;
+
+fn twoBuilds(name: []const u8, subdirs: []const []const u8) M {
+    return .{ .name = name, .subdirs = subdirs, .mojos = TWO };
+}
+
+test "a plan with a build of every package for every Mojo on every platform has no difference" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const p = try plan(a, &.{ twoBuilds("ns/a", BOTH), twoBuilds("ns/b", BOTH), twoBuilds("ns/c", LINUX) });
+    try expectLines(&.{}, try pe.differences(a, p, try expectation(a, EXPECT_TWO)));
+}
+
+test "a package without its Mojo 1.2.0 build on one platform is a difference naming the package, subdir and Mojo" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    // ns/b has both builds on linux-64 but only the 1.1.0 build on osx-arm64.
+    var text = std.Io.Writer.Allocating.init(a);
+    const ok_a = try planJson(a, &.{ twoBuilds("ns/a", BOTH), twoBuilds("ns/c", LINUX) });
+    const b_json = try std.fmt.allocPrint(a, ",{{\"name\":\"ns/b\",\"version\":\"0.1.9\",\"action\":\"upload\",\"readme\":\"ns/b/README.md\",\"files\":[" ++
+        "{{\"subdir\":\"linux-64\",\"filename\":\"mojo-ns.b-0.1.9-mojo1.1.0_0.conda\",\"sha256\":\"{s}\",\"size\":1}}," ++
+        "{{\"subdir\":\"linux-64\",\"filename\":\"mojo-ns.b-0.1.9-mojo1.2.0_0.conda\",\"sha256\":\"{s}\",\"size\":1}}," ++
+        "{{\"subdir\":\"osx-arm64\",\"filename\":\"mojo-ns.b-0.1.9-mojo1.1.0_0.conda\",\"sha256\":\"{s}\",\"size\":1}}]}}", .{ SHA, SHA, SHA });
+    try text.writer.writeAll(ok_a[0 .. ok_a.len - 2]);
+    try text.writer.writeAll(b_json);
+    try text.writer.writeAll("]}");
+    var why: []const u8 = "";
+    const p = try rbf.parsePlan(a, &why, text.written());
+    try expectLines(&.{"ns/b: no file for osx-arm64 built for Mojo 1.2.0"}, try pe.differences(a, p, try expectation(a, EXPECT_TWO)));
+}
+
+test "a plan built for one Mojo only names every package, platform and missing Mojo" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const p = try plan(a, &.{ .{ .name = "ns/a", .subdirs = BOTH }, .{ .name = "ns/b", .subdirs = BOTH }, .{ .name = "ns/c", .subdirs = LINUX } });
+    try expectLines(&.{
+        "ns/a: no file for linux-64 built for Mojo 1.2.0",
+        "ns/a: no file for osx-arm64 built for Mojo 1.2.0",
+        "ns/b: no file for linux-64 built for Mojo 1.2.0",
+        "ns/b: no file for osx-arm64 built for Mojo 1.2.0",
+        "ns/c: no file for linux-64 built for Mojo 1.2.0",
+    }, try pe.differences(a, p, try expectation(a, EXPECT_TWO)));
+}
+
+test "a file built for a Mojo the expectation does not list, or named for none, is a difference" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const exp = try expectation(a, "{\"mojos\":[\"1.1.0\",\"1.2.0\"],\"members\":[{\"name\":\"ns/a\",\"subdirs\":[\"linux-64\"]}]}");
+    const p = try plan(a, &.{.{ .name = "ns/a", .subdirs = LINUX, .mojos = &.{ "1.1.0", "1.2.0", "1.3.0" } }});
+    try expectLines(&.{"ns/a: a file for linux-64 (mojo-ns.a-0.1.9-mojo1.3.0_0.conda) built for no Mojo the expectation lists (only 1.1.0, 1.2.0)"}, try pe.differences(a, p, exp));
+    const text =
+        \\{"version":2,"members":[{"name":"ns/a","version":"0.1.9","action":"upload","readme":"ns/a/README.md","files":[
+        \\ {"subdir":"linux-64","filename":"mojo-ns.a-0.1.9-mojo1.1.0_0.conda","sha256":"
+    ++ SHA ++
+        \\","size":1},
+        \\ {"subdir":"linux-64","filename":"mojo-ns.a-0.1.9-mojo1.2.0_0.conda","sha256":"
+    ++ SHA ++
+        \\","size":1},
+        \\ {"subdir":"linux-64","filename":"mojo-ns.a-0.1.9.conda","sha256":"
+    ++ SHA ++
+        \\","size":1}]}
+        \\]}
+    ;
+    var why: []const u8 = "";
+    const q = try rbf.parsePlan(a, &why, text);
+    try expectLines(&.{"ns/a: a file for linux-64 (mojo-ns.a-0.1.9.conda) built for no Mojo the expectation lists (only 1.1.0, 1.2.0)"}, try pe.differences(a, q, exp));
+}
+
+test "two files of one member for one subdir and Mojo is a difference" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const text =
+        \\{"version":2,"members":[
+        \\ {"name":"ns/a","version":"0.1.9","action":"upload","readme":"ns/a/README.md","files":[
+        \\  {"subdir":"linux-64","filename":"mojo-ns.a-0.1.9-mojo1.1.0_0.conda","sha256":"
+    ++ SHA ++
+        \\","size":1},
+        \\  {"subdir":"linux-64","filename":"mojo-ns.a-0.1.9-mojo1.1.0_1.conda","sha256":"
+    ++ SHA ++
+        \\","size":1}]}
+        \\]}
+    ;
+    var why: []const u8 = "";
+    const p = try rbf.parsePlan(a, &why, text);
+    const exp = try expectation(a, "{\"mojos\":[\"1.1.0\"],\"members\":[{\"name\":\"ns/a\",\"subdirs\":[\"linux-64\"]}]}");
+    try expectLines(&.{"ns/a: 2 files for linux-64 built for Mojo 1.1.0, where mopm stage packs one"}, try pe.differences(a, p, exp));
+}
+
+test "mojoOf reads the Mojo version of a staged file name and nothing else" {
+    try t.expectEqualStrings("1.1.0", pe.mojoOf("mojo-komira-ai.json-0.1.9-mojo1.1.0_0.conda").?);
+    try t.expectEqualStrings("1.2.0", pe.mojoOf("mojo-komira-ai.json-0.1.9-mojo1.2.0_12.conda").?);
+    for ([_][]const u8{ "mojo-ns.a-0.1.9.conda", "mojo-ns.a-0.1.9-mojo1.1.0_0.tar.bz2", "mojo-ns.a-0.1.9-mojo_0.conda", "mojo-ns.a-0.1.9-mojo1.1.0_.conda", "mojo-ns.a-0.1.9-mojo1.1.0.conda" }) |bad| try t.expect(pe.mojoOf(bad) == null);
+}
+
 // ---- the expectation ---------------------------------------------------------------------------
 
 test "an expectation that names no package is refused" {
@@ -214,6 +327,12 @@ test "an expectation entry with no subdir, a subdir twice, or a subdir that is n
     try refusedExpectation("{\"members\":[{\"name\":\"ns/a\",\"subdirs\":[\"linux 64\"]}]}", "the expectation gives ns/a the subdir 'linux 64', which is not a plain name");
     try refusedExpectation("{\"members\":[{\"name\":\"ns/a\",\"subdirs\":[\"a\\\\b\"]}]}", "the expectation gives ns/a the subdir 'a\\b', which is not a plain name");
     try refusedExpectation("{\"members\":[{\"name\":\"ns/a\",\"subdirs\":[\"a\\u0001b\"]}]}", "the expectation gives ns/a the subdir 'a\x01b', which is not a plain name");
+}
+
+test "an expectation with a Mojo version that is not digits and dots, or listed twice, is refused" {
+    try refusedExpectation("{\"mojos\":[\"1.1.0\",\"1.1.0\"],\"members\":[{\"name\":\"ns/a\",\"subdirs\":[\"linux-64\"]}]}", "the expectation gives the Mojo version 1.1.0 twice");
+    try refusedExpectation("{\"mojos\":[\"\"],\"members\":[{\"name\":\"ns/a\",\"subdirs\":[\"linux-64\"]}]}", "the expectation gives the Mojo version '', which is not digits and dots");
+    try refusedExpectation("{\"mojos\":[\"1.1.0-rc1\"],\"members\":[{\"name\":\"ns/a\",\"subdirs\":[\"linux-64\"]}]}", "the expectation gives the Mojo version '1.1.0-rc1', which is not digits and dots");
 }
 
 test "an expectation with a field it does not know is read: the format grows by adding fields" {
@@ -254,7 +373,7 @@ test "expect on the command line: exit 0 and the counts of members, files and fi
     defer err.deinit();
     const args = [_][]const u8{ "--staged", try tmpPath(a, &tmp, "staged"), "--expect", try tmpPath(a, &tmp, "expect.json") };
     try t.expectEqual(@as(u8, 0), try pe.cliExpect(a, &args, &out.writer, &err.writer));
-    try t.expectEqualStrings("release_staged_verify: plan.json stages every package of the expectation, each with one file for every subdir it requires and none other: 3 member(s), 5 file(s) (linux-64 3, osx-arm64 2)\n", out.written());
+    try t.expectEqualStrings("release_staged_verify: plan.json stages every package of the expectation, each with one file for every subdir (and every Mojo version) it requires and none other: 3 member(s), 5 file(s) (linux-64 3, osx-arm64 2)\n", out.written());
     try t.expectEqualStrings("", err.written());
 }
 
@@ -384,19 +503,20 @@ fn realExpectation(a: std.mem.Allocator) !pe.Expectation {
     return expectation(a, text);
 }
 
-/// The plan the expectation describes: each package with one file for every subdir it requires.
+/// The plan the expectation describes: each package with one file for every subdir and Mojo it requires.
 fn membersOf(a: std.mem.Allocator, exp: pe.Expectation) ![]const M {
     var out = std.ArrayList(M).empty;
-    for (exp.members) |e| try out.append(a, .{ .name = e.name, .subdirs = e.subdirs });
+    for (exp.members) |e| try out.append(a, .{ .name = e.name, .subdirs = e.subdirs, .mojos = exp.mojos });
     return out.items;
 }
 
-test "the release's expectation: every package under komira-ai, each on linux-64, sorted, and the plan it describes passes" {
+test "the release's expectation: every package under komira-ai, each on linux-64, sorted, for Mojo 1.1.0 and 1.2.0, and the plan it describes passes" {
     var ar = std.heap.ArenaAllocator.init(t.allocator);
     defer ar.deinit();
     const a = ar.allocator();
     const exp = try realExpectation(a);
     try t.expect(exp.members.len > 1);
+    try t.expectEqual(@as(usize, 2), exp.mojos.len);
     for (exp.members, 0..) |e, i| {
         try t.expect(std.mem.startsWith(u8, e.name, "komira-ai/"));
         try t.expectEqualStrings("linux-64", e.subdirs[0]);
@@ -412,10 +532,24 @@ test "the release's expectation: a plan with every osx-arm64 file removed names 
     const exp = try realExpectation(a);
     var want = std.ArrayList([]const u8).empty;
     for (exp.members) |e| {
-        for (e.subdirs) |s| if (std.mem.eql(u8, s, "osx-arm64")) try want.append(a, try std.fmt.allocPrint(a, "{s}: no file for osx-arm64", .{e.name}));
+        for (e.subdirs) |s| if (std.mem.eql(u8, s, "osx-arm64")) for (exp.mojos) |v| try want.append(a, try std.fmt.allocPrint(a, "{s}: no file for osx-arm64 built for Mojo {s}", .{ e.name, v }));
     }
     try t.expect(want.items.len > 0);
     var linux_only = std.ArrayList(M).empty;
-    for (exp.members) |e| try linux_only.append(a, .{ .name = e.name, .subdirs = LINUX });
+    for (exp.members) |e| try linux_only.append(a, .{ .name = e.name, .subdirs = LINUX, .mojos = exp.mojos });
     try expectLines(want.items, try pe.differences(a, try plan(a, linux_only.items), exp));
+}
+
+test "the release's expectation: a plan with every Mojo 1.2.0 file removed names every package and platform" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const exp = try realExpectation(a);
+    var want = std.ArrayList([]const u8).empty;
+    for (exp.members) |e| {
+        for (e.subdirs) |sd| try want.append(a, try std.fmt.allocPrint(a, "{s}: no file for {s} built for Mojo {s}", .{ e.name, sd, exp.mojos[1] }));
+    }
+    var first_only = std.ArrayList(M).empty;
+    for (exp.members) |e| try first_only.append(a, .{ .name = e.name, .subdirs = e.subdirs, .mojos = exp.mojos[0..1] });
+    try expectLines(want.items, try pe.differences(a, try plan(a, first_only.items), exp));
 }

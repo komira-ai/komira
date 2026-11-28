@@ -2,6 +2,7 @@ load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
 load("@buildrules//rules/mojo:pack.bzl", "mojo_conda")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":buildrules.mojo.bzl", "mojo_package")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 # Email addresses: RFC 5322 section 3.4 (addr-spec, name-addr, groups) and the
 # RFC 5321 path, parsed by one grammar and formatted with minimum quoting. No
@@ -34,7 +35,7 @@ mojo_conda(
     name = "conda",
     lib = ":lib",
     manifest = "mopm.toml",
-    mojo = "1.1.0",
+    mojo = mojo_version(),
     mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/mail_address",
     version = "0.1.0",

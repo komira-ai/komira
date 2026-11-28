@@ -20,7 +20,7 @@ harness is broken and nothing is scored (exit 1).
 Exit status: 0 done, 1 an input is malformed or a mutant unknown, 2 bad usage.
 """
 
-from std.io import FileDescriptor
+from std.sys import stderr
 
 from mutate.gen import Mutant, Suppressed, apply, generate
 from mutate.sample import parse_list, render_list
@@ -220,7 +220,7 @@ def run_score(args: List[String]) raises:
 
 def run(args: List[String]) -> Int:
     """Runs the command line `args` (without the program name)."""
-    var err = FileDescriptor(2)
+    var err = stderr
     if len(args) == 0:
         print("mutate: usage: mutate list|apply|score ...", file=err)
         return EXIT_USAGE

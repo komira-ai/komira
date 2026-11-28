@@ -52,7 +52,7 @@ With `external_call`, from the module that owns the foreign resource, behind a s
 
 ### Which Mojo 1.0 spellings does the compiler require?
 
-The toolchain pins Mojo `1.1.0` (the `mojo-compiler` packages in `tools/build/cells/toolchains/mojo_pins.bzl`). Each of these became a compile error in Mojo 1.0.0 and the 1.1.0 release restores none of them, so the compiler enforces the rule; the right-hand column says how to choose among the fixes.
+The toolchain pins Mojo `1.1.0` and `1.2.0` (the `mojo-compiler` packages in `tools/build/cells/toolchains/mojo_pins.bzl` and the `mojo_compiler` and `mojo_compiler_next` pins of `tools/build/platforms/table.bzl`; the tree builds with both). Each of these became a compile error in Mojo 1.0.0 and the 1.1.0 release restores none of them, so the compiler enforces the rule (the tree is written in the 1.0.0 column for 1.2.0 too; whether 1.2.0 would accept an old spelling was not measured); the right-hand column says how to choose among the fixes.
 
 | You write | 1.0.0 wants | Choosing |
 |---|---|---|
@@ -126,7 +126,7 @@ The spelling rules in the table above are different: the compiler refuses the ol
 | `src/byte_buffer/src/byte_buffer/byte_view.mojo`, `slab.mojo` | the view and slab types that keep pointers private | `ByteView`, `Slab` |
 | `src/async_api/src/async_api/parallel_dispatch.mojo`, `fork_join_shared.mojo` | the parallel dispatch contract | `ParallelDispatch`, `NoDispatch`, `fork_join_shared` |
 | `src/byte_buffer/src/byte_buffer/mmap_region.mojo`, `src/libc/native/komira_libc_posix.c` | an FFI boundary through a C shim that resolves platform constants in C | `open_readonly`, `komira_open_ro` |
-| `tools/build/cells/toolchains/mojo_pins.bzl` | the compiler pin | the `mojo-compiler` 1.1.0 packages |
+| `tools/build/cells/toolchains/mojo_pins.bzl` | the compiler pins | the `mojo-compiler` 1.1.0 and 1.2.0 packages |
 | `tools/build/lint/pointer_lint.zig`, `mojo_tokens.zig`, `pointer_lint_test.zig`, `defs.bzl`; `tests/pointer_lint_ffi.tsv`, `tests/pointer_lint_holds.tsv` | the pointer lint, and its two ledgers | `pointer_lint`, `//:pointer_lint` |
 
 Entry points:

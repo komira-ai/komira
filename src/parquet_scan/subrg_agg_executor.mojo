@@ -33,7 +33,7 @@
 
 from atomic_alias import AtomicI64
 from std.builtin.swap import swap
-from std.io import FileDescriptor
+from std.sys import stderr
 from std.memory import Pointer, UnsafePointer
 
 from arrow.arrow_types import ArrowType
@@ -58,7 +58,7 @@ from .subrg_agg_fold import FOLD_DECLINED_DIRTY, FOLD_OK, fold_one_rg_subrg
 from .subrg_agg_plan import SUBRG_SLOTS, SubrgAggPlan
 
 
-comptime _STDERR: FileDescriptor = FileDescriptor(2)
+comptime _STDERR = stderr
 
 
 def _is_int_key_type(t: ArrowType) -> Bool:

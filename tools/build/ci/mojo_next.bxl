@@ -1,0 +1,29 @@
+# The targets of the Mojo 1.2.0 part of the pull request check, as one label per line on stdout.
+#
+#   ./buck2 bxl komira//tools/build/ci/mojo_next.bxl:select @tools/build/ci/mojo_next_affected.args @targets.txt
+#
+# `targets.txt` is what affected.bxl printed for the change (pr.yml's step `the targets to build`).
+# mojo_next.bzl says what is picked: the aggregate's twin without the coverage roots
+# (`//ci:pr_mojo_next`, `//ci:pr_default_mojo_next`) when the change is built as an aggregate of
+# the check set, else every affected label but the coverage roots, else nothing. The reason goes
+# to the log, not stdout; an empty stdout means no 1.2.0 build. It fails on a line that is not a
+# target label (BROKEN), so a selector whose output changed shape never reads as none.
+# pr.yml's step `the Mojo 1.2.0 targets to build` reads its output.
+
+load(":mojo_next.bzl", "TWINS", "mojo_next_answer")
+
+def _impl(ctx):
+    # Everything it prints, and its failure, is mojo_next_answer's (mojo_next_cases.bzl holds them).
+    answer = mojo_next_answer(ctx.cli_args.affected, TWINS)
+    if answer.failure:
+        fail(answer.failure)
+    print(answer.log)
+    for t in answer.stdout:
+        ctx.output.print(t)
+
+select = bxl_main(
+    impl = _impl,
+    cli_args = {
+        "affected": cli_args.list(cli_args.string(), default = []),
+    },
+)

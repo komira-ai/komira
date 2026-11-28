@@ -5,7 +5,7 @@ description = "The LZ4 raw block and frame codecs over lz4 1.10.0, linked static
 license = "Apache-2.0"
 repository = "https://github.com/komira-ai/komira"
 readme = "README.md"
-mojo = ["1.1.0"]
+mojo = ["1.1.0", "1.2.0"]
 
 # libkomira_lz4.a is built by the `native_library` target //third_party/lz4:lz4_native (lz4 1.10.0, C, every
 # symbol renamed komira_lz4_*), which BUCK's `natives = {...}` names: an archive of the build, not compiled from

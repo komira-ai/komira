@@ -3,6 +3,7 @@ load("@komira//tools/build/platforms:table.bzl", "by_target_platform", "constrai
 load("@komira//tools/build/package:defs.bzl", "oci_base")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime", "zig_dist", "zig_exe", "zig_test")
+load(":mojo_versions.bzl", "by_mojo")
 load(":pixi.bzl", "pixi_version_check")
 
 # ---- Pinned inputs ---------------------------------------------------------
@@ -51,6 +52,10 @@ pinned_file(**pinned_kwargs("darwin-arm64", "zig_next"))
 
 # The Mojo compiler package.
 pinned_file(**pinned_kwargs("linux-x86_64", "mojo_compiler"))
+
+# The second Mojo compiler package (1.2.0), what a target platform carrying
+# `buildrules//platforms:mojo_1_2_0` compiles with (komira_mojo_toolchains in defs.bzl).
+pinned_file(**pinned_kwargs("linux-x86_64", "mojo_compiler_next"))
 
 # The C++ runtime the compiler links against (NEEDED libstdc++.so.6 and
 # libgcc_s.so.1; newest symbol versions GLIBCXX_3.4.30, CXXABI_1.3.13,
@@ -191,6 +196,20 @@ conda_closure(
     visibility = ["PUBLIC"],
 )
 
+# The 1.2.0 compiler, with the same C++ runtime pair: its runtime libraries need the same
+# symbol versions as 1.1.0's (GLIBCXX_3.4.30, CXXABI_1.3.13, GCC_3.3).
+conda_closure(
+    name = "mojo_compiler_next",
+    exec_compatible_with = LINUX_X86_64,
+    libs = {
+        "lib/libgcc_s.so.1": ":libgcc_15.3.0_linux-64.conda",
+        "lib/libstdc++.so.6": ":libstdcxx_15.3.0_linux-64.conda",
+    },
+    package = ":" + pinned_kwargs("linux-x86_64", "mojo_compiler_next")["name"],
+    unpacker = ":conda_unpack",
+    visibility = ["PUBLIC"],
+)
+
 # What a built binary loads, read from the loader's own record of a run
 # (tests//functional/runtime_libs:loader_trace, `run init <toolchain>/lib/...` lines).
 # tools/build/tests/run_tests.sh fails if this list and that record disagree.
@@ -206,6 +225,32 @@ mojo_runtime(
         "libgcc_s.so.1",
         "libstdc++.so.6",
     ],
+    visibility = ["PUBLIC"],
+)
+
+# What a binary built with the 1.2.0 compiler loads: the same libraries, from its closure.
+mojo_runtime(
+    name = "mojo_runtime_next",
+    exec_compatible_with = LINUX_X86_64,
+    busybox = ":busybox",
+    compiler = ":mojo_compiler_next",
+    libs = [
+        "libAsyncRTRuntimeGlobals.so",
+        "libKGENCompilerRTShared.so",
+        "libMSupportGlobals.so",
+        "libgcc_s.so.1",
+        "libstdc++.so.6",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The runtime of the compiler the target platform chooses (mojo_versions.bzl), for a target that
+# stages the runtime libraries as data (a dependency configured like the target, so the select
+# sees the target platform). A rule taking the runtime as an exec dependency selects with
+# `by_mojo` on its own attribute instead.
+alias(
+    name = "mojo_runtime_selected",
+    actual = by_mojo(":mojo_runtime", ":mojo_runtime_next"),
     visibility = ["PUBLIC"],
 )
 

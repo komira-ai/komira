@@ -168,6 +168,49 @@ test "served writes the plan, the READMEs and the files each registry serves, af
     }
 }
 
+test "served: a member with a build for each of two Mojo versions has both files fetched, checked and written, and the second alone differing refuses" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const first = "mojo-ns.pa-0.1.9-mojo1.1.0_0.conda";
+    const second = "mojo-ns.pa-0.1.9-mojo1.2.0_0.conda";
+    const bytes_second = "package a, built with the second Mojo";
+    const plan = try std.fmt.allocPrint(a,
+        \\{{"version":2,"members":[
+        \\ {{"name":"ns/pa","version":"0.1.9","action":"upload","readme":"ns/pa/README.md",
+        \\   "files":[{{"subdir":"linux-64","filename":"{s}","sha256":"{s}","size":{d}}},
+        \\            {{"subdir":"linux-64","filename":"{s}","sha256":"{s}","size":{d}}}]}}
+        \\]}}
+    , .{ first, try sha(a, BYTES_A), BYTES_A.len, second, try sha(a, bytes_second), bytes_second.len });
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("staged/ns/pa");
+    try tmp.dir.writeFile(.{ .sub_path = "staged/plan.json", .data = plan });
+    try tmp.dir.writeFile(.{ .sub_path = "staged/ns/pa/README.md", .data = README_A });
+    const p = sv.beta;
+    var routes = [_]Route{
+        .{ .url = p.config_url, .got = body(try configOf(a, p)) },
+        .{ .url = try std.fmt.allocPrint(a, "{s}ns/linux-64/{s}", .{ p.channel, first }), .got = body(BYTES_A) },
+        .{ .url = try std.fmt.allocPrint(a, "{s}ns/linux-64/{s}", .{ p.channel, second }), .got = body("package a, built with another") },
+        .{ .url = try std.fmt.allocPrint(a, "{s}/packages/ns/pa/0.1.9", .{p.api_v2}), .got = body(try detail(a, "ns/pa", try jsonString(a, README_A))) },
+    };
+    var fake = Fake{ .routes = &routes, .config_url = p.config_url };
+    var log = std.Io.Writer.Allocating.init(a);
+    var why: []const u8 = "";
+    try refusedWith(&why, run(a, &tmp, &fake, p, 1, &why, &log.writer), "the registry beta does not serve what the plan staged: 1 of 2 file(s) and 0 of 1 readme(s) differ:");
+    try t.expect(contains(why, second));
+    try t.expect(!contains(why, first));
+    try t.expect(!exists(&tmp, "out"));
+    // served as staged, both builds are written, and the one README once
+    routes[2].got = body(bytes_second);
+    fake = Fake{ .routes = &routes, .config_url = p.config_url };
+    const rep = try run(a, &tmp, &fake, p, 1, &why, &log.writer);
+    try t.expectEqual(@as(usize, 1), rep.members);
+    try t.expectEqual(@as(usize, 2), rep.files);
+    try t.expectEqualStrings(BYTES_A, try tmp.dir.readFileAlloc(a, "out/linux-64/" ++ first, 1024));
+    try t.expectEqualStrings(bytes_second, try tmp.dir.readFileAlloc(a, "out/linux-64/" ++ second, 1024));
+}
+
 test "served: a file the channel does not serve is named, all differences are reported at once, and nothing is written" {
     var ar = std.heap.ArenaAllocator.init(t.allocator);
     defer ar.deinit();

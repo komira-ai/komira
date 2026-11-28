@@ -1,5 +1,6 @@
 load(":defs.bzl", "komira_host_platform")
 load(":table.bzl", "constraints", "registered_names")
+load("//tools/build/toolchains:mojo_versions.bzl", "MOJO_NEXT", "MOJO_NEXT_CONSTRAINT")
 
 # Platforms only. Nothing here names a service or a worker property set: the
 # execution platforms that use these configurations are declared in
@@ -30,6 +31,21 @@ load(":table.bzl", "constraints", "registered_names")
     platform(
         name = name,
         constraint_values = constraints(name),
+        visibility = ["PUBLIC"],
+    )
+    for name in registered_names()
+]
+
+# The same platforms building with the second Mojo compiler: each row's platform plus buildrules'
+# constraint value for that compiler's version, named `<row>-mojo-<version>` (`linux-x86_64-mojo-1.2.0`).
+# Everything Mojo builds with that compiler under it: komira's own rules (toolchains//:mojo selects on
+# the constraint) and every `mojo_package` (buildrules selects on it). Nothing else sees the
+# constraint, and the row platforms above are unchanged, so a build without one of these is the
+# default build, byte for byte. See tools/build/toolchains/mojo_versions.bzl.
+[
+    platform(
+        name = name + "-mojo-" + MOJO_NEXT,
+        constraint_values = constraints(name) + [MOJO_NEXT_CONSTRAINT],
         visibility = ["PUBLIC"],
     )
     for name in registered_names()

@@ -335,7 +335,7 @@ def test_scalar_binder_refuses_unparseable_shapes() raises:
         raise Error("bound")
     except e:
         _raised(String(e), "SQL bind error: unsupported expression")
-    var empty_case = SqlExpr.case(Slab[SqlExpr](), Slab[SqlExpr](), Slab[SqlExpr]())
+    var empty_case = SqlExpr.case_when(Slab[SqlExpr](), Slab[SqlExpr](), Slab[SqlExpr]())
     try:
         _ = _bind_scalar(empty_case, scope.out_schema, scope, cat, cte, pre)
         raise Error("bound")

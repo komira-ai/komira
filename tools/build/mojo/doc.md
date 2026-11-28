@@ -31,8 +31,14 @@ mojo_doc_json(
 - **`golden`**: the JSON must equal this file byte for byte, else
   `mojo_doc_json: <target>: the JSON differs from its golden <file>` and the
   first differences. The golden pins the bytes: an output that varied by
-  worker or run would differ from it whenever the action runs again. A
-  compiler bump that changes the JSON changes the golden in the same commit.
+  worker or run would differ from it whenever the action runs again. One
+  exception: `mojo doc` writes the compiler's version as the JSON's top-level
+  `version`, and the tree builds with two compilers, so each `@MOJO_VERSION@`
+  in the golden stands for the version of the compiler the target platform
+  builds with (`compiler_version`, which `mojo_doc_json` sets to
+  `mojo_version()` of tools/build/toolchains/mojo_versions.bzl unless given;
+  an empty value compares the golden as written). A compiler change that
+  changes any other byte of the JSON changes the golden in the same commit.
 - **`symbols`**: each entry is a declaration's dotted path inside the
   package: `<module>.<name>`, `<module>.<struct or trait>.<method>`, a
   subpackage's name first (`sub.leaf.leaf_value`). The check reads the JSON

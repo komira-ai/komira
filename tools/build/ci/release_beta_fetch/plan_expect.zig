@@ -8,15 +8,22 @@
 //! //release:mopm_plan_expectation writes from release/readme_e2e/packages.bzl (`PACKAGES`) and
 //! release/darwin_libs.bzl (`DARWIN_PACKAGES`) (release/plan_expectation.bzl):
 //!
-//!   {"members": [{"name": "<namespace>/<name>", "subdirs": ["linux-64", "osx-arm64"]}, ...]}
+//!   {"mojos": ["1.1.0", "1.2.0"], "members": [{"name": "<namespace>/<name>", "subdirs": ["linux-64", "osx-arm64"]}, ...]}
+//!
+//! `mopm stage` is given one build of every package per Mojo version of the release (`--artifacts <mojo>=<dir>`), and
+//! names each file `...-mojo<mojo>_<n>.conda`. When `mojos` lists versions, every member needs one file for every
+//! (subdir, Mojo) pair, so a package missing its build for one Mojo on one platform is refused. A plan file whose name
+//! carries no Mojo of the list is refused too. With no `mojos` the plan is held per subdir only.
 //!
 //! It refuses an expectation with no member, a name that is not a full name, a name listed twice, a member
-//! with no subdir, a subdir that is not a plain name or is listed twice. It reads `<staged>/plan.json` with
+//! with no subdir, a subdir that is not a plain name or is listed twice, a Mojo version that is not digits and dots
+//! or is listed twice. It reads `<staged>/plan.json` with
 //! release_beta_fetch's plan reader (which refuses a plan it cannot check) and compares the two, reporting
 //! every difference at once:
 //!  - a package of the expectation that is not a member of the plan;
 //!  - a member of the plan that the expectation does not name;
-//!  - a member with no file for a subdir the expectation requires;
+//!  - a member with no file for a subdir the expectation requires (for a Mojo of `mojos`, one file for each);
+//!  - a member with a file built for no Mojo of `mojos`;
 //!  - a member with a file for a subdir the expectation does not allow;
 //!  - a member with more than one file for one subdir (`mopm stage` packs one per subdir).
 //! It reads only `plan.json`: it opens none of the `.conda` files and holds no credential. The natives a
@@ -34,6 +41,7 @@ pub const Expected = struct {
 };
 
 pub const Expectation = struct {
+    mojos: []const []const u8 = &.{},
     members: []const Expected = &.{},
 };
 
@@ -63,11 +71,33 @@ fn contains(list: []const []const u8, s: []const u8) bool {
     return false;
 }
 
+/// The Mojo version a staged file name carries: `mojo-<namespace>.<name>-<version>-mojo<mojo>_<n>.conda` has
+/// `<mojo>`. Null for a name that has no `-mojo<mojo>_<n>.conda` ending.
+pub fn mojoOf(filename: []const u8) ?[]const u8 {
+    if (!std.mem.endsWith(u8, filename, ".conda")) return null;
+    const stem = filename[0 .. filename.len - ".conda".len];
+    const at = std.mem.lastIndexOf(u8, stem, "-mojo") orelse return null;
+    const build = stem[at + "-mojo".len ..];
+    const us = std.mem.lastIndexOfScalar(u8, build, '_') orelse return null;
+    if (us == 0 or us + 1 == build.len) return null;
+    return build[0..us];
+}
+
+fn mojoVersion(s: []const u8) bool {
+    if (s.len == 0 or !std.ascii.isDigit(s[0]) or !std.ascii.isDigit(s[s.len - 1])) return false;
+    for (s) |c| if (!(std.ascii.isDigit(c) or c == '.')) return false;
+    return true;
+}
+
 /// Parses the expectation file and refuses one that could let a short plan through (see the header).
 pub fn parseExpectation(a: Allocator, why: *[]const u8, text: []const u8) rbf.Error!Expectation {
     const exp = std.json.parseFromSliceLeaky(Expectation, a, text, .{ .ignore_unknown_fields = true }) catch |e|
         return refuse(a, why, "the expectation does not parse: {s}", .{@errorName(e)});
     if (exp.members.len == 0) return refuse(a, why, "the expectation names no package: it would let an empty plan through", .{});
+    for (exp.mojos, 0..) |v, i| {
+        if (!mojoVersion(v)) return refuse(a, why, "the expectation gives the Mojo version '{s}', which is not digits and dots", .{v});
+        if (contains(exp.mojos[0..i], v)) return refuse(a, why, "the expectation gives the Mojo version {s} twice", .{v});
+    }
     for (exp.members, 0..) |m, i| {
         if (rbf.namespaceOf(m.name) == null) return refuse(a, why, "expectation entry {d}: '{s}' is not a full name <namespace>/<name>", .{ i, m.name });
         for (exp.members[0..i]) |o| if (std.mem.eql(u8, o.name, m.name))
@@ -98,12 +128,26 @@ pub fn differences(a: Allocator, plan: rbf.Plan, exp: Expectation) ![]const []co
             continue;
         };
         for (e.subdirs) |s| {
-            var n: usize = 0;
-            for (m.files) |f| if (std.mem.eql(u8, f.subdir, s)) {
-                n += 1;
+            if (exp.mojos.len == 0) {
+                var n: usize = 0;
+                for (m.files) |f| if (std.mem.eql(u8, f.subdir, s)) {
+                    n += 1;
+                };
+                if (n == 0) try out.append(a, try std.fmt.allocPrint(a, "{s}: no file for {s}", .{ e.name, s }));
+                if (n > 1) try out.append(a, try std.fmt.allocPrint(a, "{s}: {d} files for {s}, where mopm stage packs one", .{ e.name, n, s }));
+                continue;
+            }
+            for (exp.mojos) |v| {
+                var n: usize = 0;
+                for (m.files) |f| if (std.mem.eql(u8, f.subdir, s) and std.mem.eql(u8, mojoOf(f.filename) orelse "", v)) {
+                    n += 1;
+                };
+                if (n == 0) try out.append(a, try std.fmt.allocPrint(a, "{s}: no file for {s} built for Mojo {s}", .{ e.name, s, v }));
+                if (n > 1) try out.append(a, try std.fmt.allocPrint(a, "{s}: {d} files for {s} built for Mojo {s}, where mopm stage packs one", .{ e.name, n, s, v }));
+            }
+            for (m.files) |f| if (std.mem.eql(u8, f.subdir, s) and !contains(exp.mojos, mojoOf(f.filename) orelse "")) {
+                try out.append(a, try std.fmt.allocPrint(a, "{s}: a file for {s} ({s}) built for no Mojo the expectation lists (only {s})", .{ e.name, s, f.filename, try joined(a, exp.mojos) }));
             };
-            if (n == 0) try out.append(a, try std.fmt.allocPrint(a, "{s}: no file for {s}", .{ e.name, s }));
-            if (n > 1) try out.append(a, try std.fmt.allocPrint(a, "{s}: {d} files for {s}, where mopm stage packs one", .{ e.name, n, s }));
         }
         for (m.files) |f| if (!contains(e.subdirs, f.subdir)) {
             try out.append(a, try std.fmt.allocPrint(a, "{s}: a file for {s} ({s}), a subdir the expectation does not allow (only {s})", .{ e.name, f.subdir, f.filename, try joined(a, e.subdirs) }));
@@ -192,7 +236,7 @@ pub fn cliExpect(a: Allocator, args: []const []const u8, out: *std.Io.Writer, er
         try err.flush();
         return 1;
     };
-    try out.print("release_staged_verify: plan.json stages every package of the expectation, each with one file for every subdir it requires and none other: {d} member(s), {d} file(s) (", .{ rep.members, rep.files });
+    try out.print("release_staged_verify: plan.json stages every package of the expectation, each with one file for every subdir (and every Mojo version) it requires and none other: {d} member(s), {d} file(s) (", .{ rep.members, rep.files });
     for (rep.subdirs, 0..) |s, n| try out.print("{s}{s} {d}", .{ if (n == 0) "" else ", ", s.subdir, s.files });
     try out.writeAll(")\n");
     try out.flush();

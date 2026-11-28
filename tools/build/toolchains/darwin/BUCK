@@ -3,6 +3,7 @@ load("@komira//tools/build/platforms:table.bzl", "os_floor_version", "pinned_kwa
 load("@komira//tools/build/mojo:darwin.bzl", "mojo_darwin_toolchain")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "by_mojo")
 
 # Every target below except the pinned download exists for darwin-arm64 only,
 # so each states it: a wildcard (`buck2 build toolchains//...`) on a checkout
@@ -14,6 +15,10 @@ load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime")
 # one. Its binaries need only the operating system: every load command names
 # @rpath/ (its own lib/), /usr/lib or /System, and the minimum OS is 11.0.
 pinned_file(**pinned_kwargs("darwin-arm64", "mojo_compiler"))
+
+# The second compiler (1.2.0), what a darwin-arm64 target platform carrying
+# `buildrules//platforms:mojo_1_2_0` compiles with.
+pinned_file(**pinned_kwargs("darwin-arm64", "mojo_compiler_next"))
 
 # liblz4 (conda-forge lz4-c), which lz4 opens at run time by the name
 # `liblz4.dylib`. macOS ships no liblz4 (on linux the worker's loader finds
@@ -38,7 +43,20 @@ conda_closure(
     libs = {
         "lib/liblz4.dylib": ":" + pinned_kwargs("darwin-arm64", "liblz4")["name"],
     },
-    package = ":mojo_compiler_1.1.0_osx-arm64.conda",
+    package = ":" + pinned_kwargs("darwin-arm64", "mojo_compiler")["name"],
+    unpacker = "komira//tools/build/toolchains:conda_unpack",
+    visibility = ["PUBLIC"],
+)
+
+# The 1.2.0 compiler, unpacked the same way.
+conda_closure(
+    name = "mojo_compiler_next",
+    exec_compatible_with = TOOL_EXEC,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-mojo-compiler
+    libs = {
+        "lib/liblz4.dylib": ":" + pinned_kwargs("darwin-arm64", "liblz4")["name"],
+    },
+    package = ":" + pinned_kwargs("darwin-arm64", "mojo_compiler_next")["name"],
     unpacker = "komira//tools/build/toolchains:conda_unpack",
     visibility = ["PUBLIC"],
 )
@@ -62,6 +80,22 @@ mojo_runtime(
     visibility = ["PUBLIC"],
 )
 
+# What a binary built with the 1.2.0 compiler loads: the same libraries, from its closure.
+mojo_runtime(
+    name = "mojo_runtime_next",
+    exec_compatible_with = TOOL_EXEC,
+    busybox = "komira//tools/build/toolchains:busybox",
+    compiler = ":mojo_compiler_next",
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-mojo-runtime
+    libs = [
+        "libAsyncRTRuntimeGlobals.dylib",
+        "libKGENCompilerRTShared.dylib",
+        "libMSupportGlobals.dylib",
+        "liblz4.dylib",
+    ],
+    visibility = ["PUBLIC"],
+)
+
 # The named hosts, or the local sentinel on a native Mac build (platforms/defs.bzl).
 _MACOS_HOSTS = darwin_toolchain_hosts_here()
 
@@ -71,7 +105,8 @@ mojo_darwin_toolchain(
     exec_compatible_with = DARWIN_ARM64,
     target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-mojo
     busybox = "komira//tools/build/mojo/darwin:busybox.sh",
-    compiler = ":mojo_compiler",
+    # The compiler the target platform chooses (toolchains/mojo_versions.bzl).
+    compiler = by_mojo(":mojo_compiler", ":mojo_compiler_next"),
     # Matches the compiler's own minimum OS.
     deployment_target = os_floor_version("darwin-arm64"),
     gate = "komira//tools/build/run:gate_darwin",
@@ -84,7 +119,7 @@ mojo_darwin_toolchain(
     macos_hosts = _MACOS_HOSTS[0],
     local_execution = _MACOS_HOSTS[1],
     config_refusal = _MACOS_HOSTS[2],
-    runtime = ":mojo_runtime",
+    runtime = by_mojo(":mojo_runtime", ":mojo_runtime_next"),
     # Every compile targets this CPU, whatever worker runs it: the first Apple
     # silicon generation, so a built binary runs on every Apple silicon Mac.
     target_cpu = row("darwin-arm64")["target_cpu"],

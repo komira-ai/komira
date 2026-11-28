@@ -12,10 +12,11 @@
 # THE MOPM JOBS. The libraries moved to mopm (every src/<name> that has a
 # mopm.toml) are published to the mopm registry as one group, apart from the
 # release set, each built for linux-64 and osx-arm64 (//release:mopm_release_artifacts:
-# //release:mopm_artifacts and the macOS set, built on the farm's macOS workers), the two
-# files of a package in the same group at the same version. The publish is CONTINUOUS:
+# //release:mopm_artifacts and the macOS set, built on the farm's macOS workers) and for
+# Mojo 1.1.0 and Mojo 1.2.0, the files of a package (one per platform and Mojo) in the same group
+# at the same version. The publish is CONTINUOUS:
 # EVERY push to main runs it, first to the registry `beta` and then to the registry `prod`,
-# the same set S (the same versions of the same bytes) to both: build and stage S once; in
+# the same set S (the same versions of the same bytes, with a build for each Mojo) to both: build and stage S once; in
 # beta, stage, test the staged bytes, commit, and (when one of them failed or the run was
 # cancelled) abort; then the same in prod, followed by a smoke and an add from prod. Prod
 # starts only when beta committed. No repository variable switches either.
@@ -27,10 +28,11 @@
 #                   `mopm stage` writes the staged set S on the runner (it
 #                   asks the registry which versions exist, so it cannot be a
 #                   build action); `release_staged_verify expect` holds S's
-#                   plan to every package on every platform the release
-#                   builds (//release:mopm_plan_expectation); the README e2e
-#                   of every package runs on the farm against S (//release/readme_e2e/verify:all, with
-#                   `-c komira_release.staged=stage` at that version); then
+#                   plan to every package on every platform and for every Mojo
+#                   the release builds (//release:mopm_plan_expectation); the README e2e
+#                   of every package runs on the farm against S, once per Mojo (//release/readme_e2e/verify:all, with
+#                   `-c komira_release.staged=stage` at that version, the second time under the
+#                   Mojo 1.2.0 target platform); then
 #                   `mopm publish --staged S --registry prod --dry-run`. It
 #                   sends nothing and holds no token. S is planned against prod;
 #                   every member is a new version (0.1.<run number>), so the same
@@ -45,7 +47,8 @@
 #                   kept as `mopm-beta-staged-<sha>`.
 #     beta-test     (needs beta-stage; environment `build`; no registry identity)
 #                   checks every file of that directory against `plan.json` and
-#                   runs the README e2e on exactly the files that matched.
+#                   runs the README e2e on exactly the files that matched, once
+#                   per Mojo (the second under the Mojo 1.2.0 target platform).
 #     beta-commit   (needs beta-test; environment `beta`) the same command
 #                   without `--no-commit`: the beta group is committed.
 #     beta-abort    (needs the three above; only when one failed or the run was
@@ -67,7 +70,8 @@
 #     prod-test     (needs prod-stage; environment `build`, the farm's; NO
 #                   registry identity and no secret) checks every file of that
 #                   directory against `plan.json` (sha256 and size) and runs the
-#                   README e2e on exactly the files that matched, at the version of
+#                   README e2e on exactly the files that matched, once per Mojo
+#                   (the second under the Mojo 1.2.0 target platform), at the version of
 #                   this run.
 #     prod-commit   (needs prod-test; environment `prod`) the same command
 #                   without `--no-commit`, with a fresh OIDC exchange, in the
@@ -81,8 +85,9 @@
 #                   the plan; on a difference it prints the command a human runs
 #                   to yank the group. It yanks nothing.
 #     prod-add      (needs prod-commit and prod-smoke; no environment, no identity)
-#                   what a user gets: in a fresh project set to the Mojo this
-#                   release was built for, the pinned mopm runs
+#                   what a user gets, once for each Mojo the release publishes (1.1.0
+#                   and 1.2.0, two steps): in a fresh project set to that Mojo, the
+#                   pinned mopm runs
 #                   `mopm add komira-ai/<name> --registry prod` for json, uuid
 #                   and every package that ships a native archive
 #                   (RELEASE_NATIVES of release/BUCK), then `mopm sync`; the
@@ -95,8 +100,10 @@
 #                   downloads every file of the plan from the prod channel and every
 #                   member's README from the prod API at this run's version, checks
 #                   them against the plan (sha256 and size; the README byte for
-#                   byte), writes them to release/staged_set, and runs the README e2e
-#                   of every package on that set on the farm.
+#                   byte), writes them to release/staged_set (the files of both Mojo
+#                   builds of every package), and runs the README e2e of every
+#                   package on that set on the farm, once per Mojo (the second under
+#                   the Mojo 1.2.0 target platform).
 #                   These jobs need a mopm that has `--no-commit` and `--abort`
 #                   (0.0.66 and later), and each registry, beta and prod, must
 #                   trust this workflow's identity in its environment as a CI
@@ -127,12 +134,12 @@
 #      release.json: a package whose bytes, name, platform or metadata are not
 #      what its manifest says, or that is not stamped, is a red build.
 #
-# macOS HERE: ONE BUILD. The macOS arm64 set is also built, reported and not blocking, by its own
+# macOS HERE: ONE BUILD PER MOJO. The macOS arm64 set is also built, reported and not blocking, by its own
 # workflow, release-macos.yml. The only lines of this file that name macOS are mopm-stage's: the macOS
-# keys its farm connection writes to a buckconfig of their own, and the step `build the packages`, the
-# one that names that file, whose //release:mopm_release_artifacts builds the osx-arm64 half of the
-# packages this workflow publishes on the farm's macOS workers (//:release_macos_cases holds exactly
-# those lines). That build is in this workflow's group, so a stalled Mac build holds the next run and
+# keys its farm connection writes to a buckconfig of their own, and the two steps `build the packages` and
+# `build the packages for Mojo 1.2.0`, the ones that name that file, whose //release:mopm_release_artifacts build the
+# osx-arm64 half of the packages this workflow publishes on the farm's macOS workers (//:release_macos_cases
+# holds exactly those lines). Those builds are in this workflow's group, so a stalled Mac build holds the next run and
 # the prod publish of both platforms, bounded by mopm-stage's timeout-minutes.
 #
 # Triggers: a push to main (not one that touches only documentation:
@@ -350,13 +357,24 @@ jobs:
       # stage --artifacts` reads (//release:mopm_release_artifacts): the linux-64 tree, and
       # the osx-arm64 tree built for darwin-arm64 on the farm's macOS workers. Each `.mojoc`
       # exists only once its library's welded tests passed on that platform, so a red macOS
-      # build stops the release before anything is staged. The last build before the version
-      # rewrite below (which edits the manifests the build reads), and the only step that
-      # names the file of the macOS keys.
+      # build stops the release before anything is staged. One directory per Mojo the release
+      # publishes: this one is built with Mojo 1.1.0, the default compiler of the tree, and the
+      # next step builds the same set with Mojo 1.2.0. These are the last builds before the version
+      # rewrite below (which edits the manifests the builds read), and the only steps that
+      # name the file of the macOS keys.
       - name: build the packages
         uses: ./.github/actions/buck2-farm
         with:
-          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts
+          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts-1.1.0
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The same packages built with Mojo 1.2.0: the target platform carries the constraint that
+      # every Mojo rule of the tree (and the osx-arm64 half, through its transition) selects its
+      # compiler on (tools/build/toolchains/mojo_versions.bzl). The same version of every package
+      # is then published with a build for each Mojo.
+      - name: build the packages for Mojo 1.2.0
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts-1.2.0
           assert-remote: ${{ steps.assert.outputs.path }}
       # THE VERSION OF THIS RUN. A (name, version) pair can be created once on a registry, and a
       # mopm version is exactly MAJOR.MINOR.PATCH, so every release carries new versions: every
@@ -369,28 +387,36 @@ jobs:
         env:
           RUN_NUMBER: ${{ github.run_number }}
         run: '"$RUNNER_TEMP/mopm-publish/release_beta_version" --workspace-root src --version "0.1.$RUN_NUMBER"'
-      # STAGE. Packs each member of src/ from its built `.mojoc` (compiler: MOJO
-      # of packages.bzl), asks the registry, without a token, which versions it
+      # STAGE. Packs each member of src/ from its built `.mojoc` for each compiler (`--artifacts
+      # <mojo version>=<directory>`, once per compiler: the two builds above, so every member has
+      # a build for Mojo 1.1.0 and one for Mojo 1.2.0 at the one version), asks the registry, without a token, which versions it
       # holds, and writes the staged set: plan.json, each `.conda`, each README.
       # It stays out of the build because it makes requests; the directory is a
       # gitignored input of //release/staged_set. A version the registry holds
       # with other bytes, or has yanked, makes the step fail.
       - name: mopm stage
-        run: '"$RUNNER_TEMP/mopm-publish/mopm" stage --workspace-root src --artifacts "$RUNNER_TEMP/mopm-publish/artifacts" --compiler 1.1.0 --out release/staged_set --registry prod'
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" stage --workspace-root src --artifacts "1.1.0=$RUNNER_TEMP/mopm-publish/artifacts-1.1.0" --artifacts "1.2.0=$RUNNER_TEMP/mopm-publish/artifacts-1.2.0" --out release/staged_set --registry prod'
       # WHOLE. The plan just written stages every package of the release, each with one file for every
-      # platform it builds for and none other (`release_staged_verify expect`, every difference listed
-      # at once), so a set that lost a platform or a package stops here, before `prod-stage` opens a
-      # group on the registry. It reads plan.json only: the natives inside each `.conda` are not files
+      # platform and every Mojo (1.1.0 and 1.2.0, the two builds above) it builds for and none other
+      # (`release_staged_verify expect`, every difference listed at once), so a set that lost a platform,
+      # a Mojo build or a package stops here, before `prod-stage` opens a group on the registry. It reads plan.json only: the natives inside each `.conda` are not files
       # of the plan, and this step does not see them.
       - name: the staged set is every package on every platform
         run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" expect --staged release/staged_set --expect "$RUNNER_TEMP/mopm-publish/plan_expectation.json"'
       # TRY. Every package's README examples, compiled and run on the farm as a
       # user would, against the `.conda` files of the set that was just staged
-      # (the e2e installs offline from it, so the closure must be in it).
+      # (the e2e installs offline from it, so the closure must be in it), once with
+      # Mojo 1.1.0 and once with Mojo 1.2.0: the compiler, the project's Mojo and the
+      # build of each package the e2e installs follow the target platform.
       - name: the README e2e against the staged set
         uses: ./.github/actions/buck2-farm
         with:
           args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the README e2e against the staged set for Mojo 1.2.0
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
           assert-remote: ${{ steps.assert.outputs.path }}
       # Reads plan.json and hashes every file; sends nothing and reads no token.
       - name: mopm publish --staged --dry-run
@@ -460,7 +486,8 @@ jobs:
   # TEST IN BETA. As `prod-test`: the directory `beta-stage` kept, every file checked
   # against `plan.json` (`release_staged_verify verify`), `release/staged_set` written from
   # the files that matched and from nothing else, and the README e2e of every package on
-  # it, on the farm. NO registry identity and no secret: the environment is `build`, which
+  # it, on the farm, once with Mojo 1.1.0 and once with Mojo 1.2.0 (the second under the 1.2.0
+  # target platform). NO registry identity and no secret: the environment is `build`, which
   # no registry trusts; `id-token: write` is for farm-connect only.
   beta-test:
     needs: beta-stage
@@ -508,6 +535,11 @@ jobs:
         uses: ./.github/actions/buck2-farm
         with:
           args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the README e2e against the files beta holds for Mojo 1.2.0
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: Stop buck2
         if: always()
@@ -585,7 +617,8 @@ jobs:
 
   # SERVED IN BETA. As `prod-served-readmes`, for the registry `beta`, after `beta-commit`: the
   # files and READMEs the beta registry now serves at this run's version, checked against the
-  # plan and tried by the README e2e on the farm. `prod-stage` does not wait for it.
+  # plan and tried by the README e2e on the farm, once per Mojo (the second under the Mojo 1.2.0
+  # target platform). `prod-stage` does not wait for it.
   beta-served-readmes:
     needs: beta-commit
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -629,6 +662,11 @@ jobs:
         uses: ./.github/actions/buck2-farm
         with:
           args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the README e2e against what beta serves for Mojo 1.2.0
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: Stop buck2
         if: always()
@@ -734,6 +772,11 @@ jobs:
         uses: ./.github/actions/buck2-farm
         with:
           args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the README e2e against the staged files for Mojo 1.2.0
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: Stop buck2
         if: always()
@@ -849,12 +892,15 @@ jobs:
 
   # ADD. What a user gets. `release_staged_verify add` makes a fresh project with the
   # pinned mopm (the one that staged and committed the set), runs `mopm add
-  # komira-ai/<name> --registry prod` for a library, one with dependencies and one that
-  # ships a native library, then `mopm sync`, and checks the lock they wrote (full names,
+  # komira-ai/<name> --registry prod` for json, uuid and every package that ships a native
+  # archive (RELEASE_NATIVES of release/BUCK), then `mopm sync`, in a project set to one
+  # Mojo, and checks the lock they wrote (full names,
   # each namespace's channel under https://conda.mopm.dev/, the version of this run, the
   # plan's sha256 and size) and the files sync installed against the plan. It runs after
-  # `prod-smoke`, so the channel already serves every file. Like the smoke job it holds no
-  # identity, no secret and no farm (farm actions have no network), and it yanks nothing.
+  # `prod-smoke`, so the channel already serves every file. It runs once for each Mojo the
+  # release publishes (1.1.0, then 1.2.0), each in its own work directory and against that Mojo's
+  # files only. Like the smoke job it holds no identity, no secret and no farm (farm actions have
+  # no network), and it yanks nothing.
   prod-add:
     needs: [prod-commit, prod-smoke]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -873,8 +919,10 @@ jobs:
           path: ${{ runner.temp }}/prod-add/committed
       - name: mopm and the verify tool are executable
         run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm" "$RUNNER_TEMP/mopm-publish/release_staged_verify"
-      - name: mopm add from prod installs the published files
-        run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" add --staged "$RUNNER_TEMP/prod-add/committed" --mopm "$RUNNER_TEMP/mopm-publish/mopm" --work "$RUNNER_TEMP/prod-add/work"'
+      - name: mopm add from prod installs the published files, Mojo 1.1.0
+        run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" add --staged "$RUNNER_TEMP/prod-add/committed" --mopm "$RUNNER_TEMP/mopm-publish/mopm" --work "$RUNNER_TEMP/prod-add/work-1.1.0" --mojo 1.1.0'
+      - name: mopm add from prod installs the published files, Mojo 1.2.0
+        run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" add --staged "$RUNNER_TEMP/prod-add/committed" --mopm "$RUNNER_TEMP/mopm-publish/mopm" --work "$RUNNER_TEMP/prod-add/work-1.2.0" --mojo 1.2.0'
 
   # SERVED. The group is visible, and what a user gets is what the registry serves: the files
   # from its channel and each README from its API (`getVersion` at this run's version), which
@@ -883,9 +931,11 @@ jobs:
   # read), refuses an index that names another registry, checks every file against the plan
   # (sha256 and size) and every README against the plan's byte for byte, reporting every
   # difference, trying again for a few minutes if the registry's cache lags, and writes
-  # `release/staged_set` from what matched and from nothing else. The README e2e of every
-  # package then runs on that set on the farm (the farm has no network, so the runner fetches
-  # and the build uploads). It holds no registry identity and no secret: the environment is
+  # `release/staged_set` from what matched and from nothing else (the plan holds the files of
+  # both Mojo builds of every package, so it checks and writes both). The README e2e of every
+  # package then runs on that set on the farm, once with Mojo 1.1.0 and once with Mojo 1.2.0
+  # (the second under the 1.2.0 target platform), the farm having no network (the runner
+  # fetches and the build uploads). It holds no registry identity and no secret: the environment is
   # `build`, `id-token: write` is for farm-connect only, and it sends nothing but GETs.
   prod-served-readmes:
     needs: prod-commit
@@ -930,6 +980,11 @@ jobs:
         uses: ./.github/actions/buck2-farm
         with:
           args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the README e2e against what prod serves for Mojo 1.2.0
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: Stop buck2
         if: always()

@@ -41,6 +41,9 @@ pub const Group = struct {
     verify_run: []const u8,
     /// The test's README e2e on the verified files.
     e2e_run: []const u8,
+    /// The same e2e with Mojo 1.2.0 (`--target-platforms ...mojo-1.2.0`): the staged set holds a build for
+    /// each Mojo, and each is tried.
+    e2e_next_run: []const u8,
     /// The commit's `run:` line.
     commit_run: []const u8,
     /// The abort's command line.
@@ -92,9 +95,11 @@ pub fn checkGroup(ar: std.mem.Allocator, text: []const u8, g: Group) !?[]const u
     const tool_at = wf.lineAt(tst, g.build_verify) orelse return try say(ar, "{[r]s}-test does not build release_staged_verify", r);
     const verify_at = wf.lineAt(tst, g.verify_run) orelse return try say(ar, "{[r]s}-test does not verify the staged files against the plan (release_staged_verify verify --out release/staged_set)", r);
     const e2e_at = wf.lineAt(tst, g.e2e_run) orelse return try say(ar, "{[r]s}-test does not run the e2e on the verified set (staged=stage at this run's version)", r);
+    const e2e_next_at = wf.lineAt(tst, g.e2e_next_run) orelse return try say(ar, "{[r]s}-test does not run the e2e on the verified set for the second Mojo (--target-platforms ...mojo-1.2.0, staged=stage at this run's version)", r);
     if (!(connect_at < tool_at and tool_at < verify_at)) return try say(ar, "{[r]s}-test verifies before the farm is joined and the tool built", r);
     if (!(download_at < verify_at)) return try say(ar, "{[r]s}-test verifies before it has the files", r);
     if (!(verify_at < e2e_at)) return try say(ar, "{[r]s}-test runs the e2e before the verification", r);
+    if (!(verify_at < e2e_next_at)) return try say(ar, "{[r]s}-test runs the e2e for the second Mojo before the verification", r);
     // nothing else may write the directory the e2e reads
     if (count(tst, "staged_set") != 1) return try say(ar, "{[r]s}-test names release/staged_set other than in the one verify step", r);
     var verify_runs: usize = 0;
@@ -106,7 +111,7 @@ pub fn checkGroup(ar: std.mem.Allocator, text: []const u8, g: Group) !?[]const u
     for (tst) |l| if (std.mem.eql(u8, l, wf.E2E_ASSERT)) {
         asserted += 1;
     };
-    if (asserted != 2) return try say(ar, "{[r]s}-test has a farm step that is not asserted remote", r);
+    if (asserted != 3) return try say(ar, "{[r]s}-test has a farm step that is not asserted remote", r);
 
     const commit = (try wf.jobLines(ar, text, try say(ar, "{[r]s}-commit", r), &scratch)) orelse return try say(ar, "no job {[r]s}-commit", r);
     if (wf.mentions(commit, "farm") or wf.mentions(commit, "buck2")) return try say(ar, "{[r]s}-commit joins the farm or runs buck2", r);
@@ -152,6 +157,7 @@ const BETA_GROUP = Group{
     .verify_run = BETA_VERIFY_RUN,
     // the same e2e line as prod-test's and mopm-stage's: the same set, at the version of this run
     .e2e_run = wf.PROD_E2E_RUN,
+    .e2e_next_run = wf.PROD_E2E_NEXT,
     .commit_run = BETA_COMMIT_RUN,
     .abort_cmd = BETA_ABORT_CMD,
 };
@@ -342,6 +348,13 @@ test "each edit of a beta command that breaks the contract is refused with its m
     try wf.expectRefused(ar, try wf.replaced(ar, text, tst_download, "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n          name: mopm-staged-${{ github.sha }}\n          path: ${{ runner.temp }}/beta-test/staged\n"), "beta-test takes the set of mopm-stage, not the one beta-stage uploaded");
     try wf.expectRefused(ar, try wf.replaced(ar, try wf.replaced(ar, text, tst_download, ""), verify_step, verify_step ++ tst_download), "beta-test verifies before it has the files");
     try wf.expectRefused(ar, try wf.replaced(ar, text, verify_step, ""), "beta-test does not verify the staged files against the plan");
+    // the second Mojo: the e2e once more under the 1.2.0 platform, after the verification, asserted remote
+    const e2e_next_step = "      - name: the README e2e against the files beta holds for Mojo 1.2.0\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ wf.PROD_E2E_NEXT ++ nl ++ wf.E2E_ASSERT ++ nl;
+    try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_next_step, ""), "beta-test does not run the e2e on the verified set for the second Mojo");
+    try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_next_step, "      - name: the README e2e against the files beta holds for Mojo 1.2.0\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ wf.PROD_E2E_RUN ++ nl ++ wf.E2E_ASSERT ++ nl), "beta-test does not run the e2e on the verified set for the second Mojo");
+    try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_next_step, "      - name: the README e2e against the files beta holds for Mojo 1.2.0\n        uses: ./.github/actions/buck2-farm\n        with:\n          args: build --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.1.0 -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all\n" ++ wf.E2E_ASSERT ++ nl), "beta-test does not run the e2e on the verified set for the second Mojo");
+    try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_next_step, "      - name: the README e2e against the files beta holds for Mojo 1.2.0\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ wf.PROD_E2E_NEXT ++ nl), "beta-test has a farm step that is not asserted remote");
+    try wf.expectRefused(ar, try wf.replaced(ar, text, verify_step ++ e2e_step ++ e2e_next_step, e2e_next_step ++ verify_step ++ e2e_step), "beta-test runs the e2e for the second Mojo before the verification");
     try wf.expectRefused(ar, try wf.replaced(ar, text, tool_step ++ verify_step, verify_step ++ tool_step), "beta-test verifies before the farm is joined and the tool built");
     try wf.expectRefused(ar, try wf.replaced(ar, text, verify_step ++ e2e_step, e2e_step ++ verify_step), "beta-test runs the e2e before the verification");
     try wf.expectRefused(ar, try wf.replaced(ar, text, e2e_step, ""), "beta-test does not run the e2e on the verified set");
