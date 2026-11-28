@@ -79,7 +79,6 @@
     "question": "How do I write a table to a CSV file?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2372",
       "komira-ai/komira#2374",
       "komira-ai/komira#2322"
     ]
@@ -98,7 +97,6 @@
     "question": "How do I remove duplicate rows?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2378",
       "komira-ai/komira#2380"
     ]
   },
@@ -229,10 +227,7 @@
     "slug": "write-table-parquet",
     "category": "Write",
     "question": "How do I write a table to Parquet?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2368"
-    ]
+    "status": "works"
   },
   {
     "rank": 28,
@@ -314,10 +309,7 @@
     "slug": "run-sql-csv-parquet-file",
     "category": "Performance",
     "question": "How do I run SQL on a CSV or Parquet file (or a DataFrame)?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2391"
-    ]
+    "status": "works"
   },
   {
     "rank": 38,
