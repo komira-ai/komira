@@ -1987,6 +1987,9 @@ def test_every_expr_slot_descends_to_an_open_leaf() raises:
         Expr.extract(EXTRACT_YEAR, _exists(set)), set, "EXTRACT", seen
     )
     _assert_expr_descends(
+        Expr.date_add(1, 2, _exists(set)), set, "DATE_ADD", seen
+    )
+    _assert_expr_descends(
         Expr.math_fn(MATH_SIN, _exists(set)), set, "MATH_FN", seen
     )
     _assert_expr_descends(

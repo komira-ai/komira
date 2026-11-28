@@ -255,19 +255,19 @@ def plan_tag_wire_name(wire: Int32) -> String:
 #     SortData/TopNData, not as an Expr arm
 # ==========================================================================
 
-comptime EXPR_TAG_WIRE_MEMBERS: Int = 28
+comptime EXPR_TAG_WIRE_MEMBERS: Int = 29
 comptime EXPR_TAG_ENGINE_MIN: UInt8 = 0
-comptime EXPR_TAG_ENGINE_MAX: UInt8 = 27
+comptime EXPR_TAG_ENGINE_MAX: UInt8 = 28
 comptime EXPR_TAG_WIRE_MIN: Int32 = 1
-comptime EXPR_TAG_WIRE_MAX: Int32 = 28
+comptime EXPR_TAG_WIRE_MAX: Int32 = 29
 
 
 def expr_tag_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this ExprTag value?
 
-    Runs: [(0, 27)]. Total, never raising.
+    Runs: [(0, 28)]. Total, never raising.
     """
-    return engine_tag <= 27
+    return engine_tag <= 28
 
 
 def expr_tag_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -418,6 +418,9 @@ def write_expr_tag_wire_name[W: Writer](mut writer: W, wire: Int32):
         return
     if wire == 28:
         writer.write("EXPR_UDF_APPLY")
+        return
+    if wire == 29:
+        writer.write("EXPR_DATE_ADD")
         return
     writer.write("ExprTag#", Int(wire))
 

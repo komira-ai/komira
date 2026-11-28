@@ -19,6 +19,7 @@ from plan_expr.expr import (
     EXPR_CAST,
     EXPR_COL_IDX,
     EXPR_COL_REF,
+    EXPR_DATE_ADD,
     EXPR_EXTRACT,
     EXPR_IN_LIST,
     EXPR_LITERAL,
@@ -53,7 +54,7 @@ from .conjunction import _collapse_nulls_to_false, _predicate_3vl
 #
 # Walker coverage: COL_REF, COL_IDX, LITERAL, BINARY_OP (both sides),
 # UNARY_OP (except `IS NULL` / `IS NOT NULL`, see the arm), CAST, ALIAS,
-# IN_LIST (child), STRING_OP / REGEXP / EXTRACT / SUBSTRING / STRING_FN (one
+# IN_LIST (child), STRING_OP / REGEXP / EXTRACT / DATE_ADD / SUBSTRING / STRING_FN (one
 # child each), UDF_CALL (its own materialized output column). For every other
 # tag (WHEN, AGG_FN, BETWEEN, MATH_FN, STRING_FN_N, WINDOW_FN, ...) the walk
 # reports the tag, and `_compute_predicate_input_validity` falls back to ANDing
@@ -177,6 +178,7 @@ def _collect_predicate_col_refs(
         expr.tag == EXPR_STRING_OP
         or expr.tag == EXPR_REGEXP
         or expr.tag == EXPR_EXTRACT
+        or expr.tag == EXPR_DATE_ADD
         or expr.tag == EXPR_SUBSTRING
         or expr.tag == EXPR_STRING_FN
     ):
@@ -191,6 +193,10 @@ def _collect_predicate_col_refs(
         elif expr.tag == EXPR_EXTRACT:
             _collect_predicate_col_refs(
                 expr.extract_child_ref(), schema, out, unhandled_tag
+            )
+        elif expr.tag == EXPR_DATE_ADD:
+            _collect_predicate_col_refs(
+                expr.date_add_child_ref(), schema, out, unhandled_tag
             )
         elif expr.tag == EXPR_SUBSTRING:
             _collect_predicate_col_refs(

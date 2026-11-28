@@ -12,7 +12,11 @@
 #      keywords. (catches: `years` refused; the sign of `'-5'` lost)
 #   3. `interval` stays a column name when no count follows it.
 #      (catches: the keyword reading taken unconditionally)
-#   4. The refusals, each named: a unit inside the string, a non-integer
+#   4. A count that is an expression or a column (`interval (x) day`,
+#      `interval x day`) is refused by name, while a column called `interval`
+#      followed by an alias or a non-unit word still parses as a column.
+#      (catches: `interval x day` read as a column aliased `x`)
+#   5. The refusals, each named: a unit inside the string, a non-integer
 #      count, a count beyond 10^9, a missing unit, and the units outside the
 #      accepted set. (catches: `'3 month'` silently read as 3 of nothing)
 
@@ -20,7 +24,7 @@ from std.testing import TestSuite, assert_equal, assert_true
 
 from sql.sql_ast import (
     SqlExpr, SqlStatement, SXIVL_DAY, SXIVL_MONTH, SXIVL_WEEK, SXIVL_YEAR,
-    SXOP_ADD, SXOP_SUB, SX_BINARY, SX_COLUMN, SX_DATE, SX_INTERVAL,
+    SXOP_ADD, SXOP_SUB, SX_BINARY, SX_CALL, SX_COLUMN, SX_DATE, SX_INTERVAL,
 )
 from sql.sql_parser import parse_sql
 from sql.sql_token import tokenize
@@ -132,6 +136,23 @@ def test_interval_refusals_are_named() raises:
     _refuses("interval '1' quarter", "INTERVAL unit 'quarter'")
     _refuses("interval '1' decade", "INTERVAL unit 'decade'")
     _refuses("interval '1' millisecond", "INTERVAL unit 'millisecond'")
+
+
+def test_interval_with_a_non_constant_count_is_refused_by_name() raises:
+    _refuses("interval (x) day", "non-constant count")
+    _refuses("interval (x + (1)) months", "non-constant count")
+    _refuses("interval x day", "non-constant count")
+    _refuses("interval t.x years", "non-constant count")
+    _refuses("interval a.b.c week", "non-constant count")
+    _refuses("date '2000-01-01' + interval (x) day", "non-constant count")
+
+
+def test_interval_column_followed_by_something_else_is_still_a_column() raises:
+    assert_equal(Int(_e("interval x").tag), Int(SX_COLUMN))
+    assert_equal(Int(_e("interval (x)").tag), Int(SX_CALL))
+    assert_equal(Int(_e("interval day").tag), Int(SX_COLUMN))
+    assert_equal(Int(_e("interval (x) + 1").tag), Int(SX_BINARY))
+    _ = _err("interval (x day")
 
 
 def main() raises:

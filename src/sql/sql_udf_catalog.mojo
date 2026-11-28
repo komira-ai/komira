@@ -326,7 +326,7 @@ struct SqlUdfCatalog(Copyable, Movable):
 
            ⛔ "HAS A ROW" IS NOT "CLAIMS THE NAME". An `FNK_REFUSED` row has no
            `op`, builds no `Expr` and shadows nothing — `geomean`, `wavg`,
-           `date_add`, `json`, `list_sum`, `user`, `pg_typeof` and the rest of
+           `json`, `list_sum`, `user`, `pg_typeof` and the rest of
            the refusal rows. Those names ARE declarable, and the binder
            resolves a declared UDF ahead of the refusal. Refusing them would be
            a false statement about the user's own program AND the removal of

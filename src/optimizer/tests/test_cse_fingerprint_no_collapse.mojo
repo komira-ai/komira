@@ -226,6 +226,24 @@ def test_fingerprints_are_distinct_per_discriminator() raises:
                 "DECIMAL(10,2) vs DECIMAL(18,4) fingerprint must differ")
 
 
+def test_date_add_fingerprints_differ_in_months_days_and_child() raises:
+    """Two date shifts differing only in months, only in days, or only in the
+    child column fingerprint differently; an identical shift fingerprints the
+    same."""
+    var a = Expr.date_add(1, 0, Expr.col_ref("d"))
+    var same = Expr.date_add(1, 0, Expr.col_ref("d"))
+    var months = Expr.date_add(2, 0, Expr.col_ref("d"))
+    var days = Expr.date_add(1, 1, Expr.col_ref("d"))
+    var child = Expr.date_add(1, 0, Expr.col_ref("e"))
+    assert_equal(_expr_fingerprint(a), _expr_fingerprint(same))
+    assert_true(_expr_fingerprint(a) != _expr_fingerprint(months),
+                "months 1 vs 2 fingerprint must differ")
+    assert_true(_expr_fingerprint(a) != _expr_fingerprint(days),
+                "days 0 vs 1 fingerprint must differ")
+    assert_true(_expr_fingerprint(a) != _expr_fingerprint(child),
+                "different child column fingerprint must differ")
+
+
 # =============================================================================
 # ★ POSITIVE regression — genuinely-identical exprs STILL dedup
 # =============================================================================

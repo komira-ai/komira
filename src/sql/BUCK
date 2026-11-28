@@ -90,6 +90,7 @@ mojo_library(
         "tests/test_sql_binder_direct.mojo",
         "tests/test_sql_catalog_tables.mojo",
         "tests/test_sql_copy_format.mojo",
+        "tests/test_sql_date_shift_bind.mojo",
         "tests/test_sql_fn_table_date_parts.mojo",
         "tests/test_sql_fn_table_direct.mojo",
         "tests/test_sql_fn_table_lowering_rows.mojo",

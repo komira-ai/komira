@@ -157,12 +157,12 @@
 #              vocabulary keeps its wire number (19) reserved, so encoding one
 #              raises in `plan_tag_to_wire` with the tag's name.
 #
-# --- EXPR TAGS: 25 of 27 modelled --------------------------------------------
+# --- EXPR TAGS: 27 of 29 modelled --------------------------------------------
 #   MODELLED   COL_REF, COL_IDX, LITERAL, BINARY_OP, UNARY_OP, ALIAS, IN_LIST,
 #              CAST, CORRELATED_SUBQUERY, WHEN, AGG_FN, EXTRACT, MATH_FN,
 #              MATH_FN2, SUBSTRING, STRING_OP, STRING_FN, STRING_FN_N, REGEXP,
 #              STRUCT_FIELD, STRUCT_FIELD_IDX, MAP_GET, JSON_EXTRACT,
-#              WINDOW_FN, UDF_CALL
+#              WINDOW_FN, UDF_CALL, UDF_APPLY, DATE_ADD
 #   REFUSED    the other 2 — BETWEEN and SORT_KEY. They are tags NO factory
 #              builds a payload for: `Expr` declares no `_between` /
 #              `_sort_key` field, so the only way to construct one is the bare
@@ -409,6 +409,7 @@ from plan_proto.plan import (
     WireWhen,
     WireAggFn,
     WireExtract,
+    WireDateAdd,
     WireMathFn,
     WireMathFn2,
     WireSubstring,
@@ -508,6 +509,7 @@ from plan_expr.expr import (
     EXPR_WHEN,
     EXPR_AGG_FN,
     EXPR_EXTRACT,
+    EXPR_DATE_ADD,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
     EXPR_SUBSTRING,
@@ -1518,6 +1520,7 @@ def _expr_to_wire(e: Expr, optimized: Bool) raises -> WireExpr:
     var string_fn_n = List[WireStringFnN]()
     var udf_call = List[WireUdfCall]()
     var udf_apply = List[WireUdfApply]()
+    var date_add = List[WireDateAdd]()
     var regexp = List[WireRegexp]()
     var struct_field = List[WireStructField]()
     var struct_field_idx = List[WireStructFieldIdx]()
@@ -1954,6 +1957,14 @@ def _expr_to_wire(e: Expr, optimized: Bool) raises -> WireExpr:
         for i in range(e.udf_apply_num_args()):
             ua_args.append(_expr_to_wire(e.udf_apply_arg_ref(i), optimized))
         udf_apply.append(WireUdfApply(UInt32(e.udf_apply_index()), ua_args^))
+    elif tag == EXPR_DATE_ADD:
+        # Arm ordinal, not field number — `date_add` is field 28, arm 27.
+        arm = 27
+        var da_child = List[WireExpr]()
+        da_child.append(_expr_to_wire(e.date_add_child_ref(), optimized))
+        date_add.append(
+            WireDateAdd(da_child^, e.date_add_months(), e.date_add_days())
+        )
     else:
         raise Error(
             PLAN_WIRE_UNSUPPORTED_EXPR_TAG + ": '"
@@ -1968,7 +1979,7 @@ def _expr_to_wire(e: Expr, optimized: Bool) raises -> WireExpr:
         alias_^, in_list^, cast^, corr_subq^, when_^, agg_fn^, extract^,
         math_fn^, math_fn2^, substring^, string_op^, regexp^, struct_field^,
         struct_field_idx^, map_get^, json_extract^, window_fn^,
-        string_fn^, string_fn_n^, udf_call^, udf_apply^,
+        string_fn^, string_fn_n^, udf_call^, udf_apply^, date_add^,
     )
 
 
@@ -2083,6 +2094,8 @@ def _expr_tag_of_arm(arm: Int) raises -> UInt8:
         return EXPR_UDF_CALL
     if arm == 26:
         return EXPR_UDF_APPLY
+    if arm == 27:
+        return EXPR_DATE_ADD
     if arm == 0:
         raise _malformed(
             "a WireExpr with NO `node` arm set. The arm IS the node kind — the"
@@ -2545,6 +2558,16 @@ def _expr_from_wire(w: WireExpr, ctx: _DecodeCtx) raises -> Expr:
         # check has required (`_udf_ref_from_wire`).
         return Expr.udf_apply(
             index, ctx.udfs[index].return_type.value().copy(), ua_args^
+        )
+    if tag == EXPR_DATE_ADD:
+        if not w.date_add:
+            raise _malformed("EXPR_DATE_ADD with no date_add payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
+        ref da = w.date_add[0]
+        # `months` and `days` are int32 on the wire and Int32 in the engine,
+        # so every wire value is a valid engine value; only the child can be
+        # absent.
+        return Expr.date_add(
+            da.months, da.days, _one_expr(da.child, "WireDateAdd.child", ctx)
         )
     # UNREACHABLE BY CONSTRUCTION and kept anyway: `_expr_tag_of_arm` returns
     # only the 22 tags the ladder above handles and raises on everything else,

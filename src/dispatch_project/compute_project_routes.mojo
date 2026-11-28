@@ -40,6 +40,7 @@ from plan_expr.expr import (
     EXPR_SUBSTRING,
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
+    EXPR_DATE_ADD,
     EXPR_EXTRACT,
     EXPR_UNARY_OP,
     EXPR_COL_IDX,
@@ -536,4 +537,19 @@ def _is_extract_output(imm e: Expr) -> Bool:
         return True
     if e.tag == EXPR_ALIAS:
         return _is_extract_output(e.alias_child_ref())
+    return False
+
+
+def _is_date_add_output(imm e: Expr) -> Bool:
+    """True iff `e` is an `EXPR_DATE_ADD` (a date moved by constant months and
+    days: `d + 7`, `d - 7`), under any number of aliases.
+
+    The walkers have no date node, and the inferred family of a DATE32 output
+    is unsupported, so the column evaluator serves it. A date_add under a
+    cast (`CAST(d + INTERVAL '1' DAY AS TIMESTAMP)`) takes the cast route; one
+    under other arithmetic is not matched and is declined."""
+    if e.tag == EXPR_DATE_ADD:
+        return True
+    if e.tag == EXPR_ALIAS:
+        return _is_date_add_output(e.alias_child_ref())
     return False

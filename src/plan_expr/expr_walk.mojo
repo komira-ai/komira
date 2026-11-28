@@ -89,6 +89,7 @@ from plan_expr.expr import (
     EXPR_STRING_FN_N,
     EXPR_UDF_CALL,
     EXPR_UDF_APPLY,
+    EXPR_DATE_ADD,
     EXPR_EXTRACT,
     EXPR_JSON_EXTRACT,
     _is_trunc_unit,
@@ -320,7 +321,7 @@ def walk_expr_column_refs[S: ExprNameSink](expr: Expr, mut sink: S):
         ONLY under the un-armed tag, so the scan never reads it.
 
     # DERIVED FACTS — re-derive with the gate, never hand-count.
-    # arms: 23
+    # arms: 24
     # unwalked: EXPR_BETWEEN EXPR_COL_IDX EXPR_LITERAL EXPR_SORT_KEY
 
     `EXPR_COL_IDX` (a column by INDEX — no name to add) and `EXPR_LITERAL`
@@ -484,6 +485,10 @@ def walk_expr_column_refs[S: ExprNameSink](expr: Expr, mut sink: S):
         # PARQUET scan fails identically; a test that feeds an IN-MEMORY
         # source cannot see it, because that source prunes nothing.
         walk_expr_column_refs(expr.extract_child_ref(), sink)
+    elif expr.tag == EXPR_DATE_ADD:
+        # `d + INTERVAL '1' MONTH` / `d + 7`: the date carries every column
+        # ref; the months and days are plan-literals.
+        walk_expr_column_refs(expr.date_add_child_ref(), sink)
     # Unwalked tags are enumerated in the derived-facts block above and pinned
     # by a repository lint. There is no second copy to keep in sync — that is
     # the point of this module.
@@ -712,7 +717,7 @@ def walk_expr_field[P: ColRefFieldPolicy](
     everything else, it is this function.
 
     # DERIVED FACTS — re-derive with the gate, never hand-count.
-    # arms: 22
+    # arms: 23
     # unwalked: EXPR_AGG_FN EXPR_COL_IDX EXPR_CORRELATED_SUBQUERY EXPR_SORT_KEY EXPR_WINDOW_FN
 
     Every member of the unwalked set still lands on the `null` fallback and
@@ -1310,6 +1315,12 @@ def walk_expr_field[P: ColRefFieldPolicy](
             trunc_child.name = String("date_trunc")
             return trunc_child^
         return Field("extract", ArrowType.INT64, True)
+
+    elif expr.tag == EXPR_DATE_ADD:
+        # A DATE moved by constant months and days is a DATE: the eval arm
+        # stamps its output DATE32 (the INTERVAL forms add a cast to
+        # TIMESTAMP above this node, which the EXPR_CAST arm types).
+        return Field("date_add", ArrowType.DATE32, True)
 
     elif expr.tag == EXPR_STRUCT_FIELD:
         var sf_parent = walk_expr_field[P](

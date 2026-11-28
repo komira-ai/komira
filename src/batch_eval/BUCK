@@ -32,6 +32,8 @@ mojo_library(
         "tests/test_conjunction_narrowing.mojo",
         "tests/test_date32_col_vs_col_compare.mojo",
         "tests/test_date32_in_list_filter.mojo",
+        "tests/test_date_add_compare.mojo",
+        "tests/test_date_add_projection.mojo",
         "tests/test_decimal128_correctness.mojo",
         "tests/test_decimal_float_literal_compare.mojo",
         "tests/test_decimal_literal_compare.mojo",

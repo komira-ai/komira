@@ -64,5 +64,5 @@ date32[day]
 
 - [How do I change a column's data type?](../12-change-column-data-type/page.md) (rank 12, works)
 - [How do I extract year, month and weekday from a date column?](../39-extract-year-month-weekday-date-column/page.md) (rank 39, partial)
-- How do I add days to a date or take the difference between dates? (rank 79, partial; no page yet)
+- How do I add days to a date or take the difference between dates? (rank 79, works)
 - How do I filter rows by a date range? (rank 83, works; no page yet)

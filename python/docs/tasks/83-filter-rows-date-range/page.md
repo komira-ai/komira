@@ -64,7 +64,7 @@ date32
 
 - A CSV column whose every value is `YYYY-MM-DD` reads as a DATE (`date32`), and comes back to Python as `datetime.date`.
 - `BETWEEN a AND b` means `>= a AND <= b`, so both ends are kept. The half-open form `>= start AND < next_start` has no end to get wrong when a range runs to the end of a day or a month.
-- `DATE '...' + INTERVAL '7' DAY` is worked out when the query is prepared, so the date it starts from is a literal, as in the example.
+- `DATE '...' + INTERVAL '7' DAY` is worked out when the query is prepared. A date column plus an interval also works (`order_date + INTERVAL '7' DAY`), and answers a timestamp, so compare it with a timestamp or a date column as in the rank 79 page.
 - The pandas-shaped frame has no `Series.between` today: write the two comparisons joined with `&`, each side in parentheses.
 - Rows come back in no promised order unless the query sorts them: add `ORDER BY` or `sort_values`.
 
@@ -72,5 +72,5 @@ date32
 
 - How do I select columns and filter rows? (rank 2, works)
 - [How do I extract year, month and weekday from a date column?](../39-extract-year-month-weekday-date-column/page.md) (rank 39, partial)
-- How do I add days to a date or take the difference between dates? (rank 79, partial; no page yet)
+- How do I add days to a date or take the difference between dates? (rank 79, works)
 - How do I group by month or week? (rank 80, works; no page yet)

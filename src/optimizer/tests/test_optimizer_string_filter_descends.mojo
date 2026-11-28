@@ -63,7 +63,8 @@ from std.memory import OwnedPointer
 
 from arrow.schema import Schema, SchemaBuilder, Field
 from arrow.arrow_types import ArrowType
-from plan_expr.expr import Expr, EXPR_STRING_OP, EXPR_REGEXP, STR_LIKE, BIN_AND, BIN_EQ, UN_NOT
+from plan_expr.scalar_value import ScalarValue
+from plan_expr.expr import Expr, EXPR_BINARY_OP, EXPR_STRING_OP, EXPR_REGEXP, STR_LIKE, BIN_AND, BIN_EQ, UN_NOT
 from plan_ir.logical_plan import (
     JOIN_ALGO_AUTO,
     JOIN_CROSS,
@@ -396,6 +397,52 @@ def test_regexp_left_join_residual_pushes_to_right_side() raises:
         " side of the LEFT join, instead of being evaluated per probed row as a"
         " join residual. This guards the RESIDUAL SPLIT, not the q13 ratio —"
         " see this test's docstring",
+    )
+
+
+def _binary_filter_child_tag(plan: LogicalPlan) -> Int:
+    """The plan tag of the CHILD of the first Filter whose predicate is a
+    binary comparison; -1 if there is none."""
+    if plan.is_filter():
+        ref fd = plan.filter_data_ref()
+        if fd.predicate.tag == EXPR_BINARY_OP:
+            return Int(fd.child[].tag)
+        return _binary_filter_child_tag(fd.child[])
+    if plan.is_join():
+        ref jd = plan.join_data_ref()
+        var l = _binary_filter_child_tag(jd.left[])
+        if l >= 0:
+            return l
+        return _binary_filter_child_tag(jd.right[])
+    return -1
+
+
+def test_date_add_filter_over_inner_join_pushes_to_owning_side() raises:
+    """`Filter(date_add(p_partkey, 1 month, 2 days) = 1, INNER(line, part))`:
+    the shift references only the `part` side's column, so after pushdown the
+    JOIN is on top and the filter sits directly on the `part` scan."""
+    var part = _scan("part.parquet", _part_schema())
+    var line = _scan("lineitem.parquet", _line_schema())
+    var lk = List[String]()
+    lk.append("l_partkey")
+    var rk = List[String]()
+    rk.append("p_partkey")
+    var joined = LogicalPlan.join(line^, part^, lk^, rk^, JOIN_INNER)
+    var pred = Expr.binary(
+        BIN_EQ,
+        Expr.date_add(1, 2, Expr.col_ref("p_partkey")),
+        Expr.literal(ScalarValue.from_int(1)),
+    )
+    var plan = LogicalPlan.filter(pred^, joined^)
+    plan = push_predicates_down(plan^)
+    assert_true(
+        plan.is_join(),
+        "a date_add filter over one join side must descend into that side",
+    )
+    assert_equal(
+        _binary_filter_child_tag(plan),
+        Int(PLAN_SCAN),
+        "the date_add filter must land directly on its owning scan",
     )
 
 

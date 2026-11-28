@@ -49,6 +49,7 @@ from plan_expr.expr import (
     EXPR_COL_IDX,
     EXPR_COL_REF,
     EXPR_CORRELATED_SUBQUERY,
+    EXPR_DATE_ADD,
     EXPR_EXTRACT,
     EXPR_IN_LIST,
     EXPR_JSON_EXTRACT,
@@ -271,6 +272,8 @@ def _udf_apply_count(e: Expr) raises -> Int:
         return _udf_apply_count(e.udf_call_child_ref())
     if tag == EXPR_EXTRACT:
         return _udf_apply_count(e.extract_child_ref())
+    if tag == EXPR_DATE_ADD:
+        return _udf_apply_count(e.date_add_child_ref())
     if tag == EXPR_MATH_FN:
         return _udf_apply_count(e.math_fn_child_ref())
     if tag == EXPR_AGG_FN:

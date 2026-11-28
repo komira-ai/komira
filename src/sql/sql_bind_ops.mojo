@@ -16,7 +16,7 @@ from plan_expr.col_expr_division import true_divide
 from plan_expr.expr import (
     BIN_ADD, BIN_AND, BIN_DIV, BIN_EQ, BIN_GE, BIN_GT, BIN_LE, BIN_LT, BIN_MOD, BIN_MUL,
     BIN_NE, BIN_OR, BIN_SUB, EXPR_BINARY_OP, EXPR_CAST,
-    EXPR_CORRELATED_SUBQUERY, EXPR_LITERAL, EXPR_UNARY_OP, Expr, MATH2_POW, STRFN_LOWER, STR_LIKE,
+    EXPR_CORRELATED_SUBQUERY, EXPR_DATE_ADD, EXPR_LITERAL, EXPR_UNARY_OP, Expr, MATH2_POW, STRFN_LOWER, STR_LIKE,
     STR_STARTS_WITH, UN_ABS, UN_IS_NOT_NULL, UN_IS_NULL, UN_NEGATE, UN_NOT,
     WhenCaseData,
 )
@@ -308,12 +308,100 @@ def _bind_sql_operator(op: UInt8, var lhs: Expr, var rhs: Expr, typing: Schema) 
         )
     if op == SXOP_CONCAT:
         raise Error(_CONCAT_OP_REFUSAL)
+    if op == SXOP_ADD or op == SXOP_SUB:
+        var lt = _operand_type(lhs, typing)
+        var rt = _operand_type(rhs, typing)
+        # An operand that cannot be typed here (NULL) keeps the plain
+        # arithmetic node.
+        if (
+            (lt == ArrowType.DATE32) != (rt == ArrowType.DATE32)
+            and lt != ArrowType.NULL and rt != ArrowType.NULL
+        ):
+            return _bind_date_integer(op == SXOP_SUB, lhs^, rhs^, lt == ArrowType.DATE32, lt, rt)
     if (
         op == SXOP_EQ or op == SXOP_NE or op == SXOP_LT or op == SXOP_LE
         or op == SXOP_GT or op == SXOP_GE
     ):
         return _bind_comparison(_map_binop(op), lhs^, rhs^, typing)
     return Expr.binary(_map_binop(op), lhs^, rhs^)
+
+
+# =============================================================================
+# A DATE plus or minus a number of days
+# =============================================================================
+#
+# DuckDB: `date + n`, `n + date` and `date - n` over an INTEGER answer a DATE
+# (the date moved n days); `n - date`, `date + 1.5` and `date + 'x'` have no
+# operator. The plan carries the shift as a `DateAdd` with constant days, so n
+# must be an integer constant; a date column plus an integer column is refused
+# by name.
+
+
+def _const_int(e: Expr, mut out: Int) -> Bool:
+    """Whether `e` is an integer literal, or its negation; its value in
+    `out`."""
+    if e.tag == EXPR_LITERAL and e.literal_value().is_int():
+        out = Int(e.literal_value().int_val)
+        return True
+    if e.tag == EXPR_UNARY_OP and e.unary_op() == UN_NEGATE:
+        var inner = 0
+        if _const_int(e.unary_child_ref(), inner):
+            out = -inner
+            return True
+    return False
+
+
+def _bind_date_integer(
+    subtract: Bool, var lhs: Expr, var rhs: Expr, date_left: Bool,
+    lt: ArrowType, rt: ArrowType,
+) raises -> Expr:
+    """`lhs +/- rhs` where exactly one operand is DATE32-typed. `date_left`
+    says which. A DATE literal with an integer literal folds to a DATE
+    literal; otherwise the result is `DateAdd(0, +/-n, date)`, a DATE32."""
+    var other_type = rt if date_left else lt
+    if not other_type.is_integer():
+        raise Error(
+            "SQL not supported: a DATE +/- an operand of type "
+            + String(other_type) + "; add a constant integer number of days"
+            " (`d + 7`) or an INTERVAL"
+        )
+    if subtract and not date_left:
+        raise Error(
+            "SQL not supported: `<number> - DATE` (DuckDB has no such"
+            " operator); only `DATE - <number of days>` is served"
+        )
+    var n = 0
+    var const_ok = False
+    if date_left:
+        const_ok = _const_int(rhs, n)
+    else:
+        const_ok = _const_int(lhs, n)
+    if not const_ok:
+        raise Error(
+            "SQL not supported: a DATE plus or minus a non-constant integer;"
+            " add a constant number of days (`d + 7`), or an INTERVAL"
+        )
+    if subtract:
+        n = -n
+    if n < -2147483648 or n > 2147483647:
+        raise Error(
+            "SQL not supported: a DATE moved by " + String(n) + " days is"
+            " beyond the range of a DATE shift (32 bits)"
+        )
+    var date = Expr.literal(ScalarValue.date32(Int32(0)))
+    if date_left:
+        date = lhs^
+    else:
+        date = rhs^
+    if date.is_literal() and date.literal_value().is_date32():
+        var out = Int(date.literal_value().date32_val) + n
+        if out < -2147483648 or out > 2147483647:
+            raise Error(
+                "SQL bind error: DATE +/- integer result is out of range"
+                " (the day count does not fit a 32-bit DATE)"
+            )
+        return Expr.literal(ScalarValue.date32(Int32(out)))
+    return Expr.date_add(Int32(0), Int32(n), date^)
 
 
 # =============================================================================
@@ -349,6 +437,11 @@ def _subquery_free(e: Expr, mut fields: List[Field]) raises -> Expr:
         return Expr.unary(e.unary_op(), _subquery_free(e.unary_child_ref(), fields))
     if e.tag == EXPR_CAST:
         return Expr.cast_preserving_arrow(_subquery_free(e.cast_child_ref(), fields), e)
+    if e.tag == EXPR_DATE_ADD:
+        return Expr.date_add(
+            e.date_add_months(), e.date_add_days(),
+            _subquery_free(e.date_add_child_ref(), fields),
+        )
     return e.copy()
 
 

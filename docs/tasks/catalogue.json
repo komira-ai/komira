@@ -675,10 +675,7 @@
     "slug": "add-days-date-take-difference-dates",
     "category": "Time",
     "question": "How do I add days to a date or take the difference between dates?",
-    "status": "partial",
-    "issues": [
-      "komira-ai/komira#2388"
-    ]
+    "status": "works"
   },
   {
     "rank": 80,

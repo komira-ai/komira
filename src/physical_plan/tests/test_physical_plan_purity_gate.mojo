@@ -277,6 +277,9 @@ def test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips() ra
     assert_equal(
         _walk(Expr.extract(EXTRACT_YEAR, _corr())), String("T"), "EXTRACT child"
     )
+    assert_equal(
+        _walk(Expr.date_add(1, 2, _corr())), String("T"), "DATE_ADD child"
+    )
 
     # EXPR_MATH_FN2 — BOTH sides. Hidden on the RIGHT, which is what catches a
     # two-child arm that descends only the left.

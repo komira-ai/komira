@@ -65,10 +65,12 @@ comptime SX_TIMESTAMP: UInt8 = 15
 comptime SX_NULL: UInt8 = 16
 
 # ★ THE INTERVAL LITERAL. `INTERVAL '<n>' <unit>`: the signed count in
-# `int_val`, the unit in `op` (SXIVL_*). It is parsed so that a constant DATE
-# can be shifted (`date '1994-01-01' + interval '1' year`); the binder folds
-# that into a DATE literal (`sql_bind_interval`) and refuses an INTERVAL
-# anywhere else, because the logical plan has no INTERVAL operand type.
+# `int_val`, the unit in `op` (SXIVL_*). It is parsed so that a DATE can be
+# shifted (`date '1994-01-01' + interval '1' year`, `d + interval '1' day`,
+# `date_add(d, interval '1' day)`); the binder folds a constant DATE into a
+# DATE literal and binds any other DATE to a `DateAdd` node
+# (`sql_bind_interval`), and refuses an INTERVAL anywhere else, because the
+# logical plan has no INTERVAL operand type.
 comptime SX_INTERVAL: UInt8 = 17
 
 # `SX_INTERVAL.op` — the unit keyword (singular or plural spelling).

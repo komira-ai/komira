@@ -101,6 +101,7 @@ from plan_expr.expr import (
     EXPR_MAP_GET,
     EXPR_JSON_EXTRACT,
     EXPR_EXTRACT,
+    EXPR_DATE_ADD,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
     EXPR_SUBSTRING,
@@ -266,6 +267,8 @@ def _corpus_expr(t: Int) raises -> Expr:
         return Expr.json_extract_string(Expr.col_ref("j"), "$.a")
     elif tag == EXPR_EXTRACT:
         return Expr.extract(EXTRACT_YEAR, Expr.col_ref("d"))
+    elif tag == EXPR_DATE_ADD:
+        return Expr.date_add(1, 2, Expr.col_ref("d"))
     elif tag == EXPR_MATH_FN:
         return Expr.sqrt(Expr.col_ref("a"))
     elif tag == EXPR_MATH_FN2:
@@ -740,6 +743,26 @@ def test_extract_and_json_extract_are_typed_not_null() raises:
     _ = e_json^
 
 
+def test_date_add_collects_child_column_and_is_typed_date32() raises:
+    """`EXPR_DATE_ADD` reports exactly its child's column (the months / days
+    are plan constants, not columns) and declares DATE32 through both
+    field-inference entry points."""
+    var schema = _schema()
+    var e = Expr.date_add(1, -3, Expr.col_ref("d"))
+    var names = _ordered_names(e)
+    assert_equal(len(names), 1)
+    assert_equal(names[0], String("d"))
+    assert_true(
+        field_for_expr(e, schema).arrow_type == ArrowType.DATE32,
+        "date_add declares DATE32 through the execution-time ladder",
+    )
+    assert_true(
+        _infer_expr_field(e, schema).arrow_type == ArrowType.DATE32,
+        "date_add declares DATE32 through the plan-build-time ladder",
+    )
+    _ = e^
+
+
 def test_date_trunc_preserves_the_child_type() raises:
     """`date_trunc` and the field-extracts share a tag and split on
     `_is_trunc_unit` — the SAME predicate `_eval_column_expr` branches on,
@@ -801,5 +824,6 @@ def main() raises:
     ts.test[test_comparison_binary_op_is_bool_everywhere]()
     ts.test[test_arithmetic_binary_op_still_promotes]()
     ts.test[test_extract_and_json_extract_are_typed_not_null]()
+    ts.test[test_date_add_collects_child_column_and_is_typed_date32]()
     ts.test[test_date_trunc_preserves_the_child_type]()
     ts^.run()

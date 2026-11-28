@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # THE FIELD-NUMBER CENSUS of `komira.plan.v1`, part 2 of 3: the expression
-# messages (WireColRef to WireWindowFn, WireExpr and its 25 arms, and
+# messages (WireColRef to WireWindowFn, WireExpr and its 27 arms, and
 # WireAggExpr). How a message is pinned, and why, is in the header of
 # test_plan_field_numbers_scan.mojo (part 1); the same helpers are restated
 # here, since a welded test is one source file.
@@ -27,6 +27,7 @@ from plan_proto.plan import (
     WireColRef,
     WireCorrelatedSubquery,
     WireExpr,
+    WireDateAdd,
     WireExtract,
     WireFrame,
     WireInList,
@@ -570,6 +571,20 @@ def test_udf_call(mut L: _Ledger) raises:
     _same(encode_proto(m), b, "WireUdfCall")
 
 
+def test_date_add(mut L: _Ledger) raises:
+    """WireDateAdd: 1 child, 2 months, 3 days; both counts are signed, so a
+    negative is the ten-byte varint of its two's complement."""
+    var b = List[UInt8]()
+    _m(L, b, "WireDateAdd.child", _expr(L, 36))
+    _i(L, b, "WireDateAdd.months", -13)
+    _i(L, b, "WireDateAdd.days", 9)
+    var m = decode_proto[WireDateAdd](b.copy())
+    assert_equal(_idx(m.child[0]), 36, "WireDateAdd: _idx(m.child[0])")
+    assert_equal(m.months, Int32(-13), "WireDateAdd: m.months")
+    assert_equal(m.days, Int32(9), "WireDateAdd: m.days")
+    _same(encode_proto(m), b, "WireDateAdd")
+
+
 def test_substring_and_string_op(mut L: _Ledger) raises:
     var b = List[UInt8]()
     _m(L, b, "WireSubstring.child", _expr(L, 34))
@@ -754,6 +769,8 @@ def _arm_of(e: WireExpr) -> String:
         out.append("udf_call")
     if len(e.udf_apply) > 0:
         out.append("udf_apply")
+    if len(e.date_add) > 0:
+        out.append("date_add")
     var joined = String("")
     for i in range(len(out)):
         joined += (String(",") if i > 0 else String("")) + out[i]
@@ -761,13 +778,13 @@ def _arm_of(e: WireExpr) -> String:
 
 
 def test_expr_arms(mut L: _Ledger) raises:
-    """oneof node { 2 col_ref .. 27 udf_apply } (1 is reserved): each arm,
+    """oneof node { 2 col_ref .. 28 date_add } (1 is reserved): each arm,
     written under its ledger number, decodes as that arm by name."""
     var arms = _names(
         "col_ref col_idx literal binary_op unary_op alias in_list cast"
         + " correlated_subquery when agg_fn extract math_fn math_fn2 substring"
         + " string_op regexp struct_field struct_field_idx map_get json_extract"
-        + " window_fn string_fn string_fn_n udf_call udf_apply"
+        + " window_fn string_fn string_fn_n udf_call udf_apply date_add"
     )
     for k in range(len(arms)):
         var q = "WireExpr." + arms[k]
@@ -830,6 +847,7 @@ def main() raises:
     test_functions_of_one_child(L)
     test_math_fn2_and_string_fn_n(L)
     test_udf_call(L)
+    test_date_add(L)
     test_substring_and_string_op(L)
     test_regexp(L)
     test_struct_and_map_access(L)
@@ -876,6 +894,9 @@ WireAggFn.op 1
 WireAggFn.child 2
 WireExtract.unit 1
 WireExtract.child 2
+WireDateAdd.child 1
+WireDateAdd.months 2
+WireDateAdd.days 3
 WireMathFn.op 1
 WireMathFn.child 2
 WireMathFn2.op 1
@@ -950,6 +971,7 @@ WireExpr.string_fn 24
 WireExpr.string_fn_n 25
 WireExpr.udf_call 26
 WireExpr.udf_apply 27
+WireExpr.date_add 28
 WireAggExpr.func 1
 WireAggExpr.has_child0 2
 WireAggExpr.child0 3

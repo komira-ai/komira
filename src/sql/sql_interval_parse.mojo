@@ -8,7 +8,15 @@ from sql.sql_ast import (
     SXIVL_DAY, SXIVL_MONTH, SXIVL_WEEK, SXIVL_YEAR, SqlExpr,
 )
 from sql.sql_token import (
-    TK_IDENT, TK_INT, TK_MINUS, TK_PLUS, TK_STRING, Token,
+    TK_DOT, TK_IDENT, TK_INT, TK_LPAREN, TK_MINUS, TK_PLUS, TK_RPAREN, TK_STRING,
+    Token,
+)
+
+comptime INTERVAL_COUNT_REFUSAL: String = (
+    "SQL not supported: an INTERVAL with a non-constant count (`INTERVAL (x)"
+    " DAY`, `INTERVAL col DAY`); the count must be an integer literal,"
+    " `INTERVAL '<n>' <unit>`, because the INTERVAL is folded into the DATE"
+    " shift at bind time"
 )
 
 
@@ -49,6 +57,43 @@ def interval_literal_starts(tokens: List[Token], pos: Int) -> Bool:
             and _is_unit_word(tokens[pos + 3].text)
         )
     return False
+
+
+def interval_count_is_expression(tokens: List[Token], pos: Int) -> Bool:
+    """True when the token at `pos` is `interval` followed by a count that is
+    not a literal and then a unit word: a parenthesised expression
+    (`interval (x) day`) or a column reference (`interval x day`,
+    `interval t.x day`). Such a count is refused by name; a column called
+    `interval` followed by anything else is still a column."""
+    if pos + 2 >= len(tokens):
+        return False
+    if tokens[pos].kind != TK_IDENT or tokens[pos].text != "interval":
+        return False
+    var k = pos + 1
+    if tokens[k].kind == TK_LPAREN:
+        var depth = 0
+        while k < len(tokens):
+            if tokens[k].kind == TK_LPAREN:
+                depth += 1
+            elif tokens[k].kind == TK_RPAREN:
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        k += 1
+    elif tokens[k].kind == TK_IDENT and not _is_unit_word(tokens[k].text):
+        k += 1
+        while (
+            k + 1 < len(tokens) and tokens[k].kind == TK_DOT
+            and tokens[k + 1].kind == TK_IDENT
+        ):
+            k += 2
+    else:
+        return False
+    return (
+        k < len(tokens) and tokens[k].kind == TK_IDENT
+        and _is_unit_word(tokens[k].text)
+    )
 
 
 def parse_interval_literal(tokens: List[Token], mut pos: Int) raises -> SqlExpr:

@@ -99,6 +99,7 @@ from plan_expr.expr import (
     EXPR_STRUCT_FIELD_IDX,
     EXPR_MAP_GET,
     EXPR_JSON_EXTRACT,
+    EXPR_DATE_ADD,
     EXPR_EXTRACT,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
@@ -485,6 +486,10 @@ def check_expr_scan_bindings[
         if not expr._extract:
             return 0
         return check_expr_scan_bindings(resolver, expr.extract_child_ref())
+    if tag == EXPR_DATE_ADD:
+        if not expr._date_add:
+            return 0
+        return check_expr_scan_bindings(resolver, expr.date_add_child_ref())
     if tag == EXPR_MATH_FN:
         if not expr._math_fn:
             return 0

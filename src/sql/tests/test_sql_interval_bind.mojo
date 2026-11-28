@@ -2,7 +2,7 @@
 # sql_bind: DATE +/- INTERVAL folds to a DATE constant (sql_bind_interval)
 # =============================================================================
 #
-# What each test proves, and the defect it would catch:
+# What each test proves:
 #   1. Every TPC-H interval use, and a table of calendar cases, bind to the
 #      expected `date32` literal: the month-end clamp (31 Jan + 1 month = 28
 #      or 29 Feb; 29 Feb +/- 1 year = 28 Feb; 31 Mar - 1 month = 29 Feb in a
@@ -18,11 +18,19 @@
 #      expression. (catches: the fold wired into one binder only)
 #   3. The TPC-H Q1 and Q6 queries bind, their WHERE clauses carrying the
 #      folded date. (catches: the corpus queries still refused)
-#   4. Refusals by name: a non-constant (column) DATE operand, a TIMESTAMP
-#      operand, a bare INTERVAL, INTERVAL - DATE, INTERVAL * n, INTERVAL +
-#      INTERVAL, an INTERVAL compared or used as a projection, and a result
-#      outside years 1..9999. (catches: a column operand folded as its first
-#      row or silently dropped; an out-of-range date wrapped)
+#   4. A DATE column (or any DATE-typed expression) `+/- INTERVAL` and
+#      `INTERVAL + DATE` bind to a TIMESTAMP cast over a `DateAdd` carrying
+#      the interval's months and days, in the WHERE, select-list,
+#      post-aggregate and correlated-subquery binders; a chain nests one
+#      `DateAdd` per interval under one cast. (catches: an interval wired
+#      into one binder only; the sign of `-` lost; a unit mapped to the wrong
+#      months or days)
+#   5. Refusals by name: a TIMESTAMP, string or number operand, a bare
+#      INTERVAL, INTERVAL - DATE, INTERVAL * n, INTERVAL + INTERVAL, an
+#      INTERVAL compared or used as a projection, an interval whose months or
+#      days do not fit 32 bits, and a result outside years 1..9999 on a
+#      constant DATE. (catches: a non-DATE operand shifted as if it were a
+#      DATE; an out-of-range date wrapped)
 
 from std.testing import TestSuite, assert_equal, assert_true
 
@@ -33,6 +41,10 @@ from plan_expr.expr import (
 )
 from plan_ir.corr_subquery import corr_subq_inner_plan_ref
 from plan_ir.logical_plan import LogicalPlan, PLAN_FILTER, PLAN_PROJECT
+from sql.sql_ast import (
+    SXIVL_DAY, SXIVL_MONTH, SXIVL_WEEK, SXIVL_YEAR, SqlExpr,
+)
+from sql.sql_bind_interval import interval_const
 from sql.sql_bind_parquet import NoParquetFooters
 from sql.sql_bind_scope import _date_to_days
 from sql.sql_binder import bind_statement
@@ -212,37 +224,169 @@ def test_tpch_q6_binds_with_the_folded_dates() raises:
     assert_true("BinaryOp(LT, ColRef(l_shipdate), " + _lit("1995-01-01") + ")" in plan, plan)
 
 
-def test_non_constant_date_operand_is_refused() raises:
-    _refuses("d + interval '1' day", "needs a constant DATE")
-    _refuses("d - interval '1' month", "needs a constant DATE")
-    _refuses("interval '1' year + d", "needs a constant DATE")
-    _refuses("timestamp '2000-01-01 00:00:00' + interval '1' day", "needs a constant DATE")
-    _refuses("'1994-01-01' + interval '1' day", "needs a constant DATE")
+def _shifted(months: Int, days: Int, col: String) -> String:
+    """The text of the TIMESTAMP-cast shift of column `col`."""
+    return (
+        "Cast(DateAdd(months=" + String(months) + ", days=" + String(days)
+        + ", ColRef(" + col + ")), "
+    )
+
+
+def _binds_shift(expr: String, months: Int, days: Int) raises:
+    var plan = _got("SELECT d FROM t WHERE d < " + expr)
+    var want = "BinaryOp(LT, ColRef(d), " + _shifted(months, days, "d")
+    assert_true(want in plan, "`" + expr + "` bound to: " + plan + " want " + want)
+
+
+def test_date_column_plus_interval_binds_a_timestamp_shift() raises:
+    _binds_shift("d + interval '1' day", 0, 1)
+    _binds_shift("d + interval '3' month", 3, 0)
+    _binds_shift("d + interval '2' year", 24, 0)
+    _binds_shift("d + interval '2' week", 0, 14)
+    _binds_shift("d - interval '1' month", -1, 0)
+    _binds_shift("d - interval '1' year", -12, 0)
+    _binds_shift("d - interval '10' day", 0, -10)
+    _binds_shift("d - interval '1' week", 0, -7)
+    _binds_shift("d + interval '-4' day", 0, -4)
+    _binds_shift("d - interval '-4' day", 0, 4)
+    _binds_shift("interval '1' year + d", 12, 0)
+    _binds_shift("interval '5' day + d", 0, 5)
+    _binds_shift("interval '1000000000' month + d", 1000000000, 0)
+    _binds_shift("d - interval '1000000000' day", 0, -1000000000)
+
+
+def test_interval_chain_nests_one_shift_per_interval_under_one_cast() raises:
+    var plan = _got(
+        "SELECT d FROM t WHERE d < d + interval '1' month + interval '2' day"
+    )
+    var want = (
+        "Cast(DateAdd(months=0, days=2, DateAdd(months=1, days=0, ColRef(d))), "
+    )
+    assert_true(want in plan, plan)
+    assert_true("Cast(DateAdd(months=0, days=2, Cast(" not in plan, plan)
+    var minus = _got("SELECT d FROM t WHERE d < d + interval '1' year - interval '1' day")
+    assert_true(
+        "Cast(DateAdd(months=0, days=-1, DateAdd(months=12, days=0, ColRef(d))), "
+        in minus,
+        minus,
+    )
+    var left = _got("SELECT d FROM t WHERE d < interval '1' day + (d + interval '1' month)")
+    assert_true(
+        "Cast(DateAdd(months=0, days=1, DateAdd(months=1, days=0, ColRef(d))), "
+        in left,
+        left,
+    )
+
+
+def test_interval_shift_follows_a_date_integer_shift() raises:
+    var plan = _got("SELECT d FROM t WHERE d < d + 3 + interval '1' month")
+    assert_true(
+        "Cast(DateAdd(months=1, days=0, DateAdd(months=0, days=3, ColRef(d))), "
+        in plan,
+        plan,
+    )
+
+
+def test_date_column_interval_in_the_select_list_and_post_aggregate_binders() raises:
+    var sel = _got("SELECT d + interval '1' day AS nd FROM t")
+    assert_true(_shifted(0, 1, "d") in sel, sel)
+    var agg = _got("SELECT max(d) + interval '1' month AS nd FROM t")
+    assert_true(not agg.startswith("ERR: "), agg)
+    assert_true("Cast(DateAdd(months=1, days=0, ColRef(" in agg, agg)
+    var left = _got("SELECT interval '1' month + max(d) AS nd FROM t")
+    assert_true("Cast(DateAdd(months=1, days=0, ColRef(" in left, left)
+    var having = _got(
+        "SELECT x, max(d) AS m FROM t GROUP BY x HAVING max(d) < min(d) + interval '7' day"
+    )
+    assert_true(not having.startswith("ERR: "), having)
+    assert_true("Cast(DateAdd(months=0, days=7, ColRef(" in having, having)
+    var grouped = _got("SELECT d + interval '1' day AS nd, count(*) FROM t GROUP BY d")
+    assert_true(not grouped.startswith("ERR: "), grouped)
+    assert_true("DateAdd(months=0, days=1, ColRef(d))" in grouped, grouped)
+
+
+def test_date_column_interval_in_a_correlated_subquery_predicate() raises:
+    var right_form = _corr_inner_of(
+        "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.x"
+        " AND u.d < d + interval '1' day)"
+    )
+    assert_true(_shifted(0, 1, "d") in right_form, right_form)
+    var left_form = _corr_inner_of(
+        "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.x"
+        " AND u.d < interval '2' month + d)"
+    )
+    assert_true(_shifted(2, 0, "d") in left_form, left_form)
+    var minus = _corr_inner_of(
+        "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.x"
+        " AND u.d > d - interval '1' year)"
+    )
+    assert_true(_shifted(-12, 0, "d") in minus, minus)
+
+
+def test_non_date_operand_of_an_interval_is_refused() raises:
+    _refuses("timestamp '2000-01-01 00:00:00' + interval '1' day", "needs a DATE operand")
+    _refuses("'1994-01-01' + interval '1' day", "needs a DATE operand")
+    _refuses("ts + interval '1' day", "needs a DATE operand")
+    _refuses("interval '1' day + ts", "needs a DATE operand")
+    _refuses("x + interval '1' day", "needs a DATE operand")
+    _refuses("(x * 2) + interval '1' day", "needs a DATE operand")
+
+
+def test_interval_beyond_a_date_shift_is_refused() raises:
+    _refuses("d + interval '1000000000' year", "beyond the range of a DATE shift")
+    _refuses("d - interval '1000000000' year", "beyond the range of a DATE shift")
+    _refuses("d + interval '1000000000' week", "beyond the range of a DATE shift")
+    _refuses("d - interval '-1000000000' week", "beyond the range of a DATE shift")
+    _refuses("d + interval '-1000000000' year", "beyond the range of a DATE shift")
+
+
+def test_interval_const_reads_months_and_days() raises:
+    var y = interval_const(SqlExpr.interval_lit(2, SXIVL_YEAR), False)
+    assert_equal(y.months, 24)
+    assert_equal(y.days, 0)
+    var m = interval_const(SqlExpr.interval_lit(3, SXIVL_MONTH), False)
+    assert_equal(m.months, 3)
+    assert_equal(m.days, 0)
+    var w = interval_const(SqlExpr.interval_lit(2, SXIVL_WEEK), False)
+    assert_equal(w.months, 0)
+    assert_equal(w.days, 14)
+    var d = interval_const(SqlExpr.interval_lit(5, SXIVL_DAY), False)
+    assert_equal(d.months, 0)
+    assert_equal(d.days, 5)
+    var neg = interval_const(SqlExpr.interval_lit(5, SXIVL_DAY), True)
+    assert_equal(neg.days, -5)
+    var neg_year = interval_const(SqlExpr.interval_lit(-1, SXIVL_YEAR), True)
+    assert_equal(neg_year.months, 12)
 
 
 def test_interval_anywhere_else_is_refused() raises:
     _refuses("interval '1' day", "only accepted as")
     _refuses("interval '1' day - date '2000-01-01'", "only accepted as")
+    _refuses("interval '1' day - d", "only accepted as")
     _refuses("interval '1' day + interval '1' day", "only accepted as")
     _refuses("date '2000-01-01' + interval '1' day * 2", "only accepted as")
     _refuses("date '2000-01-01' + 2 * interval '1' day", "only accepted as")
+    _refuses("d + interval '1' day * 2", "only accepted as")
     var proj = _got("SELECT interval '1' day AS i FROM t")
     assert_true("only accepted as" in proj, proj)
     var agg = _got("SELECT max(interval '1' day) FROM t")
     assert_true("only accepted as" in agg, agg)
-    var corr = _got(
-        "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.x AND u.d < d + interval '1' day)"
-    )
-    assert_true(corr.startswith("ERR: "), corr)
-    assert_true("needs a constant DATE" in corr, corr)
-    var corr_left = _got(
-        "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.x AND u.d < interval '1' day + d)"
-    )
-    assert_true("needs a constant DATE" in corr_left, corr_left)
     var corr_alone = _got(
         "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.x AND u.d < interval '1' day)"
     )
     assert_true("only accepted as" in corr_alone, corr_alone)
+    var post_alone = _got("SELECT interval '1' day - max(d) FROM t")
+    assert_true("only accepted as" in post_alone, post_alone)
+
+
+def test_column_valued_interval_is_refused_by_name() raises:
+    for q in List[String](
+        "interval (x) day", "interval x day", "interval t.x day",
+        "d + interval (x) day", "d + interval x month",
+    ):
+        var plan = _got("SELECT d FROM t WHERE d < " + q)
+        assert_true(plan.startswith("ERR: "), q + " bound: " + plan)
+        assert_true("non-constant count" in plan, q + " raised: " + plan)
 
 
 def test_out_of_range_results_are_refused() raises:

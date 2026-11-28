@@ -27,7 +27,10 @@ from std.builtin.swap import swap
 from containers.slab import Slab
 
 from .sql_copy_format import copy_codec_from_path, copy_format_from_path
-from .sql_interval_parse import interval_literal_starts, parse_interval_literal
+from .sql_interval_parse import (
+    INTERVAL_COUNT_REFUSAL, interval_count_is_expression, interval_literal_starts,
+    parse_interval_literal,
+)
 from .sql_nesting import enter_sql_nesting, primary_opens_a_level
 from .sql_token import (
     Token,
@@ -2635,6 +2638,8 @@ struct _Parser(Movable):
             # `interval` still binds as a column reference. See `SX_INTERVAL`.
             if interval_literal_starts(self.tokens, self.pos):
                 return parse_interval_literal(self.tokens, self.pos)
+            if interval_count_is_expression(self.tokens, self.pos):
+                raise Error(INTERVAL_COUNT_REFUSAL)
             # ★★ `EXTRACT(<field> FROM <expr>)`.
             #
             # A SEPARATE GRAMMAR ARM AND NOT A FUNCTION NAME, because `FROM`

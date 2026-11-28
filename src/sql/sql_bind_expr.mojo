@@ -250,9 +250,9 @@ def _bind_scalar(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCata
     if sx.tag == SX_BINARY:
         var ivl_side = interval_operand_side(sx)
         if ivl_side == 2:
-            return interval_date_fold(sx, _bind_scalar(sx._binary.value().left[], schema, scope, catalog, cte_scope, prebound))
+            return interval_date_fold(sx, _bind_scalar(sx._binary.value().left[], schema, scope, catalog, cte_scope, prebound), schema)
         if ivl_side == 1:
-            return interval_date_fold(sx, _bind_scalar(sx._binary.value().right[], schema, scope, catalog, cte_scope, prebound))
+            return interval_date_fold(sx, _bind_scalar(sx._binary.value().right[], schema, scope, catalog, cte_scope, prebound), schema)
         if _is_null_comparison(sx):
             if sx._binary.value().left[].tag != SX_NULL:
                 return _null_comparison(sx.op, _bind_scalar(sx._binary.value().left[], schema, scope, catalog, cte_scope, prebound))
