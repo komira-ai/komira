@@ -227,7 +227,8 @@ When the connection between the runner and the farm is cut, buck2 fails every
 action in flight at once, each with its own `Error:` line holding
 `RE channel error: code:`. `assert_remote run`
 ([`farm_retry.zig`](../tools/build/ci/assert_remote/farm_retry.zig)) then runs
-the same command again, when every failure in the output is such a cut:
+the same command again, when every failure in the output is such a cut (or
+one of the two other failures of the farm's below):
 each failed action (`Action failed:`) or test (`✗ Fail:`) has that line among
 buck2's own lines before its output, no test timed out or was fatal, and no
 other error stands outside them. A test whose run was cut before it started
@@ -245,10 +246,22 @@ it in the place of the channel error, word for word
 `Error: (Error was returned on the stream by RE: the job failed to start: input-unavailable)`.
 A block with that line, or a test whose stderr has it right after the
 `Remote Execution Error on Execute` line, counts as the farm's failure just as
-a cut does, and a log may mix the two. Any other reason the farm gives for not
+a cut does, and a log may mix the causes. Any other reason the farm gives for not
 starting a job (such as `input-not-allowed`) is final. The job summary line
 then names the cause: ``had jobs the farm failed to start (the farm's `input-unavailable` in each of 2 failed block(s))``,
-or both causes with a count for each.
+or each cause with a count for each.
+
+A connection that closes under one of buck2's requests to the farm's store,
+such as the download of the outputs of an action that ran there, is run again
+the same way. buck2 retries the request itself a few times (its
+`Transient error (attempt N/5), retrying` warnings) and then fails the action
+with, in the place of the channel error, a line such as
+`Error: (Failed to make BatchReadBlobs request: code: 'The operation was cancelled', ..., source: tonic::transport::Error(Transport, ...)): transport error: operation was canceled: connection closed)`.
+A block whose `Error:` line names a request this way, with a transport source,
+and ends `: connection closed)` counts as the farm's failure; the same request
+failing for any other reason (the store's own error, a reset in place of a
+close) is final. The job summary line names it as
+``was cut by a lost connection to the farm (buck2's `connection closed` on a request to the farm in each of 2 failed block(s))``.
 
 Before it runs again, the tool waits for the farm
 ([`farm_wait.zig`](../tools/build/ci/assert_remote/farm_wait.zig)): the same

@@ -19,7 +19,11 @@
 //! action digests zeroed. build_input_unavailable.log is a release build
 //! whose one failure was a job the farm failed to start, an input unavailable
 //! on its host: its progress lines cut to two, its build id and action
-//! digests zeroed.
+//! digests zeroed. build_download_cut.log is a release build whose one
+//! failure was the download of an action's outputs from the farm, its
+//! connection closed after buck2's own retries (its `WARN` lines, coloured as
+//! buck2 printed them): its progress lines cut to two, its build id and
+//! action digests zeroed.
 //!
 //! The wait for the farm before a run again (farm_wait.zig) runs on a fake
 //! clock and a fake farm, so a case of twenty minutes takes none: a farm that
@@ -38,6 +42,7 @@ const build_cut = @embedFile("fixtures/build_cut.log");
 const build_cut_after_file_changes = @embedFile("fixtures/build_cut_after_file_changes.log");
 const test_cut = @embedFile("fixtures/test_cut.log");
 const build_input_unavailable = @embedFile("fixtures/build_input_unavailable.log");
+const build_download_cut = @embedFile("fixtures/build_download_cut.log");
 
 const build_mixed = @embedFile("fixtures/build_cut_and_compile_error.log");
 const test_failed = @embedFile("fixtures/test_failed.log");
@@ -58,6 +63,11 @@ const own = "[2026-11-25T02:24:32.807+00:00] the test's own line\n";
 const unavailable_error = "Error: (Error was returned on the stream by RE: the job failed to start: input-unavailable)";
 /// The first failed block of fixtures/build_input_unavailable.log.
 const unavailable_first = "[2026-11-27T05:17:43.695+00:00] Action failed: komira//src/atomic_alias:atomic_alias_conda (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (conda_pack atomic_alias_conda)";
+
+/// buck2's line for a request to the farm's store whose connection closed (fixtures/build_download_cut.log).
+const request_cut_error = "Error: (Failed to make BatchReadBlobs request: code: 'The operation was cancelled', message: \"operation was canceled\", source: tonic::transport::Error(Transport, hyper::Error(Canceled, \"connection closed\")): transport error: operation was canceled: connection closed)";
+/// The first failed block of fixtures/build_download_cut.log.
+const request_cut_first = "[2026-11-28T03:22:57.875+00:00] Action failed: komira//src/async_rt:async_rt_conda (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (conda_release_join async_rt_conda)";
 
 const cut_error = "Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: \"h2 protocol error: error reading a body from connection\", source: None)";
 
@@ -501,6 +511,110 @@ test "a failed test the farm never started (input-unavailable after buck2's Exec
     try expectFarm(try edit(a, test_cut[0..end], unrun_cut, unavailable), .{ .input_unavailable = 1 });
     // with a line of the test's own after it, the test ran: final
     try expectFinal(try edit(a, test_cut[0..end], unrun_cut, unavailable ++ own), .failure, unrun_fail);
+}
+
+// ---- a request to the farm's store whose connection closed, run again -------
+
+test "a recorded build whose every failure is a request to the farm cut by a closed connection is the farm's, counting each block" {
+    // one action, printed once as it failed and once under BUILD ERRORS; the
+    // coloured WARN lines of buck2's retries before it stand outside the blocks
+    try expectFarm(build_download_cut, .{ .request_cut = 2 });
+}
+
+test "request-cut blocks beside cut and input-unavailable blocks are the farm's, each counted by its cause" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const at = "[2026-11-28T03:22:57.888+00:00] Cache hits";
+    try expectFarm(try edit(a, build_download_cut, at, cut_block ++ at), .{ .cut = 1, .request_cut = 2 });
+    const unavailable_block = "[2026-11-28T03:22:57.875+00:00] Action failed: komira//src/b:b (cfg) (conda_pack)\n" ++
+        "[2026-11-28T03:22:57.875+00:00] " ++ unavailable_error ++ "\n" ++
+        "[2026-11-28T03:22:57.875+00:00] Stdout: <empty>\n" ++
+        "[2026-11-28T03:22:57.875+00:00] Stderr: <empty>\n\n";
+    try expectFarm(try edit(a, build_download_cut, at, cut_block ++ unavailable_block ++ at), .{ .cut = 1, .input_unavailable = 1, .request_cut = 2 });
+}
+
+test "the request-cut line counts only in its recorded shape" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // the store answered with an error of its own, not a closed connection
+    try expectFinal(try edit(a, build_download_cut, "source: tonic::transport::Error(Transport, hyper::Error(Canceled, \"connection closed\")): transport error: operation was canceled: connection closed)", "source: None): not found)"), .failure, request_cut_first);
+    // a transport error that is not a closed connection
+    try expectFinal(try edit(a, build_download_cut, "operation was canceled: connection closed)", "operation was canceled: connection reset)"), .failure, request_cut_first);
+    // more after the closed connection, its closing parenthesis gone
+    try expectFinal(try edit(a, build_download_cut, request_cut_error, request_cut_error ++ " and more"), .failure, request_cut_first);
+    try expectFinal(try edit(a, build_download_cut, request_cut_error, request_cut_error[0 .. request_cut_error.len - 1]), .failure, request_cut_first);
+    // no transport source
+    try expectFinal(try edit(a, build_download_cut, "source: tonic::transport::Error(Transport, ", "source: tonic::Status(Transport, "), .failure, request_cut_first);
+    // no request name, a request name of two words, no code after it
+    try expectFinal(try edit(a, build_download_cut, "make BatchReadBlobs request", "make  request"), .failure, request_cut_first);
+    try expectFinal(try edit(a, build_download_cut, "make BatchReadBlobs request", "make Batch ReadBlobs request"), .failure, request_cut_first);
+    try expectFinal(try edit(a, build_download_cut, "BatchReadBlobs request: code: '", "BatchReadBlobs request: status: '"), .failure, request_cut_first);
+    // not buck2's Error line
+    try expectFinal(try edit(a, build_download_cut, "] Error: (Failed to make", "] Warning: (Failed to make"), .failure, request_cut_first);
+}
+
+test "the request-cut line without buck2's prefix in a block's head does not make it the farm's" {
+    const log = "[2026-11-21T16:00:00.000+00:00] Action failed: komira//src/a:a (cfg) (zig_test)\n" ++ request_cut_error ++ "\n" ++
+        "[2026-11-21T16:00:00.000+00:00] Stdout: <empty>\n\nBUILD FAILED\n";
+    try expectFinal(log, .failure, "[2026-11-21T16:00:00.000+00:00] Action failed: komira//src/a:a (cfg) (zig_test)");
+}
+
+test "an action that failed on its own and quotes the request-cut line after Stderr is final" {
+    const log = "[2026-11-21T16:00:00.000+00:00] Action failed: komira//src/a:a (cfg) (zig_test)\n" ++
+        "[2026-11-21T16:00:00.000+00:00] Remote command returned non-zero exit code 1\n" ++
+        "[2026-11-21T16:00:00.000+00:00] Stdout: <empty>\n" ++
+        "[2026-11-21T16:00:00.000+00:00] Stderr:\n" ++
+        "[2026-11-21T15:59:59.000+00:00] " ++ request_cut_error ++ "\n\n" ++
+        "BUILD FAILED\n";
+    try expectFinal(log, .failure, "[2026-11-21T16:00:00.000+00:00] Action failed: komira//src/a:a (cfg) (zig_test)");
+}
+
+test "a failed test whose request to the farm was cut (the request-cut line after buck2's Execute line) is the farm's" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const end = std.mem.indexOf(u8, test_cut, unrun_next).?;
+    const closed = "[2026-11-25T02:24:32.807+00:00] " ++ request_cut_error ++ "\n";
+    try expectFarm(try edit(a, test_cut[0..end], unrun_cut, closed), .{ .request_cut = 1 });
+    // with a line of the test's own after it, the test ran: final
+    try expectFinal(try edit(a, test_cut[0..end], unrun_cut, closed ++ own), .failure, unrun_fail);
+}
+
+test "the verdict names a request cut alone, or beside the other causes" {
+    var buf: [512]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try fr.describe(.{ .farm = .{ .request_cut = 2 } }, &w);
+    try t.expectEqualStrings("every failure (2 block(s)) is a request to the farm cut by a lost connection (buck2's `connection closed` on a request to the farm)", w.buffered());
+    w = std.Io.Writer.fixed(&buf);
+    try fr.describe(.{ .farm = .{ .cut = 1, .request_cut = 2 } }, &w);
+    try t.expectEqualStrings("every failure (3 block(s)) is the farm's: 1 a cut connection (buck2's `RE channel error`), 2 a cut request (buck2's `connection closed` on a request to the farm)", w.buffered());
+    w = std.Io.Writer.fixed(&buf);
+    try fr.describe(.{ .farm = .{ .cut = 1, .input_unavailable = 3, .request_cut = 2 } }, &w);
+    try t.expectEqualStrings("every failure (6 block(s)) is the farm's: 1 a cut connection (buck2's `RE channel error`), 3 a job it failed to start (the farm's `input-unavailable`), 2 a cut request (buck2's `connection closed` on a request to the farm)", w.buffered());
+}
+
+test "the job summary line names a request cut alone, or beside the other causes" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings(
+        "buck2-farm: the first run of `build` was cut by a lost connection to the farm (buck2's `connection closed` on a request to the farm in each of 2 failed block(s)); the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log",
+        try fr.summaryLine(a, "build", 1, .{ .request_cut = 2 }, .{ .answered = 0 }, "buck2-farm.first.log"),
+    );
+    try t.expectEqualStrings(
+        "buck2-farm: the second run of `test` was cut by a lost connection to the farm (buck2's `RE channel error` in 3 and buck2's `connection closed` on a request to the farm in 1 failed block(s)); farm unreachable for 20 min 5 s, the longest wait; not run again",
+        try fr.summaryLine(a, "test", 2, .{ .cut = 3, .request_cut = 1 }, .{ .gave_up = 1205 }, "unused"),
+    );
+    try t.expectEqualStrings(
+        "buck2-farm: the first run of `build` was cut by a lost connection to the farm and had jobs the farm failed to start (buck2's `RE channel error` in 1 and the farm's `input-unavailable` in 2 and buck2's `connection closed` on a request to the farm in 4 failed block(s)); the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log",
+        try fr.summaryLine(a, "build", 1, .{ .cut = 1, .input_unavailable = 2, .request_cut = 4 }, .{ .answered = 0 }, "buck2-farm.first.log"),
+    );
+    try t.expectEqualStrings(
+        "buck2-farm: the first run of `build` was cut by a lost connection to the farm and had jobs the farm failed to start (the farm's `input-unavailable` in 1 and buck2's `connection closed` on a request to the farm in 2 failed block(s)); the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log",
+        try fr.summaryLine(a, "build", 1, .{ .input_unavailable = 1, .request_cut = 2 }, .{ .answered = 0 }, "buck2-farm.first.log"),
+    );
 }
 
 test "the verdict says why, for the job log" {

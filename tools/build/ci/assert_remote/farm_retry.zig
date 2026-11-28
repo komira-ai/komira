@@ -1,6 +1,7 @@
 //! The run again of a buck2 step whose only failures are the farm's (a cut
-//! connection to the farm, or a job the farm failed to start because an input
-//! was unavailable on its host): `assert_remote run`, the first line of the
+//! connection to the farm, a request to the farm's store whose connection
+//! closed, or a job the farm failed to start because an input was unavailable
+//! on its host): `assert_remote run`, the first line of the
 //! buck2-farm action (.github/actions/buck2-farm/action.yml).
 //!
 //!     assert_remote run --log <file> --summary <file> --farm-config <file> -- <buck2> <subcommand> [args...]
@@ -64,9 +65,21 @@
 //!
 //!     [<time>] Error: (Error was returned on the stream by RE: the job failed to start: input-unavailable)
 //!
-//! A farm line is either of the two: buck2's own `Error:` line with
-//! `RE channel error: code: ` (a cut), or that `input-unavailable` line, word
-//! for word.
+//! When the connection closes under one of buck2's requests to the farm's
+//! store, such as the download of the outputs of an action that ran there,
+//! buck2 retries the request a few times (its `WARN` lines, `Transient error
+//! (attempt N/5), retrying`) and then fails the action with a block whose
+//! `Error:` line names the request and the closed connection (recorded in
+//! fixtures/build_download_cut.log, a release build):
+//!
+//!     [<time>] Internal error (stage: extract_artifacts): ... Failed to download trees: Remote Execution Error on download_typed_blobs ...
+//!     [<time>] Error: (Failed to make BatchReadBlobs request: code: 'The operation was cancelled', message: "operation was canceled", source: tonic::transport::Error(Transport, hyper::Error(Canceled, "connection closed")): transport error: operation was canceled: connection closed)
+//!
+//! A farm line is one of the three: buck2's own `Error:` line with
+//! `RE channel error: code: ` (a cut), that `input-unavailable` line, word
+//! for word, or buck2's `Error: (Failed to make <Request> request: code: '`
+//! line with a `source: tonic::transport::Error(Transport, ` that ends
+//! `: connection closed)` (a request cut).
 //!
 //! So a log is the farm's, and only then, when:
 //!   * it has at least one failure block (`Action failed:` or a test's
@@ -108,36 +121,67 @@ pub const Farm = struct {
     cut: usize = 0,
     /// Blocks whose job the farm failed to start, an input unavailable on its host.
     input_unavailable: usize = 0,
+    /// Blocks whose request to the farm's store lost its connection.
+    request_cut: usize = 0,
 
     fn add(f: *Farm, cause: Cause) void {
         switch (cause) {
             .cut => f.cut += 1,
             .input_unavailable => f.input_unavailable += 1,
+            .request_cut => f.request_cut += 1,
         }
     }
 
     /// Every block counted.
     pub fn blocks(f: Farm) usize {
-        return f.cut + f.input_unavailable;
+        return f.cut + f.input_unavailable + f.request_cut;
+    }
+
+    /// The blocks of one cause.
+    fn of(f: Farm, cause: Cause) usize {
+        return switch (cause) {
+            .cut => f.cut,
+            .input_unavailable => f.input_unavailable,
+            .request_cut => f.request_cut,
+        };
+    }
+
+    /// The one cause of every block, or null when the blocks have more than one.
+    fn only(f: Farm) ?Cause {
+        for (std.enums.values(Cause)) |cause| {
+            if (f.of(cause) == f.blocks()) return cause;
+        }
+        return null;
     }
 
     /// What failed the run, for the line after `the <ordinal> run `. A run
-    /// with only cuts reads as it always has.
+    /// of one cause names it with its count; a run of more names each.
     pub fn writeWhat(f: Farm, w: *std.Io.Writer) std.Io.Writer.Error!void {
-        if (f.input_unavailable == 0) {
-            try w.print("was cut by a lost connection to the farm (buck2's `RE channel error` in each of {d} failed block(s))", .{f.cut});
-        } else if (f.cut == 0) {
-            try w.print("had jobs the farm failed to start (the farm's `input-unavailable` in each of {d} failed block(s))", .{f.input_unavailable});
-        } else {
-            try w.print("was cut by a lost connection to the farm and had jobs the farm failed to start (buck2's `RE channel error` in {d} and the farm's `input-unavailable` in {d} failed block(s))", .{ f.cut, f.input_unavailable });
+        if (f.only()) |cause| {
+            try w.print("{s} ({s} in each of {d} failed block(s))", .{ cause.what(), cause.line(), f.blocks() });
+            return;
         }
+        if (f.input_unavailable == 0) {
+            try w.writeAll("was cut by a lost connection to the farm (");
+        } else {
+            try w.writeAll("was cut by a lost connection to the farm and had jobs the farm failed to start (");
+        }
+        var first = true;
+        for (std.enums.values(Cause)) |cause| {
+            if (f.of(cause) == 0) continue;
+            if (!first) try w.writeAll(" and ");
+            first = false;
+            try w.print("{s} in {d}", .{ cause.line(), f.of(cause) });
+        }
+        try w.writeAll(" failed block(s))");
     }
 };
 
 /// What a failed run's log shows.
 pub const Verdict = union(enum) {
-    /// Every failure is the farm's: a cut connection to the farm, or a job the
-    /// farm failed to start because an input was unavailable on its host.
+    /// Every failure is the farm's: a cut connection to the farm, a request to
+    /// the farm's store whose connection closed, or a job the farm failed to
+    /// start because an input was unavailable on its host.
     farm: Farm,
     /// A failure block that is not the farm's: its first line.
     failure: []const u8,
@@ -263,18 +307,66 @@ pub const Cause = enum {
     /// read on the host it was placed on. The farm settles it as an
     /// infrastructure failure for the client to run again.
     input_unavailable,
+    /// The connection closed under one of buck2's requests to the farm's
+    /// store, such as the download of an action's outputs, after buck2's own
+    /// retries of it.
+    request_cut,
+
+    /// What the farm did to the run, for the line after `the <ordinal> run `.
+    fn what(c: Cause) []const u8 {
+        return switch (c) {
+            .cut, .request_cut => "was cut by a lost connection to the farm",
+            .input_unavailable => "had jobs the farm failed to start",
+        };
+    }
+
+    /// The farm line, as the job log names it.
+    fn line(c: Cause) []const u8 {
+        return switch (c) {
+            .cut => "buck2's `RE channel error`",
+            .input_unavailable => "the farm's `input-unavailable`",
+            .request_cut => "buck2's `connection closed` on a request to the farm",
+        };
+    }
+
+    /// One block of the cause, for the verdict.
+    fn block(c: Cause) []const u8 {
+        return switch (c) {
+            .cut => "a cut connection",
+            .input_unavailable => "a job it failed to start",
+            .request_cut => "a cut request",
+        };
+    }
 };
 
 /// buck2's `Error:` line for a job the farm failed to start because an input
 /// was unavailable on its host, word for word (fixtures/build_input_unavailable.log).
 const input_unavailable_line = "Error: (Error was returned on the stream by RE: the job failed to start: input-unavailable)";
 
+/// True for buck2's `Error:` line for a request to the farm's store whose
+/// connection closed (fixtures/build_download_cut.log): `Error: (Failed to
+/// make <Request> request: code: '`, the request's name one word of letters
+/// and digits, then a `source: tonic::transport::Error(Transport, ` and the
+/// end `: connection closed)`.
+fn requestCut(c: []const u8) bool {
+    const head = "Error: (Failed to make ";
+    if (!std.mem.startsWith(u8, c, head)) return false;
+    var at: usize = head.len;
+    while (at < c.len and std.ascii.isAlphanumeric(c[at])) at += 1;
+    if (at == head.len) return false;
+    const rest = c[at..];
+    if (!std.mem.startsWith(u8, rest, " request: code: '")) return false;
+    return std.mem.indexOf(u8, rest, "source: tonic::transport::Error(Transport, ") != null and std.mem.endsWith(u8, rest, ": connection closed)");
+}
+
 /// The farm line: buck2's `Error:` with the error of its channel to the farm,
-/// or the farm's refusal to start a job whose input was unavailable on its
-/// host; null for any other line.
+/// the farm's refusal to start a job whose input was unavailable on its host,
+/// or buck2's `Error:` for a request to the farm's store whose connection
+/// closed; null for any other line.
 fn farmCause(c: []const u8) ?Cause {
     if (std.mem.startsWith(u8, c, "Error: ") and std.mem.indexOf(u8, c, "RE channel error: code: ") != null) return .cut;
     if (std.mem.eql(u8, c, input_unavailable_line)) return .input_unavailable;
+    if (requestCut(c)) return .request_cut;
     return null;
 }
 
@@ -475,7 +567,7 @@ const Block = struct {
 };
 
 /// What a failed run's log shows: whether every failure in it is the farm's,
-/// a cut connection or a job the farm could not start (the header says what
+/// a cut connection, a cut request or a job the farm could not start (the header says what
 /// counts). The slices of the verdict point into `log`. `a` holds one line at
 /// a time.
 pub fn classify(a: std.mem.Allocator, log: []const u8) !Verdict {
@@ -535,12 +627,22 @@ pub fn classify(a: std.mem.Allocator, log: []const u8) !Verdict {
 pub fn describe(v: Verdict, w: *std.Io.Writer) std.Io.Writer.Error!void {
     switch (v) {
         .farm => |f| {
-            if (f.input_unavailable == 0) {
-                try w.print("every failure ({d} block(s)) is a cut connection to the farm (buck2's `RE channel error`)", .{f.cut});
-            } else if (f.cut == 0) {
-                try w.print("every failure ({d} block(s)) is a job the farm failed to start (the farm's `input-unavailable`)", .{f.input_unavailable});
-            } else {
-                try w.print("every failure ({d} block(s)) is the farm's: {d} a cut connection (buck2's `RE channel error`), {d} a job it failed to start (the farm's `input-unavailable`)", .{ f.blocks(), f.cut, f.input_unavailable });
+            if (f.only()) |cause| {
+                const what = switch (cause) {
+                    .cut => "a cut connection to the farm",
+                    .input_unavailable => "a job the farm failed to start",
+                    .request_cut => "a request to the farm cut by a lost connection",
+                };
+                try w.print("every failure ({d} block(s)) is {s} ({s})", .{ f.blocks(), what, cause.line() });
+                return;
+            }
+            try w.print("every failure ({d} block(s)) is the farm's: ", .{f.blocks()});
+            var first = true;
+            for (std.enums.values(Cause)) |cause| {
+                if (f.of(cause) == 0) continue;
+                if (!first) try w.writeAll(", ");
+                first = false;
+                try w.print("{d} {s} ({s})", .{ f.of(cause), cause.block(), cause.line() });
             }
         },
         .failure => |l| try w.print("a failure that is not a cut connection: {s}", .{l}),
@@ -758,7 +860,7 @@ pub fn main(a: std.mem.Allocator, args: []const [:0]const u8, cap: usize, w: *st
         };
         if (run == max_runs) {
             if (on_farm) |f| {
-                if (f.input_unavailable == 0) {
+                if (f.only() == .cut) {
                     try w.print("buck2-farm: FAILED: the {s} run was cut too: the connection to the farm was cut in each of {d} runs (buck2's `RE channel error`); not run again\n", .{ ordinal(run), run });
                 } else {
                     try w.print("buck2-farm: FAILED: the {s} run failed on the farm too, as each of {d} runs did: it ", .{ ordinal(run), run });

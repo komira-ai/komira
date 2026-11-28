@@ -1,0 +1,31 @@
+[2026-11-28T02:29:05.984+00:00] Build ID: 00000000-0000-0000-0000-000000000000
+[2026-11-28T02:29:07.081+00:00] RE Session: GRPC-SESSION-ID
+[2026-11-28T02:29:14.177+00:00] Waiting on komira//src/job_report_proto:job_report_proto_conda (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- conda_pack, and 71 other actions
+[2026-11-28T02:29:21.277+00:00] Waiting on komira//src/join_assembly:join_assembly_conda (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- conda_pack, and 69 other actions
+[2026-11-28T03:22:56.377+00:00] [2m2026-11-28T03:22:56.288363Z[0m [33m WARN[0m [2mremote_execution::client[0m[2m:[0m Transient error (attempt 1/5), retrying in 120ms: Failed to make BatchReadBlobs request: code: 'The operation was cancelled', message: "operation was canceled", source: tonic::transport::Error(Transport, hyper::Error(Canceled, "connection closed")): transport error: operation was canceled: connection closed
+[2026-11-28T03:22:56.576+00:00] [2m2026-11-28T03:22:56.409757Z[0m [33m WARN[0m [2mremote_execution::client[0m[2m:[0m Transient error (attempt 2/5), retrying in 239ms: Failed to make BatchReadBlobs request: code: 'The operation was cancelled', message: "operation was canceled", source: tonic::transport::Error(Transport, hyper::Error(Canceled, "connection closed")): transport error: operation was canceled: connection closed
+[2026-11-28T03:22:56.777+00:00] [2m2026-11-28T03:22:56.650501Z[0m [33m WARN[0m [2mremote_execution::client[0m[2m:[0m Transient error (attempt 3/5), retrying in 417ms: Failed to make BatchReadBlobs request: code: 'The operation was cancelled', message: "operation was canceled", source: tonic::transport::Error(Transport, hyper::Error(Canceled, "connection closed")): transport error: operation was canceled: connection closed
+[2026-11-28T03:22:57.177+00:00] [2m2026-11-28T03:22:57.068238Z[0m [33m WARN[0m [2mremote_execution::client[0m[2m:[0m Transient error (attempt 4/5), retrying in 806ms: Failed to make BatchReadBlobs request: code: 'The operation was cancelled', message: "operation was canceled", source: tonic::transport::Error(Transport, hyper::Error(Canceled, "connection closed")): transport error: operation was canceled: connection closed
+[2026-11-28T03:22:57.875+00:00] Action failed: komira//src/async_rt:async_rt_conda (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (conda_release_join async_rt_conda)
+[2026-11-28T03:22:57.875+00:00] Internal error (stage: extract_artifacts): action_digest=0000000000000000000000000000000000000000000000000000000000000000:141: Failed to download trees: Remote Execution Error on download_typed_blobs for ReSession GRPC-SESSION-ID
+[2026-11-28T03:22:57.875+00:00] Error: (Failed to make BatchReadBlobs request: code: 'The operation was cancelled', message: "operation was canceled", source: tonic::transport::Error(Transport, hyper::Error(Canceled, "connection closed")): transport error: operation was canceled: connection closed)
+[2026-11-28T03:22:57.875+00:00] Remote action digest: '0000000000000000000000000000000000000000000000000000000000000000:141'
+[2026-11-28T03:22:57.875+00:00] Stdout: <empty>
+[2026-11-28T03:22:57.875+00:00] Stderr: <empty>
+
+[2026-11-28T03:22:57.888+00:00] Cache hits: 97%
+[2026-11-28T03:22:57.888+00:00] Commands: 5598 (cached: 5425, remote: 173, local: 0)
+[2026-11-28T03:22:57.888+00:00] Network: up 3.0MiB  down 15MiB  session GRPC-SESSION-ID
+[2026-11-28T03:22:57.888+00:00]
+[2026-11-28T03:22:57.888+00:00] BUILD ERRORS (1)
+[2026-11-28T03:22:57.888+00:00] The following actions failed during the execution of this command:
+[2026-11-28T03:22:57.888+00:00] Action failed: komira//src/async_rt:async_rt_conda (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (conda_release_join async_rt_conda)
+[2026-11-28T03:22:57.888+00:00] Internal error (stage: extract_artifacts): action_digest=0000000000000000000000000000000000000000000000000000000000000000:141: Failed to download trees: Remote Execution Error on download_typed_blobs for ReSession GRPC-SESSION-ID
+[2026-11-28T03:22:57.888+00:00] Error: (Failed to make BatchReadBlobs request: code: 'The operation was cancelled', message: "operation was canceled", source: tonic::transport::Error(Transport, hyper::Error(Canceled, "connection closed")): transport error: operation was canceled: connection closed)
+[2026-11-28T03:22:57.888+00:00] Remote action digest: '0000000000000000000000000000000000000000000000000000000000000000:141'
+[2026-11-28T03:22:57.888+00:00] Stdout: <empty>
+[2026-11-28T03:22:57.888+00:00] Stderr: <empty>
+
+[2026-11-28T03:22:57.888+00:00]
+BUILD FAILED
+Failed to build 'komira//src/async_rt:async_rt_conda (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)'

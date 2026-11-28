@@ -8,10 +8,13 @@
 # The first, `assert_remote run`, runs buck2 with its output copied to the job
 # log and to a file (tools/build/ci/assert_remote/farm_retry.zig): when the
 # run fails and every failure in its output is the farm's, a cut connection to
-# the farm or a job the farm failed to start because an input was unavailable
-# on its host (buck2's `Error:` line with `RE channel error: code:`, or its
-# `Error:` line ending `the job failed to start: input-unavailable)`, in each
-# failed action or test, for a test that never started in its stderr right
+# the farm, a request to the farm whose connection closed, or a job the farm
+# failed to start because an input was unavailable on its host (buck2's
+# `Error:` line with `RE channel error: code:`, its `Error: (Failed to make
+# <Request> request: code:` line with a transport source ending
+# `: connection closed)`, or its `Error:` line ending
+# `the job failed to start: input-unavailable)`, in each failed action or
+# test, for a test that never started in its stderr right
 # after buck2's `Remote Execution Error on Execute` line, and no other error),
 # it waits for the farm's port to answer
 # (tools/build/ci/assert_remote/farm_wait.zig), at most as long as
@@ -35,7 +38,7 @@
 # pattern is `//path:name`, a list of them is `@file` or `$(cat file)` made
 # by the caller before this step. It reaches the step through `env:` only.
 name: buck2-farm
-description: Run one ./buck2 command (again after a cut connection to the farm, a job the farm failed to start for an unavailable input, or a run ended on a dead connection, once the farm answers, at most three runs) and fail unless buck2 succeeded and no action ran locally.
+description: Run one ./buck2 command (again after a cut connection to the farm, a request to the farm whose connection closed, a job the farm failed to start for an unavailable input, or a run ended on a dead connection, once the farm answers, at most three runs) and fail unless buck2 succeeded and no action ran locally.
 
 inputs:
   args:
