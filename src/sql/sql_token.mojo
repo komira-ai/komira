@@ -532,6 +532,15 @@ def tokenize(sql: String, mut starts: List[Int]) raises -> List[Token]:
                 " no meaning in this dialect; the cast operator is '::', as in"
                 " `x::BIGINT`"
             )
+        # `[` opens a DuckDB list (`[1, 2]`, and the list of files of
+        # `read_csv(['a.csv', 'b.csv'])`), which this dialect has not got: it
+        # is refused naming the list, and the file list's pattern form.
+        if c == UInt8(ord("[")):
+            raise Error(
+                "SQL not supported: a list `[...]`, such as the list of files"
+                " of `read_csv(['a.csv', 'b.csv'])`, is not implemented; name"
+                " the files with a glob pattern, as `read_csv('dir/*.csv')`"
+            )
         raise Error("SQL syntax error: unexpected character '" + chr(Int(c)) + "'")
     starts.append(n)
     out.append(Token(TK_EOF, String(""), Int64(0), Float64(0.0)))

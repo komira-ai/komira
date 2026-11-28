@@ -17,8 +17,12 @@
 #                                   columns).
 #   - `add_source(name, source)` binds any resolved `SourceVariant` under its own
 #                                   schema (an Iceberg table).
+#   - `add_sources(name, sources)` binds the sources of several files read as
+#                                   one table (a CSV or JSON Lines pattern); its
+#                                   scan is their UNION ALL (`scan_of_sources`).
 #   - `schema_of(name)`   resolves a table's schema (for column binding).
-#   - `build_scan(name)`  builds the PLAN_SCAN node (copies the source + schema).
+#   - `build_scan(name)`  builds the PLAN_SCAN node (copies the source + schema),
+#                         or the UNION ALL of a table of several sources.
 #
 # `SourceVariant` and `Schema` are both Movable+Copyable, so the catalog copies
 # a table's source into each scan (no move-out-of-container gymnastics), and a
@@ -33,6 +37,7 @@ from arrow.primitive_array import PrimitiveArray
 from arrow.record_batch import RecordBatch
 from arrow.table import Table
 from containers.slab import Slab
+from std.memory import OwnedPointer
 from scan_source.source_variant import SourceVariant
 from scan_source.in_memory_source import InMemorySource
 from scan_source.parquet_source import ParquetSource
@@ -56,13 +61,51 @@ def catalog_relation_schema(source: ParquetSource) -> Schema:
     return sb.build()
 
 
-@fieldwise_init
 struct CatalogTable(Copyable, Movable):
-    """One registered table: a name + its schema + its data source."""
+    """One registered table: a name + its schema + its data source, and the
+    sources of its further files when it is several CSV or JSON Lines files
+    (`SqlCatalog.add_sources`)."""
 
     var name: String  # stored lower-cased for case-insensitive resolution
     var schema: Schema
     var source: SourceVariant
+    var more_sources: List[SourceVariant]
+    """The sources after `source`, in file order, each at `schema`; empty for
+    a table of one source. A scan of the table is the UNION ALL of `source`
+    and these (`scan_of_sources`)."""
+
+    def __init__(
+        out self,
+        var name: String,
+        var schema: Schema,
+        var source: SourceVariant,
+        var more_sources: List[SourceVariant] = List[SourceVariant](),
+    ):
+        self.name = name^
+        self.schema = schema^
+        self.source = source^
+        self.more_sources = more_sources^
+
+
+def scan_of_sources(
+    first: SourceVariant, more: List[SourceVariant], schema: Schema
+) raises -> LogicalPlan:
+    """The scan of `first` at `schema` when `more` is empty, else the UNION ALL
+    of the scans of `first` and of each of `more`, in that order, every branch
+    at `schema`."""
+    if len(more) == 0:
+        return LogicalPlan.scan_from_source(first.copy(), schema.copy())
+    var kids = List[OwnedPointer[LogicalPlan]]()
+    kids.append(
+        OwnedPointer(LogicalPlan.scan_from_source(first.copy(), schema.copy()))
+    )
+    for i in range(len(more)):
+        kids.append(
+            OwnedPointer(
+                LogicalPlan.scan_from_source(more[i].copy(), schema.copy())
+            )
+        )
+    return LogicalPlan.union(kids^, schema.copy())
 
 
 struct SqlCatalog(Copyable, Movable):
@@ -193,6 +236,27 @@ struct SqlCatalog(Copyable, Movable):
         var schema = source.schema()
         self._tables.append(CatalogTable(name.lower(), schema^, source^))
 
+    def add_sources(mut self, name: String, var sources: List[SourceVariant]) raises:
+        """Register the sources of several files read as one table under
+        `name` (a CSV or JSON Lines pattern), every one at the first's schema;
+        a scan of it is their UNION ALL in this order (`scan_of_sources`).
+        One source registers as `add_source` does.
+
+        Raises:
+            Error when `sources` is empty.
+        """
+        if len(sources) == 0:
+            raise Error(
+                "SqlCatalog.add_sources: table '" + name + "' has no source"
+            )
+        var schema = sources[0].schema()
+        var more = List[SourceVariant]()
+        for i in range(1, len(sources)):
+            more.append(sources[i].copy())
+        self._tables.append(
+            CatalogTable(name.lower(), schema^, sources[0].copy(), more^)
+        )
+
     def _find(self, name: String) -> Int:
         var target = name.lower()
         for i in range(len(self._tables)):
@@ -233,15 +297,16 @@ struct SqlCatalog(Copyable, Movable):
         if idx < 0:
             raise Error("SQL bind error: unknown table '" + name + "'")
         ref t = self._tables[idx]
-        return CatalogTable(t.name.copy(), t.schema.copy(), t.source.copy())
+        return CatalogTable(
+            t.name.copy(), t.schema.copy(), t.source.copy(), t.more_sources.copy()
+        )
 
     def build_scan(self, name: String) raises -> LogicalPlan:
         var idx = self._find(name)
         if idx < 0:
             raise Error("SQL bind error: unknown table '" + name + "'")
-        return LogicalPlan.scan_from_source(
-            self._tables[idx].source.copy(), self._tables[idx].schema.copy()
-        )
+        ref t = self._tables[idx]
+        return scan_of_sources(t.source, t.more_sources, t.schema)
 
 
 # =============================================================================

@@ -192,6 +192,7 @@ mojo_library(
         "tests/test_credentials_reveal.mojo",
         "tests/test_plan_result.mojo",
         "tests/test_register_arrow.mojo",
+        "tests/test_register_patterns.mojo",
         "tests/test_register_text.mojo",
         "tests/test_session.mojo",
         "tests/test_sources.mojo",

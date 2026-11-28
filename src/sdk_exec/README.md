@@ -280,7 +280,12 @@ and a filter on one prunes files. Rows come back in no promised order across
 files. Refused by name: no file matches (`PARQUET_GLOB_NO_MATCH`), a directory
 given to SQL `read_parquet` (`PARQUET_PATH_IS_DIRECTORY`), files whose schemas
 differ (`PARQUET_FILES_SCHEMA_MISMATCH`), and the Hive shapes the footer
-package lists (`HIVE_PARTITION_*`).
+package lists (`HIVE_PARTITION_*`). `read_csv('<glob>')`, `read_json('<glob>')`
+and the `register_csv` / `register_json` of the C library take the same glob:
+the files are listed and inferred at bind (or registration), their schemas
+merged, and the scan is the UNION ALL of one scan per file in sorted order
+(`CSV_GLOB_NO_MATCH`, `JSON_GLOB_NO_MATCH`, `CSV_FILES_SCHEMA_MISMATCH`,
+`JSON_FILES_SCHEMA_MISMATCH`; `sql.sql_tvf_files`).
 
 **Refused here, by name.** The COPY refusals above, `CREATE TABLE ... AS`
 (`STATEMENT_NOT_A_QUERY`, step `bind`); the door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
@@ -407,7 +412,7 @@ refused over the budget as before: a GROUP BY with COUNT(DISTINCT) (its
 refusal says so), a GROUP BY over a string or a mixed string key, the sort
 (ORDER BY), and the output rows of every partition, which must fit the budget
 together, since the result is returned whole. `run_sql` serves the plans `lowering` cuts: Parquet scans (one file or several; through `run_sql_with`, objects of an S3 or GCS bucket or an Azure container too, from a catalog table whose source names the bucket: no SQL text names an object-store URL yet, the context's footers read local files only, and the session holds no store settings or credentials), `read_csv`
-scans of one local file with a header row (decoded whole before the first
+scans of local files with a header row, one file or the UNION ALL of a glob's files (decoded whole before the first
 morsel; `header=false` is refused at lowering, because the reader would name
 the columns `col_0`, `col_1`, ... where DuckDB names them `column0`,
 `column1`, ...), the one-row relation a SELECT with no FROM reads (an integer

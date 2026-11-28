@@ -169,6 +169,13 @@ package, and each compares what it prints with that file, every line.
   registers a CSV file as the table `name`, the table SQL's `read_csv` makes
   of the same file, and `register_json(name, path)` a newline-delimited JSON
   file (one object per line), the table `read_json` makes.
+  - `path` may be a glob pattern (`*`, `?`, `[...]`, `{a,b}`, one `**`): every
+    file it matches is read as one table (the files are listed in sorted
+    order; rows come in no promised order without `ORDER BY`). CSV files must
+    have the same columns in the same order (`CSV_FILES_SCHEMA_MISMATCH`);
+    JSON files may have different keys, the table having all of them. A
+    pattern that matches nothing raises `CSV_GLOB_NO_MATCH` or
+    `JSON_GLOB_NO_MATCH`.
   - The engine infers the column names and types when the call is made, and
     every later query reads the file with them. An empty CSV field and a JSON
     `null` or missing key read as NULL.

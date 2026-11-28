@@ -153,8 +153,14 @@ Iceberg tables. Every other DuckDB `iceberg_scan` option (`version`,
 `skip_schema_inference`, `snapshot_from_timestamp`) is refused by name, as is
 any CSV, JSON or Parquet option on `iceberg_scan`, and both Iceberg options on
 the other readers. `SqlCatalog.add_source` registers any resolved
-`SourceVariant` as a table under its own schema (an Iceberg table). A `read_csv`, `read_json` or `read_avro`
-relation gets its schema from `sql_tvf_bind`, which reads the file. The
+`SourceVariant` as a table under its own schema (an Iceberg table), and
+`SqlCatalog.add_sources` the sources of several files as one table, whose scan
+is their UNION ALL. A `read_csv`, `read_json` or `read_avro`
+relation gets its schema from `sql_tvf_bind`, which reads the file. A CSV or
+JSONL name may be a glob pattern: `sql_tvf_files` lists its files (sorted;
+`CSV_GLOB_NO_MATCH` / `JSON_GLOB_NO_MATCH` for none) and merges their schemas
+(`CSV_FILES_SCHEMA_MISMATCH` for other columns; JSON keys united), and the
+relation is the UNION ALL of one scan per file. The
 binder's code is split over the `sql_bind_*` modules (the FROM scope,
 operators, functions, casts and timestamps, subqueries, correlated scalar
 subqueries, aggregates and

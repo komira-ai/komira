@@ -40,6 +40,12 @@
 #    owns the option allowlist. By the time a `TvfOptions` reaches this file
 #    every option in the text has been either recorded, proven neutral, or
 #    raised on.
+#
+# 4. A CSV OR JSON LINES NAME MAY BE A PATTERN. `sql_tvf_files.tvf_files` lists
+#    the files it matches, sorted; each is inferred, the schemas merge into one
+#    (`merge_csv_schema` / `merge_json_schema`), and the relation is the UNION
+#    ALL of one scan leaf per file, every leaf at the merged schema. One file is
+#    one leaf with no union. `read_avro` takes one file.
 # =============================================================================
 
 from arrow.arrow_types import ArrowType
@@ -60,6 +66,11 @@ from parquet_codec.text_decompress import (
 )
 
 from .sql_ast import FromRelation, TvfOptions, TVF_CSV, TVF_JSON, TVF_AVRO
+from .sql_catalog import scan_of_sources
+from .sql_tvf_files import (
+    CSV_GLOB_NO_MATCH, JSON_GLOB_NO_MATCH, merge_csv_schema,
+    merge_json_schema, tvf_files,
+)
 
 
 # Bytes of JSONL prefix handed to the record-shape inferrer (256 KiB, the same
@@ -181,6 +192,80 @@ def avro_tvf_schema(path: String) raises -> Schema:
     return table.out_schema.copy()
 
 
+def csv_files_schema(files: List[String], imm opts: TvfOptions) raises -> Schema:
+    """The one schema the CSV `files` (in this order, at least one) read at:
+    each file's `csv_tvf_schema`, merged in file order (`merge_csv_schema`)."""
+    var merged = csv_tvf_schema(files[0], opts)
+    for i in range(1, len(files)):
+        merged = merge_csv_schema(
+            merged, files[0], csv_tvf_schema(files[i], opts), files[i]
+        )
+    return merged^
+
+
+def json_files_schema(files: List[String]) raises -> Schema:
+    """The one schema the JSON Lines `files` (in this order, at least one) read
+    at: each file's `json_tvf_schema`, merged in file order
+    (`merge_json_schema`)."""
+    var merged = json_tvf_schema(files[0])
+    for i in range(1, len(files)):
+        merged = merge_json_schema(
+            merged, files[0], json_tvf_schema(files[i]), files[i]
+        )
+    return merged^
+
+
+def csv_file_sources(
+    files: List[String], schema: Schema, imm opts: TvfOptions
+) raises -> List[SourceVariant]:
+    """One `CsvSource` per file of `files`, in order, each read at `schema`
+    with the dialect of `opts` and pinned to its own mtime (a failed stat pins
+    0, the honest "no pin")."""
+    var o = _csv_read_options(opts)
+    var out = List[SourceVariant]()
+    for i in range(len(files)):
+        out.append(
+            SourceVariant(
+                CsvSource(
+                    String(files[i]),
+                    schema.copy(),
+                    mtime_ns=UInt64(FileIdentity.stat_path(files[i]).mtime_ns),
+                    quote_style_tag=Int(o.quote_style_tag),
+                    delimiter=o.delimiter,
+                    has_header=o.has_header,
+                )
+            )
+        )
+    return out^
+
+
+def json_file_sources(
+    files: List[String], schema: Schema
+) -> List[SourceVariant]:
+    """One `JsonSource` per file of `files`, in order, each read at `schema`
+    and pinned to its own mtime."""
+    var out = List[SourceVariant]()
+    for i in range(len(files)):
+        out.append(
+            SourceVariant(
+                JsonSource(
+                    String(files[i]),
+                    schema.copy(),
+                    mtime_ns=UInt64(FileIdentity.stat_path(files[i]).mtime_ns),
+                )
+            )
+        )
+    return out^
+
+
+def _scan_of(
+    var sources: List[SourceVariant], schema: Schema
+) raises -> LogicalPlan:
+    """The scan of the first of `sources`, or the UNION ALL of all of them."""
+    var first = sources.pop(0)
+    return scan_of_sources(first, sources, schema)
+
+
 def tvf_relation_schema(imm rel: FromRelation) raises -> Schema:
     """The bind-time schema of a non-footer TVF relation (CSV / JSONL / AVRO).
 
@@ -189,14 +274,18 @@ def tvf_relation_schema(imm rel: FromRelation) raises -> Schema:
     container header. The CSV/JSONL arms infer; the avro arm READS."""
     var path = rel.tvf_path.value()
     if rel.tvf_kind == TVF_CSV:
-        return csv_tvf_schema(path, rel.tvf_opts)
+        return csv_files_schema(
+            tvf_files(path, CSV_GLOB_NO_MATCH), rel.tvf_opts
+        )
     if rel.tvf_kind == TVF_AVRO:
         return avro_tvf_schema(path)
-    return json_tvf_schema(path)
+    return json_files_schema(tvf_files(path, JSON_GLOB_NO_MATCH))
 
 
 def tvf_relation_scan(imm rel: FromRelation) raises -> LogicalPlan:
-    """The LAZY scan leaf of a non-footer TVF relation (CSV / JSONL / AVRO).
+    """The LAZY scan leaf of a non-footer TVF relation (CSV / JSONL / AVRO),
+    or, for a CSV or JSONL pattern matching several files, the UNION ALL of one
+    leaf per file in sorted order (see the module note, item 4).
 
     ALL THREE arms build a binding-backed `SourceVariant` and go through
     `scan_from_source`. Each carries `source_kind == SOURCE_KIND_ROW`, DECLARED
@@ -221,25 +310,12 @@ def tvf_relation_scan(imm rel: FromRelation) raises -> LogicalPlan:
     if rel.tvf_kind == TVF_AVRO:
         return _avro_tvf_scan(path)
     if rel.tvf_kind == TVF_CSV:
-        var o = _csv_read_options(rel.tvf_opts)
-        var schema = csv_tvf_schema(path, rel.tvf_opts)
-        var cs = CsvSource(
-            String(path),
-            schema.copy(),
-            mtime_ns=UInt64(FileIdentity.stat_path(String(path)).mtime_ns),
-            quote_style_tag=Int(o.quote_style_tag),
-            delimiter=o.delimiter,
-            has_header=o.has_header,
-        )
-        return LogicalPlan.scan_from_source(SourceVariant(cs^), schema^)
-    var jschema = json_tvf_schema(path)
-    var js = JsonSource(
-        String(path),
-        jschema.copy(),
-        mtime_ns=UInt64(FileIdentity.stat_path(String(path)).mtime_ns),
-    )
-    var sv = SourceVariant(js^)
-    return LogicalPlan.scan_from_source(sv^, jschema^)
+        var files = tvf_files(path, CSV_GLOB_NO_MATCH)
+        var schema = csv_files_schema(files, rel.tvf_opts)
+        return _scan_of(csv_file_sources(files, schema, rel.tvf_opts), schema)
+    var jfiles = tvf_files(path, JSON_GLOB_NO_MATCH)
+    var jschema = json_files_schema(jfiles)
+    return _scan_of(json_file_sources(jfiles, jschema), jschema)
 
 
 def _avro_tvf_scan(path: String) raises -> LogicalPlan:
