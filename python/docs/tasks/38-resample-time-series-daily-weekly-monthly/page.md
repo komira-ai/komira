@@ -58,7 +58,7 @@ month [{'bucket': datetime.date(2026, 10, 1), 'total': 55.0, 'n': 6}, {'bucket':
 
 - `date_trunc('week', ...)` starts the week on Monday: 2026-10-01 and 2026-10-02 fall in the week of 2026-09-28. The other units are `'day'`, `'month'`, `'quarter'` and `'year'`.
 - Sorting by a date column fails today (`ORDER BY bucket`, or `groupby` on a date with its default `sort=True`): komira-ai/komira#2408. Until it is fixed, sort the answer in Python, as the example does, or group by integer parts such as `.dt.year` and `.dt.month`, which sort.
-- A bucket with no rows has no row in the answer: komira does not fill gaps, so a day, week or month without sales is missing rather than 0.
+- A bucket with no rows has no row in the answer, so a day, week or month without sales is missing rather than 0. To list every bucket, `LEFT JOIN` the totals onto a `generate_series` of the dates, as [rank 81](../81-fill-gaps-time-series-date-present/page.md) shows.
 - The CSV reader infers a date column (`YYYY-MM-DD`) as a date, and `date_trunc` of a date gives a date (DuckDB widens the date and gives a timestamp; the day it names is the same). For a timestamp column (from Parquet, say), `date_trunc` gives a timestamp, and `.dt.floor("D")` on the pandas-shaped frame cuts it to the day, or to `"h"`, `"min"` or `"s"`.
 - The pandas-shaped frame has no `resample`: `df.resample(...)` raises `AttributeError`, since a komira frame has no time index, and `.dt.floor` takes no week or month. Group by the date for days, or by `.dt.year` and `.dt.month` for months; for weeks, use the SQL form. `probe_pandas_resample.py` beside this page tries `df.resample("MS", on=...)` and must fail with the line in `probe_pandas_resample.error.txt`; komira-ai/komira#2392 tracks the frame forms. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
 - There is no polars-shaped form of this task: the `komira.pl` frame has no `dt` namespace or `group_by_dynamic` today.
@@ -68,5 +68,5 @@ month [{'bucket': datetime.date(2026, 10, 1), 'total': 55.0, 'n': 6}, {'bucket':
 
 - [How do I extract year, month and weekday from a date column?](../39-extract-year-month-weekday-date-column/page.md) (rank 39, partial)
 - [How do I group by month or week?](../80-group-month-week/page.md) (rank 80, partial)
-- How do I fill gaps in a time series so every date is present? (rank 81, gap; no page yet)
+- [How do I fill gaps in a time series so every date is present?](../81-fill-gaps-time-series-date-present/page.md) (rank 81, partial)
 - [How do I parse strings into dates?](../23-parse-strings-dates/page.md) (rank 23, partial)

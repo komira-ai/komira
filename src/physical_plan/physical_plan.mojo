@@ -28,6 +28,7 @@ from physical_plan.csv_source_spec import CsvSourceSpec
 from physical_plan.iceberg_scan_spec import IcebergScanSpec
 from physical_plan.parquet_source_data import ParquetRowWindow, ParquetSourceData
 from physical_plan.udf_call_spec import UdfCallSpec
+from scan_source.series_scan import SeriesSpec
 from physical_plan.sink_data import (
     AggSinkData,
     AsofJoinSinkData,
@@ -91,9 +92,13 @@ from physical_plan.sink_data import (
 #   21: `TopNSinkData.offset` — the rows of the sort order a top-N skips
 #       before the `n` it keeps (LIMIT n OFFSET m over a sort). 0 is the plain
 #       top-N.
+#   22: `SOURCE_GENERATE_SERIES` and `SourceSpecPod.series_spec`
+#       (`scan_source.series_scan.SeriesSpec`) — the rows of a
+#       `generate_series` / `range` table function, computed a morsel at a
+#       time; the segment reads no input.
 #   Retired `MorselOp` tag values (4-13) are not reused.
 
-comptime PHYSICAL_PLAN_IR_VERSION: Int = 21
+comptime PHYSICAL_PLAN_IR_VERSION: Int = 22
 
 
 # =============================================================================
@@ -239,6 +244,7 @@ comptime SOURCE_CSV: UInt8 = 4         # Read one local CSV file
 comptime SOURCE_UDF_STEP: UInt8 = 5    # A STEP user function, run once
 comptime SOURCE_ICEBERG: UInt8 = 6     # Read the planned files of one Iceberg snapshot
 comptime SOURCE_JSONL: UInt8 = 7       # Read one newline-delimited JSON file
+comptime SOURCE_GENERATE_SERIES: UInt8 = 8  # Compute the rows of generate_series / range
 
 # MorselOp tags
 comptime OP_FILTER: UInt8 = 0          # Predicate filter (SV-based)
@@ -553,7 +559,7 @@ comptime KEY_DTYPE_COMPOSITE: UInt8 = 9
 
 
 struct SourceSpecPod(Movable):
-    """POD source spec — the closed 8-kind `SOURCE_*` vocabulary as an
+    """POD source spec — the closed 9-kind `SOURCE_*` vocabulary as an
     INLINE descriptor field (source symmetry: the source set is bounded and
     is NOT the growth axis a new SINK kind widens, so it stays inline, not erased).
 
@@ -575,11 +581,14 @@ struct SourceSpecPod(Movable):
         the bound columns (`iceberg_scan_spec`).
       * SOURCE_JSONL: `jsonl_path` + `jsonl_schema` (the keys read, in the
         order the source delivers them, each at the type it is read as).
+      * SOURCE_GENERATE_SERIES: `series_spec`, the generated column, its
+        bounds and its step (`scan_source.series_scan`).
 
     Every field is inert: `String`, `Optional[List[String]]`, `Optional[Expr]`,
     `List[Int]`, `List[Field]`, `List[List[String]]`, `Int`, `Bool`, `Schema`,
     `FsDescriptorPod` (a `UInt8`, a `String`, an `Int`), and `CsvSourceSpec`,
-    `UdfCallSpec` and `IcebergScanSpec` of the same kinds. Passes the inert-IR lint.
+    `UdfCallSpec`, `IcebergScanSpec` and `SeriesSpec` of the same kinds. Passes
+    the inert-IR lint.
 
     ⛔ THE PARQUET ARM IS LOSSY, AND `parquet_spec_is_total` IS HOW A CONSUMER
     FINDS OUT. It carries THREE of `ParquetSourceData`'s ELEVEN fields. Read that
@@ -649,6 +658,7 @@ struct SourceSpecPod(Movable):
     reads, in order, at the type the key's values are read as. A key the schema
     does not name is skipped; a key a line lacks reads NULL. The schema is the
     one the plan was bound at, so the file is never inferred again."""
+    var series_spec: SeriesSpec                  # SOURCE_GENERATE_SERIES (empty = no rows)
 
     def __init__(out self):
         """Empty spec (SOURCE_SINK_OUTPUT/CONCAT default: fill dep_seg_ids)."""
@@ -667,6 +677,7 @@ struct SourceSpecPod(Movable):
         self.iceberg_spec = IcebergScanSpec()
         self.jsonl_path = String("")
         self.jsonl_schema = Schema()
+        self.series_spec = SeriesSpec.empty(String(""), False)
 
     @staticmethod
     def parquet(
@@ -762,6 +773,13 @@ struct SourceSpecPod(Movable):
         s.jsonl_schema = schema^
         return s^
 
+    @staticmethod
+    def generate_series(var spec: SeriesSpec) -> SourceSpecPod:
+        """Mint the SOURCE_GENERATE_SERIES arm: the rows `spec` describes."""
+        var s = SourceSpecPod()
+        s.series_spec = spec^
+        return s^
+
     # PORT(1.0.0): explicit destructor breaks the non-co-inductive
     # Deinitable check on this struct's recursive self-reference.
     # Field destructors still run (verified); ownership unchanged.
@@ -790,7 +808,7 @@ struct SegmentDescPod(Movable):
     var seg_id: Int                     # dense id; index into the runtime's per-seg tables
 
     # ---- SOURCE (tagged POD spec) ----
-    var source_kind: UInt8              # SOURCE_PARQUET | SOURCE_BATCH | SOURCE_SINK_OUTPUT | SOURCE_CONCAT | SOURCE_CSV | SOURCE_UDF_STEP | SOURCE_ICEBERG | SOURCE_JSONL
+    var source_kind: UInt8              # SOURCE_PARQUET | SOURCE_BATCH | SOURCE_SINK_OUTPUT | SOURCE_CONCAT | SOURCE_CSV | SOURCE_UDF_STEP | SOURCE_ICEBERG | SOURCE_JSONL | SOURCE_GENERATE_SERIES
     var source_spec: SourceSpecPod
 
     # ---- OP CHAIN (the LANDED closed tagged union; runtime-N, no comptime over N) ----

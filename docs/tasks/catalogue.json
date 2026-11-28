@@ -695,10 +695,7 @@
     "slug": "fill-gaps-time-series-date-present",
     "category": "Time",
     "question": "How do I fill gaps in a time series so every date is present?",
-    "status": "gap",
-    "issues": [
-      "komira-ai/komira#2343"
-    ]
+    "status": "partial"
   },
   {
     "rank": 82,

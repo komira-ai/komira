@@ -47,11 +47,15 @@
 # sort-merge algorithm hint, a build side the plan does not define, a key that
 # is not a column of its side, a key pair whose types the probe does not
 # compare, and a join whose output names one column twice. Key types: INT64
-# and INT32, in any pairing; FLOAT64 with FLOAT64; STRING with STRING.
+# and INT32, in any pairing; FLOAT64 with FLOAT64; STRING with STRING; DATE32
+# and a TIMESTAMP in microseconds without a time zone, in any pairing (a DATE
+# is its midnight, DuckDB's implicit cast); a TIMESTAMP in microseconds with a
+# time zone with another such (one instant); DATE64 and the other TIMESTAMP
+# units each only with its own type and time-zone presence.
 # =============================================================================
 
 from arrow.arrow_types import ArrowType
-from arrow.schema import Schema
+from arrow.schema import Field, Schema
 from containers.slab import Slab
 from lowering.cut_state import _Cutter, _Pipe
 from lowering.lowered_plan import LoweringInputs, LOWERING_JOIN_UNSERVED
@@ -126,26 +130,43 @@ def _unserved(node: LogicalPlan, what: String) -> Error:
     )
 
 
-def _key_family(arrow_type: ArrowType) -> Int:
-    """The family a key type compares in, or -1: 0 for the integers, 1 for
-    FLOAT64, 2 for STRING."""
-    if arrow_type == ArrowType.INT64 or arrow_type == ArrowType.INT32:
+def _key_family(field: Field) -> Int:
+    """The family a key column compares in, or -1: 0 for the integers, 1 for
+    FLOAT64, 2 for STRING, 3 for DATE32 and a microsecond TIMESTAMP without a
+    time zone (the probe keys a DATE as its midnight in microseconds), 4 for a
+    microsecond TIMESTAMP with a time zone, and one family apiece for DATE64
+    and each other TIMESTAMP unit, with and without a time zone."""
+    var t = field.arrow_type
+    if t == ArrowType.INT64 or t == ArrowType.INT32:
         return 0
-    if arrow_type == ArrowType.FLOAT64:
+    if t == ArrowType.FLOAT64:
         return 1
-    if arrow_type == ArrowType.STRING:
+    if t == ArrowType.STRING:
         return 2
+    if t == ArrowType.DATE32:
+        return 3
+    var zoned = 1 if field.timezone() != "" else 0
+    if t == ArrowType.TIMESTAMP or t == ArrowType.TIMESTAMP_US:
+        return 3 + zoned
+    if t == ArrowType.DATE64:
+        return 5
+    if t == ArrowType.TIMESTAMP_S:
+        return 6 + zoned
+    if t == ArrowType.TIMESTAMP_MS:
+        return 8 + zoned
+    if t == ArrowType.TIMESTAMP_NS:
+        return 10 + zoned
     return -1
 
 
-def _column_type(
+def _key_field(
     node: LogicalPlan, schema: Schema, name: String, side: String
-) raises -> ArrowType:
-    """The type of the column `name` of `schema` (the first so named), or the
+) raises -> Field:
+    """The field of the column `name` of `schema` (the first so named), or the
     refusal naming the side it is missing from."""
     for i in range(schema.num_columns()):
         if schema.field_name(i) == name:
-            return schema.field_at_unchecked(i).arrow_type
+            return schema.field_at_unchecked(i)
     raise _unserved(
         node, "the key '" + name + "' is not a column of the " + side + " side"
     )
@@ -257,8 +278,8 @@ def join_shape(node: LogicalPlan) raises -> JoinShape:
     ref left_schema = jd.left[].output_schema
     ref right_schema = jd.right[].output_schema
     for k in range(n):
-        var lt = _column_type(node, left_schema, jd.left_on[k], "left")
-        var rt = _column_type(node, right_schema, jd.right_on[k], "right")
+        var lt = _key_field(node, left_schema, jd.left_on[k], "left")
+        var rt = _key_field(node, right_schema, jd.right_on[k], "right")
         var lf = _key_family(lt)
         if lf < 0 or lf != _key_family(rt):
             raise _unserved(
@@ -266,11 +287,11 @@ def join_shape(node: LogicalPlan) raises -> JoinShape:
                 "the key pair "
                 + jd.left_on[k]
                 + " ("
-                + String(lt)
+                + String(lt.arrow_type)
                 + ") = "
                 + jd.right_on[k]
                 + " ("
-                + String(rt)
+                + String(rt.arrow_type)
                 + ")",
             )
     var out_names = _names_of(node.output_schema)

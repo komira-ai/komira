@@ -89,6 +89,25 @@ that finds no column raises an `Error` naming the file. `tvf_relation_scan`
 returns a lazy row-oriented scan whose source carries the dialect and the
 file's mtime, so two dialects of one file are two different sources.
 
+`generate_series` and `range` in FROM are table functions over integers, dates
+and timestamps (DuckDB v1.5.6): `generate_series(a, b [, step])` includes `b`,
+`range` excludes it, and the one-argument forms count from 0. The parser reads
+the call into a `SeriesCall` (`sql_series_ast`, plain copyable data: each
+argument's kind and literal value, and the column names of an `AS t(d)` list);
+only literals and NULL are accepted. `sql_series_bind` turns it into a
+`SeriesSpec` and scans the `komira.generate_series` source: integer arguments
+give a BIGINT column, DATE or TIMESTAMP arguments (mixing allowed) with an
+INTERVAL step give TIMESTAMP, a DATE being its midnight. The column is named
+after the function, or the first name of the alias list; the relation answers
+to its alias, else the function name. A NULL argument is no rows, a step away
+from the bound is no rows, and month and year steps clamp to the end of the
+month on the previous value. Refused by name: a zero step (`interval cannot be
+0!`), a column-valued argument, any argument that is not a literal, the shapes
+DuckDB has no overload for (two DATE bounds, an integer step with dates, an
+interval step with integers, strings, decimals, other arities), TIMESTAMPTZ, and
+an interval step beyond 64 bits of microseconds. The scalar spelling (a list
+cell) stays refused in `sql_fn_table`.
+
 The expression binder (`sql_bind_expr`, `sql_bind_call`, `sql_bind_cast`,
 `sql_bind_fn_args`, `sql_bind_fn_nested`, `sql_bind_timestamp`) lowers one
 `SqlExpr` to a plan `Expr` against a schema and a `BindScope`. `sql_bind_expr`
@@ -255,7 +274,9 @@ Nothing is optimized, lowered or run.
 
 `INTERVAL '<n>' <unit>` (also `INTERVAL <n> <unit>`) parses to an `SX_INTERVAL`
 node holding a signed count (magnitude at most 10^9) and a unit. The units
-accepted are YEAR, MONTH, WEEK and DAY, singular or plural. The binder folds
+accepted are YEAR, MONTH, WEEK, DAY, HOUR, MINUTE and SECOND, singular or
+plural (HOUR, MINUTE and SECOND exist for the step of a `generate_series` /
+`range` table function; a DATE fold refuses them by name). The binder folds
 `<constant DATE> + INTERVAL`, `<constant DATE> - INTERVAL` and
 `INTERVAL + <constant DATE>` into a `date32` literal while binding
 (`sql_bind_interval`), in the WHERE, correlated-subquery, aggregate and
@@ -273,8 +294,9 @@ is 12 months, a week 7 days. A clamped day is not restored by the next step
 of a chain (31 Jan + 1 month + 1 month is 29 Mar in 2024). A result outside
 years 1 to 9999 is refused.
 
-Refused by name: a unit outside the accepted four (QUARTER, HOUR, MINUTE,
-SECOND, MILLISECOND, and the rest), a unit written inside the string
+Refused by name: a unit outside the accepted seven (QUARTER, MILLISECOND, and
+the rest), a DATE shifted by an HOUR, MINUTE or SECOND interval (DuckDB answers
+a TIMESTAMP there), a unit written inside the string
 (`'3 month'`), a non-integer or oversize count, a missing unit, a non-constant
 DATE operand (`col + interval '1' day`; the interval is folded at bind time,
 so a column cannot take it), a TIMESTAMP or string operand, and an INTERVAL
@@ -313,6 +335,24 @@ var e = SqlExpr.binary(
 assert_false(e.is_aggregate())
 assert_true(e.contains_aggregate())
 assert_true(e.copy().contains_aggregate())
+```
+
+A series call in FROM:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from sql.sql_parser import parse_sql
+from sql.sql_series_ast import SERIES_ARG_INT
+from sql.sql_token import tokenize
+
+var st = parse_sql(tokenize("SELECT * FROM range(2, 9) AS t(n)"))
+var rel = st.query.from_tables[0].copy()
+assert_equal(rel.rel_alias, "t")
+var call = rel.series.value().copy()
+assert_equal(call.fn_name, "range")
+assert_equal(call.column_names[0], "n")
+assert_equal(Int(call.args[1].kind), Int(SERIES_ARG_INT))
+assert_equal(Int(call.args[1].int_val), 9)
 ```
 
 Looking up a function name:

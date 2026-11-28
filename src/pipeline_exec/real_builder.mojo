@@ -30,6 +30,10 @@
 #            SOURCE_JSONL         the batches the spec's file is read into at
 #                                 the spec's schema, served as a `BatchSource`
 #                                 (`source_jsonl`)
+#            SOURCE_GENERATE_SERIES
+#                                 the column of a generate_series / range
+#                                 spec, computed a morsel at a time as the
+#                                 workers claim them (`source_generate_series`)
 #   op       OP_FILTER            `FilterOp`  (`op_filter`)
 #            OP_PROJECT           `MapOp`     (`op_project`)
 #            OP_LIMIT             `LimitOp`   (`op_limit`)
@@ -166,6 +170,7 @@ from physical_plan.physical_plan import (
     SOURCE_BATCH,
     SOURCE_CONCAT,
     SOURCE_CSV,
+    SOURCE_GENERATE_SERIES,
     SOURCE_ICEBERG,
     SOURCE_JSONL,
     SOURCE_PARQUET,
@@ -193,6 +198,10 @@ from .sink_window import WindowSink
 from .sink_string_group_agg import StringGroupAggSink
 from .source_batch import BatchSource
 from .source_csv import build_csv_source
+from .source_generate_series import (
+    GenerateSeriesSource,
+    build_generate_series_source,
+)
 from .source_iceberg import build_iceberg_source
 from .source_jsonl import build_jsonl_source
 from .source_parquet import (
@@ -260,8 +269,8 @@ struct RealBuilder[
     R: ScanFsOpener = LocalOnlyScanFs,
 ](SegmentBuilder):
     """Builds the real members of a segment: Parquet (local, or on the store
-    `R` opens), batch, sink-output, CSV, concatenation and JSONL sources;
-    filter, project, limit and join probe operators; the collect, aggregation,
+    `R` opens), batch, sink-output, CSV, concatenation, JSONL and
+    generated-series sources; filter, project, limit and join probe operators; the collect, aggregation,
     sort, window and hash build sinks."""
 
     comptime ParquetArm = SourceVariant[
@@ -271,10 +280,15 @@ struct RealBuilder[
     ]
     """A Parquet source: over the local file system (first) or over the
     remote store's (second)."""
+    comptime OutputArm = SourceVariant[
+        SinkOutputSource, GenerateSeriesSource, NoSource
+    ]
+    """A source that reads no file: the output of a producer segment (first)
+    or a generated series (second)."""
     comptime Source = SourceVariant[
         Self.ParquetArm,
         BatchSource,
-        SinkOutputSource,
+        Self.OutputArm,
     ]
     comptime Op = OpVariant[FilterOp, MapOp, LimitOp, HashProbeOp]
     comptime Sink = PipelineSink[
@@ -525,6 +539,12 @@ struct RealBuilder[
             return Self.Source.second(build_iceberg_source(spec, morsel_rows))
         if desc.source_kind == SOURCE_JSONL:
             return Self.Source.second(build_jsonl_source(spec, morsel_rows))
+        if desc.source_kind == SOURCE_GENERATE_SERIES:
+            return Self.Source.third(
+                Self.OutputArm.second(
+                    build_generate_series_source(spec, morsel_rows)
+                )
+            )
         if desc.source_kind == SOURCE_SINK_OUTPUT:
             if len(spec.dep_seg_ids) != 1:
                 raise Error(
@@ -537,8 +557,10 @@ struct RealBuilder[
             var producer = spec.dep_seg_ids[0]
             _check_reads_a_dependency(desc, producer)
             return Self.Source.third(
-                SinkOutputSource(
-                    published.take(producer), producer, morsel_rows
+                Self.OutputArm.first(
+                    SinkOutputSource(
+                        published.take(producer), producer, morsel_rows
+                    )
                 )
             )
         if desc.source_kind == SOURCE_CONCAT:
@@ -561,10 +583,12 @@ struct RealBuilder[
             var concatenated = concat_record_batches_nway(batches^)
             concatenated.schema = merged^
             return Self.Source.third(
-                SinkOutputSource(
-                    concatenated^,
-                    spec.dep_seg_ids[0],
-                    morsel_rows,
+                Self.OutputArm.first(
+                    SinkOutputSource(
+                        concatenated^,
+                        spec.dep_seg_ids[0],
+                        morsel_rows,
+                    )
                 )
             )
         raise Error(
@@ -573,8 +597,8 @@ struct RealBuilder[
             + " of segment "
             + String(desc.seg_id)
             + " is not served (SOURCE_PARQUET, SOURCE_BATCH,"
-            " SOURCE_SINK_OUTPUT, SOURCE_CSV, SOURCE_ICEBERG, SOURCE_CONCAT and"
-            " SOURCE_JSONL are)"
+            " SOURCE_SINK_OUTPUT, SOURCE_CSV, SOURCE_ICEBERG, SOURCE_CONCAT,"
+            " SOURCE_JSONL and SOURCE_GENERATE_SERIES are)"
         )
 
     def build_op(

@@ -5,9 +5,9 @@ import from the modules.
 
 - `op_join_probe.join_multi_key_builder`: `MultiKeyHashJoinBuilder`,
   the hash join over 1 to `MAX_JOIN_KEYS` (8) key columns of INT64, INT32,
-  FLOAT64, STRING or DICTIONARY type, with separate chaining (so duplicate
-  keys keep every match), a bloom filter over the inserted rows, and its INNER
-  (`probe_inner_into`) and LEFT (`probe_left_into`) probes. Matches come back
+  FLOAT64, STRING, DICTIONARY, DATE32, DATE64 or TIMESTAMP type, with
+  separate chaining (so duplicate keys keep every match), a bloom filter over
+  the inserted rows, and its INNER (`probe_inner_into`) and LEFT (`probe_left_into`) probes. Matches come back
   as parallel lists of build and probe row indices; LEFT marks an unmatched
   probe row with build index -1.
 - `op_join_probe.join_multi_key_filter`: `multi_key_probe_semi` and
@@ -77,7 +77,11 @@ import from the modules.
   dispatcher. `join_key_pairs_as_float64` says which key pairs (an
   INT32 or INT64 key against a FLOAT64 key) compare as FLOAT64, the integer
   side cast as DuckDB casts it to DOUBLE, and refuses a STRING key against a
-  numeric key.
+  numeric key. A DATE32 key is its midnight in microseconds, so it compares
+  with a DATE32 key or a microsecond TIMESTAMP key (DuckDB's implicit cast); a
+  DATE32 beyond the TIMESTAMP range is refused. DATE64 and the other TIMESTAMP
+  keys compare by their storage, with a key of the same arrow type only; any
+  other pairing is refused by name.
 - `op_join_probe.join_multi_key`: the key slots' constants, the
   composite hash and the string hash and equality the probes share.
 - `op_join_probe.join_probe`: `execute_join_probe`, the join probe

@@ -76,6 +76,9 @@ comptime SXIVL_YEAR: UInt8 = 0   # 12 months per unit
 comptime SXIVL_MONTH: UInt8 = 1  # calendar months, the day clamps to the month end
 comptime SXIVL_WEEK: UInt8 = 2   # 7 days
 comptime SXIVL_DAY: UInt8 = 3
+comptime SXIVL_HOUR: UInt8 = 4    # sub-day units: a TIMESTAMP step of `generate_series`; no DATE fold
+comptime SXIVL_MINUTE: UInt8 = 5
+comptime SXIVL_SECOND: UInt8 = 6
 
 # `SX_TIMESTAMP.op` — which keyword introduced the literal.
 comptime TSLIT_NAIVE: UInt8 = 0  # `TIMESTAMP '...'`   — wall clock, no zone
@@ -1282,6 +1285,7 @@ struct SqlExpr(Movable):
 # catalog table or `FROM x` can collide with it (the `CAST_DESUGAR_NAME` trick).
 comptime FROM_LESS_RELATION: String = "from-less select"
 
+from .sql_series_ast import SERIES_RELATION_PREFIX, SeriesCall
 from .sql_tvf_options import (
     TVF_NONE, TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO, TVF_ICEBERG,
     HIVE_PARTITIONING_AUTO, HIVE_PARTITIONING_ON, HIVE_PARTITIONING_OFF,
@@ -1291,7 +1295,8 @@ from .sql_tvf_options import (
 
 struct FromRelation(Copyable, Movable):
     """One FROM relation. Either a CATALOG table (resolved by `name` against the
-    `SqlCatalog`) or a `read_parquet('path')` / `read_csv('path', ...)` /
+    `SqlCatalog`), a `generate_series(..)` / `range(..)` call (`series` is
+    `Some`; it reads no input) or a `read_parquet('path')` / `read_csv('path', ...)` /
     `read_json('path', ...)` table-valued function (the file at `tvf_path` is
     bound directly — no catalog entry needed). `tvf_path` is `Some(path)` iff
     this is a TVF, and `tvf_kind` says WHICH reader binds it.
@@ -1317,6 +1322,7 @@ struct FromRelation(Copyable, Movable):
     var tvf_kind: UInt8  # TVF_{NONE,PARQUET,CSV,JSON,AVRO,ICEBERG}
     var tvf_opts: TvfOptions  # the TVF call's semantics-bearing options
     var rel_alias: String  # AS alias ("" if none) — `alias` is a reserved word
+    var series: Optional[SeriesCall]  # Some(call) => `generate_series(..)` / `range(..)` in FROM
 
     def __init__(
         out self,
@@ -1325,12 +1331,26 @@ struct FromRelation(Copyable, Movable):
         rel_alias: String = String(""),
         tvf_kind: UInt8 = TVF_NONE,
         var tvf_opts: TvfOptions = TvfOptions(),
+        var series: Optional[SeriesCall] = None,
     ):
         self.name = name
         self.tvf_path = tvf_path^
         self.tvf_kind = tvf_kind
         self.tvf_opts = tvf_opts^
         self.rel_alias = rel_alias
+        self.series = series^
+
+    @staticmethod
+    def series_of(
+        var call: SeriesCall, rel_alias: String = String("")
+    ) -> FromRelation:
+        """A `generate_series(..)` / `range(..)` table function. Its `name` is
+        `SERIES_RELATION_PREFIX` + the function name (no catalog table can
+        have it) and `rel_alias` is its alias, or the function name."""
+        var name = SERIES_RELATION_PREFIX + call.fn_name
+        return FromRelation(
+            name, None, rel_alias, TVF_NONE, TvfOptions(), Optional(call^),
+        )
 
     @staticmethod
     def named(name: String, rel_alias: String = String("")) -> FromRelation:

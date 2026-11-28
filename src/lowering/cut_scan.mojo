@@ -26,7 +26,12 @@
 # filter an Iceberg scan pushed is kept as an operator because the planner uses
 # it only to skip files.
 # A scan of one newline-delimited JSON file opens a SOURCE_JSONL pipeline
-# (`cut_scan_jsonl`).
+# (`cut_scan_jsonl`). A scan of `generate_series` or `range` (a binding of
+# kind `komira.generate_series`) opens a SOURCE_GENERATE_SERIES pipeline whose
+# spec is the series itself (`SeriesSpec`: type, first value, bound, step,
+# whether the bound is a value); it reads no file and takes no scan facts. It
+# pushes nothing, so a filter or projection becomes operators over its one
+# column.
 #
 # Refused: an unbounded scan, a Hive-partitioned scan that lists its files
 # lazily (a directory scan or a partition predicate) or a Parquet scan on a
@@ -67,7 +72,9 @@ from physical_plan.physical_plan import (
     SOURCE_BATCH,
     SOURCE_CSV,
     SOURCE_ICEBERG,
+    SOURCE_GENERATE_SERIES,
 )
+from scan_source.series_scan import is_series_binding, series_spec_of
 from arrow.arrow_types import ArrowType
 from arrow.schema import Schema
 from scan_source.csv_source import CSV_DEFAULT_DELIMITER, CSV_DEFAULT_HAS_HEADER
@@ -207,6 +214,15 @@ def _open_scan(
         )
         _scan_ops(pipe, node, pushed^, proj^)
         return pipe^
+    if is_series_binding(sd.source):
+        var pipe = _Pipe(
+            SOURCE_GENERATE_SERIES,
+            SourceSpecPod.generate_series(series_spec_of(sd.source.binding_ref())),
+            sd.source.schema(),
+            idx,
+        )
+        _scan_ops(pipe, node, pushed^, proj^)
+        return pipe^
     if sd.source.tag == SOURCE_VARIANT_JSON:
         return _open_jsonl_scan(node, idx, proj^, pushed^)
     raise _uncuttable(node, "a " + sd.source.kind_name() + " source")
@@ -246,8 +262,8 @@ def _scan_ops(
     var proj: Optional[List[String]],
 ) raises:
     """The scan's pushed filter and projection as operators of `pipe`, the
-    filter first, over the source's full schema: the batch, CSV and Iceberg arms
-    carry neither."""
+    filter first, over the source's full schema: the batch, CSV, Iceberg and
+    series arms carry neither."""
     if pushed:
         pipe.append_op(MorselOp.filter(pushed.take()))
     if proj:

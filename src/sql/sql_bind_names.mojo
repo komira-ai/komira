@@ -11,7 +11,7 @@ from sql.sql_ast import (
     SXOP_MUL, SXOP_NE, SXOP_OR, SXOP_POW, SXOP_STARTS_WITH, SXOP_SUB, SXUN_ABS,
     SXUN_IS_NOT_NULL, SXUN_IS_NULL, SXUN_NEGATE, SX_AGG, SX_BINARY, SX_BOOL, SX_CALL,
     SX_CASE, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT, SX_LIKE, SX_NULL, SX_STAR, SX_STRING,
-    SX_INTERVAL, SX_SUBQUERY, SX_TIMESTAMP, SX_UNARY, SXIVL_DAY, SXIVL_MONTH, SXIVL_WEEK,
+    SX_INTERVAL, SX_SUBQUERY, SX_TIMESTAMP, SX_UNARY, SXIVL_DAY, SXIVL_HOUR, SXIVL_MINUTE, SXIVL_MONTH, SXIVL_SECOND, SXIVL_WEEK,
     SelectStmt, SqlExpr, TSLIT_AWARE,
 )
 from sql.sql_bind_ops import _sx_is_big_int
@@ -279,6 +279,12 @@ def _duckdb_expr_text(sx: SqlExpr) raises -> String:
             unit = String("WEEK")
         elif sx.op == SXIVL_DAY:
             unit = String("DAY")
+        elif sx.op == SXIVL_HOUR:
+            unit = String("HOUR")
+        elif sx.op == SXIVL_MINUTE:
+            unit = String("MINUTE")
+        elif sx.op == SXIVL_SECOND:
+            unit = String("SECOND")
         return "INTERVAL '" + String(sx.int_val) + "' " + unit
     if sx.tag == SX_NULL:
         return String("NULL")

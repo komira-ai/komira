@@ -13,6 +13,17 @@
 # their integer side as FLOAT64 keys. A STRING key against a numeric key is
 # refused there.
 #
+# DATE32, DATE64 and the TIMESTAMP flavours are keys too. A DATE32 key is
+# rendered as its midnight in microseconds (days times 86,400,000,000, which is
+# injective over the int32 days, so DATE32 against DATE32 compares by value),
+# so it meets a microsecond TIMESTAMP as DuckDB's implicit DATE-to-TIMESTAMP
+# cast does; a DATE32 beyond the microsecond TIMESTAMP range is refused by
+# name. DATE64 and the TIMESTAMPs (int64 storage) are compared by their
+# storage. TIMESTAMP and TIMESTAMP_US, both microseconds, are one type. Each
+# other pairing of a temporal key (two different units, or a temporal key
+# with an integer, FLOAT64 or STRING key) is refused by name in
+# `join_key_pairs_as_float64` and is never cast.
+#
 # The string hash wave tiles rows into chunks (about four per physical core,
 # at least 4,096 rows, and one chunk below 65,536 rows); each chunk writes only
 # its own rows' slots.
@@ -194,13 +205,40 @@ comptime _KEY_CLASS_INTEGER: Int = 0
 comptime _KEY_CLASS_FLOAT64: Int = 1
 comptime _KEY_CLASS_STRING: Int = 2
 comptime _KEY_CLASS_OTHER: Int = 3
+# One class per temporal arrow type; every class from here up is temporal.
+comptime _KEY_CLASS_DATE32: Int = 4
+comptime _KEY_CLASS_DATE64: Int = 5
+comptime _KEY_CLASS_TIMESTAMP_S: Int = 6
+comptime _KEY_CLASS_TIMESTAMP_MS: Int = 7
+comptime _KEY_CLASS_TIMESTAMP_US: Int = 8
+comptime _KEY_CLASS_TIMESTAMP_NS: Int = 9
+
+
+def _temporal_key_class(at: ArrowType) -> Int:
+    """The key class of a DATE / TIMESTAMP arrow type, or `_KEY_CLASS_OTHER`
+    for any other type. TIMESTAMP and TIMESTAMP_US are both microseconds and
+    share a class."""
+    if at == ArrowType.DATE32:
+        return _KEY_CLASS_DATE32
+    if at == ArrowType.DATE64:
+        return _KEY_CLASS_DATE64
+    if at == ArrowType.TIMESTAMP_S:
+        return _KEY_CLASS_TIMESTAMP_S
+    if at == ArrowType.TIMESTAMP_MS:
+        return _KEY_CLASS_TIMESTAMP_MS
+    if at == ArrowType.TIMESTAMP or at == ArrowType.TIMESTAMP_US:
+        return _KEY_CLASS_TIMESTAMP_US
+    if at == ArrowType.TIMESTAMP_NS:
+        return _KEY_CLASS_TIMESTAMP_NS
+    return _KEY_CLASS_OTHER
 
 
 def _key_class(batch: RecordBatch, name: String) raises -> Int:
     """The comparison class of key column `name`: INT32 / INT64 (plain or a
     numeric dictionary of them), FLOAT64 (plain or numeric dictionary),
-    STRING / string DICTIONARY, or any other type (which
-    `extract_join_key_columns_typed` refuses on its own)."""
+    STRING / string DICTIONARY, DATE32 / DATE64 / each TIMESTAMP unit (one
+    class apiece), or any other type (which `extract_join_key_columns_typed`
+    refuses on its own)."""
     ref col = batch.column_at(batch.schema.column_index(name))
     if col.is_numeric_dict():
         var vt = col.dict_value_dtype()
@@ -216,13 +254,24 @@ def _key_class(batch: RecordBatch, name: String) raises -> Int:
         return _KEY_CLASS_FLOAT64
     if at == ArrowType.STRING or at == ArrowType.DICTIONARY:
         return _KEY_CLASS_STRING
-    return _KEY_CLASS_OTHER
+    return _temporal_key_class(at)
 
 
 def join_key_is_integer(batch: RecordBatch, name: String) raises -> Bool:
     """True iff key column `name` is INT32 or INT64 (plain, or a numeric
     dictionary of them): the side `join_key_pairs_as_float64` casts."""
     return _key_class(batch, name) == _KEY_CLASS_INTEGER
+
+
+def _date_meets_micros(a: Int, b: Int) -> Bool:
+    """True for a DATE32 key against a microsecond TIMESTAMP key: both are
+    rendered as microseconds, so the pair compares as it is."""
+    return a == _KEY_CLASS_DATE32 and b == _KEY_CLASS_TIMESTAMP_US
+
+
+def _key_type_name(batch: RecordBatch, name: String) raises -> String:
+    """The arrow type of key column `name`, for an error message."""
+    return String(batch.column_at(batch.schema.column_index(name)).arrow_type)
 
 
 def join_key_pairs_as_float64(
@@ -233,6 +282,9 @@ def join_key_pairs_as_float64(
 ) raises -> List[Bool]:
     """For each key pair (`probe_keys[k]`, `build_keys[k]`), True iff the pair
     compares as FLOAT64: one side FLOAT64 and the other INT32 or INT64.
+    A DATE or TIMESTAMP key pairs with a key of its own arrow type, and a
+    DATE32 key with a microsecond TIMESTAMP key (then False: both render as
+    microseconds); against any other non-OTHER key it raises.
 
     This is DuckDB's rule: the common type of an integer and a DOUBLE is
     DOUBLE, so the integer side is cast to DOUBLE (rounded to nearest) and
@@ -244,7 +296,8 @@ def join_key_pairs_as_float64(
     `extract_join_key_columns_typed`, which refuses it.
 
     Raises:
-        On a string-against-number pair, a key name that is not a column, or
+        On a string-against-number pair, a pair with a DATE or TIMESTAMP key
+        and a key of another arrow type, a key name that is not a column, or
         key lists of different lengths.
     """
     if len(build_keys) != len(probe_keys):
@@ -259,11 +312,22 @@ def join_key_pairs_as_float64(
         if pc == _KEY_CLASS_OTHER or bc == _KEY_CLASS_OTHER or pc == bc:
             out.append(False)
             continue
+        if _date_meets_micros(pc, bc) or _date_meets_micros(bc, pc):
+            out.append(False)
+            continue
         if pc == _KEY_CLASS_STRING or bc == _KEY_CLASS_STRING:
             raise Error(
                 "join key pair ('" + probe_keys[k] + "', '" + build_keys[k]
                 + "'): a STRING key cannot be compared with a numeric key"
                 " without an explicit cast"
+            )
+        if pc >= _KEY_CLASS_DATE32 or bc >= _KEY_CLASS_DATE32:
+            raise Error(
+                "join key pair ('" + probe_keys[k] + "', '" + build_keys[k]
+                + "'): a " + _key_type_name(probe_batch, probe_keys[k])
+                + " key cannot be compared with a "
+                + _key_type_name(build_batch, build_keys[k])
+                + " key without an explicit cast"
             )
         out.append(True)
     return out^
@@ -315,6 +379,42 @@ def _numeric_key_slots[
     return out^
 
 
+comptime _US_PER_DAY: Int64 = 86_400_000_000
+comptime _MAX_MICROS_DAYS: Int64 = Int64.MAX // _US_PER_DAY
+"""The last day whose midnight is a microsecond TIMESTAMP (the first is its
+negation)."""
+
+
+def _date32_key_slots(
+    ref src: PrimitiveArray[DType.int32], name: String
+) raises -> PrimitiveArray[DType.int64]:
+    """A DATE32 key column in the Int64 key-slot domain: each day's midnight
+    in microseconds, every NULL row `_NAN_SENTINEL_BITS` (never a midnight:
+    that is a multiple of 2^13, the sentinel is odd), the validity bitmap
+    carried onto the result. A day beyond the microsecond TIMESTAMP range
+    raises, naming the column."""
+    var n = src.length
+    var out = PrimitiveArray[DType.int64].allocate(n)
+    for r in range(n):
+        if src.is_null(r):
+            out.set(r, _NAN_SENTINEL_BITS)
+            continue
+        var days = Int64(Int(src.get(r)))
+        if days > _MAX_MICROS_DAYS or days < -_MAX_MICROS_DAYS:
+            raise Error(
+                "join key column '" + name + "': the DATE " + String(days)
+                + " days from 1970-01-01 is beyond the TIMESTAMP range a"
+                " DATE key is compared in"
+            )
+        out.set(r, days * _US_PER_DAY)
+    if src.validity and n > 0:
+        var bm = Bitmap.create(n)
+        Bitmap.copy_bits_into(bm, 0, src.validity.value(), src.offset, n)
+        out.null_count = n - bm.popcount()
+        out.validity = bm^
+    return out^
+
+
 def _int_key_slots[
     dt: DType
 ](ref src: PrimitiveArray[dt], as_float64: Bool) raises -> PrimitiveArray[
@@ -353,7 +453,8 @@ def extract_join_key_columns_typed[
 
     Returns:
         A MultiKeyColumns bundle. `int_keys[k]` holds Int64 bit patterns
-        regardless of input dtype (the value for INT64 and INT32, the
+        regardless of input dtype (the value for INT64, INT32, DATE64 and
+        the TIMESTAMPs (their storage), a DATE32's midnight in microseconds, the
         float-model canonical bits for FLOAT64 and for an integer key cast by
         `as_float64`, the byte hash for STRING /
         DICT; `_NAN_SENTINEL_BITS` for a NULL key).
@@ -366,7 +467,7 @@ def extract_join_key_columns_typed[
 
     Raises:
         Error if any key column has a dtype other than INT64 / INT32 /
-        FLOAT64 / STRING / DICTIONARY.
+        FLOAT64 / STRING / DICTIONARY / DATE32 / DATE64 / TIMESTAMP*.
     """
     var n_keys = len(key_names)
     var out_int = Slab[PrimitiveArray[DType.int64]].with_capacity(n_keys)
@@ -414,6 +515,20 @@ def extract_join_key_columns_typed[
         elif col_dtype == ArrowType.INT32:
             var i32 = col.as_primitive[DType.int32]()
             out_int.append(_int_key_slots[DType.int32](i32, promote))
+            out_str.append(None)
+            out_dict.append(None)
+        elif col_dtype == ArrowType.DATE32:
+            var d32 = col.as_primitive[DType.int32]()
+            out_int.append(_date32_key_slots(d32, key_names[i]))
+            out_str.append(None)
+            out_dict.append(None)
+        elif _temporal_key_class(col_dtype) != _KEY_CLASS_OTHER:
+            # DATE64 and the TIMESTAMPs: int64 storage, keyed as an INT64.
+            var t64 = col.as_primitive[DType.int64]()
+            if t64.validity:
+                out_int.append(_int_key_slots[DType.int64](t64, False))
+            else:
+                out_int.append(t64^)
             out_str.append(None)
             out_dict.append(None)
         elif col_dtype == ArrowType.FLOAT64:
@@ -491,8 +606,8 @@ def extract_join_key_columns_typed[
                 "extract_join_key_columns_typed: unsupported key dtype "
                 + String(col_dtype)
                 + " for column '" + key_names[i] + "'. "
-                + "The supported key types are INT64, INT32, FLOAT64, STRING "
-                + "and DICTIONARY."
+                + "The supported key types are INT64, INT32, FLOAT64, STRING, "
+                + "DICTIONARY, DATE32, DATE64 and TIMESTAMP."
             )
     return MultiKeyColumns(
         int_keys=out_int^,

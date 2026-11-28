@@ -105,6 +105,14 @@ Import each module by name; the package root exports nothing.
   each, a `.jsonl.gz`/`.zst`/`.lz4` (and `.ndjson`, `.json`) file decompressed
   whole. The batches are served as a `BatchSource`; a file of no row is one
   empty batch at the schema. A read that fails names the file.
+- `source_generate_series`: `build_generate_series_source` serves the column of
+  a SOURCE_GENERATE_SERIES spec (`scan_source.series_scan.SeriesSpec`: INT64, or
+  TIMESTAMP in microseconds). It is lazy: the workers claim morsel indices from
+  one atomic cursor and claim `c` computes rows `c * morsel_rows ..` with
+  `series_values`, O(morsel_rows) whatever `c` is, so a series of 2^62 rows is
+  never held and a LIMIT above it ends the run early. The morsel's partition id
+  is `c`, so a collect sink keeps the series' order on any number of workers. A
+  series of no row is one empty batch at the schema.
 - `op_filter`, `op_project`, `op_limit`: the operators. A filter evaluates its
   predicate and records the rows it keeps as the batch's selection mask instead
   of gathering them; all rows kept leaves no mask, none kept is FILTERED_EMPTY,
@@ -382,7 +390,8 @@ Import each module by name; the package root exports nothing.
   they decided are in `docs/design/lowering_and_pipeline.md` (section 4.3).
 - `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
   serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CSV,
-  SOURCE_ICEBERG, SOURCE_JSONL, SOURCE_CONCAT (a UNION ALL: it takes the output of every producer the spec
+  SOURCE_ICEBERG, SOURCE_JSONL, SOURCE_GENERATE_SERIES, SOURCE_CONCAT (a
+  UNION ALL: it takes the output of every producer the spec
   names, after checking each is a dependency, and concatenates them in the
   spec's order into one batch it serves as a `SinkOutputSource`, with each
   column nullable when any producer's is; a concatenation of no segment is
