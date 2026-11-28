@@ -22,8 +22,11 @@ and may they do this. komira's answer is one generic layer that any issuer and a
 
 Out of scope, by design: minting user tokens, a user store, sessions, MFA, API keys, a policy store or role engine, a
 client registry. Those belong to whoever runs the issuer and the PDP. komira ships the verifier, the client and the
-contract, and names no issuer, no deployment and no party of its own. Deferred: browser login (OIDC authorization
-code with PKCE), token exchange (RFC 8693), DPoP (RFC 9449), mTLS-bound tokens (RFC 8705), AuthZEN search endpoints.
+contract, and this layer names no issuer, no deployment and no party of its own. Deferred here: browser login (OIDC
+authorization code with PKCE), token exchange (RFC 8693), DPoP (RFC 9449), mTLS-bound tokens (RFC 8705), AuthZEN search
+endpoints. An issuer that komira would ship, browser login included, is specified in
+[oidc_issuer.md](oidc_issuer.md) (design, not built); until it exists, minting tokens stays with whoever runs the
+issuer.
 
 ## What exists, and what is missing?
 
