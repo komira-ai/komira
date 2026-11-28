@@ -921,8 +921,8 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
             #
             # ⚠ THE DIALECT IS THE DEFAULT HERE, ON PURPOSE. This factory's
             # signature carries no options, so it cannot honour a non-default
-            # `delimiter` / `has_header` / `quote_style_tag` — and dropping an
-            # option is the one thing `sql_tvf_bind`'s module note forbids. A
+            # `delimiter` / `has_header` / `skip` / `quote_style_tag` — and
+            # dropping an option is the one thing `sql_tvf_bind`'s module note forbids. A
             # caller with options therefore calls `scan_from_source` with a
             # fully-populated `CsvSource` instead; `tvf_relation_scan` is that
             # caller and is the reason `read_csv('f', delim='|')` has a

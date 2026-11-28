@@ -14,7 +14,7 @@
 # schema (the files' columns, then the partition columns). An in-memory scan
 # opens a SOURCE_BATCH pipeline over a ParamTable batch handle. A CSV scan
 # (`read_csv`) opens a SOURCE_CSV pipeline whose spec carries the file's path,
-# its dialect (delimiter, header, quote style) and every column of the file
+# its dialect (delimiter, header, quote style, lines skipped) and every column of the file
 # with the type the plan bound it at, so the reader decodes at the bound
 # schema and never infers a second one. A scan of an Iceberg table (a binding
 # of kind `komira.iceberg.table`) opens a SOURCE_ICEBERG pipeline whose spec is
@@ -70,7 +70,11 @@ from physical_plan.physical_plan import (
 )
 from arrow.arrow_types import ArrowType
 from arrow.schema import Schema
-from scan_source.csv_source import CSV_DEFAULT_DELIMITER, CSV_DEFAULT_HAS_HEADER
+from scan_source.csv_source import (
+    CSV_DEFAULT_DELIMITER,
+    CSV_DEFAULT_HAS_HEADER,
+    CSV_DEFAULT_SKIP,
+)
 from scan_source.source_variant import (
     SOURCE_VARIANT_PARQUET,
     SOURCE_VARIANT_IN_MEMORY,
@@ -270,7 +274,7 @@ def _csv_spec(source: SourceVariant, full: Schema) -> SourceSpecPod:
     A missing dialect parameter means the CSV default (a comma, a header row,
     RFC 4180), as the row reader's options walker reads it, never the
     parameter table's own default of 0, which would be a NUL delimiter and no
-    header."""
+    header, and no line skipped."""
     ref params = source.binding_ref().params
     var names = List[String]()
     var types = List[ArrowType]()
@@ -294,4 +298,5 @@ def _csv_spec(source: SourceVariant, full: Schema) -> SourceSpecPod:
         Int(params.get_i64(String("quote_style_tag"), Int64(0))),
         names^,
         types^,
+        Int(params.get_i64(String("skip"), Int64(CSV_DEFAULT_SKIP))),
     ))

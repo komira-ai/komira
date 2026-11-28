@@ -49,8 +49,8 @@
 `komira_ctx_new`, `komira_ctx_new_with_options`, `komira_ctx_free`, `komira_last_error`, `komira_last_error_code`, `komira_last_error_step`, the source and
 render calls, the three credential calls, `komira_sql_stream`,
 `komira_register_csv` and `komira_register_json`, the four run-control
-calls, `komira_sql_stream_run`, `komira_plan_stream`, `komira_register_arrow_stream`
-and `komira_add_sql_binding`). It is the one file that holds pointers and is not part of this
+calls, `komira_sql_stream_run`, `komira_plan_stream`, `komira_register_arrow_stream`,
+`komira_add_sql_binding`, `komira_csv_binding_with_skip` and `komira_register_csv_with_skip`). It is the one file that holds pointers and is not part of this
 Mojo package; `libkomira` is built from it by the `libkomira` target.
 """
 

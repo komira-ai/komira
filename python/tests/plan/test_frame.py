@@ -945,7 +945,7 @@ ALLOWED_IMPORTS = {
     "typing:Any", "re",
     # The notebook display (komira/_display.py): it escapes HTML and formats
     # a result's rows with pyarrow, and reads no stream.
-    ".:_display", "html", "collections.abc:Sequence", "pyarrow", "pyarrow.compute",
+    ".:_display", "html", "collections.abc:Sequence", "collections.abc:Iterable", "pyarrow", "pyarrow.compute",
     ".:_write", "collections.abc:Mapping",
     # DataFrame.resample (komira/_resample.py) builds the bucket and a GroupBy.
     ".:_resample", "._frame:DataFrame", "._groupby:GroupBy",
@@ -1064,6 +1064,23 @@ def test_read_csv_header_must_be_infer_zero_or_none_before_any_library_call():
     )
     for header in (1, True, False, "first", 2.5):
         refuses(lambda: komira.read_csv(PATH, header=header), UnsupportedOperation, message.format(header))
+
+
+def test_read_csv_skiprows_of_row_numbers_or_a_function_is_unbuilt_before_any_library_call():
+    message = (
+        "read_csv(skiprows=<{0}>) drops the rows it names or selects, which komira does not build: "
+        "pass the number of lines to skip at the start of the file, or None"
+    )
+    cases = (([0], "list"), ((0, 1), "tuple"), ({0}, "set"), (range(2), "range"), (lambda i: i == 0, "function"))
+    for skiprows, form in cases:
+        refuses(lambda: komira.read_csv(PATH, skiprows=skiprows), UnsupportedOperation, message.format(form))
+
+
+def test_read_csv_skiprows_that_is_not_a_count_is_refused_before_any_library_call():
+    refuses(lambda: komira.read_csv(PATH, skiprows=True), TypeError, "skiprows must be None or an int, not bool")
+    refuses(lambda: komira.read_csv(PATH, skiprows="1"), TypeError, "skiprows must be None or an int, not str")
+    refuses(lambda: komira.read_csv(PATH, skiprows=1.5), TypeError, "skiprows must be None or an int, not float")
+    refuses(lambda: komira.read_csv(PATH, skiprows=-1), ValueError, "skiprows must be 0 or more, not -1")
 
 
 def test_read_csv_refuses_chunked_reading_by_name_before_any_library_call():

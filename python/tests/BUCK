@@ -110,6 +110,22 @@ c_shared_lib(
 )
 
 c_shared_lib(
+    name = "fake_v1_10",
+    target_os = True,
+    srcs = ["fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=1010"],
+    out = "libkomira_fake_v1_10.so",
+)
+
+c_shared_lib(
+    name = "fake_v1_11",
+    target_os = True,
+    srcs = ["fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=1011"],
+    out = "libkomira_fake_v1_11.so",
+)
+
+c_shared_lib(
     name = "fake_modes",
     target_os = True,
     srcs = ["fake_libkomira.c"],
@@ -326,6 +342,26 @@ _ISA_FIXTURES = [
     deps = ["//python:komira"],
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
+
+# The CSV skip on the stand-ins of ABI 1.11 and 1.10: a skip above 0 reaches
+# komira_csv_binding_with_skip and komira_register_csv_with_skip with the skip
+# as given, a skip of 0 reaches the calls of 1.1 and 1.5 whichever library it
+# is, and a 1.10 library refuses a skip above 0 naming ABI 1.11 and serves a
+# skip of 0; a boolean, a non-integer and a negative skip are refused before
+# any call.
+[python_binding_test(
+    name = "csv_skip{}_test".format(v) + p["suffix"],
+    src = "test_csv_skip.py",
+    args = [
+        "--fake",
+        "fake_v1_{}".format(v),
+        "--version",
+        "10{}".format(v),
+    ],
+    data = {"fake_v1_{}/libkomira.so".format(v): ":fake_v1_{}".format(v)},
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS for v in (10, 11)]
 
 # Credential objects and sealing them on a session, on the stand-in's fake
 # store: the name grammar and reserved names, each field's type, emptiness,
@@ -588,7 +624,7 @@ c_shared_lib(
 # Session.register_csv and register_json on the real library, over the
 # fixtures: the names, types and rows the engine infers, NULL where a file has
 # no value, the same schema and rows as read_csv and read_json; the delimiter,
-# all_varchar and header arguments; a pathlib.Path, a relative path and `~`
+# all_varchar, header and skip arguments; a pathlib.Path, a relative path and `~`
 # resolved when the call is made; a missing and an empty file refused with the
 # engine's message naming the absolute path; a taken name refused word for
 # word; the argument checks and a closed session.
@@ -600,6 +636,7 @@ c_shared_lib(
         "events.jsonl": "fixtures/events.jsonl",
         "libkomira": LIBKOMIRA,
         "people.csv": "fixtures/people.csv",
+        "people_noted.csv": "fixtures/people_noted.csv",
         "people_pipe.csv": "fixtures/people_pipe.csv",
         "two_columns.parquet": PARQUET,
     },

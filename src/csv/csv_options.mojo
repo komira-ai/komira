@@ -77,6 +77,7 @@ struct CsvReadOptions(Copyable, Movable, Deinitable):
     Defaults mirror pandas:
       - delimiter = b','
       - has_header = True
+      - skip = 0 (raw lines dropped before the header)
       - quote = b'"'
       - null_strings = ["", "NULL", "NA", "NaN", "null"]
       - true_strings = ["true", "TRUE", "T", "1", "yes", "Y"]
@@ -90,6 +91,7 @@ struct CsvReadOptions(Copyable, Movable, Deinitable):
     var delimiter: UInt8
     var quote: UInt8
     var has_header: Bool
+    var skip: Int
     var decimal_separator: UInt8
 
     # Bounded heap-owning fields (pointer-free via Array cap)
@@ -191,6 +193,7 @@ struct CsvReadOptions(Copyable, Movable, Deinitable):
         self.delimiter = UInt8(ord(","))
         self.quote = UInt8(ord('"'))
         self.has_header = True
+        self.skip = 0
         self.decimal_separator = UInt8(ord("."))
 
         # Initialize Arrays (Mojo 1.0.0b1 requires explicit fill_value
@@ -258,6 +261,7 @@ struct CsvReadOptions(Copyable, Movable, Deinitable):
         out.delimiter = self.delimiter
         out.quote = self.quote
         out.has_header = self.has_header
+        out.skip = self.skip
         out.decimal_separator = self.decimal_separator
         out.null_strings = Array[String, MAX_NULL_STRINGS](fill=String(""))
         out.true_strings = Array[String, MAX_TRUE_FALSE_STRINGS](fill=String(""))
@@ -388,6 +392,7 @@ struct CsvReadOptions(Copyable, Movable, Deinitable):
         self.infer_rows = infer_rows
         self.max_row_bytes = max_row_bytes
         # Defaults
+        self.skip = 0
         self.date_format = String("")
         self.per_column_date_formats = Array[
             String, MAX_DATE_FORMATS

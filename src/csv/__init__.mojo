@@ -23,6 +23,7 @@ from .csv_options import (
     QUOTE_STYLE_TAG_EXCEL,
     QUOTE_STYLE_TAG_POSIX,
 )
+from .skip_lines import csv_skip_lines_end
 from .null_detection import is_null_cell, is_true_cell, is_false_cell
 from .csv_scanner_phase1 import (
     Row,

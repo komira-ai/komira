@@ -121,6 +121,7 @@ class Session:
         delimiter: str = ",",
         header: bool = True,
         all_varchar: bool = False,
+        skip: int = 0,
     ) -> None:
         """Registers the local CSV file at `path` as the table `name`, the
         table SQL's `read_csv` makes of the same file with the same options.
@@ -132,22 +133,26 @@ class Session:
         column a string. A query on a table registered with `header=False`
         raises `KomiraError` naming `header=false`, as `read_csv(...,
         header=false)` does: the engine does not yet name the columns of a
-        file without a header.
+        file without a header. `skip` is the number of lines to skip at the
+        start of the file before the header, as in SQL's `read_csv(...,
+        skip = n)` (pandas calls it `skiprows`); the schema is inferred after
+        them and every later query reads the file after them. A `skip` that
+        leaves no line of the file raises `KomiraError`.
 
         A missing, empty or unreadable file, or a `name` the session already
         has a table under (of any kind, in any case), raises `KomiraError`
         with the engine's message, status -3, and registers nothing. A
         relative `path` is resolved against the working directory now and `~`
         is expanded. An argument of the wrong type is a `TypeError`, and an
-        empty `name` or a `delimiter` that is not one ASCII character a
-        `ValueError`, both raised before the library is called. Needs
-        libkomira ABI 1.5.
+        empty `name`, a `delimiter` that is not one ASCII character or a
+        negative `skip` a `ValueError`, both raised before the library is
+        called. Needs libkomira ABI 1.5, and ABI 1.11 when `skip` is not 0.
         """
         _check_name(name)
         path = _local_path(path)
         with self._held():
             self._native.register_csv(
-                self._live(), name, path, delimiter=delimiter, header=header, all_varchar=all_varchar
+                self._live(), name, path, delimiter=delimiter, header=header, all_varchar=all_varchar, skip=skip
             )
 
     def register_json(self, name: str, path: str | os.PathLike[str]) -> None:
@@ -333,12 +338,13 @@ class Session:
         with self._held():
             return self._native.parquet_schema(self._live(), path)
 
-    def _csv_binding(self, path: str, *, delimiter: str, header: bool) -> bytes:
+    def _csv_binding(self, path: str, *, delimiter: str, header: bool, skip: int = 0) -> bytes:
         """The `WireScanBinding` bytes of the local CSV file at the absolute
-        `path` (`komira_csv_binding`), its columns inferred now."""
+        `path` (`komira_csv_binding`, or `komira_csv_binding_with_skip` for a
+        non-zero `skip`), its columns inferred now after the skipped lines."""
         with self._held():
             return self._native.csv_binding(
-                self._live(), path, delimiter=delimiter, has_header=header, all_varchar=False
+                self._live(), path, delimiter=delimiter, has_header=header, all_varchar=False, skip=skip
             )
 
     def _json_binding(self, path: str) -> bytes:

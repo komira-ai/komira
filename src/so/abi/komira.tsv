@@ -1,4 +1,4 @@
-version	1.10
+version	1.11
 # The C ABI of libkomira. One row per export: symbol, return type, argument types, the version that added it.
 # Types are Mojo's, origins dropped; see tools/build/mojo/abi_golden.bzl. Adding a row raises the minor version.
 # Changing or removing one raises the major version (status.mojo: ABI_MAJOR, ABI_MINOR).
@@ -68,3 +68,5 @@ constant	KOMIRA_STEP_OPTIMIZE	3	1.7
 constant	KOMIRA_STEP_LOWER	4	1.7
 constant	KOMIRA_STEP_EXECUTE	5	1.7
 komira_add_sql_binding	Int32	Handle,CStr,ConstBytes,UInt64,Int32	1.10
+komira_csv_binding_with_skip	Int32	Handle,CStr,UInt8,Int32,Int32,Int64,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.11
+komira_register_csv_with_skip	Int32	Handle,CStr,CStr,UInt8,Int32,Int32,Int64	1.11

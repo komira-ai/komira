@@ -1,1 +1,0 @@
-UnsupportedOperation: parse: SQL not supported: read_csv option 'skip' is not implemented. It is REJECTED rather than ignored — an ignored option can change the result silently. at line 1, column 44

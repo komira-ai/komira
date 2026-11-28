@@ -109,6 +109,21 @@ def main(args):
     assert got == b"csv:c.csv:59:1:0", got
     got = native.csv_binding(ctx, "c.csv", delimiter="\t", has_header=False, all_varchar=True)
     assert got == b"csv:c.csv:9:0:1", got
+    # A skip of 0 is the same call; one above 0 needs the call of ABI 1.11,
+    # which this library lacks, and a skip that is not a count is refused
+    # before either.
+    got = native.csv_binding(ctx, "c.csv", delimiter=";", has_header=True, all_varchar=False, skip=0)
+    assert got == b"csv:c.csv:59:1:0", got
+    want = "komira_csv_binding_with_skip needs libkomira ABI version 1.11; the library at {} is 1.1".format(native.path)
+    expect_error(
+        lambda: native.csv_binding(ctx, "c.csv", delimiter=";", has_header=True, all_varchar=False, skip=1),
+        want,
+        None,
+    )
+    e = raised(lambda: native.csv_binding(ctx, "c.csv", delimiter=";", has_header=True, all_varchar=False, skip=True))
+    assert type(e) is TypeError and str(e) == "skip must be an int, not bool", repr(e)
+    e = raised(lambda: native.csv_binding(ctx, "c.csv", delimiter=";", has_header=True, all_varchar=False, skip=-1))
+    assert type(e) is ValueError and str(e) == "skip must be 0 or more, and fit in 64 bits, not -1", repr(e)
     assert native.json_binding(ctx, "j.json") == b"json:j.json"
     assert native.plan_render(ctx, b"a\0b") == "plan:3:610062"
     assert native.plan_render(ctx, bytearray(b"\x01")) == "plan:1:01"

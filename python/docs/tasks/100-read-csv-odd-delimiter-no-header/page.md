@@ -1,6 +1,6 @@
 # How do I read a CSV with an odd delimiter, no header or extra lines?
 
-Name the delimiter, `register_csv(..., delimiter="|")` in SQL or `komira.read_csv(..., sep=";")` on the pandas-shaped frame; a file with no header line, or with lines to skip above the header, is not read yet.
+Name the delimiter, `register_csv(..., delimiter="|")` in SQL or `komira.read_csv(..., sep=";")` on the pandas-shaped frame; `skip = n` (SQL) or `skiprows=n` skips lines above the header. A file with no header line is not read yet.
 
 <!-- include example.py -->
 ```python
@@ -20,6 +20,22 @@ with komira.Session() as s:
 # pandas-shaped: sep= is the delimiter, as in pandas.
 eu = komira.read_csv("orders_eu.csv", sep=";")
 print(eu.sort_values("id").materialize().to_arrow().to_pylist())
+
+# A file with a note line above its header.
+Path("notes.csv").write_text("exported by the till\nid,name,qty\n5,Ed,1\n6,Flo,4\n")
+
+# SQL: skip = n drops the first n lines before the header.
+with komira.Session() as s:
+    print(s.sql("SELECT * FROM read_csv('notes.csv', skip = 1) ORDER BY id").to_arrow().to_pylist())
+
+# SQL, registered: skip= on register_csv does the same.
+with komira.Session() as s:
+    s.register_csv("notes", "notes.csv", skip=1)
+    print(s.sql("SELECT * FROM notes ORDER BY id").to_arrow().to_pylist())
+
+# pandas-shaped: skiprows= is the number of lines to skip, as in pandas.
+notes = komira.read_csv("notes.csv", skiprows=1)
+print(notes.sort_values("id").materialize().to_arrow().to_pylist())
 ```
 
 Output:
@@ -28,13 +44,19 @@ Output:
 ```text
 [{'id': 1, 'name': 'Ana', 'qty': 3}, {'id': 2, 'name': 'Bo', 'qty': 5}]
 [{'id': 3, 'name': 'Cy', 'qty': 7}, {'id': 4, 'name': 'Di', 'qty': 2}]
+[{'id': 5, 'name': 'Ed', 'qty': 1}, {'id': 6, 'name': 'Flo', 'qty': 4}]
+[{'id': 5, 'name': 'Ed', 'qty': 1}, {'id': 6, 'name': 'Flo', 'qty': 4}]
+[{'id': 5, 'name': 'Ed', 'qty': 1}, {'id': 6, 'name': 'Flo', 'qty': 4}]
 ```
 
 ## Notes
 
 - A delimiter is one ASCII character: `|`, `;`, a tab, or any other single ASCII character. `read_csv` takes it as `sep=`, `register_csv` as `delimiter=`, and SQL's `read_csv('file', delim = ';')` as `delim`.
 - The first line must hold the column names. A file with no header line is not read yet: a table registered with `header=False` is refused when a query reads it, because the engine would name the columns `col_0`, `col_1`, ... where DuckDB names them `column0`, `column1`, ... `probe_no_header.py` beside this page tries it and must fail with the line in `probe_no_header.error.txt`. komira-ai/komira#2364 tracks it.
-- Skipping lines above the header (DuckDB's `skip`, pandas' `skiprows`) is not read yet: SQL's `read_csv` refuses the `skip` option by name rather than ignore it, and `komira.read_csv` has no `skiprows`. `probe_skip_lines.py` tries it and must fail with the line in `probe_skip_lines.error.txt`. komira-ai/komira#2365 tracks it.
+- Skipping lines above the header works: SQL's `read_csv('file', skip = n)` and `register_csv(..., skip=n)` skip the first `n` lines, as DuckDB's `skip` does, and `komira.read_csv(..., skiprows=n)` takes pandas' integer `skiprows`. The first line after the skipped lines holds the column names (or the first record, with `header=False`).
+- Skipped lines are raw lines, ending at a line feed, a carriage return plus line feed, or a lone carriage return. A quote in a skipped note does not open a field, and a byte-order mark counts as part of line 1.
+- A negative skip is refused, as DuckDB refuses it. A skip that leaves no line to read is refused with `CSV_SKIP_PAST_END`, where DuckDB either fails to detect the file's dialect or answers an empty table; komira names the error instead.
+- pandas' `skiprows` as a list of row numbers or a callable drops chosen rows, which komira does not build: `komira.read_csv` refuses it with `UnsupportedOperation`. Only a whole number of lines is read.
 - The day a probe runs to the end, this page's check goes red, and the page and the catalogue status change with it.
 
 ## Related

@@ -36,12 +36,28 @@
 #                                       a `|` delimiter with a comma inside a
 #                                       cell; a header with no row is no row
 #                                       of VARCHAR columns.
+#   test_skip_csv_equals_duckdb         skip = 2 over a file with two note
+#                                       lines above the header (one holding a
+#                                       comma): the types, the rows with a
+#                                       quoted line break, an aggregate;
+#                                       skip = 1 with a `|` delimiter; skip = 1
+#                                       over a note holding a quote; skip = 0
+#                                       equals no skip.
 #   test_gzip_csv_equals_duckdb         every case above over gzip copies.
 #   test_every_case_is_run              each case of cases.sql belongs to one
 #                                       of the tests above, so none is skipped.
 #   test_a_missing_csv_is_refused_at_bind
 #                                       a path with no file is refused before
 #                                       anything runs.
+#   test_a_negative_skip_is_refused_at_parse
+#                                       skip = -1 is refused with the exact
+#                                       text, as DuckDB refuses it.
+#   test_a_skip_past_every_line_is_refused_at_bind
+#                                       skip = 99 names CSV_SKIP_PAST_END and
+#                                       the file's line count.
+#   test_skip_with_no_header_row_is_refused_at_lower
+#                                       skip with header=false is refused by
+#                                       name like header=false alone.
 #   test_a_csv_with_no_header_row_is_refused_at_lower
 #                                       header=false is refused by name, not
 #                                       answered with column names DuckDB
@@ -73,6 +89,9 @@ def _files() -> List[String]:
     out.append("nulls.csv")
     out.append("pipe.csv")
     out.append("header_only.csv")
+    out.append("skip.csv")
+    out.append("skip_pipe.csv")
+    out.append("skip_quote.csv")
     return out^
 
 
@@ -83,6 +102,8 @@ def _prefixes() -> List[String]:
     out.append("nulls_")
     out.append("pipe_")
     out.append("header_only_")
+    out.append("skip_")
+    out.append("skip0_")
     return out^
 
 comptime _DESCRIBE = "SELECT column_name, column_type FROM (DESCRIBE "
@@ -259,6 +280,11 @@ def test_dialect_and_header_only_csv_equal_duckdb() raises:
     _check_prefix("header_only_", False)
 
 
+def test_skip_csv_equals_duckdb() raises:
+    _check_prefix("skip_", False)
+    _check_prefix("skip0_", False)
+
+
 def test_gzip_csv_equals_duckdb() raises:
     var prefixes = _prefixes()
     for i in range(len(prefixes)):
@@ -267,7 +293,7 @@ def test_gzip_csv_equals_duckdb() raises:
 
 def test_every_case_is_run() raises:
     var cases = _cases()
-    assert_true(len(cases) >= 17, "cases.sql holds " + String(len(cases)) + " cases")
+    assert_true(len(cases) >= 23, "cases.sql holds " + String(len(cases)) + " cases")
     for i in range(len(cases)):
         var known = False
         var prefixes = _prefixes()
@@ -293,6 +319,57 @@ def test_a_csv_with_no_header_row_is_refused_at_lower() raises:
         ctx,
         "SELECT * FROM read_csv('" + data_path("pipe.csv")
         + "', delim = '|', header = false)",
+    )
+    assert_true(Bool(out.refusal))
+    assert_equal(out.refusal.value().step, String(STEP_LOWER))
+    assert_true(
+        "LOWERING_UNCUTTABLE_NODE" in out.refusal.value().reason,
+        out.refusal.value().reason,
+    )
+    assert_true(
+        "header=false" in out.refusal.value().reason,
+        out.refusal.value().reason,
+    )
+
+
+def test_a_negative_skip_is_refused_at_parse() raises:
+    var ctx = EngineContext(EngineOptions(worker_count=1))
+    var out = run_sql(
+        ctx, "SELECT * FROM read_csv('" + data_path("skip.csv") + "', skip = -1)"
+    )
+    assert_true(Bool(out.refusal))
+    assert_equal(out.refusal.value().step, String("parse"))
+    assert_equal(len(out.batches), 0)
+    assert_equal(
+        out.refusal.value().reason,
+        "SQL not supported: read_csv skip=-1 — skip is the number of lines to"
+        " skip at the start of the file and must be 0 or more (DuckDB refuses"
+        " a negative skip too)",
+    )
+
+
+def test_a_skip_past_every_line_is_refused_at_bind() raises:
+    var ctx = EngineContext(EngineOptions(worker_count=1))
+    var out = run_sql(
+        ctx, "SELECT * FROM read_csv('" + data_path("skip.csv") + "', skip = 99)"
+    )
+    assert_true(Bool(out.refusal))
+    assert_equal(out.refusal.value().step, String(STEP_BIND))
+    assert_equal(len(out.batches), 0)
+    assert_true(
+        "CSV_SKIP_PAST_END: skip=99 skips every line of the file, which has 8"
+        " lines; no header or record is left to read"
+        in out.refusal.value().reason,
+        out.refusal.value().reason,
+    )
+
+
+def test_skip_with_no_header_row_is_refused_at_lower() raises:
+    var ctx = EngineContext(EngineOptions(worker_count=1))
+    var out = run_sql(
+        ctx,
+        "SELECT * FROM read_csv('" + data_path("skip.csv")
+        + "', skip = 2, header = false)",
     )
     assert_true(Bool(out.refusal))
     assert_equal(out.refusal.value().step, String(STEP_LOWER))

@@ -4,7 +4,9 @@
 // answering a stand-in Arrow C stream, when it is 1.5 or later,
 // komira_register_csv and komira_register_json, when it is 1.6 or later, the
 // run handle calls and komira_sql_stream_run, and when it is 1.7 or later,
-// komira_last_error_code and komira_last_error_step (all below). The tests load it to reach what the real
+// komira_last_error_code and komira_last_error_step, when it is 1.11 or later,
+// komira_csv_binding_with_skip and komira_register_csv_with_skip, which log
+// the skip they are given (all below). The tests load it to reach what the real
 // library never does:
 //
 // - FAKE_VERSION sets the ABI version it reports (default 1001, which is 1.1):
@@ -520,9 +522,16 @@ EXPORT void komira_fake_options(int64_t *out) { memcpy(out, options, sizeof opti
 #if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 5
 // ABI 1.5: komira_register_csv and komira_register_json, which a loader of
 // that minor requires; like komira_register_parquet, the name sets the mode.
+static char csv_log[256];
+
+// What the CSV registration calls were given, one entry each: "csv;" for
+// komira_register_csv and "skip=<n>;" for komira_register_csv_with_skip.
+EXPORT const char *komira_fake_register_csv_log(void) { return csv_log; }
+
 EXPORT int32_t komira_register_csv(void *ctx, const char *name, const char *path, uint8_t delimiter,
                                    int32_t has_header, int32_t all_varchar) {
   (void)ctx;
+  strncat(csv_log, "csv;", sizeof csv_log - strlen(csv_log) - 1);
   (void)path;
   (void)delimiter;
   (void)has_header;
@@ -586,4 +595,64 @@ EXPORT int32_t komira_last_error_step(void *ctx) {
   return err_step;
 }
 
+#endif
+
+#if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 8
+// ABI 1.8 to 1.10: the calls a loader of those minors requires, answering by
+// the mode as the registration calls do.
+EXPORT int32_t komira_plan_stream(void *ctx, const char *plan, uint64_t plan_len, struct ArrowArrayStream *out) {
+  (void)ctx;
+  (void)plan;
+  (void)plan_len;
+  (void)out;
+  return mode_status();
+}
+#endif
+
+#if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 9
+EXPORT int32_t komira_register_arrow_stream(void *ctx, const char *name, struct ArrowArrayStream *stream) {
+  (void)ctx;
+  (void)stream;
+  snprintf(mode, sizeof mode, "%s", name);
+  return mode_status();
+}
+#endif
+
+#if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 10
+EXPORT int32_t komira_add_sql_binding(void *ctx, const char *name, const char *source, uint64_t source_len,
+                                      int32_t scope) {
+  (void)ctx;
+  (void)source;
+  (void)source_len;
+  (void)scope;
+  snprintf(mode, sizeof mode, "%s", name);
+  return mode_status();
+}
+#endif
+
+#if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 11
+// ABI 1.11: the CSV binding and registration with a skip. The binding's
+// answer names the skip it was given; the registration logs it.
+EXPORT int32_t komira_csv_binding_with_skip(void *ctx, const char *path, uint8_t delimiter, int32_t has_header,
+                                            int32_t all_varchar, int64_t skip, uint8_t *b, uint64_t cap,
+                                            uint64_t *n) {
+  (void)ctx;
+  snprintf(out, sizeof out, "csv:%s:%u:%d:%d:%lld", path, (unsigned)delimiter, (int)has_header, (int)all_varchar,
+           (long long)skip);
+  return answer(out, b, cap, n);
+}
+
+EXPORT int32_t komira_register_csv_with_skip(void *ctx, const char *name, const char *path, uint8_t delimiter,
+                                             int32_t has_header, int32_t all_varchar, int64_t skip) {
+  (void)ctx;
+  (void)path;
+  (void)delimiter;
+  (void)has_header;
+  (void)all_varchar;
+  char entry[40];
+  snprintf(entry, sizeof entry, "skip=%lld;", (long long)skip);
+  strncat(csv_log, entry, sizeof csv_log - strlen(csv_log) - 1);
+  snprintf(mode, sizeof mode, "%s", name);
+  return mode_status();
+}
 #endif

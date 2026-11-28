@@ -53,6 +53,7 @@ def test_tvf_options_and_from_relations() raises:
     assert_false(o.all_varchar)
     assert_true(o.has_header)
     assert_equal(Int(o.delimiter), ord(","))
+    assert_equal(o.skip, 0)
 
     var t = FromRelation.named("lineitem", "l")
     assert_equal(t.name, "lineitem")

@@ -122,11 +122,11 @@ def test_iceberg_scan_refuses_the_options_of_other_readers() raises:
     var csv_names: List[String] = [
         "header = true", "has_header = true",
         "delim = '|'", "sep = '|'", "delimiter = '|'",
-        "quote = '\"'", "escape = '\"'", "parallel = true",
+        "quote = '\"'", "escape = '\"'", "parallel = true", "skip = 1",
     ]
     var keys: List[String] = [
         "header", "has_header", "delim", "sep", "delimiter", "quote", "escape",
-        "parallel",
+        "parallel", "skip",
     ]
     for i in range(len(csv_names)):
         assert_equal(

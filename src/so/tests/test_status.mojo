@@ -54,7 +54,7 @@ def test_step_values() raises:
 
 def test_version_scheme() raises:
     var v = abi_version()
-    assert_equal(v, Int32(1010))
+    assert_equal(v, Int32(1011))
     assert_equal(v // Int32(1000), ABI_MAJOR)
     assert_equal(v % Int32(1000), ABI_MINOR)
 

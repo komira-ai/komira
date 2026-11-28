@@ -55,6 +55,21 @@ comptime PARQUET = "src/so/tests/fixtures/two_columns.parquet"
 comptime SCAN_PLAN_HEX = "080412a903124c0a200a0161100518052000280030003a00400450005a04756e6974620563656e74730a130a0162100518052001280030003a00400450000a130a0173100d18002001280030003a004004500022d8020af90112f60108c0c2d2f703120a6b6f6d6972612e6f72631a066f7264657273221b0a0a6861735f666f6f74657210051a00200129000000000000000022250a047061746810011a102f646174612f6f72646572732e6f72632000290000000000000000221d0a0c7374726970655f636f756e7410021a0020072900000000000000002a4c0a200a0161100518052000280030003a00400450005a04756e6974620563656e74730a130a0162100518052001280030003a00400450000a130a0173100d18002001280030003a004004500030effdb6f50d38cef5b7f70f420a0803103f180120012801500258d285d8cc04600180010068007008780010011a4c0a200a0161100518052000280030003a00400450005a04756e6974620563656e74730a130a0162100518052001280030003a00400450000a130a0173100d18002001280030003a0040045000200030004000480050015800"
 
 
+def _count(haystack: List[UInt8], needle: String) -> Int:
+    """How many times `needle`'s bytes occur in `haystack`."""
+    var nb = needle.as_bytes()
+    var found = 0
+    for i in range(len(haystack) - len(nb) + 1):
+        var ok = True
+        for j in range(len(nb)):
+            if haystack[i + j] != nb[j]:
+                ok = False
+                break
+        if ok:
+            found += 1
+    return found
+
+
 def _contains(haystack: List[UInt8], needle: String) -> Bool:
     var nb = needle.as_bytes()
     var n = len(nb)
@@ -246,6 +261,21 @@ def test_csv_binding() raises:
     assert_false(csv_binding_bytes(path, UInt8(ord(",")), True, True) == base)
 
 
+def test_csv_binding_of_skip_zero_is_the_binding_without_skip() raises:
+    # The same file at skip 0 and 1: the skip-1 binding names "skip" once more (the param),
+    # whatever the scratch path holds.
+    var path = _write(String("plain_dialect.csv"), String("a,b\n1,x\n2,y\n"))
+    var comma = UInt8(ord(","))
+    var base = csv_binding_bytes(path, comma, True, False)
+    assert_true(csv_binding_bytes(path, comma, True, False, 0) == base)
+    # A non-zero skip is part of the scan's identity.
+    var noted = _write(String("noted_dialect.csv"), String("a note\na,b\n1,x\n"))
+    var skipped = csv_binding_bytes(noted, comma, True, False, 1)
+    var noted_plain = csv_binding_bytes(noted, comma, True, False, 0)
+    assert_equal(_count(skipped, String("skip")), _count(noted_plain, String("skip")) + 1)
+    assert_false(csv_binding_bytes(path, comma, True, False, 1) == base)
+
+
 def test_csv_binding_missing_file() raises:
     var raised = False
     try:
@@ -415,6 +445,7 @@ def main() raises:
     test_parquet_schema_bytes()
     test_csv_binding()
     test_csv_binding_missing_file()
+    test_csv_binding_of_skip_zero_is_the_binding_without_skip()
     test_json_binding()
     test_plan_render()
     test_plan_render_refuses_garbage()

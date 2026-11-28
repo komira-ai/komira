@@ -118,6 +118,7 @@ def register_csv(
     delimiter: UInt8,
     has_header: Bool,
     all_varchar: Bool,
+    skip: Int = 0,
 ) raises:
     """Bind the CSV file at `path` into `session`'s engine as the table `name`.
 
@@ -125,8 +126,9 @@ def register_csv(
     (`csv_binding_bytes` holds the same source): the schema is inferred now
     from a bounded prefix of an uncompressed file (a compressed one is read
     whole), `delimiter` and `has_header` are the dialect the file is read
-    with, and `all_varchar` makes every column a string. A query on the
-    session then reads it by name, found without regard to case. The schema
+    with, `skip` is the number of lines skipped at the start of the file
+    before the header, and `all_varchar` makes every column a string. A query
+    on the session then reads it by name, found without regard to case. The schema
     is the one inferred here: the file is read at it by every later query.
     A query on a table registered with `has_header` False is refused at
     `lower`, naming `header=false`, as one on `read_csv(..., header=false)` is.
@@ -135,13 +137,15 @@ def register_csv(
         `TABLE_NAME_EMPTY` for an empty `name`; `TABLE_ALREADY_REGISTERED`
         when the session already holds a table of that name (of any kind);
         the inference's own error for a file that is missing, unreadable or
-        has no column; `compression: cannot load <soname>: <loader error>`
-        when a codec library cannot be loaded. Nothing is registered then.
+        has no column; `CSV_SKIP_NEGATIVE` for a negative `skip` and
+        `CSV_SKIP_PAST_END` when `skip` leaves no line of the file;
+        `compression: cannot load <soname>: <loader error>` when a codec
+        library cannot be loaded. Nothing is registered then.
     """
     probe_codec_libraries()
     _check_name_free(session, name)
     session.engine.catalog.add_source(
-        name, _csv_source(path, delimiter, has_header, all_varchar)
+        name, _csv_source(path, delimiter, has_header, all_varchar, skip)
     )
 
 
@@ -226,15 +230,21 @@ def _check_name_free(session: Session, name: String) raises:
 
 
 def _csv_source(
-    path: String, delimiter: UInt8, has_header: Bool, all_varchar: Bool
+    path: String,
+    delimiter: UInt8,
+    has_header: Bool,
+    all_varchar: Bool,
+    skip: Int = 0,
 ) raises -> SourceVariant:
     """The source of a CSV file, as `read_csv` binds it: the inferred schema
-    (every column a string with `all_varchar`), the file's mtime as its
-    snapshot, and the dialect it is read with."""
+    (every column a string with `all_varchar`, read after the first `skip`
+    lines), the file's mtime as its snapshot, and the dialect it is read
+    with."""
     var opts = TvfOptions()
     opts.delimiter = delimiter
     opts.has_header = has_header
     opts.all_varchar = all_varchar
+    opts.skip = skip
     var schema = csv_tvf_schema(path, opts)
     var source = CsvSource(
         String(path),
@@ -243,6 +253,7 @@ def _csv_source(
         quote_style_tag=QUOTE_STYLE_TAG_RFC4180,
         delimiter=delimiter,
         has_header=has_header,
+        skip=skip,
     )
     return SourceVariant(source^)
 
@@ -276,7 +287,11 @@ def parquet_schema_bytes(path: String) raises -> List[UInt8]:
 
 
 def csv_binding_bytes(
-    path: String, delimiter: UInt8, has_header: Bool, all_varchar: Bool
+    path: String,
+    delimiter: UInt8,
+    has_header: Bool,
+    all_varchar: Bool,
+    skip: Int = 0,
 ) raises -> List[UInt8]:
     """The `WireScanBinding` of the CSV file at `path`, as bytes.
 
@@ -284,7 +299,8 @@ def csv_binding_bytes(
     compressed file is read whole). `delimiter`, `has_header` and
     `all_varchar` change what the cells mean, so they are inputs: the first
     two enter the binding's identity, and `all_varchar` makes every column a
-    string.
+    string. `skip` is the number of lines skipped at the start of the file; a
+    non-zero one enters the identity too.
 
     Raises:
         Error `compression: cannot load <soname>: <loader error>` when a codec
@@ -293,7 +309,9 @@ def csv_binding_bytes(
     probe_codec_libraries()
     # The binding is taken from the source variant, which owns the parameter
     # set that is the scan's identity.
-    var variant = _csv_source(path, delimiter, has_header, all_varchar)
+    var variant = _csv_source(
+        path, delimiter, has_header, all_varchar, skip
+    )
     return binding_to_bytes(variant.binding_ref(), variant.tag)
 
 

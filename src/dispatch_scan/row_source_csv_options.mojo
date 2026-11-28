@@ -34,6 +34,7 @@ from scan_source.source_variant import SOURCE_VARIANT_CSV
 from scan_source.csv_source import (
     CSV_DEFAULT_DELIMITER,
     CSV_DEFAULT_HAS_HEADER,
+    CSV_DEFAULT_SKIP,
 )
 from csv.csv_options import (
     CsvReadOptions,
@@ -59,7 +60,8 @@ def _row_source_csv_options_for_dispatch(
 
     ⚠ THE `get_i64` DEFAULTS ARE `CSV_DEFAULT_*`, NOT `get_i64`'s OWN `0`.
     A missing `delimiter` param must mean a COMMA, not a NUL byte, and a
-    missing `has_header` must mean TRUE, not False.
+    missing `has_header` must mean TRUE, not False, and a missing `skip`
+    (which `_csv_binding` leaves out at 0) must mean no line skipped.
 
     On a same-version plan this fallback is unreachable BY CONSTRUCTION:
     `SOURCE_VARIANT_CSV` has two constructors — `SourceVariant(CsvSource)`,
@@ -108,6 +110,10 @@ def _row_source_csv_options_for_dispatch(
                 String("has_header"),
                 Int64(1) if CSV_DEFAULT_HAS_HEADER else Int64(0),
             ) != Int64(0)
+            # Written only when not 0, so a leaf without it skips no line.
+            o.skip = Int(
+                params.get_i64(String("skip"), Int64(CSV_DEFAULT_SKIP))
+            )
             # Threaded for the same reason as the other two: `_csv_binding`
             # puts it on the leaf, and the reader dispatches its comptime
             # scanner off it. Inert today (every producer emits 0 = RFC4180),

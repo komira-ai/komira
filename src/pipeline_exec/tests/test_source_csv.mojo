@@ -180,6 +180,29 @@ def test_typed_quoted_and_null_cells_come_back_at_the_bound_types() raises:
     _check_sample(read_csv_spec(_sample_spec(path)))
 
 
+def test_a_spec_that_skips_lines_reads_the_rows_after_the_note_above_the_header() raises:
+    var path = _write_text(
+        "noted.csv", "exported by a tool\nsecond note line\nid,name\n7,x\n8,y\n"
+    )
+    var types = List[ArrowType]()
+    types.append(ArrowType.INT64)
+    types.append(ArrowType.STRING)
+    var spec = SourceSpecPod.csv(CsvSourceSpec(
+        path, UInt8(ord(",")), True, 0, _names("id", "name"), types^, 2
+    ))
+    var batch = read_csv_spec(spec)
+    assert_equal(batch.num_rows(), 2)
+    var names = column_names(batch)
+    assert_equal(names[0], "id")
+    assert_equal(names[1], "name")
+    var ids = int64_column(batch, 0)
+    assert_equal(ids[0], 7)
+    assert_equal(ids[1], 8)
+    var s = string_column(batch, 1)
+    assert_equal(s[0], "x")
+    assert_equal(s[1], "y")
+
+
 def test_a_gzip_file_is_read_by_its_extension() raises:
     var raw = String(_SAMPLE)
     var gz = Gzip.compress_gzip_file(raw.as_bytes())

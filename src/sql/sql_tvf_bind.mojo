@@ -69,11 +69,12 @@ comptime _JSONL_SCHEMA_SAMPLE_PREFIX_BYTES: Int = 256 * 1024
 
 
 def _csv_read_options(imm opts: TvfOptions) raises -> CsvReadOptions:
-    """`TvfOptions` -> the CSV chassis' own options. Only the two fields that
-    change what the header/sample inference SEES are threaded; `all_varchar` is
+    """`TvfOptions` -> the CSV chassis' own options. Only the three fields that
+    change what the header/sample inference SEES (`delimiter`, `has_header`,
+    `skip`) are threaded; `all_varchar` is
     applied to the resulting schema instead (see the module note).
 
-    `tvf_relation_scan` stamps the same `delimiter` and `has_header` on the
+    `tvf_relation_scan` stamps the same `delimiter`, `has_header` and `skip` on the
     `CsvSource` of the scan leaf, so the reader parses the file with the dialect
     the schema was inferred under. A `|`-delimited file bound with the default
     dialect would infer ONE column named `id|amt|name`; a header-less file read
@@ -82,6 +83,7 @@ def _csv_read_options(imm opts: TvfOptions) raises -> CsvReadOptions:
     o.quote_style_tag = QUOTE_STYLE_TAG_RFC4180
     o.has_header = opts.has_header
     o.delimiter = opts.delimiter
+    o.skip = opts.skip
     return o^
 
 
@@ -230,6 +232,7 @@ def tvf_relation_scan(imm rel: FromRelation) raises -> LogicalPlan:
             quote_style_tag=Int(o.quote_style_tag),
             delimiter=o.delimiter,
             has_header=o.has_header,
+            skip=o.skip,
         )
         return LogicalPlan.scan_from_source(SourceVariant(cs^), schema^)
     var jschema = json_tvf_schema(path)

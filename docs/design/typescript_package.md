@@ -190,7 +190,7 @@ Fixed before this design, and not reopened here:
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.10, with twenty-six exports
+- **EXISTS** `libkomira` is at ABI 1.11, with twenty-eight exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
   - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream.
     `komira_sql_stream_run` (1.6) runs it under a run handle that another thread cancels
@@ -206,6 +206,9 @@ Fixed before this design, and not reopened here:
     memory and registers it by name, replacing a table of that name; it releases the stream.
   - `komira_add_sql_binding` (1.10) binds a table name to the protobuf bytes of a
     `WireBoundSource` (a Parquet location), replacing a table of that name.
+  - `komira_csv_binding_with_skip` and `komira_register_csv_with_skip` (1.11) are
+    `komira_csv_binding` and `komira_register_csv` for a CSV file whose first `skip` lines are not
+    data; `skip` is an `int64_t`.
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,

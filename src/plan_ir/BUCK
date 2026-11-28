@@ -35,6 +35,7 @@ mojo_library(
         "tests/test_scan_binding_arrow_arm.mojo",
         "tests/test_scan_binding_bind_pass.mojo",
         "tests/test_scan_binding_csv_arm.mojo",
+        "tests/test_scan_binding_csv_skip.mojo",
         "tests/test_scan_binding_gate.mojo",
         "tests/test_scan_binding_orc_arm.mojo",
         "tests/test_scan_binding_substrate.mojo",

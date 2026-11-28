@@ -13,6 +13,10 @@
 -- nulls.csv   an empty cell (NULL) in every column but id, a row of NULLs
 -- pipe.csv    `|` between cells, a comma inside a cell
 -- header_only.csv  a header and no row
+-- skip.csv    two note lines (one with a comma) above the header, a quoted
+--             line break in a row
+-- skip_pipe.csv  one note line above a `|`-delimited header
+-- skip_quote.csv  a note line holding a quote and a comma above the header
 COPY (SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_csv('typed.csv'))) TO 'typed_types.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT id, qty, price, name FROM read_csv('typed.csv')) TO 'typed_rows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT name, qty FROM read_csv('typed.csv') WHERE day >= DATE '2026-11-01' AND price > 2) TO 'typed_filter.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
@@ -30,3 +34,9 @@ COPY (SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_csv('pip
 COPY (SELECT * FROM read_csv('pipe.csv', delim = '|')) TO 'pipe_rows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_csv('header_only.csv', header = true))) TO 'header_only_types.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT count(*) AS n FROM read_csv('header_only.csv', header = true)) TO 'header_only_count.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_csv('skip.csv', skip = 2))) TO 'skip_types.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT * FROM read_csv('skip.csv', skip = 2)) TO 'skip_rows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT count(*) AS n, sum(amount) AS total FROM read_csv('skip.csv', skip = 2)) TO 'skip_agg.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT * FROM read_csv('skip_pipe.csv', delim = '|', skip = 1)) TO 'skip_pipe_rows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT * FROM read_csv('skip_quote.csv', skip = 1)) TO 'skip_quote_rows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT * FROM read_csv('typed.csv', skip = 0)) TO 'skip0_rows.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

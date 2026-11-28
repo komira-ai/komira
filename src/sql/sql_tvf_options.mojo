@@ -71,6 +71,8 @@ struct TvfOptions(Copyable, Movable):
                       `CsvReadOptions`' default, and what every corpus fixture
                       is written with.
         delimiter:    DuckDB `delim=`/`sep=` (CSV), one byte. Default ','.
+        skip:         DuckDB `skip=` (CSV), the number of raw lines to skip
+                      at the start of the file, before the header. Default 0.
         hive_partitioning: DuckDB `hive_partitioning=` (`read_parquet`), one of
                       `HIVE_PARTITIONING_AUTO` (the default, no option
                       written), `_ON` or `_OFF`. Honored by the footer reader
@@ -86,6 +88,7 @@ struct TvfOptions(Copyable, Movable):
     var all_varchar: Bool
     var has_header: Bool
     var delimiter: UInt8
+    var skip: Int
     var hive_partitioning: UInt8
     var allow_moved_paths: Bool
     var snapshot_from_id: Optional[Int64]
@@ -94,6 +97,7 @@ struct TvfOptions(Copyable, Movable):
         self.all_varchar = False
         self.has_header = True
         self.delimiter = UInt8(ord(","))
+        self.skip = 0
         self.hive_partitioning = HIVE_PARTITIONING_AUTO
         self.allow_moved_paths = False
         self.snapshot_from_id = None

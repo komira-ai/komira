@@ -2,7 +2,7 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of so that holds
 # pointers.
 # =============================================================================
-# Twenty-six `@export abi("C")` functions are the library's whole surface today. Their C
+# Twenty-eight `@export abi("C")` functions are the library's whole surface today. Their C
 # prototypes are komira.h, which `//src/so:komira_abi` makes from the golden `abi/komira.tsv`
 # (one row per export, with its types and the version that added it) and builds only while this
 # file's exports are exactly the golden's rows; `src/so/README.md` lists them in prose.
@@ -31,25 +31,12 @@
 # table the session holds and calls its `release` once before it returns, whatever the status
 # (unless NULL or released); the caller frees the struct.
 #
-# Errors. A call returns `KOMIRA_OK` (0) or a negative `KOMIRA_ERR_*` code (status.mojo). A run
-# its run handle's cancel stopped is `KOMIRA_ERR_CANCELLED` with a `QUERY_CANCELLED: ` last
-# error; the run handle calls touch no context and store no last error. `KOMIRA_ERR_NULL_ARG`
-# on a live context stores its refusal as the last error; `KOMIRA_ERR_BUFFER_TOO_SMALL` stores
-# nothing. Every source and render call first clears the last error and stores the engine's
-# message on `KOMIRA_ERR_ENGINE`. `komira_last_error` does not clear what it reads.
-#
-# Strings and byte inputs. A `const char *` is NUL-terminated UTF-8 the caller keeps alive for
-# the call; it is copied first, and one that is not valid UTF-8 is `KOMIRA_ERR_ENGINE` with a
-# last error, never used. The SQL text of `komira_sql_stream` looks for its NUL in at most
-# `KOMIRA_MAX_INPUT_BYTES + 1` bytes; none there is `KOMIRA_ERR_TOO_LARGE`. The bytes of
-# `komira_plan_render`, `komira_plan_stream` and `komira_add_sql_binding` are `ptr[0..len]`, the
-# length an argument because a serialized message holds NUL bytes; they are copied in full
-# before anything is decoded. Above `KOMIRA_MAX_INPUT_BYTES` (64 MiB) the call returns
-# `KOMIRA_ERR_TOO_LARGE` with a last error, before any byte is read or memory allocated for it.
-# Exactly 64 MiB is accepted.
-#
-# The session options, the two-call output protocol, the error's code and step and the
-# credential values are described in src/so/README.md, with each export's docstring below.
+# Errors and inputs (src/so/README.md states them in full, with the session options, the
+# two-call output protocol, the error's code and step and the credential values). A call returns
+# `KOMIRA_OK` (0) or a negative `KOMIRA_ERR_*` code (status.mojo); the source and render calls
+# clear the last error first and store the engine's message on `KOMIRA_ERR_ENGINE`. A `char *`
+# is copied, and refused unless UTF-8, before use; byte inputs (`ptr[0..len]`) are refused above
+# `KOMIRA_MAX_INPUT_BYTES` before any byte is read, and copied in full before decoding.
 #
 # Pointer types. Only the `comptime` aliases below name a wildcard origin: a `void *` that lives
 # in the host between calls has no Mojo origin, and the Mojo side takes no pointer from the host
@@ -215,29 +202,12 @@ def _copy_error_field(
     if Int(out_len) == 0:
         session[].set_error(call + String(": out_len is NULL"))
         return KOMIRA_ERR_NULL_ARG
-    var n = text.byte_length()
-    # SAFETY: `out_len` is non-NULL (tested above) and is a caller-owned slot.
-    out_len[0] = UInt64(n)
-    var status = buffer_status(n, out_cap)
-    if status != KOMIRA_OK:
-        return status
-    if n == 0:
-        return KOMIRA_OK
-    if Int(out_buf) == 0:
-        session[].set_error(call + String(": out_buf is NULL"))
-        return KOMIRA_ERR_NULL_ARG
-    # SAFETY: `out_buf` holds at least `out_cap >= n` bytes by the caller's
-    # contract and `buffer_status` just confirmed it; `text` is alive for the
-    # copy and does not overlap the caller's buffer.
-    unsafe_memcpy(dest=out_buf, src=text.unsafe_ptr(), count=n)
-    return KOMIRA_OK
+    return _emit(session, text.as_bytes(), out_buf, out_cap, out_len, call)
 
 
 @export
 def komira_last_error(
-    ctx: Handle,
-    out_buf: UnsafePointer[UInt8, MutUntrackedOrigin],
-    out_cap: UInt64,
+    ctx: Handle, out_buf: UnsafePointer[UInt8, MutUntrackedOrigin], out_cap: UInt64,
     out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
     """Copy the session's last error text into `out_buf` (two-call protocol).
@@ -257,9 +227,7 @@ def komira_last_error(
 
 @export
 def komira_last_error_code(
-    ctx: Handle,
-    out_buf: UnsafePointer[UInt8, MutUntrackedOrigin],
-    out_cap: UInt64,
+    ctx: Handle, out_buf: UnsafePointer[UInt8, MutUntrackedOrigin], out_cap: UInt64,
     out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
     """Copy the last error's code (`SQL_SYNTAX_ERROR`; empty when it has
@@ -337,11 +305,14 @@ def _emit(
     out_buf: _Bytes,
     out_cap: UInt64,
     out_len: _Len,
+    call: String = "",
 ) -> Int32:
-    """The write half of the two-call protocol for the source and render calls:
-    stores the byte count in `*out_len`, then returns `KOMIRA_ERR_BUFFER_TOO_SMALL`
-    (writing nothing) when `out_cap` is below it. A NULL `out_buf` is refused only
-    when there are bytes to write."""
+    """The write half of the two-call protocol for the source and render calls
+    (and, through `_copy_error_field`, the last-error calls): stores the byte
+    count in `*out_len`, then returns `KOMIRA_ERR_BUFFER_TOO_SMALL` (writing
+    nothing) when `out_cap` is below it. A NULL `out_buf` is refused only when
+    there are bytes to write, in the name of the export `call` when one is
+    given."""
     var n = len(data)
     # SAFETY: `out_len` is non-NULL (every caller tests first), a caller-owned slot.
     out_len[0] = UInt64(n)
@@ -351,7 +322,8 @@ def _emit(
     if n == 0:
         return KOMIRA_OK
     if Int(out_buf) == 0:
-        session[].set_error(String("out_buf is NULL"))
+        var prefix = (call + ": ") if call.byte_length() > 0 else String("")
+        session[].set_error(prefix + "out_buf is NULL")
         return KOMIRA_ERR_NULL_ARG
     # SAFETY: `out_buf` holds at least `out_cap >= len(data)` bytes by the
     # caller's contract, just tested by `buffer_status`; `data` is alive for
@@ -361,9 +333,7 @@ def _emit(
 
 
 @export
-def komira_register_parquet(
-    ctx: Handle, name: CStr, path: CStr
-) abi("C") -> Int32:
+def komira_register_parquet(ctx: Handle, name: CStr, path: CStr) abi("C") -> Int32:
     """Register the Parquet file at `path` in the session under `name`.
 
     The footer is read at registration, so a missing or unreadable file is
@@ -388,10 +358,7 @@ def komira_register_parquet(
 
 @export
 def komira_parquet_schema(
-    ctx: Handle,
-    path: CStr,
-    out_buf: UnsafePointer[UInt8, MutUntrackedOrigin],
-    out_cap: UInt64,
+    ctx: Handle, path: CStr, out_buf: UnsafePointer[UInt8, MutUntrackedOrigin], out_cap: UInt64,
     out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
     """Write the Arrow schema of the Parquet file at `path` as `WireSchema`
@@ -418,15 +385,33 @@ def komira_parquet_schema(
         return KOMIRA_ERR_ENGINE
 
 
+def _csv_binding_call(
+    ctx: Handle, op: String, path: CStr, delimiter: UInt8, has_header: Int32,
+    all_varchar: Int32, skip: Int64, out_buf: _Bytes, out_cap: UInt64, out_len: _Len,
+) -> Int32:
+    """The body of `komira_csv_binding` and `komira_csv_binding_with_skip`;
+    `op` names the export in the NULL-argument refusal."""
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(path) == 0 or Int(out_len) == 0:
+        session[].set_error(op + ": path or out_len is NULL")
+        return KOMIRA_ERR_NULL_ARG
+    try:
+        var bytes = csv_binding_bytes(
+            _c_string(path), delimiter, Int(has_header) != 0, Int(all_varchar) != 0, Int(skip)
+        )
+        return _emit(session, Span(bytes), out_buf, out_cap, out_len)
+    except e:
+        session[].set_error(String(e), KOMIRA_STEP_BIND)
+        return KOMIRA_ERR_ENGINE
+
+
 @export
 def komira_csv_binding(
-    ctx: Handle,
-    path: CStr,
-    delimiter: UInt8,
-    has_header: Int32,
-    all_varchar: Int32,
-    out_buf: UnsafePointer[UInt8, MutUntrackedOrigin],
-    out_cap: UInt64,
+    ctx: Handle, path: CStr, delimiter: UInt8, has_header: Int32, all_varchar: Int32,
+    out_buf: UnsafePointer[UInt8, MutUntrackedOrigin], out_cap: UInt64,
     out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
     """Write the `WireScanBinding` of the CSV file at `path` (two-call
@@ -437,29 +422,30 @@ def komira_csv_binding(
     `int32_t` and any non-zero value is true. Errors are those of
     `komira_parquet_schema`.
     """
-    if Int(ctx) == 0:
-        return KOMIRA_ERR_NULL_CTX
-    var session = _session(ctx)
-    session[].clear_error()
-    if Int(path) == 0 or Int(out_len) == 0:
-        session[].set_error(String("komira_csv_binding: path or out_len is NULL"))
-        return KOMIRA_ERR_NULL_ARG
-    try:
-        var bytes = csv_binding_bytes(
-            _c_string(path), delimiter, Int(has_header) != 0, Int(all_varchar) != 0
-        )
-        return _emit(session, Span(bytes), out_buf, out_cap, out_len)
-    except e:
-        session[].set_error(String(e), KOMIRA_STEP_BIND)
-        return KOMIRA_ERR_ENGINE
+    return _csv_binding_call(
+        ctx, "komira_csv_binding", path, delimiter, has_header, all_varchar, 0,
+        out_buf, out_cap, out_len,
+    )
+
+
+@export
+def komira_csv_binding_with_skip(
+    ctx: Handle, path: CStr, delimiter: UInt8, has_header: Int32, all_varchar: Int32,
+    skip: Int64, out_buf: UnsafePointer[UInt8, MutUntrackedOrigin], out_cap: UInt64,
+    out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
+) abi("C") -> Int32:
+    """`komira_csv_binding` with the first `skip` lines skipped (ABI 1.11; 0 is
+    `komira_csv_binding`). A negative `skip` (`CSV_SKIP_NEGATIVE`) or one that
+    leaves no line (`CSV_SKIP_PAST_END`) is `KOMIRA_ERR_ENGINE` at step bind."""
+    return _csv_binding_call(
+        ctx, "komira_csv_binding_with_skip", path, delimiter, has_header, all_varchar,
+        skip, out_buf, out_cap, out_len,
+    )
 
 
 @export
 def komira_json_binding(
-    ctx: Handle,
-    path: CStr,
-    out_buf: UnsafePointer[UInt8, MutUntrackedOrigin],
-    out_cap: UInt64,
+    ctx: Handle, path: CStr, out_buf: UnsafePointer[UInt8, MutUntrackedOrigin], out_cap: UInt64,
     out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
 ) abi("C") -> Int32:
     """Write the `WireScanBinding` of the newline-delimited JSON file at
@@ -831,14 +817,33 @@ def komira_sql_stream_run(
     )
 
 
+def _register_csv_call(
+    ctx: Handle, op: String, name: CStr, path: CStr, delimiter: UInt8,
+    has_header: Int32, all_varchar: Int32, skip: Int64,
+) -> Int32:
+    """The body of `komira_register_csv` and `komira_register_csv_with_skip`;
+    `op` names the export in the NULL-argument refusal."""
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(name) == 0 or Int(path) == 0:
+        session[].set_error(op + ": name or path is NULL")
+        return KOMIRA_ERR_NULL_ARG
+    try:
+        register_csv(
+            session[], _c_string(name), _c_string(path), delimiter,
+            Int(has_header) != 0, Int(all_varchar) != 0, Int(skip),
+        )
+        return KOMIRA_OK
+    except e:
+        session[].set_error(String(e), KOMIRA_STEP_BIND)
+        return KOMIRA_ERR_ENGINE
+
+
 @export
 def komira_register_csv(
-    ctx: Handle,
-    name: CStr,
-    path: CStr,
-    delimiter: UInt8,
-    has_header: Int32,
-    all_varchar: Int32,
+    ctx: Handle, name: CStr, path: CStr, delimiter: UInt8, has_header: Int32, all_varchar: Int32
 ) abi("C") -> Int32:
     """Register the CSV file at `path` in the session as the table `name`.
 
@@ -852,26 +857,22 @@ def komira_register_csv(
     name (`TABLE_NAME_EMPTY`) and a name the session already holds
     (`TABLE_ALREADY_REGISTERED`); nothing is registered then.
     """
-    if Int(ctx) == 0:
-        return KOMIRA_ERR_NULL_CTX
-    var session = _session(ctx)
-    session[].clear_error()
-    if Int(name) == 0 or Int(path) == 0:
-        session[].set_error(String("komira_register_csv: name or path is NULL"))
-        return KOMIRA_ERR_NULL_ARG
-    try:
-        register_csv(
-            session[],
-            _c_string(name),
-            _c_string(path),
-            delimiter,
-            Int(has_header) != 0,
-            Int(all_varchar) != 0,
-        )
-        return KOMIRA_OK
-    except e:
-        session[].set_error(String(e), KOMIRA_STEP_BIND)
-        return KOMIRA_ERR_ENGINE
+    return _register_csv_call(
+        ctx, "komira_register_csv", name, path, delimiter, has_header, all_varchar, 0
+    )
+
+
+@export
+def komira_register_csv_with_skip(
+    ctx: Handle, name: CStr, path: CStr, delimiter: UInt8, has_header: Int32,
+    all_varchar: Int32, skip: Int64,
+) abi("C") -> Int32:
+    """`komira_register_csv` with the first `skip` lines skipped, as `read_csv(...,
+    skip = n)` does (ABI 1.11). A negative `skip` (`CSV_SKIP_NEGATIVE`) or one that
+    leaves no line (`CSV_SKIP_PAST_END`) is `KOMIRA_ERR_ENGINE`; nothing is registered."""
+    return _register_csv_call(
+        ctx, "komira_register_csv_with_skip", name, path, delimiter, has_header, all_varchar, skip
+    )
 
 
 @export

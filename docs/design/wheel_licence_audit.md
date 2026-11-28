@@ -75,7 +75,7 @@ extracted unmodified as that target's files.
 
 Verified by reading, not by running anything on a developer machine:
 
-- `libkomira`'s dynamic symbol table is exactly the twenty-six `komira_*` exports
+- `libkomira`'s dynamic symbol table is exactly the twenty-eight `komira_*` exports
   (`exports_exact` gate in `src/so/tests/gate/`). None takes a URL, host or
   socket: they take a local file path, a worker count and memory budget, the bytes of a plan, SQL text, or a
   credential's kind, name and field values, a run handle, the bytes of a bound source, or an Arrow C stream the caller
@@ -84,7 +84,7 @@ Verified by reading, not by running anything on a developer machine:
 - The closure holds network code: `async_rt`'s reactor and socket primitives,
   `net`, `http_core` (HTTP and TLS) and `http_client`, which the engine uses
   to read object stores and to call an Iceberg REST catalog. Two exports of the
-  twenty-six reach it, and only for a table the caller bound to an object store:
+  twenty-eight reach it, and only for a table the caller bound to an object store:
   `komira_add_sql_binding`, given an `s3://` or `az://` location, reads the
   objects' footers from that store (and lists it for a glob), with the endpoint
   the caller passed and a credential the caller sealed; and `komira_sql_stream`

@@ -61,7 +61,7 @@ is made, not when `komira` is imported.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
@@ -1086,11 +1086,31 @@ def read_parquet(path: str | os.PathLike[str], *, session: Session | None = None
     return _scan_frame(session, path, "parquet", schema, _encoder().parquet_source(path, schema_bytes))
 
 
+def _skiprows(skiprows: object) -> int:
+    """The number of lines `read_csv(skiprows=...)` skips: None is 0, an int
+    from 0 up is itself; a collection of row numbers or a function is refused
+    as unbuilt, a bool or another type as a TypeError, a negative int as a
+    ValueError."""
+    if skiprows is None:
+        return 0
+    if callable(skiprows) or (isinstance(skiprows, Iterable) and not isinstance(skiprows, (str, bytes))):
+        raise UnsupportedOperation(
+            f"read_csv(skiprows=<{type(skiprows).__name__}>) drops the rows it names or selects, "
+            "which komira does not build: pass the number of lines to skip at the start of the file, or None"
+        )
+    if isinstance(skiprows, bool) or not isinstance(skiprows, int):
+        raise TypeError("skiprows must be None or an int, not {}".format(type(skiprows).__name__))
+    if skiprows < 0:
+        raise ValueError("skiprows must be 0 or more, not {}".format(skiprows))
+    return skiprows
+
+
 def read_csv(
     path: str | os.PathLike[str],
     *,
     sep: str = ",",
     header: int | str | None = "infer",
+    skiprows: int | None = None,
     chunksize: int | None = None,
     iterator: bool = False,
     session: Session | None = None,
@@ -1098,10 +1118,14 @@ def read_csv(
     """A frame of the local CSV file at `path`, its column names and types
     inferred by the engine now, from the start of the file. `sep` is the one
     ASCII character between fields; `header` is "infer" or 0 when the first
-    line holds the column names, None when it does not. Failures, paths and
-    `session` are as for `read_parquet`. pandas' chunked reading,
-    `chunksize` other than None and `iterator` other than False, raises
-    `UnsupportedOperation` before the file is touched."""
+    line holds the column names, None when it does not. `skiprows` is None
+    or the number of lines (0 or more) to skip at the start of the file
+    before the header, as SQL's `read_csv(..., skip = n)` does; a list of row
+    numbers or a function of the row number, which pandas reads as rows to
+    drop, is not built. Needs libkomira ABI 1.11 when `skiprows` is above 0.
+    Failures, paths and `session` are as for `read_parquet`. pandas' chunked
+    reading, `chunksize` other than None and `iterator` other than False,
+    raises `UnsupportedOperation` before the file is touched."""
     for name, value, default in (("chunksize", chunksize, None), ("iterator", iterator, False)):
         if value is not default:
             raise UnsupportedOperation(
@@ -1117,9 +1141,10 @@ def read_csv(
             f"read_csv(header={header!r}) reads the column names from another line than the first: "
             'use header="infer" (or 0) for names on the first line, or header=None for none'
         )
+    skip = _skiprows(skiprows)
     session = _session_of(session)
     path = _local_path(path)
-    binding = session._csv_binding(path, delimiter=sep, header=has_header)
+    binding = session._csv_binding(path, delimiter=sep, header=has_header, skip=skip)
     schema = _wire().pb.WireScanBinding.FromString(binding).schema
     return _scan_frame(session, path, "csv", schema, _encoder().binding_source(binding))
 

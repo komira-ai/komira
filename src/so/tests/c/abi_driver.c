@@ -21,7 +21,8 @@
  * It also registers CSV and newline-delimited JSON files it writes under
  * $TEST_TMPDIR with komira_register_csv and komira_register_json and queries
  * each table by name through komira_sql_stream; every answer is checked
- * against the rows the driver wrote.
+ * against the rows the driver wrote. A CSV file with a note line above its
+ * header is registered with komira_register_csv_with_skip and skipped.
  * And it runs SQL through komira_sql_stream_run under a run handle: a handle
  * cancelled before the call refuses the run with KOMIRA_ERR_CANCELLED and the
  * QUERY_CANCELLED last error; a second thread reads the progress of a run in
@@ -93,6 +94,8 @@ DECLARE(komira_sql_stream_run);
 DECLARE(komira_plan_stream);
 DECLARE(komira_register_arrow_stream);
 DECLARE(komira_add_sql_binding);
+DECLARE(komira_csv_binding_with_skip);
+DECLARE(komira_register_csv_with_skip);
 
 static int bind_all(void *lib) {
     int missing = 0;
@@ -131,6 +134,8 @@ static int bind_all(void *lib) {
     BIND(komira_plan_stream);
     BIND(komira_register_arrow_stream);
     BIND(komira_add_sql_binding);
+    BIND(komira_csv_binding_with_skip);
+    BIND(komira_register_csv_with_skip);
 #undef BIND
     return missing;
 }
@@ -725,6 +730,29 @@ static void text_source_cases(void) {
     }
     /* A refused name stays free. */
     CHECK(p_komira_register_csv(ctx, "gone", people, ',', 1, 0) == KOMIRA_OK);
+
+    /* A file with a note line above the header: skip 1 reads the rows under
+       the real header; a negative skip and one past the last line are
+       refused and register nothing. */
+    char noted[512];
+    if (write_file(tmp, "noted.csv", "exported by hand\nid,score\n1,10\n2,20\n", noted, sizeof noted) != 0) return;
+    CHECK(p_komira_register_csv_with_skip(ctx, "noted", noted, ',', 1, 0, 1) == KOMIRA_OK);
+    if (query(ctx, "SELECT sum(score) AS s FROM noted", &a) == 0) {
+        CHECK(a.n_fields == 1 && a.rows == 1 && a.n_values == 1 && a.values[0] == 30);
+    }
+    CHECK(p_komira_register_csv_with_skip(ctx, "flat", people, ',', 1, 0, 0) == KOMIRA_OK);
+    if (query(ctx, "SELECT count(*) AS n FROM flat", &a) == 0) {
+        CHECK(a.rows == 1 && a.n_values == 1 && a.values[0] == 3);
+    }
+    CHECK(p_komira_register_csv_with_skip(ctx, "neg", noted, ',', 1, 0, -1) == KOMIRA_ERR_ENGINE);
+    CHECK(starts_with(last_error_text(ctx, text, sizeof text), "CSV_SKIP_NEGATIVE: skip=-1 is negative"));
+    CHECK(p_komira_last_error_step(ctx) == KOMIRA_STEP_BIND);
+    CHECK(p_komira_register_csv_with_skip(ctx, "neg", noted, ',', 1, 0, 4) == KOMIRA_ERR_ENGINE);
+    CHECK(starts_with(last_error_text(ctx, text, sizeof text), "CSV_SKIP_PAST_END: skip=4 skips every line"));
+    CHECK(p_komira_register_csv_with_skip(ctx, "neg", noted, ',', 1, 0, 1) == KOMIRA_OK);
+    CHECK(p_komira_register_csv_with_skip(NULL, "t", noted, ',', 1, 0, 1) == KOMIRA_ERR_NULL_CTX);
+    CHECK(p_komira_register_csv_with_skip(ctx, NULL, noted, ',', 1, 0, 1) == KOMIRA_ERR_NULL_ARG);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text), "komira_register_csv_with_skip: name or path is NULL") == 0);
     p_komira_ctx_free(ctx);
 }
 
