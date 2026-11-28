@@ -148,13 +148,28 @@ The parts of that table, each sourced:
 - `RecordBatch` is `Movable` and not `Copyable` (`src/arrow/record_batch.mojo`). That is why
   `Result` lends its batch by `ref` and does not copy it.
 
+**`print(result)` when formatting fails.**
+- `format_table` is declared `raises`. A cell it cannot render raises, for example.
+- `Writable`'s `write_to` cannot raise at the pinned compiler. Every one of the 67 `write_to`
+  methods under `src/` is declared without `raises` (`git grep -n "def write_to" -- 'src/*.mojo'`),
+  for example `def write_to[W: Writer](self, mut writer: W)` in `src/arrow/schema.mojo`.
+- So `Result` does not format inside `write_to`. `sql` formats the first 20 rows once, when it
+  builds the `Result`, and keeps the text. A formatting failure is raised by `sql` itself, as a
+  `KomiraError` with code `RESULT_NOT_PRINTABLE` and `format_table`'s message, at step
+  `execute`.
+- `print(result)` writes the kept text and cannot fail, so the user never sees a half-printed
+  table.
+- The cost is formatting at most 20 rows per query, whether or not the result is printed
+  *(inferred: small next to running the query)*.
+
 The behaviour:
 - **Errors.**
   - Python and Node already raise a `KomiraError` carrying `code` (the named code, such as
     `SQL_SYNTAX_ERROR`), `step` (`parse`, `bind`, `optimize`, `lower` or `execute`) and the engine's
     message `<step>: <reason>`. Each has subclasses chosen by the code:
     - Python has `ParseError`, `BindError`, `UnsupportedOperation`, `MemoryLimitError`,
-      `CredentialsError`, `StorageError` and `LibraryLoadError` (`python/komira/_errors.py`).
+      `CredentialsError`, `StorageError`, `LibraryLoadError` and `UnsupportedCpuError`
+      (`python/komira/_errors.py`).
     - Node has `UnsupportedOperation`, `LibraryLoadError` and `UnsupportedCpuError`
       (`node/src/errors.ts`).
   - The Mojo session matches them. `sql` raises a `KomiraError` struct with `code:
@@ -701,7 +716,7 @@ A user's build needs:
 | Mojo | `1.1.0`, the one Mojo every package is built for | `MOJO` in [packages.bzl](../../release/readme_e2e/packages.bzl), `mojo = ["1.1.0"]` in each `mopm.toml` |
 | mopm | a mopm with pixi on `PATH`; the repository builds and tests with mopm 0.0.138 | `MOPM` in packages.bzl, `mopm-toolchain.toml` |
 | the project | `mopm init`, `[toolchain] mojo = "1.1.0"` (init writes mopm's own default, and `mopm add` resolves the newest build for the project's Mojo), `mopm add komira-ai/komira`, `mopm sync` | the `prod-add` job ([docs/ci.md](../ci.md)) |
-| platform | Linux on x86_64 or macOS on arm64. No linux-arm64 package exists for any library, so Linux on arm64 is not covered, in Mojo as in Python ("Linux on arm64 comes in a later release"). Whether the gate accepts that is part of owner decision 3 | [docs/releases.md](../releases.md), [docs/install.md](../install.md) |
+| platform | Linux on x86_64 or macOS on arm64. The Mojo packages are not built for linux-arm64, and this is listed with the gate's exceptions (owner decision 3) | [docs/releases.md](../releases.md), [docs/install.md](../install.md) |
 | host | *(inferred)* what the Python wheel needs on Linux: glibc 2.35 or newer and an x86-64-v3 CPU, since both are built by the same toolchain for the same target CPU | [docs/install.md](../install.md), [mojo_rules_and_toolchain.md](mojo_rules_and_toolchain.md) |
 | system libraries | `compression` opens libzstd, libbz2 and liblzma, and `zlib` and `lz4` open libz and liblz4, at run time. Each package declares them as `[native-dependencies]`, so `mopm sync` installs them from conda-forge | those packages' `mopm.toml`, `tools/build/package/system_libs.bzl` |
 
@@ -830,7 +845,7 @@ SDK: the library, the forms and the trees.
     it from an empty directory, and compares what it prints with `expected_output.txt`, byte for
     byte.
   - After merge, the release runs the same examples against the installed `.conda` through the
-    install test's phases, with #2495's exact compare added to them (its slice 6).
+    install test's phases, with #2495's exact compare added to them (its slice 5).
   - Each form has its `refuses_*` targets, which must fail, as #2495 lists them.
 - **The output** is `format_table`'s text, since `print(result)` writes it. #2495 recommends the same
   table form for its SQL command, so a Mojo task's `expected_output.txt` can read like the SQL one.
@@ -847,20 +862,21 @@ SDK: the library, the forms and the trees.
   every example does under #2495. A task needs no hidden input file.
 
 How many of the 80 tasks the session can show at publish time:
-- **Measured.**
-  - 79 of the 80 Python examples call `.sql(`. That is a text search of
-    `python/docs/tasks/*/example.py` for `.sql(`.
-  - 14 of them call nothing else from the reader and frame APIs. That is a text search of the same
-    files for `read_parquet`, `read_csv`, `read_json`, `DataFrame`, `komira.pl`, `.groupby`,
-    `.merge`, `.filter(`, `.select(`, `.with_columns`, `from_arrow` and `concat(`.
-- **What follows.**
-  - Those 14 are the floor *(inferred: their SQL runs as written in the session)*.
-  - Each of the other 65 has a pandas or polars step. Slice 2 tries to write that step as SQL, task
-    by task.
-  - A task whose answer SQL cannot give is `not-shown` in form `mojo`, with its reason and an issue.
-    Python data, cloud files and a frame API are examples of such reasons.
-- **The real number** is the count slice 2 ends with. This design does not estimate it beyond the
-  floor of 14 and the ceiling of 79.
+- **It is the SQL form's range.** The Mojo session runs SQL text, so it reads a CSV or JSON file
+  through SQL's own functions (`read_csv('<file>')`), exactly as the SQL and TypeScript forms do.
+  That does not need `files`. `files` reads Parquet only until slice 6, so an example binds its input
+  through `files` only for the kinds `files` reads at that time.
+- **The counts are #2495's.** It writes out the one text search that counts the examples using no
+  frame API, and it lists the tasks SQL can never show for reasons other than missing work. Today
+  those are:
+  - rank 60, which holds no SQL;
+  - ranks 31 and 93, which read cloud storage with a credential;
+  - ranks 22, 89 and 90, which store rows with Python's `sqlite3`.
+
+  This design does not count them again. In Mojo, ranks 31 and 93 can come with slice 7, which
+  brings remote files and credentials.
+- Every other task is shown once slice 2 writes its SQL, or is `not-shown` in form `mojo` with its
+  reason and an issue.
 - **The plan builder.** It shows fewer tasks: only those whose plan it can write after slice 4,
   and more after slice 5.
 
@@ -894,7 +910,7 @@ tested there.
 |---|---|---|
 | 0 | one pull request: `engine_iceberg.mojo` and its test `sdk_exec/tests/test_run_sql_iceberg.mojo` move to `sdk_exec_iceberg` (no other source imports it), and `sdk_exec`'s `deps` drop `iceberg_catalog` and gain the 4 libraries of the 86 they lack, `decimal_literal`, `op_agg_hash`, `op_fused_kernels` and `op_join_build` (M11). No behaviour changes | `sdk_exec`'s closure is the 86 of §4 |
 | 1 | the 56 in the order of §4, then `sdk_exec`, then `komira` with the session of §1, its tests (§8) and its README example (§7); before `komira`'s first release, the standalone proof that the pinned compiler's typed raises work and the move of `so`'s `error_code` rule into `sdk_exec`, so `KomiraError` is settled before anything ships (§1) | **the install test**: `//release/readme_e2e/verify:komira` installs `komira-ai/komira` and its closure from the staged set into an empty project, compiles the README example against the installed packages only, and runs one query over one local Parquet file; then `prod-add` does `mopm add komira-ai/komira` from the prod registry on the next release |
-| 2 | Session: the Mojo task examples in `src/komira/docs/tasks/`, form `mojo`, run by komira-ai/komira#2495's `mojo_task_examples`: built against `komira` in the pull request's check, its output compared byte for byte with `expected_output.txt`; then #2495's compare added to the install test's phases for the release (#2495 slice 6) | every task SQL can answer shown in Mojo, the rest `not-shown` with a reason (§7) |
+| 2 | Session: the Mojo task examples in `src/komira/docs/tasks/`, form `mojo`, run by komira-ai/komira#2495's `mojo_task_examples`: built against `komira` in the pull request's check, its output compared byte for byte with `expected_output.txt`; then #2495's compare added to the install test's phases for the release (#2495 slice 5) | every task SQL can answer shown in Mojo, the rest `not-shown` with a reason (§7) |
 | 3 | Plan builder: the executor's own checks: the sink capability table moves to `physical_plan` and `check_plan` refuses an unserved sink, and `run_lowered_plan_with` refuses a missing result or a stray root, both before any pipeline runs (§2) | a hand-made `LoweredPlan` with either fault refused by name |
 | 4 | Plan builder: `komira.physical`: `PhysicalPlan`, `parquet`, `filter`, `project`, `limit`, `hash_aggregate`, collect, the expressions and aggregates, the checks at submit, and `session.run` (§2). No new library to publish | the README example of §2 run by the README e2e against the installed packages; the same query through the session and the plan builder gives the same rows; the `mojo_plan` tree in `src/komira/docs/mojo_plan_tasks/` with its first task |
 | 5 | Plan builder: `sort`, `top_n`, `output_of` and `hash_join` | a two-pipeline join plan run as written |
@@ -905,8 +921,9 @@ tested there.
 | 10 | Typed SDK: its own design first: the front end over the typed operator tables (§3) | — |
 
 Slice 1 has many pull requests and is the bulk of the work (§4, "What each kind of row takes"). It
-is the one slice whose order the dependency graph fixes. The slices after it go in any order the dependencies allow. Slice 4
-needs slice 3, and slice 5 needs slice 4. Slice 2, the gate's examples, needs only slice 1, and
+is the one slice whose order the dependency graph fixes. The slices after it go in any order the
+dependencies allow, and no slice waits on an answer about order. Slice 1 uses the name `komira`
+(owner decision 2); another name would change only the package's name. Slice 4 needs slice 3, and slice 5 needs slice 4. Slice 2, the gate's examples, needs only slice 1, and
 slices 6 to 8 can go in any order after it.
 
 ## Decisions for the owner
@@ -935,12 +952,17 @@ Three questions, each about what exists at the end. The order of the work is not
 3. **What does the komira.dev gate mean for a task a language cannot show?** The gate is that the
    examples work in SQL, Python, TypeScript and Mojo. Must every task that Python shows work in all
    four, or may a task be left out of one language when a tracked issue says why?
-   - *Every task Python shows works in every language*, the gate as written. Nothing publishes until
-     all 80 are done in all four. For Mojo that waits on a frame API that has no design yet, and
-     Linux on arm64 is not covered by any Mojo package either (§5).
+   - *Every task that Python shows, and that the language can show at all, works in that language
+     before the site publishes.* The tasks a form can never show are listed by rank with the
+     reason. For SQL, and so for the Mojo session (§7), these are ranks 60, 31, 93, 22, 89 and 90
+     today, except that the Mojo session can show 31 and 93 once slice 7 brings credentials;
+     komira-ai/komira#2495 keeps the list. Before publishing, Mojo then needs slice 2's
+     examples for every other task. The tasks that need a frame API wait for one, and it has no
+     design yet. The Mojo packages are not built for linux-arm64, and this is listed with the gate's
+     exceptions.
    - *A task may be marked not shown in a language, with a reason naming an issue.* The site
-     publishes with holes, and the number of holes is not counted yet. For the Mojo session it is
-     between 1 and 66 of the 80 (§7).
+     publishes with holes, and the number of holes is not counted yet. komira-ai/komira#2495's
+     ranges give it per form.
    - **Recommended:** hold the gate as stated as the target, and let the owner grant exceptions once
      the count of tasks left out per language is known. This design does not recommend publishing
      with holes before that count exists.
