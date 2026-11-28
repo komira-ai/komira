@@ -715,8 +715,8 @@ _WINDOW_FRAMES_TEST_DATA.update({f + ".parquet": ":window_frames_oracle[" + f + 
 
 _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".tsv]" for c in _WINDOW_FRAMES_CASES})
 
-# The engine-execution layer of the SDK: its leaf modules, the plan gate
-# modules and the engine context with its SQL door and its plan
+# The engine-execution layer of the SDK: twelve modules (ten leaves plus the
+# plan gate modules) and the engine context with its SQL door and its plan
 # door (see README.md). Each module's header says what it is for.
 #
 # The welded tests are every tests/test_*.mojo file but the one the
