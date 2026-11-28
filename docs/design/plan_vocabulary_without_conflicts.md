@@ -7,10 +7,23 @@ open pull requests are a snapshot taken while main was at that commit. Anything 
 A pull request that adds one member to an enum of
 [plan_vocabulary.proto](../../src/plan_proto/plan_vocabulary.proto) conflicts with every other
 pull request that does the same, even when the two touch different enums. This document decides
-how a contributor gets a wire number without asking anyone, and how the committed generated code
-changes so that such pull requests merge with no conflict. The hand-written total
-`PLAN_WIRE_VOCABULARY_MEMBERS` in `src/plan_wire` is a separate change and is not covered here.
-Until that change lands, every member pull request also edits that one line.
+how a contributor takes a wire number that no other pull request is working on, and how the
+committed generated code changes so that such pull requests stop conflicting.
+
+What it does not cover:
+
+- **The hand-written total.** `PLAN_WIRE_VOCABULARY_MEMBERS` is two lines in two files:
+  `src/plan_wire/plan_wire_vocabulary.mojo` line 61, and the assertion in
+  `src/plan_wire/tests/test_plan_wire_vocabulary.mojo` line 179.
+  - Every member pull request edits both lines.
+  - Two pull requests that each add the same number of members merge cleanly, to a wrong total.
+    Two measured pairs did this. Only the welded test catches it.
+  - A separate change makes the total no longer hand-written. Until it lands, no pair of member
+    pull requests merges cleanly.
+- **Other numbers.** Field numbers and `oneof` arm numbers of `plan.proto` race the same way. One
+  measured pull request adds a `WirePlan` field. The claims below cover the vocabulary enums only.
+- **Hand-written code.** Engine code, `plan_wire` code and golden fixtures that a member needs
+  conflict like any hand-written code.
 
 ## What happens today
 
@@ -36,16 +49,17 @@ The conflicts come from three places:
   ([split.rs](../../tools/build/proto-codegen/src/split.rs)).
   - It fills each part with declarations, in declaration order, up to 880 lines. It then halves
     any part that still does not fit.
-  - One enum member costs 7 generated lines. Parts 4 and 5 have 4 free lines each.
-  - So one new member in an enum of part 4 moves `RegexpOp` to part 5, and the tail of part 5 moves
-    to part 6.
+  - One enum member costs 7 generated lines. Parts 4 and 5 have 4 free lines each. That figure is
+    inferred by applying the packing rule to the committed parts.
+  - So a new member in an enum of part 4 moves `RegexpOp` to part 5, and the tail of part 5 moves to
+    part 6.
   - That accounts for the other 6 of the 105 conflicted files: part 4, in each pair where both pull
     requests added to part 4.
 - **The lock.** [buildrules.mojo.lock.bzl](../../src/plan_proto/buildrules.mojo.lock.bzl) lists
   every source of the library with its sha256, sorted by path, one line per file.
   - It does so once for each of three platforms: 57 lines for the 19 generated files.
   - It is written by `buildrules mojo sync`, which `regen` does not run.
-  - The lock conflicted in all 15 pairs on the generated-file lines. In 6 of the pairs it also
+  - The lock conflicted in all 15 pairs on the generated-file lines. In 7 of the pairs it also
     conflicted on the line of a ledger test that both pull requests edited.
 
 The `.proto` text itself conflicted in 2 of the 15 pairs. In both, the two pull requests added to
@@ -57,19 +71,27 @@ run `regen` and the lock sync, push, and wait for a whole new check.
 
 ## The decision
 
-1. **Numbers.** Each wire number is a file, `src/plan_proto/numbers/<Enum>/<number>`, that holds
-   the member's name.
-   - A contributor takes a number by adding its file, ideally in a small pull request that lands
-     first.
-   - Two people who take the same number add the same path, and git refuses that merge.
-2. **Generated files stay committed.**
-   - The generator stops writing the input digest for inputs that are files of this repository.
-   - A module over the line limit is split into one directory per declaration, instead of being
+1. **Open claims.** A number that someone is working on, but that is not yet declared, is a file:
+   `src/plan_proto/numbers/<Enum>/<number>`, holding the member's name.
+   - The claim lands first, in a small pull request of its own.
+   - The member's pull request declares the value and deletes the claim.
+   - The first claim to land wins. The second one to land is refused at merge, as an add/add
+     conflict on the same path, and its author takes another number.
+   - That refusal comes no earlier than today's `.proto` conflict or protoc's refusal of a
+     duplicate number. A claim does not stop two open pull requests from choosing the same number.
+     What it adds is that a claim already on main is visible to everyone who starts work after it,
+     so it helps exactly when the claim lands before the work starts.
+2. **Generated files stay committed.** Two changes make each one local:
+   - the generator stops writing the input digest for inputs that are files of this repository;
+   - a module over the line limit is split into one directory per declaration, instead of being
      packed by size.
-3. **Result.** A pull request that adds a member to one enum touches four files.
-   - Two such pull requests on different enums merge with no conflict in them.
-   - Two on the same enum still conflict in that enum's lines. They can no longer hold the same
-     number, though, so the fix is to keep both sides' lines and regenerate, never to renumber.
+3. **The result.** With both changes, and with the total no longer hand-written:
+   - 13 of the 15 measured pairs, the ones on different enums, merge with no conflict in the
+     vocabulary's files. Hand-written code that two pull requests both change can still conflict
+     there, as any hand-written code can;
+   - the 2 same-enum pairs still conflict in that enum's lines. When their claims landed first,
+     their numbers differ, and the fix is to keep both sides' lines and regenerate. Nothing has to
+     be renumbered.
 
 ## Numbers
 
@@ -90,89 +112,100 @@ The rules are in [optimized_plan.md](optimized_plan.md) section 9.2:
 - never reuse a number or a name;
 - a value removed before any release could carry it is `reserved`, number and name.
 
-Nothing compares a pull request with main or with a release. The guards all work inside one tree:
+Section 9.2 also says each new value comes under a new `format_version`. In practice, members are
+added without a version bump. `PLAN_WIRE_FORMAT_VERSION` is 4
+(`src/plan_wire/plan_wire_codec.mojo:711`), and it last changed for a deleted field, not for any
+vocabulary member. This design changes neither the rule nor the practice.
 
-- The ledgers in `tests/test_plan_enum_numbers_nodes.mojo` and
-  `tests/test_plan_enum_numbers_functions.mojo` hold each name to its number in the generated codec.
-  They are written by hand in the same pull request as the `.proto`. So they catch a number the
-  generator gets wrong, not a deliberate edit.
-- `tests/test_plan_census_complete.mojo` requires a ledger row for every declared value. It
-  compares names only.
-- `tests/test_plan_reservations.mojo` holds every `reserved` line.
-- protoc refuses two values with one number in one enum, because no enum sets `allow_alias`.
+What holds a number today, all inside one tree:
 
-The repository has no release tags and no record of shipped numbers. Suppose one member has
-already landed on main, and a conflict with it is resolved by moving it to another number. Every
-test still passes.
+| What | Held by |
+|---|---|
+| each name maps to its number in the generated codec | the ledgers `tests/test_plan_enum_numbers_nodes.mojo` and `tests/test_plan_enum_numbers_functions.mojo`, written by hand in the same pull request |
+| each declared value has a ledger row (names only) | `tests/test_plan_census_complete.mojo` |
+| every `reserved` number and name | `tests/test_plan_reservations.mojo` |
+| the Mojo vocabulary of `plan_wire` equals protoc's, name by name and number by number | `src/plan_wire/tests/test_plan_wire_vocabulary_names.mojo` |
+| encoded plans keep their bytes | the golden byte fixtures of `src/plan_wire/tests`; a moved number changes the bytes of every golden that uses that member |
+| one number per value within an enum | protoc, because no enum sets `allow_alias` |
+
+Nothing compares a pull request with main or with a release, and the repository has no release
+tags. Moving a member that has already landed is caught only if a golden covers that member, and
+only if the author does not also rewrite the golden in the same pull request.
 
 ### The ways weighed
 
-| | A file per number | A reserved range per enum, one line per range in a shared file | A number derived from the name | A gate check that refuses a number another open pull request takes |
+| | An open claim file per number | A reserved range per enum, one line per range in a shared file | A number derived from the name | A gate check that refuses a number another open pull request takes |
 |---|---|---|---|---|
-| Who hands the number out | the first pull request to add the file; git refuses a second file at the same path | a person, whenever a range fills up and must be widened | nobody | the gate |
+| Who hands the number out | the first claim to land; git refuses a second claim at the same path | a person, whenever a range fills up and must be widened | nobody | the gate |
 | Two different claims | separate files, no conflict | two ranges that sort next to each other are adjacent lines, which git treats as a conflict | — | — |
 | Stable and readable | yes | yes | no: a hash of the name can collide, and the number moves if the name or the formula changes | yes |
 | Fits the engine | yes | no: `PlanTag` and `ExprTag` must stay dense (below), so a range leaves holes they cannot have | no: wire numbers must be permanent and small (the engine tag is a `UInt8`) | — |
 | Can it work | yes | yes, with a person widening ranges | no | no: a build sees one tree; listing other open pull requests needs the network, which a hermetic check may not use |
 
-**Choice: a file per number.** It conflicts exactly when two people take the same number, and at
-no other time. What a check can see is the tree the merge queue builds: main plus the pull request
-([ci.md](../ci.md#the-merge-queue)). The check below runs there.
+**Choice: an open claim file per number.** It conflicts exactly when two claims take the same
+number. A check can only see the tree the merge queue builds, which is main plus the pull request
+([ci.md](../ci.md#the-merge-queue)), so the check below runs there.
 
-### The files and their check
+### The claims and their check
 
 - `src/plan_proto/numbers/<Enum>/<number>` holds one line: the member's name. `<Enum>` is the
   enum's name in the `.proto`, and `<number>` is the wire number in decimal.
-- The 33 `*_WIRE_UNSPECIFIED = 0` values have no file. Every other declared value has one,
-  including `DTypeCode`'s real code 0. Seeding from main makes 367 files across the 34 enums.
-- These files replace the ledger rows of the 34 vocabulary enums, other than their
-  `*_WIRE_UNSPECIFIED` rows. So each number is written by hand in one place, not two.
-- The ledger tests read the files as test data. Their byte checks against the generated codec
-  stay; only where the rows come from changes.
-- These rows stay in the ledgers: the `*_WIRE_UNSPECIFIED` rows, which never change; and the rows
-  of enums outside the vocabulary, such as `AddressingStyleWire` of `bound_source.proto` and the
-  enums of `plan.proto`.
-- The files are staged by a glob in `src/plan_proto/BUCK`, so adding one changes no BUCK line. They
-  are not `.mojo`, so the lock does not list them. With no ledger edit, the ledger tests' lines in
-  the lock stop changing as well.
-- A welded test of `plan_proto` holds the files and the `.proto` to each other:
-  - every declared value other than the 33 `*_WIRE_UNSPECIFIED` has its file, and the file holds
-    its name;
-  - a file whose number is declared names that value;
-  - a file whose number is not declared is an open claim: it may name no value declared under
-    another number, and it may sit on no `reserved` number.
+- The directory holds open claims only. A declared value has no file: its pull request deletes the
+  claim.
+- The files are staged by a glob in `src/plan_proto/BUCK`, so a claim changes no BUCK line. They
+  are not `.mojo`, so the lock does not list them.
+- A welded test of `plan_proto` reads the claims and the `.proto`. It refuses a claim:
+  - whose number is declared in its enum;
+  - whose name is declared under any number;
+  - that sits on a `reserved` number.
 - **`PlanTag` and `ExprTag` stay dense.**
   - Engine code walks every tag in `[0, PLAN_TAG_COUNT)`, skipping only the two retired ids
     (`plan_tag_is_retired`).
   - It walks every tag in `[0, EXPR_TAG_COUNT)` with no holes at all.
-  - So in these two enums, a value may be declared only when no lower open claim remains, and the
-    test refuses a declared value above an open claim.
-  - The author of the higher number lands after the lower one. The files on main show which claim
-    that pull request waits for, so nobody needs to be asked.
+  - So in these two enums, the test also refuses a declared value above an open claim. The author
+    of the higher number lands after the lower one, and the claims on main show which one that is.
   - The other enums already have holes. The membership check of `plan_wire_vocabulary.mojo` lists
     runs, such as `[(0, 14), (16, 25)]` for `ExtractField`.
 
 ### Taking a number
 
-1. Find the highest number in `numbers/<Enum>/` on main, and add the next one as a file.
-2. When other pull requests in the same enum may be in flight, open that file as a pull request of
-   its own. It touches no generated file, so it lands in one check.
-3. If git reports an add/add conflict on that path, someone else holds the number. Take the next
+1. Take the highest number of the enum in the `.proto` or in `numbers/<Enum>/` on main, plus one.
+   Add it as a claim file, in a pull request of its own. It touches no generated file, so it lands
+   in one check.
+2. Start the member's work once the claim has landed.
+3. If git reports an add/add conflict on that path, the number is someone else's. Take the next
    one.
-4. To give up a claim, delete its file. The test refuses deleting the file of a declared value.
 
-### What guards a released number after the change
+The claim step is advice, not enforced. A pull request that skips it can still declare a value
+directly. If another pull request lands the same number first, the late one pays what it pays
+today: it renumbers its engine tag, its ledger rows, its `plan_wire` entry and its goldens.
 
-The same in-tree tests still run. Three things are added:
+**Stale claims.** Anyone may delete a claim in their own pull request when no open pull request
+declares it. The claim's commit names its author. This matters most in `PlanTag` and `ExprTag`, where
+a stale claim blocks every later member of the enum. In the other enums, a stale claim only wastes
+a number.
 
-- The number files on main are the record of every number in use.
-- Two open pull requests that take the same number cannot both land.
-- A member can move to a number held by another name only by editing an existing file.
+### What guards a number after the change
 
-Every legitimate change to `numbers/` adds or deletes a file, so a modified file stands out in
-review. A check cannot refuse that edit, because a build cannot read main's history. A test
-against the previous release's vocabulary would need a published copy pinned by sha256, and these
-slices do not build one.
+Every guard in the table above stays. Two things are added:
+
+- A number someone is working on is on main before the work starts, so the next contributor sees
+  it.
+- The new test refuses a claim that collides with a declared or reserved value. In the two dense
+  enums, it refuses a value declared above an open claim.
+
+Moving a member that has already landed still passes, unless a golden covers it, because a build
+cannot read main's history.
+
+There is a later step, which may never be needed: keep a file for every declared value, not only
+for open claims. Seeding from main would make 367 files: every value other than the 33
+`*_WIRE_UNSPECIFIED`, `DTypeCode`'s real code 0 included. The ledger rows of the 34 enums would be
+read from those files.
+
+- What it buys: a record of every number on main, and one hand-written place for each number
+  instead of two.
+- What it costs: a moved number becomes an edit of a one-line file instead of a ledger row. It also
+  needs a rewrite of the two ledger tests and of the census test.
 
 ## Generated files
 
@@ -195,8 +228,8 @@ Python modules `plan_pb2` and `plan_vocabulary_pb2` are already generated at bui
 | | Keep them committed; make a change local | Stop committing them | Keep everything; the gate names the command |
 |---|---|---|---|
 | What a member pull request conflicts on | that enum's lines, only when the other pull request touches the same enum | nothing generated | the 7 files and the lock, every time |
-| Build | regeneration is already a cached check; `plan_proto` gains about 200 small files (inferred) | one cached generation action | unchanged |
-| Package publication | unchanged | `mojo_package` takes its sources only from the lock and has no input for another target's output; a lock cannot hash a file that does not exist yet. This needs a new kind of source in mopm's unit graph, plus changes in buildrules, in the `plan_proto` adopted library (its `srcs` is a glob of the directory) and in the release packaging | unchanged |
+| Build | the costs below | one cached generation action | unchanged |
+| Package publication | unchanged: the package holds only the `.mojoc` (`:conda_holds` with `sole = True`) | `mojo_package` takes its sources only from the lock and has no input for another target's output; a lock cannot hash a file that does not exist yet. This needs a new kind of source in mopm's unit graph, plus changes in buildrules, in the `plan_proto` adopted library (its `srcs` is a glob of the directory) and in the release packaging | unchanged |
 | Review | generated changes stay in the diff, now limited to the declaration that changed | generated code is never seen | unchanged |
 | Cost of each landing | none | none | every open pull request merges main, regenerates, syncs the lock and runs a new check |
 
@@ -206,7 +239,7 @@ Python modules `plan_pb2` and `plan_vocabulary_pb2` are already generated at bui
 - Stopping the commits is the "generated-source input" option that generated_sources.md already
   describes, and it needs its own design in mopm first.
 - Naming the command does not remove a single conflict, and the freshness check already names
-  `regen`. Its cheap part is kept as the last slice below: `regen` also syncs the lock.
+  `regen`.
 
 ### The two generator changes
 
@@ -216,6 +249,8 @@ committed next to the output.
 **No input digest.** The header says `# input <path>`, and its last line says the inputs are named
 rather than pinned.
 
+- The text the generator writes changes, so `PLUGIN_GENERATOR_VERSION` in `header.rs` is bumped,
+  as its comment requires.
 - The tree already ties output to input: the freshness check fails on any difference, and the lock
   pins the bytes of every output file.
 - The AWS and Google Cloud clients keep the digest. Their inputs are archives fetched at build time,
@@ -232,15 +267,35 @@ _parts/<module>/<declaration>/declaration.mojo
 
 - `<declaration>` is the name in lower snake case, so `StringFnN` becomes `string_fn_n`.
 - The facade re-exports each declaration on its own line.
-- Adding a member rewrites only its own declaration's file. Adding an enum adds a directory and one
-  facade line.
-- The unchanging `__init__.mojo` of each declaration is there for the lock. The lock lists paths
-  sorted, one file per line. So `string_fn_n/__init__.mojo` sits between the files of `string_fn/`
-  and `string_fn_n/`. Without it, a change to each of those two enums would change two adjacent
-  lock lines, and adjacent lines conflict.
+- Adding a member rewrites only its own declaration's file.
+- The layout is shaped by how git merges.
+  - The lock lists paths sorted, one file per line, so the unchanging `__init__.mojo` of
+    `string_fn_n/` sits between the files of `string_fn/` and `string_fn_n/`.
+  - Without it, a change to each of those two enums would change two adjacent lock lines, and
+    adjacent lines conflict.
+  - A new enum still adds two lock lines next to its sorted neighbour, so a new-enum pull request
+    and a member pull request on that neighbour can still conflict.
 - The largest declaration in a split module of this repository is `ArrowType`, at 405 lines, so
   every file stays under the limit. A single declaration that reached 1000 lines would be refused
   by name.
+
+**Costs.**
+
+- The lock grows. Split modules of these rules today have this many declarations: `plan_proto` 107
+  (`plan` 73, `plan_vocabulary` 34), chat 65, managed mail 43, CRM 24, contacts 18.
+- For `plan_proto` the generated tree goes from 19 files to 222: two per declaration, two module
+  `__init__.mojo`, and the six files that are not parts (five beside `_parts`, and `_parts/__init__.mojo`). Its lock goes from 19 lines to 222 per
+  platform: about 600 more lines across the three platforms.
+- Each regeneration lands once and rebuilds every library built from the regenerated trees once.
+- Every open member pull request merges main once, into the new layout.
+- **Unproven: nested packages that import each other.** The 73 messages of `plan` import one
+  another, and the split today relies on Mojo allowing imports in a cycle between sibling modules.
+  Whether it allows them between sibling packages is not yet shown.
+  - So the first step of that slice is a build on the farm of `komira//src/plan_proto:lib` in the
+    new layout, with its compile time before and after.
+  - The fallback, if imports between packages are refused: one flat file per declaration, with the
+    lock lines kept apart another way. One way is for the lock to write each file's path and hash
+    on separate lines, which is a change in the package tool's repository.
 
 ### Other generated trees of the same shape
 
@@ -253,41 +308,42 @@ _parts/<module>/<declaration>/declaration.mojo
 
 ## What a pull request that adds one member looks like
 
-In `src/plan_proto` it touches four files. The engine and `plan_wire` code it needs come on top:
+In `src/plan_proto` it touches four files. Engine code, `plan_wire` code, goldens and the total
+come on top:
 
 ```text
 src/plan_proto/plan_vocabulary.proto                                                     one new line
-src/plan_proto/numbers/StringFnN/15                                                      new file, one line
+src/plan_proto/numbers/StringFnN/15                                                      the claim, deleted
 src/plan_proto/generated/plan_proto/_parts/plan_vocabulary/string_fn_n/declaration.mojo  7 new lines, 1 changed
 src/plan_proto/buildrules.mojo.lock.bzl                                                  3 changed lines, one per platform
 ```
 
-**The merge, shown with git.** A shallow clone of main got a base commit with this layout:
+**The merge, shown with git.** A shallow clone of main got two commits:
 
-- the vocabulary's six parts rewritten into 34 declaration directories;
-- no digest in any file;
-- the 367 number files;
-- the lock's rows rewritten from the files on disk.
+- the layout above: the vocabulary's six parts rewritten into 34 declaration directories, no digest
+  in any file, and the lock's lines rewritten from the files on disk;
+- four claims landed on top of it: `StringFnN` 15 and 16, `StringFn` 20 and `AggFn` 39.
 
-Each branch was then made from that base and adds one member. A scratch script wrote each branch's
-generated change by copying the lines of the enum's last member, which follows the 7-line pattern
-of the committed code. This proves the text merge, not the generator.
+Each branch was then made from those commits. A scratch script wrote each branch's generated change
+by copying the lines of the enum's last member, which follows the 7-line pattern of the committed
+code. This proves the text merge, not the generator.
 
-| Branch | Adds |
+| Branch | Does |
 |---|---|
-| `string-fn-n-15` | `StringFnN` `STRFNN_EXAMPLE_A = 15` |
-| `string-fn-20` | `StringFn` `STRFN_EXAMPLE_B = 20`: the neighbouring enum, with neighbouring lock lines |
-| `agg-fn-39` | `AggFn` `AGG_EXAMPLE_E = 39` |
-| `string-fn-n-16` | `StringFnN` `STRFNN_EXAMPLE_C = 16`: the same enum as `string-fn-n-15`, at another number |
-| `string-fn-n-15-other-name` | only the file `numbers/StringFnN/15`, naming `STRFNN_EXAMPLE_D`: the same number as `string-fn-n-15` |
+| `string-fn-n-15` | declares `StringFnN` `STRFNN_EXAMPLE_A = 15` and deletes its claim |
+| `string-fn-20` | declares `StringFn` `STRFN_EXAMPLE_B = 20`: the neighbouring enum, with neighbouring lock lines |
+| `agg-fn-39` | declares `AggFn` `AGG_EXAMPLE_E = 39` |
+| `string-fn-n-16` | declares `StringFnN` `STRFNN_EXAMPLE_C = 16`: the same enum as `string-fn-n-15` |
+| `claim-17-first`, `claim-17-second` | each claims `StringFnN` 17, with different names |
+| `claim-17-same` | claims `StringFnN` 17 with the same name as `claim-17-first` |
 
 ```text
 $ git diff --stat base string-fn-n-15
  src/plan_proto/buildrules.mojo.lock.bzl                          | 6 +++---
  .../_parts/plan_vocabulary/string_fn_n/declaration.mojo          | 9 ++++++++-
- src/plan_proto/numbers/StringFnN/15                              | 1 +
+ src/plan_proto/numbers/StringFnN/15                              | 1 -
  src/plan_proto/plan_vocabulary.proto                             | 1 +
- 4 files changed, 13 insertions(+), 4 deletions(-)
+ 4 files changed, 12 insertions(+), 5 deletions(-)
 
 $ git merge-tree --write-tree --name-only string-fn-n-15 string-fn-20    # exit 0
 $ git merge-tree --write-tree --name-only string-fn-n-15 agg-fn-39       # exit 0
@@ -298,9 +354,11 @@ src/plan_proto/buildrules.mojo.lock.bzl
 src/plan_proto/generated/plan_proto/_parts/plan_vocabulary/string_fn_n/declaration.mojo
 src/plan_proto/plan_vocabulary.proto
 
-$ git merge-tree --write-tree --name-only string-fn-n-15 string-fn-n-15-other-name  # exit 1
-src/plan_proto/numbers/StringFnN/15
-CONFLICT (add/add): Merge conflict in src/plan_proto/numbers/StringFnN/15
+$ git merge-tree --write-tree --name-only claim-17-first claim-17-second  # exit 1
+src/plan_proto/numbers/StringFnN/17
+CONFLICT (add/add): Merge conflict in src/plan_proto/numbers/StringFnN/17
+
+$ git merge-tree --write-tree --name-only claim-17-first claim-17-same    # exit 0
 ```
 
 Next, `string-fn-n-15`, `string-fn-20` and `agg-fn-39` were merged into one tree.
@@ -313,24 +371,31 @@ Next, `string-fn-n-15`, `string-fn-20` and `agg-fn-39` were merged into one tree
 
 Two controls show what each piece does:
 
-- Without the separator: the `__init__.mojo` lines were removed from the base lock and from the
-  locks of `string-fn-n-15` and `string-fn-20`, leaving one flat file per declaration. `git
-  merge-file` of those two locks then reports 3 conflicting hunks, one per platform.
+- Without the separator: the `__init__.mojo` lines were removed from the locks of the base,
+  `string-fn-n-15` and `string-fn-20`, leaving one flat file per declaration. `git merge-file` of
+  those locks then exits 3: one conflicting hunk per platform.
 - Today's layout: each of the six measured pull requests changes the digest line of all seven
   files, so every pair conflicts.
 
-The same-enum pair (`string-fn-n-15` and `string-fn-n-16`) still conflicts. The second to land
-takes both sides' lines in number order, then runs `regen` and the lock sync. Their numbers already
-differ, so nothing in engine code, the ledgers or `plan_wire` needs renumbering.
+The same-enum pair still conflicts. The second to land takes both sides' lines in number order,
+then runs `regen` and the lock sync. Its claim gave it a different number, so nothing has to be
+renumbered.
 
 ## Order of work
 
-Each slice lands on its own, and each one helps without the others. With all three of the first
-slices, and with the `plan_wire` total no longer written by hand, two member pull requests on
-different enums merge with no conflict.
+Pairs of member pull requests merge cleanly only when slices 2 and 3 have landed and the total is
+no longer hand-written. Slice 1 prevents number collisions; it does not change merging.
 
-1. **No input digest for the two proto rules.** This slice changes:
-   - the header in `header.rs`: no digest, and "inputs named above" in its last line;
+1. **Open claims.** This slice changes:
+   - the `numbers/` directory, which starts empty, with its glob in `src/plan_proto/BUCK`;
+   - the welded test of the claims;
+   - the steps of "Taking a number", in `src/plan_proto/README.md`.
+
+   It changes no ledger and no generated file, and waits on nothing. Had claims landed before the
+   work, it would have prevented both measured number collisions.
+2. **No input digest for the two proto rules.** This slice changes:
+   - the header in `header.rs`: no digest, "inputs named above" in its last line, and a bump of
+     `PLUGIN_GENERATOR_VERSION`;
    - the `__init__.mojo` text of the Zig rule actions, together with the other spellings that
      `tools/build/gen:command_agreement` holds equal;
    - the Rust tests that assert the digest;
@@ -338,38 +403,37 @@ different enums merge with no conflict.
      under `tools/build/tests`;
    - the paragraph "What does a generated file look like?" of generated_sources.md.
 
-   Alone, this removes the conflicts that were only the digest line: 99 of the 105 measured.
-2. **One directory per declaration for the two proto rules.** This slice changes:
-   - the generator's split;
-   - the check of `_parts` in `tools/build/act_util` and `tools/build/mojo/tools/proto_gen.zig`,
-     which refuses anything but a flat list of `.mojo` files today: nested directories become
-     allowed for these two rules only, and the AWS and Google Cloud actions keep the flat check;
-   - the layout that `tools/build/mojo/proto.bzl` and `tools/build/tests/proto_tests.sh` describe;
-   - the generator's goldens;
-   - the regeneration;
-   - the paragraph "The line limit" of generated_sources.md.
+   Alone, it removes the digest-only conflicts inside files: 99 of the 105 measured. Every pair
+   still conflicts, though, on the lock and on the parts that shift.
+3. **One directory per declaration for the two proto rules.** It pays off only after slice 2.
+   Without it, the digest would still change every declaration's file. This slice:
+   - first builds `komira//src/plan_proto:lib` on the farm in the new layout, with its compile time
+     before and after, and takes the fallback above if that fails;
+   - changes the generator's split;
+   - changes the check of `_parts` in `tools/build/act_util` and
+     `tools/build/mojo/tools/proto_gen.zig`. Today that check refuses anything but a flat list of
+     `.mojo` files. Nested directories become allowed for these two rules only, and the AWS and
+     Google Cloud actions keep the flat check;
+   - changes the layout that `tools/build/mojo/proto.bzl` and `tools/build/tests/proto_tests.sh`
+     describe, and the facades' generated import lines, which become one per declaration;
+   - moves the generator's goldens;
+   - regenerates the trees;
+   - updates the paragraph "The line limit" of generated_sources.md.
+4. **Later, possibly never:** a file for every declared value, as described above.
+5. **A convenience, not part of the fix:** `regen` also runs the lock sync of the package it
+   rewrote. That couples `regen` to a tool from another repository.
 
-   Alone, this ends parts shifting.
-3. **Number files.** This slice changes:
-   - the 367 seeded files and their glob in `src/plan_proto/BUCK`;
-   - the welded test;
-   - the ledger tests, which read the files;
-   - `tests/test_plan_census_complete.mojo`, which takes the files as well as the remaining ledger
-     rows;
-   - the steps of "Taking a number", in `src/plan_proto/README.md`.
+## The owner's decision
 
-   It does not depend on slices 1 or 2.
-4. **`regen` also syncs the lock** of the package it rewrote, so that after a same-enum merge one
-   command does both. Small and optional.
+Keep generated code checked in and make a pull request touch only its own declaration's file
+(recommended), or stop checking it in, which needs work in the package tool and the build rules
+first and means nobody reviews generated code. With the recommended way, 13 of the 15 measured pairs of pull requests would no longer conflict
+over the vocabulary; the other 2, which add to the same enum, would still conflict, but a number taken twice
+is refused when the second one lands.
 
-**The owner's decision.** Slice 1 is the owner's decision, because it changes a decided rule of
-generated_sources.md: that every generated file pins each input by name and sha256. No slice
-changes the rule that generated code is committed. No slice changes a wire format or the rules of
-section 9.2. The ordering check of slice 3 for `PlanTag` and `ExprTag` writes down what the engine
-already requires.
+The rest is information, decided as engineering changes, not questions:
 
-The choice: keep generated code committed and drop the digest for inputs in this repository, which
-removes 99 of the 105 measured conflicts and needs no change outside this repository; or stop
-committing generated code, which removes it from pull requests entirely but first needs a new kind
-of source in mopm and buildrules, and gives up reviewing generated code. **Recommended: the
-first.**
+- the claim files;
+- dropping the input line's hash from generated files of this repository's own `.proto` files,
+  which edits one sentence of generated_sources.md;
+- the landing order in `PlanTag` and `ExprTag`, which writes down what the engine already requires.
