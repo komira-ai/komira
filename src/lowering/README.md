@@ -198,8 +198,10 @@ shape:
   residual predicate, the sort-merge algorithm hint, a build side the plan
   does not define, a key that is not a column of its side, a key pair whose
   types the probe does not compare (INT64 and INT32 in any pairing, FLOAT64
-  with FLOAT64, STRING with STRING), and a join whose output names one column
-  twice.
+  with FLOAT64, STRING with STRING, a DATE32 with a DATE32 or a naive
+  microsecond TIMESTAMP, and each other temporal type with itself, a zoned
+  TIMESTAMP only with the same zoning), and a join whose output names one
+  column twice.
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key with a
   column of a type with no row (an 8- or 16-bit integer, a timestamp, a
   binary, ...), alone or beside served columns, or a segment whose triple has

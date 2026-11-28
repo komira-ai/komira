@@ -30,6 +30,12 @@
 #   test_a_month_window_past_the_end_is_empty
 #       a window starting after the last row, and a month series that points
 #       away from its bound, give no rows.
+#   test_a_month_step_beyond_the_timestamp_range_raises
+#       a step of a billion months, and one month at a time past the last
+#       TIMESTAMP (294247-01-10) or before the first, raise DuckDB's overflow
+#       error once the series needs the value beyond the range (DuckDB
+#       computes the value after the last row, so the full series raises);
+#       the rows before it are read.
 #   test_a_fixed_timestamp_step_adds_microseconds
 #       an hour step over three hours (range: three values).
 #   test_the_binding_carries_the_whole_spec
@@ -195,6 +201,32 @@ def test_a_month_window_past_the_end_is_empty() raises:
     var same_month = _monthly(_day(19753), _day(19723), 1, True)
     _assert_values(_all(same_month), List[Int64]())
     assert_false(Bool(s.row_count()))
+
+
+def test_a_month_step_beyond_the_timestamp_range_raises() raises:
+    # generate_series(TIMESTAMP '2024-01-01', TIMESTAMP '2024-02-01',
+    # INTERVAL 1000000000 MONTH): DuckDB raises, as row 1 is out of range.
+    var huge = _monthly(_day(19723), _day(19754), 1_000_000_000, True)
+    _assert_values(series_values(huge, 0, 1), [_day(19723)])
+    with assert_raises(contains="Overflow exception in date/time"):
+        _ = _all(huge)
+    with assert_raises(contains="beyond the TIMESTAMP range"):
+        _ = series_values(huge, 1, 10)
+    # 294246-11-30 .. 294247-01-10 (the last TIMESTAMP day) by one month:
+    # 11-30 and 12-30, then 294247-01-30 is beyond the range.
+    var last = Int64(106751991)
+    var up = _monthly(_day(last - 41), _day(last), 1, True)
+    _assert_values(
+        series_values(up, 0, 2), [_day(last - 41), _day(last - 11)]
+    )
+    with assert_raises(contains="Overflow exception in date/time"):
+        _ = _all(up)
+    with assert_raises(contains="Overflow exception in date/time"):
+        _ = series_values(up, 2, 1)
+    # Down from 40 days after the first TIMESTAMP day by one month.
+    var down = _monthly(_day(40 - last), _day(-last), -1, True)
+    with assert_raises(contains="Overflow exception in date/time"):
+        _ = _all(down)
 
 
 def test_a_fixed_timestamp_step_adds_microseconds() raises:

@@ -79,9 +79,10 @@ import from the modules.
   side cast as DuckDB casts it to DOUBLE, and refuses a STRING key against a
   numeric key. A DATE32 key is its midnight in microseconds, so it compares
   with a DATE32 key or a microsecond TIMESTAMP key (DuckDB's implicit cast); a
-  DATE32 beyond the TIMESTAMP range is refused. DATE64 and the other TIMESTAMP
-  keys compare by their storage, with a key of the same arrow type only; any
-  other pairing is refused by name.
+  DATE32 beyond the TIMESTAMP range (after year 294247) is refused, against a
+  DATE32 key too, since each side is extracted without the other's type.
+  DATE64 and the other TIMESTAMP keys compare by their storage, with a key of
+  the same arrow type only; any other pairing is refused by name.
 - `op_join_probe.join_multi_key`: the key slots' constants, the
   composite hash and the string hash and equality the probes share.
 - `op_join_probe.join_probe`: `execute_join_probe`, the join probe

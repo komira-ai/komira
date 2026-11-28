@@ -54,6 +54,14 @@ comptime US_PER_DAY: Int64 = 86_400_000_000
 """Microseconds in a day: a DATE bound is `days * US_PER_DAY`."""
 
 comptime _GREGORIAN_CYCLE_MONTHS: Int = 4800
+comptime _MAX_DAY: Int64 = Int64.MAX // US_PER_DAY
+"""The last day whose midnight is a TIMESTAMP; its negation is the first."""
+comptime SERIES_TIMESTAMP_OVERFLOW: StaticString = (
+    "generate_series: Overflow exception in date/time -> timestamp conversion"
+    " (a value of the series is beyond the TIMESTAMP range)"
+)
+"""What a month-step series raises when a value it reaches, including the one
+after the last in range, is beyond the TIMESTAMP range, as DuckDB raises."""
 """400 years: the days in a month repeat with this period of month indices."""
 
 
@@ -224,7 +232,13 @@ def series_values(
     `limit` of them, fewer when the series ends inside that window, none when
     it ends at or before `first`. Each call costs O(limit) (a month step adds at
     most one 400-year cycle of month lengths to find the window's first day),
-    whatever `first` is."""
+    whatever `first` is.
+
+    Raises:
+        `SERIES_TIMESTAMP_OVERFLOW` when a month step reaches a value beyond
+        the TIMESTAMP range, the one after the last row included (DuckDB
+        computes it too, and raises).
+    """
     spec.check()
     var out = List[Int64]()
     if limit <= 0:
@@ -246,8 +260,10 @@ def series_values(
     if not at:
         return out^
     var v = at.value()
-    while len(out) < limit and _within(spec, v):
+    while _within(spec, v):
         out.append(v)
+        if len(out) == limit:
+            break
         v = _add_months_clamped(v, spec.start, spec.step_months)
     return out^
 
@@ -345,17 +361,32 @@ def _month_index(micros: Int64) -> Int:
     return c.y * 12 + c.m - 1
 
 
-def _at_month(month_index: Int, day: Int, tod: Int64) -> Int64:
+def _at_month(month_index: Int, day: Int, tod: Int64) raises -> Int64:
+    """Day `day` (clamped to the month's length) of the month `month_index`
+    at `tod` microseconds into the day.
+
+    Raises:
+        `SERIES_TIMESTAMP_OVERFLOW` when that instant is beyond the TIMESTAMP
+        range, as DuckDB raises for the value after the last in range.
+    """
     var y = month_index // 12
     var m = month_index - y * 12 + 1
     var d = day
     var dim = _days_in_month(y, m)
     if d > dim:
         d = dim
-    return Int64(_days_from_civil(y, m, d)) * US_PER_DAY + tod
+    var days = _days_from_civil(y, m, d)
+    if days > Int(_MAX_DAY) or days < -Int(_MAX_DAY):
+        raise Error(String(SERIES_TIMESTAMP_OVERFLOW))
+    var midnight = Int64(days) * US_PER_DAY
+    if midnight > Int64.MAX - tod:
+        raise Error(String(SERIES_TIMESTAMP_OVERFLOW))
+    return midnight + tod
 
 
-def _add_months_clamped(prev: Int64, start: Int64, months: Int64) -> Int64:
+def _add_months_clamped(
+    prev: Int64, start: Int64, months: Int64
+) raises -> Int64:
     """`prev + months` months, the day clamped to the end of the target month,
     the time of day kept (it is the start's, which every value shares)."""
     var tod = _split(start)[1]
@@ -363,7 +394,7 @@ def _add_months_clamped(prev: Int64, start: Int64, months: Int64) -> Int64:
     return _at_month(c.y * 12 + c.m - 1 + Int(months), c.d, tod)
 
 
-def _month_value_at(spec: SeriesSpec, k: UInt64) -> Optional[Int64]:
+def _month_value_at(spec: SeriesSpec, k: UInt64) raises -> Optional[Int64]:
     """The value at row `k` of a month-step series, or None when the series
     has ended by then. The k-th value's day is the start's day clamped by every
     month the series has passed through; a day of 28 or less never clamps, and

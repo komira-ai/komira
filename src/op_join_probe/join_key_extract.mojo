@@ -17,8 +17,10 @@
 # rendered as its midnight in microseconds (days times 86,400,000,000, which is
 # injective over the int32 days, so DATE32 against DATE32 compares by value),
 # so it meets a microsecond TIMESTAMP as DuckDB's implicit DATE-to-TIMESTAMP
-# cast does; a DATE32 beyond the microsecond TIMESTAMP range is refused by
-# name. DATE64 and the TIMESTAMPs (int64 storage) are compared by their
+# cast does. A DATE32 beyond the microsecond TIMESTAMP range (after 294247-01-10
+# or before 290308-12-22 BC) has no midnight there and is refused by name,
+# whatever the other side's key is: each side is extracted without the other's
+# type, so a DATE32-to-DATE32 join on such a day is refused too. DATE64 and the TIMESTAMPs (int64 storage) are compared by their
 # storage. TIMESTAMP and TIMESTAMP_US, both microseconds, are one type. Each
 # other pairing of a temporal key (two different units, or a temporal key
 # with an integer, FLOAT64 or STRING key) is refused by name in
