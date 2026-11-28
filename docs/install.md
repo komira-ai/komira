@@ -163,7 +163,7 @@ The package's [README](../python/README.md), which is also its PyPI description,
 ## What does not work yet
 
 - **The DataFrame verbs not built yet**, of the pandas-shaped and the polars-shaped frames: the
-  [capability table](design/dataframe_surface_verbs.md) marks each one "not built", and gives what the
+  [capability map](design/dataframe_surface_verbs.md) marks each one "not built", and gives what the
   engine does with each capability's plan. Among them: the ORC, Avro and Arrow IPC readers, the
   readers on an object-store URL (`s3://`, `gs://`, `az://`; SQL reads `s3://` and `az://` Parquet
   through `Session.add_sql_binding`), and frames made from Arrow data (SQL reads Arrow data through `Session.register`). Both frames write a local

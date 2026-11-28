@@ -39,8 +39,9 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
 - Row order (section 7): a sort makes a frame ordered. A verb whose rows are
   rows of the frame (a filter, a projection, a limit) keeps the order unless
   it drops, renames or replaces the column of a sort key (`_ordered` asks
-  each verb): the builder places filters and projections under the sort and
-  a limit above it, and a sort above a limit when a verb comes after one, and
+  each verb that builds a filter or a projection): the builder places filters
+  and projections under the sort and a limit above it, and a sort above a
+  limit when a verb comes after one, and
   `tail` of a sorted frame is sorted. A verb that drops, renames or replaces
   a sort key's column, or whose rows are not the frame's rows one for one (a
   reduction, a distinct, a union, a join), gives an unordered frame, except

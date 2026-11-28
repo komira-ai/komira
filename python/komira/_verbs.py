@@ -2,6 +2,8 @@
 that the verbs share or that are too long for komira/_frame.py, which calls
 them. The longer ones, one bullet per verb in name order:
 
+- `add_prefix` and `add_suffix` take only the columns as their axis
+  (`check_label_axis`).
 - `concat` checks, before it builds the union, that the frames are on one
   session and have the same column set, one type per column and the same
   nullability, so that the encoder's own refusal is never what a user reads.

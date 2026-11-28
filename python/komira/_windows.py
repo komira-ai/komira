@@ -1,5 +1,5 @@
 """Window functions of the pandas-shaped DataFrame (docs/design/dataframe_surface.md,
-section 7; docs/design/dataframe_surface_verbs.md, the `window` row).
+section 7; docs/design/dataframe_surface_verbs.md, the `window` section).
 
 A window gives one value per row, computed over other rows. In the plan it is
 a `WindowExpr` item of a projection (komira/_ops), which the encoder sends as a

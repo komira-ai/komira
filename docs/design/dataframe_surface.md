@@ -7,9 +7,9 @@ capture of a user function (`komira._capture`) and the UDF worker runtime (`komi
 in part, in `python/komira/_frame.py` and `python/komira/pl/`, and `materialize` and `collect` run the plan
 through `komira_plan_stream`. What each skin does today is one page per feature under
 [python/docs/](../../python/docs/dataframe/overview.md), and what each capability has and lacks is its
-row of the capability map in [dataframe_surface_verbs.md](dataframe_surface_verbs.md); this paragraph lists
+section of the capability map in [dataframe_surface_verbs.md](dataframe_surface_verbs.md); this paragraph lists
 neither. The verbs, the plan each one builds and
-its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
+its matrix cell are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
 
 ## What problem does this solve?
@@ -633,8 +633,8 @@ package design). D4 to D18 are this design's own.
   capability in what the builders make
   ([dataframe_surface_verbs.md](dataframe_surface_verbs.md#grounding-that-no-surface-reaches)).
 - `subquery` has no spelling in either library, and `json_extract` has none in pandas. So the
-  polars-shaped skin leaves 2 of its 52 cells empty by decision, and the pandas-shaped skin leaves 3
-  (counted from the verbs document's table).
+  polars-shaped skin leaves `between` and `subquery` empty by decision, and the pandas-shaped skin
+  `json_extract` too (the verbs document's capability map lists them).
 - The early engine refuses at `lower` some of what the skins can build:
   a distinct over an explicit column list, a source other than Parquet, in memory, CSV, JSON Lines or an
   Iceberg table, and a CSV scan with `header=false` ([src/lowering/README.md](../../src/lowering/README.md)); a whole-row distinct runs only

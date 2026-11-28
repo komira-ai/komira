@@ -967,9 +967,9 @@ polars-shaped (`kpl`):
 
 ## Verbs that reach a capability through another row
 
-These verbs have no capability of their own. Each one builds the plan of the row named:
+These verbs have no capability of their own. Each one builds the plan of the capability named:
 
-| verb | pandas-shaped | polars-shaped | row |
+| verb | pandas-shaped | polars-shaped | capability |
 |---|---|---|---|
 | frame rename | `rename(columns=)`, `add_prefix`, `add_suffix` | `rename(mapping)` | `project` |
 | drop rows with a missing value | `dropna(subset=None, how="any")` | `drop_nulls(subset=None)` | `filter` (`drop_nulls_predicate`) |
