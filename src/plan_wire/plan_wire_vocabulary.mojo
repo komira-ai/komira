@@ -4343,7 +4343,7 @@ def plan_wire_space_member_count(space: Int) raises -> Int:
     if space == 1:
         return 28
     if space == 2:
-        return 38
+        return 39
     if space == 3:
         return 16
     if space == 4:
@@ -4414,7 +4414,7 @@ def plan_wire_space_engine_max(space: Int) raises -> UInt8:
     if space == 1:
         return 27
     if space == 2:
-        return 37
+        return 38
     if space == 3:
         return 24
     if space == 4:

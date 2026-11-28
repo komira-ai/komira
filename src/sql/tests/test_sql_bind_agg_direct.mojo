@@ -284,7 +284,7 @@ def test_statistical_aggregates() raises:
     )
     _check(
         "SELECT regr_slope(v) FROM t",
-        "ERR: SQL bind error: regr_slope() expects exactly 2 arguments: the SQL spelling is regr_slope(y, x), the DEPENDENT variable first"
+        "ERR: SQL bind error: regr_slope() expects exactly 2 arguments — the SQL spelling is regr_slope(y, x), the DEPENDENT variable first"
     )
     _check(
         "SELECT count_star(v) FROM t",
