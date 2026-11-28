@@ -74,5 +74,5 @@ Output:
 
 - How do I filter rows by a date range? (rank 83, works)
 - How do I split events into sessions by time gap? (rank 84, works)
-- How do I group by month or week? (rank 80, works; no page yet)
+- How do I group by month or week? (rank 80, works)
 - How do I fill gaps in a time series so every date is present? (rank 81, gap; no page yet)

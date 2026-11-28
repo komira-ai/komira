@@ -16,10 +16,16 @@
 #     NULL entry inside a string dictionary reads as the empty string.
 #   * The scratch estimate is at least the string encoding's per-row allocations
 #     (140 bytes a row for distinct 8-byte strings with an INT64 key).
-#   * A key whose type cannot be sorted (DECIMAL, DATE32) is refused by name
-#     when the sink is built over a known schema; over an unknown schema it is
-#     refused by name at combine, the output is then not readable, and the pool
-#     holds nothing once the sink is dropped.
+#   * A DATE32 key sorts by its day number, days before the epoch first:
+#     ascending and descending, with NULLs last by default in both directions
+#     (the engine's default placement, DuckDB's) and first or last as the plan
+#     asks, the value stored under a NULL never read, ties kept in input order,
+#     as the first of two keys, and through a top-N; the sorted column is still
+#     DATE32 and holds the input's days and NULLs.
+#   * A key whose type cannot be sorted (DECIMAL) is refused by name when the
+#     sink is built over a known schema; over an unknown schema it is refused
+#     by name at combine, the output is then not readable, and the pool holds
+#     nothing once the sink is dropped.
 
 from std.math import inf, nan
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
@@ -39,7 +45,7 @@ from arrow.string_array import StringArray
 from byte_buffer.heap_region import HeapRegion
 from morsel.morsel import Morsel
 from morsel.pipeline_execution import PipelineExecution
-from physical_plan.physical_plan import SortSinkData
+from physical_plan.physical_plan import SortSinkData, TopNSinkData
 from pipeline_exec.plan_harness import int64_column
 from pipeline_exec.segment_pool import SegmentPool
 from pipeline_exec.sink_sort import SortSink
@@ -53,12 +59,12 @@ def _ids(n: Int) raises -> Column[HeapRegion]:
     return Column.from_primitive[DType.int64](ids^)
 
 
-def _sort(
+def _sorted_batch(
     var batch: RecordBatch,
     keys: List[String],
     desc: List[Bool],
     nulls_first: List[Bool],
-) raises -> List[Int]:
+) raises -> RecordBatch:
     var pool = SegmentPool()
     var data = SortSinkData(keys.copy(), desc.copy(), 0, nulls_first.copy())
     var sink = SortSink(data, pool.share(), 3, Optional(batch.schema.copy()))
@@ -70,6 +76,16 @@ def _sort(
     var out = sink.take_output()
     _ = sink^
     assert_equal(pool.granted(), 0)
+    return out^
+
+
+def _sort(
+    var batch: RecordBatch,
+    keys: List[String],
+    desc: List[Bool],
+    nulls_first: List[Bool],
+) raises -> List[Int]:
+    var out = _sorted_batch(batch^, keys, desc, nulls_first)
     return int64_column(out, 0)
 
 
@@ -304,6 +320,127 @@ def test_the_scratch_estimate_covers_the_string_encoding_of_a_multi_key_sort() r
         assert_equal(order[i], n - 1 - i)
 
 
+# The days of `_dates`, by id; `_NULL_DAY` marks a NULL row. 19725 is 2024-01-03,
+# 19727 2024-01-05, 0 1970-01-01 and -1 1969-12-31.
+comptime _NULL_DAY = -1000000
+
+
+def _days(with_nulls: Bool) -> List[Int]:
+    var out: List[Int] = [19725, _NULL_DAY, -1, 19727, 0, _NULL_DAY, 19725]
+    if not with_nulls:
+        out[1] = 19726
+        out[5] = -400
+    return out^
+
+
+def _dates(with_nulls: Bool) raises -> RecordBatch:
+    """`[id INT64, day DATE32]`, seven rows of `_days`. A NULL row stores a
+    day far before every other under its NULL, so reading it would move the
+    row to the front."""
+    var days = _days(with_nulls)
+    var n = len(days)
+    var a = PrimitiveArray[DType.int32].allocate_nullable(n)
+    for i in range(n):
+        a.set(i, Int32(days[i]))
+        if days[i] == _NULL_DAY:
+            a._set_null(i)
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    rb.add_column(_ids(n))
+    sb.add_field(Field("day", ArrowType.DATE32, with_nulls))
+    rb.add_column(
+        Column.from_primitive_with_arrow_type[DType.int32](a^, ArrowType.DATE32)
+    )
+    return rb.build(sb.build())
+
+
+def _check_day_column(ref out: RecordBatch, with_nulls: Bool) raises:
+    """Column 1 of `out` is DATE32 in the schema and in the column, and row i
+    holds the day (or the NULL) of the input row whose id is in column 0."""
+    assert_true(out.schema.field_arrow_type(1) == ArrowType.DATE32)
+    assert_true(out.column_at(1).arrow_type == ArrowType.DATE32)
+    var days = _days(with_nulls)
+    var ids = int64_column(out, 0)
+    var values = out.column_at(1).as_primitive[DType.int32]()
+    for i in range(out.num_rows()):
+        var want = days[ids[i]]
+        assert_equal(out.column_at(1).is_null_at(i), want == _NULL_DAY, "null at " + String(i))
+        if want != _NULL_DAY:
+            assert_equal(Int(values.get(i)), want, "day at " + String(i))
+
+
+def test_a_date32_key_sorts_ascending_and_keeps_its_type() raises:
+    # Days by id: 0:19725 1:19726 2:-1 3:19727 4:0 5:-400 6:19725.
+    var out = _sorted_batch(_dates(False), _k("day"), _f(False), List[Bool]())
+    _expect(int64_column(out, 0), [5, 2, 4, 0, 6, 1, 3])
+    _check_day_column(out, False)
+
+
+def test_a_date32_key_sorts_descending_and_keeps_its_type() raises:
+    var out = _sorted_batch(_dates(False), _k("day"), _f(True), List[Bool]())
+    _expect(int64_column(out, 0), [3, 1, 0, 6, 4, 2, 5])
+    _check_day_column(out, False)
+
+
+def test_date32_nulls_go_last_by_default_in_both_directions() raises:
+    # Days by id: 0:19725 1:NULL 2:-1 3:19727 4:0 5:NULL 6:19725.
+    var asc = _sorted_batch(_dates(True), _k("day"), _f(False), List[Bool]())
+    _expect(int64_column(asc, 0), [2, 4, 0, 6, 3, 1, 5])
+    _check_day_column(asc, True)
+    var desc = _sorted_batch(_dates(True), _k("day"), _f(True), List[Bool]())
+    _expect(int64_column(desc, 0), [3, 0, 6, 4, 2, 1, 5])
+    _check_day_column(desc, True)
+
+
+def test_date32_nulls_are_placed_as_the_plan_asks() raises:
+    _expect(_sort(_dates(True), _k("day"), _f(False), _f(True)), [1, 5, 2, 4, 0, 6, 3])
+    _expect(_sort(_dates(True), _k("day"), _f(True), _f(True)), [1, 5, 3, 0, 6, 4, 2])
+    _expect(_sort(_dates(True), _k("day"), _f(False), _f(False)), [2, 4, 0, 6, 3, 1, 5])
+    _expect(_sort(_dates(True), _k("day"), _f(True), _f(False)), [3, 0, 6, 4, 2, 1, 5])
+
+
+def test_a_date32_key_ahead_of_a_second_key_breaks_its_ties_by_it() raises:
+    # The two rows of 19725 (ids 0 and 6) come in the second key's order.
+    _expect(
+        _sort(_dates(False), _k("day", "id"), _f(False, True, 2), List[Bool]()),
+        [5, 2, 4, 6, 0, 1, 3],
+    )
+    _expect(
+        _sort(_dates(True), _k("day", "id"), _f(True, True, 2), _f(True, False, 2)),
+        [5, 1, 3, 6, 0, 4, 2],
+    )
+
+
+def _top(
+    var batch: RecordBatch, desc: Bool, nulls_first: List[Bool], n: Int
+) raises -> RecordBatch:
+    var pool = SegmentPool()
+    var data = TopNSinkData(_k("day"), _f(desc), n, nulls_first.copy(), 0)
+    var sink = SortSink(data, pool.share(), 3, Optional(batch.schema.copy()))
+    sink.resize_worker_state(1)
+    sink.consume(0, Morsel(batch^, 0, 0))
+    var pipeline = PipelineExecution(1, 0)
+    sink.combine(pipeline)
+    sink.finalize()
+    var out = sink.take_output()
+    _ = sink^
+    assert_equal(pool.granted(), 0)
+    return out^
+
+
+def test_a_top_n_over_a_date32_key_keeps_the_first_rows_of_the_sort() raises:
+    var latest = _top(_dates(True), True, List[Bool](), 2)
+    assert_equal(latest.num_columns(), 2)
+    _expect(int64_column(latest, 0), [3, 0])
+    _check_day_column(latest, True)
+    var earliest = _top(_dates(True), False, List[Bool](), 3)
+    _expect(int64_column(earliest, 0), [2, 4, 0])
+    var nulls = _top(_dates(True), True, _f(True), 3)
+    _expect(int64_column(nulls, 0), [1, 5, 3])
+    _check_day_column(nulls, True)
+
+
 def test_a_key_that_cannot_be_sorted_is_refused_when_the_sink_is_built() raises:
     var sb = SchemaBuilder()
     sb.add_field(Field("id", ArrowType.INT64, False))
@@ -313,10 +450,11 @@ def test_a_key_that_cannot_be_sorted_is_refused_when_the_sink_is_built() raises:
     var pool = SegmentPool()
     with assert_raises(contains="sorts by 'price', of unsupported sort key type"):
         _ = SortSink(SortSinkData(_k("price"), _f(False)), pool.share(), 3, Optional(schema.copy()))
-    with assert_raises(contains="sorts by 'day', of unsupported sort key type"):
-        _ = SortSink(SortSinkData(_k("id", "day"), _f(False, False, 2)), pool.share(), 3, Optional(schema.copy()))
-    # A sortable key over the same schema is accepted.
+    with assert_raises(contains="sorts by 'price', of unsupported sort key type"):
+        _ = SortSink(SortSinkData(_k("day", "price"), _f(False, False, 2)), pool.share(), 3, Optional(schema.copy()))
+    # Sortable keys over the same schema, a DATE32 one among them, are accepted.
     _ = SortSink(SortSinkData(_k("id"), _f(False)), pool.share(), 3, Optional(schema.copy()))
+    _ = SortSink(SortSinkData(_k("id", "day"), _f(False, False, 2)), pool.share(), 3, Optional(schema.copy()))
 
 
 def test_over_an_unknown_schema_the_refusal_comes_at_combine_with_no_output() raises:
@@ -351,6 +489,12 @@ def main() raises:
     suite.test[test_a_numeric_dictionary_sorts_by_its_values_with_a_null]()
     suite.test[test_a_null_entry_inside_a_dictionary_reads_as_the_empty_string]()
     suite.test[test_the_scratch_estimate_covers_the_string_encoding_of_a_multi_key_sort]()
+    suite.test[test_a_date32_key_sorts_ascending_and_keeps_its_type]()
+    suite.test[test_a_date32_key_sorts_descending_and_keeps_its_type]()
+    suite.test[test_date32_nulls_go_last_by_default_in_both_directions]()
+    suite.test[test_date32_nulls_are_placed_as_the_plan_asks]()
+    suite.test[test_a_date32_key_ahead_of_a_second_key_breaks_its_ties_by_it]()
+    suite.test[test_a_top_n_over_a_date32_key_keeps_the_first_rows_of_the_sort]()
     suite.test[test_a_key_that_cannot_be_sorted_is_refused_when_the_sink_is_built]()
     suite.test[test_over_an_unknown_schema_the_refusal_comes_at_combine_with_no_output]()
     suite^.run()

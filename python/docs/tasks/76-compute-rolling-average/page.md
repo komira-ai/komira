@@ -57,4 +57,4 @@ Output:
 ## Related
 
 - How do I compare each row with the previous row (lag, lead, change)? (rank 77, partial)
-- How do I group by month or week? (rank 80, partial)
+- How do I group by month or week? (rank 80, works)

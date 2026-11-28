@@ -21,17 +21,17 @@ Path("sales.csv").write_text(
     "2026-11-03,9.5\n"
 )
 
-# SQL: date_trunc cuts each date down to the start of its day, week (Monday) or month.
-# komira cannot sort by a date column yet, so the few buckets are sorted in Python.
+# SQL: date_trunc cuts each date down to the start of its day, week (Monday) or month,
+# and ORDER BY sorts the buckets by date.
 with komira.Session() as s:
     s.register_csv("sales", "sales.csv")
     for unit in ("day", "week", "month"):
         rows = s.sql(
             "SELECT bucket, sum(amount) AS total, count(*) AS n FROM ("
             f"SELECT date_trunc('{unit}', sold_on) AS bucket, amount FROM sales"
-            ") AS b GROUP BY bucket"
+            ") AS b GROUP BY bucket ORDER BY bucket"
         )
-        print(unit, sorted(rows.to_arrow().to_pylist(), key=lambda r: r["bucket"]))
+        print(unit, rows.to_arrow().to_pylist())
 
 # pandas-shaped: resample by the date column. pandas labels a day by itself, a
 # week ("W") by the Sunday that ends it, and a month by its first day ("MS") or
@@ -72,7 +72,7 @@ ME [{'sold_on': datetime.date(2026, 10, 31), 'amount': 55.0}, {'sold_on': dateti
 - `date_trunc('week', ...)` starts the week on Monday: 2026-10-01 and 2026-10-02 fall in the week of 2026-09-28. The other units are `'day'`, `'month'`, `'quarter'` and `'year'`.
 - `df.resample(rule, on=column)` takes pandas' rules `"D"`, `"W"` (`"W-SUN"`), `"MS"` and `"ME"` (`"M"`), and labels each bucket as pandas does: a week, Monday to Sunday, by its Sunday, so 2026-10-01 is in the week pandas calls 2026-10-04 and SQL calls 2026-09-28; a month by its first day (`"MS"`) or its last (`"ME"`). The groups are SQL's `date_trunc` groups. A komira frame has no time index, so `on=` is required; the bucket keeps the column's name. Other rules, a multiple such as `"2D"`, and `closed` or `label` other than pandas' default are refused by name, and so is `.dt.floor("W")`, as pandas refuses it.
 - `komira.pl` has `col("sold_on").dt.truncate(every)` and `group_by_dynamic("sold_on", every=...)` for `"1d"`, `"1w"` and `"1mo"`, as polars spells them: a window is named by its start, the week from Monday, as in SQL. polars needs the frame sorted by the index first; komira does not, and gives the windows in no order.
-- Sorting by a date column fails today (`ORDER BY bucket`, or `groupby` on a date with its default `sort=True`): komira-ai/komira#2408. Until it is fixed, sort the answer in Python, as the example does. `resample` and `group_by_dynamic` give their buckets in no order for the same reason.
+- `ORDER BY bucket` sorts the buckets by date, earliest first, and a pandas-shaped `groupby` on a date sorts its groups by the date (its default `sort=True`). `resample` and `group_by_dynamic` give their buckets in no order, so the example sorts those in Python.
 - A bucket with no rows has no row in the answer: komira does not fill gaps, so a day, week or month without sales is missing rather than 0 (pandas' `resample` gives such a bucket a row; filling the gaps is komira-ai/komira#2343). A row with no date is in no bucket, as in pandas.
 - The CSV reader infers a date column (`YYYY-MM-DD`) as a date, and `date_trunc` of a date gives a date (DuckDB widens the date and gives a timestamp; the day it names is the same); `resample` and `dt.truncate` keep the date too. For a timestamp column (from Parquet, say), each gives a timestamp at the bucket's midnight, and `.dt.floor("D")` on the pandas-shaped frame cuts it to the day, or to `"h"`, `"min"` or `"s"`.
 - Sum a float column here: SQL `sum` of an integer column answers a 128-bit decimal (`Decimal('15')`), not an integer.
@@ -80,6 +80,6 @@ ME [{'sold_on': datetime.date(2026, 10, 31), 'amount': 55.0}, {'sold_on': dateti
 ## Related
 
 - [How do I extract year, month and weekday from a date column?](../39-extract-year-month-weekday-date-column/page.md) (rank 39, partial)
-- [How do I group by month or week?](../80-group-month-week/page.md) (rank 80, partial)
+- [How do I group by month or week?](../80-group-month-week/page.md) (rank 80, works)
 - How do I fill gaps in a time series so every date is present? (rank 81, gap; no page yet)
 - [How do I parse strings into dates?](../23-parse-strings-dates/page.md) (rank 23, partial)

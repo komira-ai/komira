@@ -12,23 +12,22 @@ Path("orders.csv").write_text(
     "6,2024-02-29,30\n"
 )
 
-# SQL: date_trunc cuts a date down to the first day of its month or week.
-# ORDER BY a date column is not supported yet, so the rows are sorted in
-# Python.
+# SQL: date_trunc cuts a date down to the first day of its month or week,
+# and ORDER BY sorts the periods by date.
 with komira.Session() as s:
     s.register_csv("orders", "orders.csv")
     by_month = s.sql(
         "SELECT date_trunc('month', order_date) AS month_start, count(*) AS n"
-        " FROM orders GROUP BY 1"
+        " FROM orders GROUP BY 1 ORDER BY month_start"
     )
-    print(sorted(by_month.to_arrow().to_pylist(), key=lambda r: r["month_start"]))
+    print(by_month.to_arrow().to_pylist())
 
     # Weeks start on Monday.
     by_week = s.sql(
         "SELECT date_trunc('week', order_date) AS week_start, count(*) AS n"
-        " FROM orders GROUP BY 1"
+        " FROM orders GROUP BY 1 ORDER BY week_start"
     )
-    print(sorted(by_week.to_arrow().to_pylist(), key=lambda r: r["week_start"]))
+    print(by_week.to_arrow().to_pylist())
 
 # pandas-shaped: add the year and the month as columns, then group by them.
 df = komira.read_csv("orders.csv")

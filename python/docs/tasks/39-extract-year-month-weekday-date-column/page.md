@@ -53,12 +53,12 @@ Output:
 - A CSV column whose every value is `YYYY-MM-DD` is read as a date, so no conversion is needed first.
 - The weekday number depends on the spelling: SQL `isodow` counts Monday as 1 and Sunday as 7, while `.dt.weekday` (also `.dt.dayofweek`) counts Monday as 0, as pandas does. SQL `dayofweek` counts Sunday as 0.
 - `.dt` also has `quarter`, `day` and `dayofyear`, and for a timestamp column `hour`, `minute` and `second`. Every part is an int64 column.
-- The example sorts by `id`, not by the date: sorting by a date column (`ORDER BY d`, `sort_values("d")`) fails today, komira-ai/komira#2408.
+- The example sorts by `id`; `ORDER BY d` and `sort_values("d")` sort by the date, earliest first, with NULLs last.
 - The weekday as a name (`Monday`) is not available yet: `.dt.day_name()` and `.dt.month_name()` are refused, and so are SQL `dayname()` and `monthname()`. `probe_day_name.py` beside this page tries `.dt.day_name()` and must fail with the line in `probe_day_name.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it. komira-ai/komira#2393 tracks it. Until then, map the number to a name in Python.
 
 ## Related
 
 - [How do I parse strings into dates?](../23-parse-strings-dates/page.md) (rank 23, partial)
 - [How do I add days to a date or take the difference between dates?](../79-add-days-date-take-difference-dates/page.md) (rank 79, partial)
-- [How do I group by month or week?](../80-group-month-week/page.md) (rank 80, partial)
+- [How do I group by month or week?](../80-group-month-week/page.md) (rank 80, works)
 - [How do I filter rows by a date range?](../83-filter-rows-date-range/page.md) (rank 83, works)

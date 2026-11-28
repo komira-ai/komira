@@ -15,17 +15,17 @@ Path("sales.csv").write_text(
     "2026-11-03,9.5\n"
 )
 
-# SQL: date_trunc cuts each date down to the start of its day, week (Monday) or month.
-# komira cannot sort by a date column yet, so the few buckets are sorted in Python.
+# SQL: date_trunc cuts each date down to the start of its day, week (Monday) or month,
+# and ORDER BY sorts the buckets by date.
 with komira.Session() as s:
     s.register_csv("sales", "sales.csv")
     for unit in ("day", "week", "month"):
         rows = s.sql(
             "SELECT bucket, sum(amount) AS total, count(*) AS n FROM ("
             f"SELECT date_trunc('{unit}', sold_on) AS bucket, amount FROM sales"
-            ") AS b GROUP BY bucket"
+            ") AS b GROUP BY bucket ORDER BY bucket"
         )
-        print(unit, sorted(rows.to_arrow().to_pylist(), key=lambda r: r["bucket"]))
+        print(unit, rows.to_arrow().to_pylist())
 
 # pandas-shaped: resample by the date column. pandas labels a day by itself, a
 # week ("W") by the Sunday that ends it, and a month by its first day ("MS") or

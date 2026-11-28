@@ -27,8 +27,7 @@ them, and any other is refused by name.
 
 As in pandas, a row whose date is missing is in no bucket. Unlike pandas, a
 bucket with no rows has no row in the answer: komira does not fill gaps
-(komira-ai/komira#2343). The answer has no row order: sorting by a date
-column is not built yet (komira-ai/komira#2408), so the `GroupBy` is made
+(komira-ai/komira#2343). The answer has no row order: the `GroupBy` is made
 with `sort=False`.
 
 The engine groups by no timestamp key (`LOWERING_SINK_UNSERVED`): a timestamp

@@ -44,6 +44,7 @@ mojo_library(
         "tests/test_sort_float_total_order.mojo",
         "tests/test_sort_indices_nested.mojo",
         "tests/test_sort_lex_multikey.mojo",
+        "tests/test_sort_multi_date32_key.mojo",
         "tests/test_sort_loser_tree.mojo",
         "tests/test_sort_nested_leaf_order.mojo",
         "tests/test_sort_parallel.mojo",

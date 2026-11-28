@@ -113,9 +113,6 @@ cross_bool/join_inner_on_v_bool_single	lower: LOWERING_JOIN_UNSERVED: Join (the 
 cross_date32/agg_median_0key_date32_full	execute: pipeline_exec: the aggregation sink of segment 0 does not serve aggregate tag 10 (SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)
 cross_date32/join_composite_kv_date32_full	lower: LOWERING_JOIN_UNSERVED: Join (the key pair v (date32) = v (date32)) is not served by the hash join
 cross_date32/join_inner_on_v_date32_full	lower: LOWERING_JOIN_UNSERVED: Join (the key pair v (date32) = v (date32)) is not served by the hash join
-cross_date32/sort_date32_full	execute: pipeline_exec: the sort sink of segment 0 sorts by 'v', of unsupported sort key type date32
-cross_date32/sort_desc_date32_full	execute: pipeline_exec: the sort sink of segment 0 sorts by 'v', of unsupported sort key type date32
-cross_date32/topn_date32_full	execute: pipeline_exec: the sort sink of segment 0 sorts by 'v', of unsupported sort key type date32
 cross_decimal128_12_2/agg_median_0key_decimal128_12_2_allnull	execute: pipeline_exec: the aggregation sink of segment 0 does not serve aggregate tag 10 (SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)
 cross_decimal128_12_2/agg_median_0key_decimal128_12_2_empty	execute: pipeline_exec: the aggregation sink of segment 0 does not serve aggregate tag 10 (SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)
 cross_decimal128_12_2/agg_median_0key_decimal128_12_2_full	execute: pipeline_exec: the aggregation sink of segment 0 does not serve aggregate tag 10 (SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)
