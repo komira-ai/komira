@@ -864,8 +864,8 @@ test "add: a plan with two builds of every package (both Mojo versions) is check
         defer log.deinit();
         var why: []const u8 = "";
         const rep = try pa.add(a, &why, try path(a, &tmp, "committed"), "/pinned/mopm", try path(a, &tmp, c.work), &pa.add_set, "linux-64", c.mojo, fake.runner(), &log.writer);
-        try t.expectEqual(@as(usize, 9), rep.members);
-        try t.expectEqual(@as(usize, 10), rep.entries);
+        try t.expectEqual(@as(usize, 10), rep.members);
+        try t.expectEqual(@as(usize, 11), rep.entries);
         const want = try std.mem.replaceOwned(u8, a, INIT_TOML, "mojo = \"" ++ INIT_MOJO ++ "\"", try std.fmt.allocPrint(a, "mojo = \"{s}\"", .{c.mojo}));
         try t.expectEqualStrings(want, try tmp.dir.readFileAlloc(a, try std.fmt.allocPrint(a, "{s}/project/mopm.toml", .{c.work}), 1 << 20));
         const lock = try tmp.dir.readFileAlloc(a, try std.fmt.allocPrint(a, "{s}/project/mopm.lock", .{c.work}), 1 << 20);
