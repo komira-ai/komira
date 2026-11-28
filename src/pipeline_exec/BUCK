@@ -48,7 +48,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 resident batch, 1e16, 1, -1e16, 1 exactly 1.0,
 #                                 the cursor-grain route's refusal.
 # test_variants                   each variant slot forwards to its member, the
-#                                 fourth operator and sink slots included.
+#                                 fourth operator and sink slots and the fifth
+#                                 sink slot included.
 # test_run_segment                every row once, the end of input once per
 #                                 worker, the operator chain, combine once
 #                                 after every worker, a worker count of one to
@@ -256,6 +257,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 (rows tied on every key numbered in source order), no
 #                                 input, refusals by exact message, the pool charged,
 #                                 returned and refused by name.
+# test_partition_topn_plan        hand-built plans into SINK_PARTITION_TOPN: the top
+#                                 rows of each partition on 3 workers under both
+#                                 dispatchers, RANK keeping every tie and naming its
+#                                 column, NULL order keys last as peers, k = 0 and no
+#                                 input giving the output schema, refusals by name.
 # test_window_plan                hand-built plans into SINK_PARTITION_BY: a resident
 #                                 batch, a window read by a filtered collect segment on
 #                                 1 to 4 workers, two chained windows, a param the
@@ -420,6 +426,7 @@ mojo_library(
         "tests/test_tpch_q6_concurrent.mojo",
         "tests/test_variants.mojo",
         "tests/test_window_plan.mojo",
+        "tests/test_partition_topn_plan.mojo",
     ],
     # Declared data is staged at the path given, and the test opens it by that
     # path: DuckDB's answer to each case of the agg_float_ungrouped corpus.

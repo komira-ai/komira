@@ -17,6 +17,7 @@ from physical_plan.physical_plan import (
     SortSinkData,
     TopNSinkData,
     PartitionBySinkData,
+    PartitionTopNSinkData,
 )
 from containers.slab import Slab
 from plan_ir.udf_ref import UdfRef
@@ -128,7 +129,8 @@ struct ParamTable(Movable):
 
     `SINK_AGG` segments index `agg` by `sink_param_id`, `SINK_SORT` segments
     index `sort`, `SINK_TOPN` segments index `topn`, `SINK_PARTITION_BY`
-    segments index `window`; a `SINK_COLLECT` or `SINK_HASH_BUILD` segment
+    segments index `window`, `SINK_PARTITION_TOPN` segments index
+    `partition_topn`; a `SINK_COLLECT` or `SINK_HASH_BUILD` segment
     indexes nothing (`sink_param_id` is -1): a join's keys are on its
     OP_JOIN_PROBE. `SOURCE_BATCH` segments index `batches` by
     `source_spec.batch_handle_id`. Every user-function call (an
@@ -140,6 +142,7 @@ struct ParamTable(Movable):
     var sort: List[SortSinkData]
     var topn: List[TopNSinkData]
     var window: List[PartitionBySinkData]
+    var partition_topn: List[PartitionTopNSinkData]
     var batches: List[InMemorySource]
     var udfs: Slab[UdfRef]
 
@@ -148,6 +151,7 @@ struct ParamTable(Movable):
         self.sort = List[SortSinkData]()
         self.topn = List[TopNSinkData]()
         self.window = List[PartitionBySinkData]()
+        self.partition_topn = List[PartitionTopNSinkData]()
         self.batches = List[InMemorySource]()
         self.udfs = Slab[UdfRef]()
 

@@ -56,13 +56,20 @@ and no environment variable and touches no global, so equal arguments give a
   with every function of one `OVER` clause) ends its child in a
   `SINK_PARTITION_BY` segment whose `sink_param_id` indexes
   `ParamTable.window`, opens a pipeline that reads it, and marks that
-  pipeline as a sorted stream when the node has a key. The root is a `SINK_COLLECT`
+  pipeline as a sorted stream when the node has a key. A partition top-n
+  (`cut_partition_topn`, the optimizer's fusion of `rn <= K` over a
+  ROW_NUMBER or RANK window) ends its child in a `SINK_PARTITION_TOPN`
+  segment whose `sink_param_id` indexes `ParamTable.partition_topn`: per
+  partition, the rows numbered at most `k` (every row tied within `k` for
+  RANK), with the number appended when the node names its column; the
+  pipeline that reads it is a sorted stream when the node has a key, as a
+  window's is. The root is a `SINK_COLLECT`
   segment unless the top node is a breaker, which is then the result.
   `cut_walk` is the dispatch on the node's tag and the resolution of shared
   subplans around it (below); each arm is its own module (`cut_scan` and
   its JSON arm `cut_scan_jsonl`, `cut_filter`, `cut_project`, `cut_limit`,
   `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_topn`, `cut_window`,
-  `cut_union`, `cut_join`,
+  `cut_partition_topn`, `cut_union`, `cut_join`,
   `cut_shared`), and `cut_state` holds
   what they share: the open pipeline, the cutter's segments and ParamTable,
   the shared subplans cut so far, and the close and reopen of a breaker. A new
@@ -101,7 +108,8 @@ and no environment variable and touches no global, so equal arguments give a
   `(SINK_HASH_BUILD, NONE, COLUMNAR)`, a join's build segment; it indexes no
   ParamTable row, so its `sink_param_id` is -1. `(SINK_PARTITION_BY, NONE,
   COLUMNAR)`, after the sort row, is a window's segment; it indexes
-  `ParamTable.window`.
+  `ParamTable.window`. `(SINK_PARTITION_TOPN, NONE, COLUMNAR)`, after it, is a
+  partition top-n's segment; it indexes `ParamTable.partition_topn`.
 - `udf_check`: what a user-function call is held to before it is cut (see
   User functions).
 - `render`: the deterministic text of a `LoweredPlan`.
@@ -144,7 +152,7 @@ outside its set is refused when the code runs, by its runtime
 Lowering refuses by name and never replaces what it cannot lower with another
 shape:
 
-- `LOWERING_UNCUTTABLE_NODE`, naming the node: a partition top-n,
+- `LOWERING_UNCUTTABLE_NODE`, naming the node: a
   view reference, cast to string or exchange node (the cutter has no
   arm for any of them, so an exchange is refused rather than elided on one
   host; a view reference is resolved before lowering, which has no view
@@ -154,7 +162,8 @@ shape:
   scale and timezone); a filter, projection or aggregation that carries a
   UDF of the registered kind (`has_udf`), an aggregate function that is a UDF
   (`AGG_UDF`); a limit with a negative
-  count or a negative offset, or a top-n with a negative count; a limit with
+  count or a negative offset, a top-n or a partition top-n with a negative
+  count; a limit with
   an offset that does not reach a sort (only a sort's output has an order to
   skip rows of); a limit over a sorted stream that is not one range of its
   sort (a filter stands between them, or the sort or a node between is a
@@ -190,7 +199,11 @@ shape:
   Every other `ROWS` or `RANGE` frame is served. The sink declares a `SUM`,
   `AVG`, `MIN` or `MAX` column nullable when its argument is, and a `SUM`,
   `AVG`, `MIN`, `MAX`, `FIRST_VALUE` or `LAST_VALUE` column nullable when
-  its frame need not hold the current row (and so can be empty).
+  its frame need not hold the current row (and so can be empty). A
+  partition top-n is refused with the same token, before its child is
+  walked, for a descending list whose length is not the sort keys', a
+  function other than `ROW_NUMBER` or `RANK`, and a partition or sort key the
+  window's check refuses.
 - `LOWERING_JOIN_UNSERVED`, naming the reason, raised before either child of
   the join is walked: a join type the plan IR does not define, a SEMI or ANTI
   join that builds its left side, a CROSS join that names a key, an equi-join

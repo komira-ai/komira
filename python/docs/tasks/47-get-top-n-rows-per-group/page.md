@@ -20,8 +20,7 @@ Path("sales.csv").write_text(
     "north,Hal,50\n"
 )
 
-# SQL: number the rows in each group with ROW_NUMBER, then keep numbers 1 to 2.
-# BETWEEN 1 AND 2 stands where most people write rn <= 2 (see the notes).
+# SQL: number the rows in each group with ROW_NUMBER, then keep numbers up to 2.
 with komira.Session() as s:
     s.register_csv("sales", "sales.csv")
     top2 = s.sql(
@@ -29,7 +28,7 @@ with komira.Session() as s:
         " SELECT region, rep, amount,"
         " ROW_NUMBER() OVER (PARTITION BY region ORDER BY amount DESC) AS rn"
         " FROM sales) ranked"
-        " WHERE rn BETWEEN 1 AND 2 ORDER BY region, amount DESC"
+        " WHERE rn <= 2 ORDER BY region, amount DESC"
     )
     print(top2.to_arrow().to_pylist())
 
@@ -50,12 +49,12 @@ Output:
 
 ## Notes
 
-- Write the filter as `rn BETWEEN 1 AND 2` (or `rn IN (1, 2)`), not `rn <= 2`. The plain `rn <= N` form, the one most people write, fails today with `UnsupportedOperation: lower: LOWERING_UNCUTTABLE_NODE: PartitionTopN (no cutter arm for this node) is not cut`, because the optimizer turns that exact shape into a node komira cannot run yet (komira-ai/komira#2377). `probe_rn_at_most.py` beside this page tries it and must fail with the line in `probe_rn_at_most.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
+- `rn <= 2` and `rn < 3` keep the first two rows of each group, and `rn BETWEEN 1 AND 2`, `rn IN (1, 2)` give the same rows. Rows tied on every `ORDER BY` key are numbered in no promised order, in DuckDB too: add a key that tells them apart (`ORDER BY amount DESC, rep`) when the cut can fall inside a tie. `RANK() OVER (...) AS rk` with `rk <= 2` keeps every row tied within the first two places, as DuckDB does, so a tie at the cut keeps more than two rows. A NULL in the `PARTITION BY` column forms one group of its own, and NULLs in the `ORDER BY` column come last in both directions.
 - `QUALIFY` is refused by name; the message points to this subquery form.
 - The subquery needs an alias (`ranked` above), and `SELECT *` next to a window function in the same select list is refused, so name the columns.
-- On the pandas-shaped frame, `groupby("region")["amount"].rank(method="min", ascending=False)` ranks each row within its group. `method="min"` gives tied rows the same rank, so a tie at the cut keeps more than N rows; `method="first"` is refused because a frame has no row order. `groupby().head(n)`, `groupby().cumcount()`, `groupby().nlargest(n)` and `DataFrame.nlargest` are not there.
+- On the pandas-shaped frame, `groupby("region")["amount"].rank(method="min", ascending=False)` ranks each row within its group. `method="min"` gives tied rows the same rank, so a tie at the cut keeps more than N rows; `method="first"` is refused because a frame has no row order. `groupby().head(n)`, `groupby().cumcount()`, `groupby().nlargest(n)` and `DataFrame.nlargest` are not there: pandas' `head` keeps each group's first rows in the frame's row order and index, and `nlargest(keep="first")` breaks ties by that order, and a frame has neither (komira-ai/komira#2377).
 - Rows come back in no promised order unless sorted: add `ORDER BY` or `sort_values`.
-- For the single top row per group, `rn = 1` runs as written, or take the group's `max` and join it back.
+- For the single top row per group, write `rn = 1` or `rn <= 1`, or take the group's `max` and join it back.
 
 ## Related
 

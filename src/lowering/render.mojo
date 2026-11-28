@@ -12,6 +12,7 @@ from lowering.sink_capability import triple_name
 from physical_plan.iceberg_scan_spec import IcebergScanSpec
 from physical_plan.udf_call_spec import UdfCallSpec
 from plan_expr.null_order_policy import derived_nulls_first
+from plan_expr.partition_expr import partition_fn_name
 from plan_ir.udf_ref import udf_ref_kind_name
 from physical_plan.physical_plan import (
     SegmentDescPod,
@@ -306,9 +307,10 @@ def _segment_text(seg: SegmentDescPod) -> String:
 
 def render_lowered_plan(plan: LoweredPlan) -> String:
     """The text of `plan`: its segments, its parameter table (a `params:`
-    header counting the agg, sort, top-n and batch rows, then a line for each
-    aggregation, sort and top-n and a `udf` line for each `UdfRef`) and its
-    result."""
+    header counting the agg, sort, top-n, window and batch rows, then a line
+    for each aggregation, sort, top-n, window and partition top-n and a `udf`
+    line for each `UdfRef`) and its result. A partition top-n row is not
+    counted in the header, which keeps its shape for plans without one."""
     var out = String("ir_version ") + String(plan.segments[0].ir_version) + "\n"
     for i in range(len(plan.segments)):
         out += _segment_text(plan.segments[i])
@@ -379,6 +381,24 @@ def render_lowered_plan(plan: LoweredPlan) -> String:
                 out += ", "
             out += String(w.partition_exprs[k])
         out += "]\n"
+    for i in range(len(p.partition_topn)):
+        ref t = p.partition_topn[i]
+        out += (
+            "  partition_topn "
+            + String(i)
+            + ": partition="
+            + _names(t.partition_keys)
+        )
+        out += " order=["
+        for k in range(len(t.sort_keys)):
+            if k > 0:
+                out += ", "
+            out += t.sort_keys[k]
+            out += " desc" if t.descending[k] else " asc"
+        out += "] fn=" + partition_fn_name(t.func) + " k=" + String(t.k)
+        if t.output_rank_col_name:
+            out += " rank_col=" + t.output_rank_col_name.value()
+        out += "\n"
     for i in range(len(p.udfs)):
         ref u = p.udfs[i]
         out += (

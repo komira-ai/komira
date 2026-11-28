@@ -700,6 +700,41 @@ _WINDOW_FRAMES_TEST_DATA.update({f + ".parquet": ":window_frames_oracle[" + f + 
 
 _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".tsv]" for c in _WINDOW_FRAMES_CASES})
 
+# DuckDB's table and answers for test_run_sql_partition_topn:
+# tests/partition_topn/data.sql writes top.parquet, and each line of
+# tests/partition_topn/cases.sql runs one `WHERE rn <= N` query over it and
+# writes its answer.
+_PARTITION_TOPN_CASES = [
+    "rn_le_2",
+    "rn_lt_3_kept",
+    "rn_one_int_key",
+    "rn_no_partition",
+    "rn_k_past_every_group",
+    "rank_le_2_ties",
+    "rank_ties_one_int_key",
+    "rank_lt_3_null_partition",
+    "rank_null_order_keys_last",
+    "rn_le_0",
+    "rank_lt_1",
+    "rn_over_where_ordered",
+]
+
+sql_oracle(
+    name = "partition_topn_oracle",
+    srcs = [
+        "tests/partition_topn/data.sql",
+        "tests/partition_topn/cases.sql",
+    ],
+    outputs = ["top.parquet"] + [c + ".tsv" for c in _PARTITION_TOPN_CASES],
+)
+
+_PARTITION_TOPN_TEST_DATA = {
+    "cases.sql": "tests/partition_topn/cases.sql",
+    "top.parquet": ":partition_topn_oracle[top.parquet]",
+}
+
+_PARTITION_TOPN_TEST_DATA.update({c + ".tsv": ":partition_topn_oracle[" + c + ".tsv]" for c in _PARTITION_TOPN_CASES})
+
 # The engine-execution layer of the SDK: twelve modules (ten leaves plus the
 # plan gate modules) and the engine context with its SQL door and its plan
 # door (see README.md). Each module's header says what it is for.
@@ -829,6 +864,7 @@ mojo_library(
         "tests/test_run_sql_topn.mojo": _TOPN_TEST_DATA,
         "tests/test_run_sql_window.mojo": _WINDOW_TEST_DATA,
         "tests/test_run_sql_window_frames.mojo": _WINDOW_FRAMES_TEST_DATA,
+        "tests/test_run_sql_partition_topn.mojo": _PARTITION_TOPN_TEST_DATA,
         "tests/test_run_sql_join_kinds.mojo": _JOIN_KINDS_TEST_DATA,
         "tests/test_run_sql_subquery.mojo": _SUBQUERY_TEST_DATA,
         "tests/test_run_sql_set_ops.mojo": _SET_OPS_TEST_DATA,
