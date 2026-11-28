@@ -89,7 +89,7 @@ Fixed before this design, and not reopened here:
 | what the user writes | files and SQL text, and later logical plans; reads rows back | the physical plan itself: pipelines, their operators and the step that ends each, run as written | a program whose schema is a compile-time value |
 | when names and types are checked | at run time, when the library binds the plan | at run time, when the plan is submitted (§5) | when the user's program is compiled |
 | what it rests on | the shared library's C interface (§1 to §3) | the engine's Mojo libraries, linked into the user's program (§5) | the typed operator tables (§6) |
-| what installing it compiles | `komira`, `komira_error` and two small libraries (`arrow`, `arrow_ipc`); no engine | the engine: 58 packages (§5) | not designed |
+| what installing it compiles | `komira` and the 19 libraries of its closure (§4); no engine | the engine: 58 packages (§5) | not designed |
 | built | first | second | not planned; the owner has not ruled on it |
 
 The untyped SDK comes first because the examples gate needs it and because it needs only four
@@ -299,8 +299,14 @@ user's own Mojo already has (below).
 | macOS arm64 | `libkomira.dylib` alone: the native code is linked into it, with install name `@rpath/libkomira.dylib` | yes, on the farm's Macs |
 | Linux arm64 | none | no |
 
-The Mojo packages are not built for linux-arm64, and this is listed with the gate's exceptions
-(owner decision 3).
+Linux arm64, said for each package:
+- **`komira`** has no linux-arm64 build because the shared library has none. That is listed with
+  the gate's exceptions (the gate question of komira-ai/komira#2495).
+- **`komira_physical`** does not use the shared library, and it is not built for linux-arm64 either.
+  No mopm package is built for linux-arm64 today ([docs/releases.md](../releases.md)), and its
+  closure links `awslc`, whose static archive has no linux-arm64 build (`src/awslc/README.md`:
+  "Not built: ... the linux arm64 assembly set"). It is outside the gate, so this is no gate
+  exception.
 
 **mopm cannot carry it yet.** What a mopm package can declare today:
 - `[native.<id>]`: a static archive only, linked into the user's program (`mopm pack` refuses
@@ -377,7 +383,7 @@ repository allows only in a module's FFI internals, appear only there. So `komir
 in `tests/pointer_lint_ffi.tsv`, the pointer lint's list of FFI modules, naming the foreign resource
 it owns: "the libkomira shared library: its handle, the session's context, the C strings and buffers
 of each call, and the ArrowArrayStream each query returns". The repository already has the pattern
-in three places:
+in two places:
 - `src/so/tests/gate/*.mojo` and `src/tests/helpers/komira_plan_harness/door.mojo` open libkomira
   from Mojo and call it;
 - `compression/codec_libraries.mojo` has a process-wide handle slot and a raising opener.
@@ -438,11 +444,14 @@ plus the mopm change of §2. Notes on them:
   (1.1) takes a bare path. Sources are values in every SDK (credentials_and_writes.md, decision 12),
   and the same `files` value later carries a credential for a remote file, which
   `komira_register_parquet` cannot. The encoding libraries are published already, and the logical
-  plans of slice 5 need them anyway. Their cost is five small libraries compiled at install.
+  plans of slice 5 need them anyway. Their cost is the five libraries of the `plan_proto` set,
+  counted in the 19 below.
 
 The engine is compiled once, by the release, into the shared library, as it is for the wheel. A
-user who installs `komira` compiles `komira`, `komira_error`, `arrow` and `arrow_ipc`, and no engine
-library.
+user's build of a program that imports `komira` compiles `komira` and the 19 libraries of its
+closure: `komira_error`, the 13 of `arrow` and `arrow_ipc`, and the 5 of the `plan_proto` set. None
+of them is an engine library *(inferred: a `.mojoc` holds no machine code, so the user's build
+compiles every library it imports)*.
 
 ## 5. Mojo physical plan: `komira_physical`
 
@@ -500,10 +509,15 @@ def main() raises:
     plan.hash_aggregate(trips, keys=[col("city")],
                         aggregates=[count_rows("trips"), sum_of(col("fare"), "total")])
     plan.set_result(trips)
-    print(engine.schema_of(plan, trips))    # the pipeline's output schema, a run-time value
     var result = engine.run(plan^)           # check the plan, then run it as written
     print(result)
 ```
+
+`engine.run` returns a `Result` of `komira_physical`'s own, over the result batch. It prints the
+same `format_table` text as `komira`'s `Result`, by the same rule: the first 20 rows are formatted
+when it is built, and a formatting failure keeps the rows and prints one fixed line (§1). So a Mojo
+physical plan example prints the same way as a Mojo example. The pipeline's output schema, a
+run-time value, is read with `engine.schema_of(plan, trips)` when a program wants it.
 
 Each call maps to the IR, and the builder fills the fields the user does not choose:
 
@@ -515,7 +529,7 @@ Each call maps to the IR, and the builder fills the fields the user does not cho
 | no sink named | `SINK_COLLECT` |
 | `plan.pipeline(output_of(p))` | `SourceSpecPod.from_sink_output(p)`, with `p` in the new pipeline's `deps` and the waiting edge `EDGE_E3_PUBLISH_WAIT` |
 | later: `sort`, `top_n`, `hash_join(build=p1, probe=p2, ...)` | `SINK_SORT`, `SINK_TOPN`, and `SINK_HASH_BUILD` on `p1` with `MorselOp.join_probe` on `p2` |
-| `engine.run(plan)` | reads each source's schema, checks the whole plan (below), builds the `LoweredPlan`, and calls `run_lowered_plan_with(ctx, lowered, LocalOnlyScanFs())` |
+| `engine.run(plan)` returns a `Result` | reads each source's schema, checks the whole plan (below), builds the `LoweredPlan`, and calls `run_lowered_plan_with(ctx, lowered, LocalOnlyScanFs())` |
 
 The user chooses the shape: how the plan is cut into pipelines, where a filter runs, which sink ends
 each pipeline, and which side of a join is built. That is what this surface has and the untyped
@@ -884,8 +898,8 @@ How the two packages obey the rules:
 - **Packaging is `.mojoc`, and `deps` list the whole closure.**
   - Both are `mojo_package`s from their first commit, so each library is a `.mojoc` and each
     package a `.conda` with a `mopm.toml`.
-  - Their BUCK `deps` are their whole closures: 18 libraries for `komira` (§4); `sdk_exec` and its
-    86 for `komira_physical` (§5).
+  - Their BUCK `deps` are their whole closures: 19 libraries for `komira`, with `komira_error`
+    (§4); `komira_error`, `sdk_exec` and its 86 for `komira_physical` (§5).
   - Each `mopm.toml` `[dependencies]` names only what the package imports. mopm resolves the rest
     from each package's own dependencies (`>=0.1,<0.2`, [docs/ci.md](../ci.md)).
 - **Files, tests and examples.** Every file stays under 1,000 lines, every test file is in
@@ -898,7 +912,7 @@ A user's build needs:
 | Mojo | `1.1.0`, the one Mojo every package and the shared library are built for | `MOJO` in [packages.bzl](../../release/readme_e2e/packages.bzl), `mojo = ["1.1.0"]` in each `mopm.toml`, `tools/build/platforms/table.bzl` |
 | mopm | a mopm with pixi on `PATH`. `komira` needs the first mopm with shared natives (§2); the repository builds with mopm 0.0.138 today | `MOPM` in packages.bzl, `mopm-toolchain.toml` |
 | the project | `mopm init`, `[toolchain] mojo = "1.1.0"` (init writes mopm's own default, and `mopm add` resolves the newest build for the project's Mojo), `mopm add komira-ai/komira`, `mopm sync` | the `prod-add` job ([docs/ci.md](../ci.md)) |
-| platform | Linux on x86_64 or macOS on arm64. The Mojo packages are not built for linux-arm64, and this is listed with the gate's exceptions (owner decision 3) | [docs/releases.md](../releases.md) |
+| platform | Linux on x86_64 or macOS on arm64. Neither Mojo package is built for linux-arm64 (§2 says why for each) | [docs/releases.md](../releases.md) |
 | host | what the Python wheel needs on Linux: glibc 2.35 or newer and an x86-64-v3 CPU, since the same shared library is inside it | [docs/install.md](../install.md) |
 | system libraries | `compression` opens libzstd, libbz2 and liblzma, and `zlib` and `lz4` open libz and liblz4, at run time. Each package declares them as `[native-dependencies]`, so `mopm sync` installs them from conda-forge | those packages' `mopm.toml`, `tools/build/package/system_libs.bzl` |
 
@@ -976,7 +990,8 @@ runner.
   `expected_output.txt`, byte for byte. It is given the shared library as the README gate is. After
   merge, the release runs the same examples against the installed packages, with
   komira-ai/komira#2495's exact compare added to the install test's phases (its slice 5).
-- **The output.** It is `format_table`'s text, since `print(result)` writes it.
+- **The output.** It is `format_table`'s text in both Mojo forms, since `print(result)` writes it
+  for `komira`'s `Result` and for `komira_physical`'s (§5).
 - **The trees, one per form, each in its package:**
   - Mojo (key `mojo`): `src/komira/docs/tasks/<rank>-<slug>/`;
   - Mojo physical plan (key `mojo_plan`): `src/komira_physical/docs/tasks/<rank>-<slug>/`.
@@ -984,14 +999,16 @@ runner.
   Each holds `example.mojo`, `expected_output.txt` and `page.md`. A form draws its tab only once its
   package is published (komira-ai/komira#2495, section 1).
 - **How many of the 80 tasks the Mojo form can show.** The same range as the SQL form, because it
-  runs SQL text. The counts are komira-ai/komira#2495's: it writes out the one text search, and it
-  lists the tasks SQL can never show for reasons other than missing work. Today those are:
-  - rank 60, which holds no SQL;
-  - ranks 31 and 93, which read cloud storage with a credential;
-  - ranks 22, 89 and 90, which store rows with Python's `sqlite3`.
+  runs SQL text. The counts are komira-ai/komira#2495's ("What each form can show"), from the one
+  text search it writes out:
+  - "Cannot be shown in SQL today, for a reason other than work not yet done: 5. Ranks 31 and 93
+    read cloud storage with a credential, which SQL text cannot name. Ranks 22, 89 and 90 store rows
+    in a database with Python's `sqlite3`, and komira writes to no database."
+  - "Rank 60 ... has no SQL in its Python example ... That is not shown to be impossible in SQL, so
+    it is counted with the tasks whose SQL is written first."
 
-  In the Mojo form, ranks 31 and 93 can come with slice 4, which brings credentials. This design
-  does not count them again.
+  For Mojo, ranks 31 and 93 leave the 5 once `files` names a credential (slice 4), so its floor is
+  then 3. This design does not count them again.
 
 ## 10. Tests of `komira` itself
 
@@ -1060,7 +1077,8 @@ name.
 
 ## Decisions for the owner
 
-Three questions, each about what exists at the end. The order of the work is not among them.
+Two questions, each about what exists at the end; the third, about the gate, is asked once, in
+komira-ai/komira#2495. The order of the work is not among them.
 
 1. **Does a typed SDK exist at the end?** It would check column types when the user's program is
    compiled (§6).
@@ -1079,21 +1097,12 @@ Three questions, each about what exists at the end. The order of the work is not
    - The physical-plan surface needs 50 more names before its waves are published, listed in §5's
      table (every row marked "claim the name"), as each wave comes or all at once.
    - **Recommended:** `komira`, the name on PyPI and npm.
-3. **What does the komira.dev gate mean for a task a language cannot show?** The gate is that the
-   examples work in SQL, Python, TypeScript and Mojo. Must every task that Python shows work in all
-   four, or may a task be left out of one language when a tracked issue says why?
-   - *Every task that Python shows, and that the language can show at all, works in that language
-     before the site publishes.* The tasks a form can never show are listed by rank with the reason.
-     For SQL, and so for the Mojo form (§9), these are ranks 60, 31, 93, 22, 89 and 90 today. The
-     Mojo form can show 31 and 93 once slice 4 brings credentials. komira-ai/komira#2495 keeps the
-     list. The Mojo packages are not built for linux-arm64, and this is listed with the gate's
-     exceptions.
-   - *A task may be marked not shown in a language, with a reason naming an issue.* The site
-     publishes with holes, and the number of holes is not counted yet. komira-ai/komira#2495's
-     ranges give it per form.
-   - **Recommended:** hold the gate as stated as the target, and let the owner grant exceptions once
-     the count of tasks left out per language is known. This design does not recommend publishing
-     with holes before that count exists.
+3. **The gate.** What it means for a task a language cannot show is asked once, in
+   komira-ai/komira#2495's question for the owner, with its table of ranks per language and its
+   recommendation. The gate counts four languages, SQL, Python, TypeScript and Mojo, where Mojo is
+   the untyped SDK `komira`, and the Mojo physical plan tab is outside it. For `komira` the answer
+   decides whether ranks 22, 89, 90 (and 31 and 93 until slice 4) and its missing linux-arm64 build
+   are listed exceptions or must be done first.
 
 ## What the design decides, and why
 
