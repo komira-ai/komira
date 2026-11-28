@@ -1,7 +1,8 @@
-# The form komira does not have yet: pandas' read_csv(chunksize=...), which
+# The form komira does not have: pandas' read_csv(chunksize=...), which
 # hands back the file as an iterator of frames to loop over
-# (komira-ai/komira#2369). It must fail with the line of
-# probe_chunksize.error.txt.
+# (komira-ai/komira#2369). komira refuses it by name, since chunked reading
+# waits for the engine to hand out batches as it makes them. It must fail
+# with the line of probe_chunksize.error.txt.
 from pathlib import Path
 
 import komira

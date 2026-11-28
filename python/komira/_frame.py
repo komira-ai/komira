@@ -1091,13 +1091,23 @@ def read_csv(
     *,
     sep: str = ",",
     header: int | str | None = "infer",
+    chunksize: int | None = None,
+    iterator: bool = False,
     session: Session | None = None,
 ) -> DataFrame:
     """A frame of the local CSV file at `path`, its column names and types
     inferred by the engine now, from the start of the file. `sep` is the one
     ASCII character between fields; `header` is "infer" or 0 when the first
     line holds the column names, None when it does not. Failures, paths and
-    `session` are as for `read_parquet`."""
+    `session` are as for `read_parquet`. pandas' chunked reading,
+    `chunksize` other than None and `iterator` other than False, raises
+    `UnsupportedOperation` before the file is touched."""
+    for name, value, default in (("chunksize", chunksize, None), ("iterator", iterator, False)):
+        if value is not default:
+            raise UnsupportedOperation(
+                f"read_csv({name}={value!r}) reads the file in chunks: chunked reading waits for the engine "
+                "to hand out batches as it makes them"
+            )
     if header is None:
         has_header = False
     elif header == "infer" or (header == 0 and not isinstance(header, bool)):

@@ -7,6 +7,8 @@ refused). Each reads the file's schema now, so a missing file raises at the
 reader; paths are taken as `register_parquet` takes them. Each takes
 `session=`, the session the frame runs on; without it, the process's
 default session, made by the first reader called without one. No table name
-is registered.
+is registered. pandas' chunked reading, `read_csv(path, chunksize=n)` or
+`iterator=True`, raises `UnsupportedOperation` by name: chunked reading waits
+for the engine to hand out batches as it makes them.
 
 Back to [the DataFrame overview](overview.md).

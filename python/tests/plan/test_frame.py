@@ -1066,6 +1066,21 @@ def test_read_csv_header_must_be_infer_zero_or_none_before_any_library_call():
         refuses(lambda: komira.read_csv(PATH, header=header), UnsupportedOperation, message.format(header))
 
 
+def test_read_csv_refuses_chunked_reading_by_name_before_any_library_call():
+    message = (
+        "read_csv({0}={1!r}) reads the file in chunks: chunked reading waits for the engine "
+        "to hand out batches as it makes them"
+    )
+    for chunksize in (2, 1, 0, -1, 2.0, "2", False):
+        refuses(lambda: komira.read_csv(PATH, chunksize=chunksize), UnsupportedOperation,
+                message.format("chunksize", chunksize))
+    for iterator in (True, 1, 0, None):
+        refuses(lambda: komira.read_csv(PATH, iterator=iterator), UnsupportedOperation,
+                message.format("iterator", iterator))
+    refuses(lambda: komira.read_csv(PATH, chunksize=2, iterator=True), UnsupportedOperation,
+            message.format("chunksize", 2))
+
+
 def test_the_readers_refuse_a_session_that_is_not_a_session_before_any_library_call():
     for session in ("x", Stub()):
         name = type(session).__name__
