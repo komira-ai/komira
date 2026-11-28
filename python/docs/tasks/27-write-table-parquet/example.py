@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import komira
+import komira.pl as pl
 
 Path("orders.csv").write_text(
     "order_id,customer,amount\n"
@@ -26,3 +27,7 @@ with komira.Session() as s:
 # The pandas-shaped frame reads the new file too.
 df = komira.read_parquet("big_orders.parquet")
 print(df.groupby("customer").agg(total=("amount", "sum")).sort_values("customer").materialize().to_arrow().to_pylist())
+
+# The polars-shaped frame writes its own rows with sink_parquet, zstd by default.
+pl.scan_parquet("big_orders.parquet").filter(pl.col("customer") == "Ana").sink_parquet("ana.parquet")
+print(pl.scan_parquet("ana.parquet").sort("order_id").collect().to_arrow().to_pylist())
