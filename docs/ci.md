@@ -513,6 +513,12 @@ name, for a pull request and for a merge group alike. Building a library runs it
 on a Mac. This is the one macOS build before the merge; the release workflows below build the whole set
 and the macOS wheel after it.
 
+The Linux part also links one Mach-O file: `//node:komira_addon_macho`, the Node addon linked for
+darwin-arm64 by zig on a Linux worker, in the Linux configuration, with its loader check (which symbols it
+leaves to `node`). It is not a macOS target of the check: nothing in it runs on a Mac, and it is a
+committed root like any other Linux target ([Adding a target](#adding-a-target-one-file-per-root)).
+Loading the addon in `node` on a Mac stays with `npm.yml`'s macOS job after the merge.
+
 - **What it builds.** The step `select the macOS targets` runs
   [`tools/build/ci/darwin.bxl:select`](../tools/build/ci/darwin.bxl) over the list the selector printed
   (`targets.txt`); [`darwin.bzl`](../tools/build/ci/darwin.bzl) says what it picks. When the change is

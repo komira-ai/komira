@@ -31,6 +31,15 @@
 //!       Writes the validation result and exits 0 when green; prints every
 //!       finding and exits 1 when red.
 //!
+//!   native_so loader --result <out.json> --so <lib> [--leave <prefix>]...
+//!                    [--export <name>]...
+//!       c_shared_lib's check (tools/build/node/defs.bzl; native_checks.zig,
+//!       `checkLoader`): every strong undefined symbol is bound to a library
+//!       the library loads, or starts with a --leave prefix (the names the
+//!       loading program defines: a Node-API addon's `napi_` and `node_api_`),
+//!       and the library exports each --export name; written and exit codes
+//!       as `check`.
+//!
 //!   native_so readme --result <out.json> --soname <s> --list <exports.txt>
 //!                    --objects <dir>
 //!       the README check (docs/design/native_packaging.md, slice 10):
@@ -82,6 +91,8 @@ const Opts = struct {
     objects: ?[]const u8 = null,
     format: ?[]const u8 = null,
     weak: std.ArrayList([]const u8),
+    leave: std.ArrayList([]const u8),
+    exports: std.ArrayList([]const u8),
     owners: std.ArrayList(checks.Owner),
     archives: std.ArrayList(checks.Archive),
     callers: std.ArrayList(checks.Caller),
@@ -94,6 +105,8 @@ fn need(v: ?[]const u8, what: []const u8) []const u8 {
 fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
     var o = Opts{
         .weak = std.ArrayList([]const u8).empty,
+        .leave = std.ArrayList([]const u8).empty,
+        .exports = std.ArrayList([]const u8).empty,
         .owners = std.ArrayList(checks.Owner).empty,
         .archives = std.ArrayList(checks.Archive).empty,
         .callers = std.ArrayList(checks.Caller).empty,
@@ -101,7 +114,7 @@ fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
     var i: usize = 0;
     while (i < argv.len) {
         const a = argv[i];
-        const one = [_][]const u8{ "--soname", "--list", "--script", "--report", "--result", "--so", "--floor", "--weak", "--objects", "--format" };
+        const one = [_][]const u8{ "--soname", "--list", "--script", "--report", "--result", "--so", "--floor", "--weak", "--objects", "--format", "--leave", "--export" };
         var matched = false;
         for (one) |flag| {
             if (!std.mem.eql(u8, a, flag)) continue;
@@ -117,6 +130,8 @@ fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
             if (std.mem.eql(u8, flag, "--objects")) o.objects = v;
             if (std.mem.eql(u8, flag, "--format")) o.format = v;
             if (std.mem.eql(u8, flag, "--weak")) try o.weak.append(alloc, v);
+            if (std.mem.eql(u8, flag, "--leave")) try o.leave.append(alloc, v);
+            if (std.mem.eql(u8, flag, "--export")) try o.exports.append(alloc, v);
             i += 2;
             matched = true;
         }
@@ -248,11 +263,30 @@ fn runExports(alloc: Alloc, args: []const []const u8) !void {
     writeFile(need(o.report, "--report"), e.report);
 }
 
+const loader_title = "loader check (undefined symbols left to the loading program, and the required exports)";
+
+/// What the `loader` mode found: the library's name for messages, the
+/// green message and the --result path.
+const Loader = struct { soname: []const u8, msg: []const u8, result: []const u8 };
+
+/// The `loader` mode over its arguments (argv after `loader`): reads --so
+/// and adds to `red` what `checks.checkLoader` finds against the --leave
+/// prefixes and the --export names. `main` exits 1 when `red` has a line
+/// and otherwise writes --result.
+fn runLoader(alloc: Alloc, args: []const []const u8, red: *checks.Red) !Loader {
+    const o = try parse(alloc, args);
+    const result = need(o.result, "--result");
+    const so_path = need(o.so, "--so");
+    const so = readShared(alloc, so_path);
+    const msg = try checks.checkLoader(alloc, so, o.leave.items, o.exports.items, red);
+    return .{ .soname = std.fs.path.basename(so_path), .msg = msg, .result = result };
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const alloc = arena.allocator();
     const argv = try std.process.argsAlloc(alloc);
-    if (argv.len < 2) usage("usage: native_so dynsym|exports|check|readme ... (see native_so.zig)", .{});
+    if (argv.len < 2) usage("usage: native_so dynsym|exports|check|loader|readme ... (see native_so.zig)", .{});
     const mode = argv[1];
 
     if (std.mem.eql(u8, mode, "dynsym")) {
@@ -264,6 +298,14 @@ pub fn main() !void {
     }
 
     if (std.mem.eql(u8, mode, "exports")) return runExports(alloc, argv[2..]);
+
+    if (std.mem.eql(u8, mode, "loader")) {
+        var red = checks.Red.init(alloc);
+        const l = try runLoader(alloc, argv[2..], &red);
+        finish(loader_title, l.soname, red);
+        try writeResult(alloc, l.result, l.soname, loader_title, l.msg);
+        return;
+    }
 
     if (std.mem.eql(u8, mode, "readme")) {
         const o = try parse(alloc, argv[2..]);
@@ -387,8 +429,46 @@ test "exports, run from its arguments: --format macho writes the `_`-prefixed ex
     }
 }
 
+test "loader, run from its arguments: --leave and --export reach the check, and an addon leaving another name to node is red" {
+    const mt = @import("native_macho_test.zig");
+    const A = std.heap.page_allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const ids = [_][]const u8{"@rpath/komira_addon.node"};
+    const loads = [_]mt.Load{.{ .name = "/usr/lib/libSystem.B.dylib" }};
+    const good = [_]mt.NSym{
+        .{ .name = "_napi_register_module_v1", .ty = mt.N_SECT_EXT },
+        .{ .name = "_strlen", .ty = 0x01, .desc = 0x0100 },
+        .{ .name = "_napi_get_undefined", .ty = 0x01, .desc = 0xfe00 },
+    };
+    try tmp.dir.writeFile(.{ .sub_path = "good.node", .data = mt.dylib(.{ .ids = &ids, .loads = &loads, .rpaths = &.{}, .syms = &good }) });
+    const missing = good ++ [_]mt.NSym{.{ .name = "_arrow_result_value", .ty = 0x01, .desc = 0xfe00 }};
+    try tmp.dir.writeFile(.{ .sub_path = "missing.node", .data = mt.dylib(.{ .ids = &ids, .loads = &loads, .rpaths = &.{}, .syms = &missing }) });
+    const root = try tmp.dir.realpathAlloc(A, ".");
+    const result = try inDir(A, root, "result.json");
+
+    var red = checks.Red.init(A);
+    const l = try runLoader(A, &.{ "--result", result, "--so", try inDir(A, root, "good.node"), "--leave", "napi_", "--leave", "node_api_", "--export", "napi_register_module_v1" }, &red);
+    try std.testing.expect(red.green());
+    try std.testing.expectEqualStrings("good.node", l.soname);
+    try std.testing.expectEqualStrings(result, l.result);
+    try std.testing.expectEqualStrings("1 strong undefined symbols bound to the libraries it loads and 1 left to the loading program, all napi_* or node_api_*; exports the 1 required", l.msg);
+
+    red = checks.Red.init(A);
+    _ = try runLoader(A, &.{ "--result", result, "--so", try inDir(A, root, "missing.node"), "--leave", "napi_", "--leave", "node_api_", "--export", "napi_register_module_v1" }, &red);
+    try std.testing.expectEqual(@as(usize, 1), red.lines.items.len);
+    try std.testing.expectEqualStrings("strong undefined symbols left to the loading program that are not napi_* or node_api_* (1): arrow_result_value", red.lines.items[0]);
+
+    // No --leave: the same good addon leaves a Node-API name, and is red.
+    red = checks.Red.init(A);
+    _ = try runLoader(A, &.{ "--result", result, "--so", try inDir(A, root, "good.node") }, &red);
+    try std.testing.expectEqual(@as(usize, 1), red.lines.items.len);
+    try std.testing.expectEqualStrings("strong undefined symbols left to the loading program, which may define none of them (1): napi_get_undefined", red.lines.items[0]);
+}
+
 test {
     _ = @import("native_so_test.zig");
     _ = @import("native_elf_test.zig");
     _ = @import("native_macho_test.zig");
+    _ = @import("native_loader_test.zig");
 }

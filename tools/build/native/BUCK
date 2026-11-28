@@ -10,13 +10,15 @@ _ZIG = "komira//tools/build/toolchains:zig_next"
 _ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 
 # native_so: a library's shared library, its export list and checks 1 to 7
-# (README.md, "Each library's shared library"; shared.bzl), in Zig. It reads
+# (README.md, "Each library's shared library"; shared.bzl), and the `loader`
+# check of every c_shared_lib (tools/build/node/defs.bzl), in Zig. It reads
 # ELF and Mach-O (native_macho.zig) alike.
 _NATIVE_SO = [
     "native_callsites.zig",
     "native_checks.zig",
     "native_elf.zig",
     "native_elf_test.zig",
+    "native_loader_test.zig",
     "native_macho.zig",
     "native_macho_test.zig",
     "native_so_test.zig",
@@ -24,7 +26,8 @@ _NATIVE_SO = [
 
 # The unit tests (native_so_test.zig: each check green, and red on the
 # defect it exists for; native_macho_test.zig: the Mach-O reader and checks 1 to 7
-# on Mach-O bytes), run as a build action.
+# on Mach-O bytes; native_loader_test.zig: the loader check on ELF and Mach-O),
+# run as a build action.
 zig_test(
     name = "native_so_unit",
     exec_compatible_with = LINUX_X86_64,

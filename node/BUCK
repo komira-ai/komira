@@ -4,6 +4,7 @@ load("@komira//src/tests/conformance/komira_sql_conformance:tables.bzl", "CORPUS
 load("@komira//tools/build/package:npm.bzl", "npm_tarball")
 load("@komira//tools/build/package/libkomira:packaged.bzl", "DIST_LICENSE_EXPRESSION", "DIST_LICENSE_FILES", "DIST_NATIVE_NEEDS")
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
+load("@komira//tools/build/platforms:table.bzl", "row")
 load(":install_test.bzl", "INSTALL_DATA", "INSTALL_FILES", "INSTALL_NODES", "INSTALL_NODES_MACOS", "INSTALL_REGISTRY", "INSTALL_TESTS")
 
 # The failing cases of :install_test (tools/build/tests/negative/node), which
@@ -24,6 +25,20 @@ node_addon(
     srcs = ["komira_addon.c", "arrow_import.c"],
     headers = ["arrow_c.h", "arrow_import.h"],
     target_os = True,
+)
+
+# The same addon linked as the macOS platform package's Mach-O (the
+# darwin-arm64 row's triple) from the linux configuration, so the Linux part
+# of the pull request check links it and runs its loader check: the Node-API
+# names bound to flat lookup, everything else to libSystem. The macOS addon
+# itself is built only for a darwin-arm64 target platform, which no pull
+# request builds.
+node_addon(
+    name = "komira_addon_macho",
+    srcs = ["komira_addon.c", "arrow_import.c"],
+    headers = ["arrow_c.h", "arrow_import.h"],
+    out = "komira_addon.node",
+    zig_triple = row("darwin-arm64")["zig_triple"],
 )
 
 # libkomira configured for linux-x86_64 whatever the platform of the target that
