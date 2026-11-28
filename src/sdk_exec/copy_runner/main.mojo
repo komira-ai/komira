@@ -3,7 +3,8 @@
 # =============================================================================
 #
 # The program behind the `:copy_komira` build action, which writes the
-# Parquet, CSV and JSON files DuckDB reads back (`:copy_readback_oracle`, `test_copy_readback_duckdb`).
+# Parquet, CSV and JSON files (and the directories of a partitioned COPY)
+# DuckDB reads back (`:copy_readback_oracle`, `test_copy_readback_duckdb`).
 #
 #   copy_runner --cases <cases.sql> --input-dir <dir> --out-dir <dir>
 #

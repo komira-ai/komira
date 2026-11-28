@@ -6,8 +6,10 @@
 # COPY wrote for tests/copy/cases.sql (the :copy_readback_oracle action in
 # BUCK) and finds the same rows, column names and types as in the file DuckDB
 # writes for the same line, and as many rows as the COPY's `Count`; an
-# uncompressed CSV or JSON file holds the same bytes as DuckDB's; every case of
-# cases.sql is checked.
+# uncompressed CSV or JSON file holds the same bytes as DuckDB's; a
+# partitioned COPY (PARTITION_BY) writes the same directories and files as
+# DuckDB's, and both trees read back alike, by DuckDB and by komira; every
+# case of cases.sql is checked.
 #
 # A test of the `copy_readback` library (src/sdk_exec/BUCK). `:copy_komira` ran
 # every COPY line of tests/copy/cases.sql through run_sql and wrote
@@ -45,7 +47,19 @@
 #     signed one), a timestamp whose footer unit is off by 1000 (other
 #     instants), a value or NULL lost (the empty string written unquoted
 #     reads as NULL), a cell quoted, escaped or formatted otherwise than
-#     DuckDB does it, and a `Count` that is not the rows written.
+#     DuckDB does it, and a `Count` that is not the rows written. For the
+#     hive_* cases (a directory each), the files under komira's directory,
+#     relative to it, are the files under DuckDB's, and DuckDB reads both
+#     trees with Hive partitioning as the same rows and column types: two
+#     BIGINT levels, BOOLEAN, DATE and DECIMAL directories, NULL partitions,
+#     URL-escaped values (a comma, quotes, a line break, spaces, a multi-byte
+#     character), gzip CSV files, and an empty result, an empty directory in
+#     both. Catches a directory or file name other than DuckDB's (an escape,
+#     the NULL name, the file name, the level order) and a row in the wrong
+#     directory.
+#   * test_komira_reads_both_trees_alike: komira's read_parquet with
+#     `hive_partitioning = true` reads DuckDB's tree and komira's tree of the
+#     two-level and the typed cases as the same rows.
 #   * test_the_readers_of_the_files: `case_files` keeps only `COPY (` lines
 #     and ends a file name at its quote, `case_name` ends a name at its first
 #     `.` (or keeps a name with none), `tsv_row` of a header alone is empty
@@ -56,7 +70,11 @@
 from std.testing import TestSuite, assert_equal, assert_true
 
 from copy_readback.checks import case_files, case_name, tsv_pairs, tsv_row
-from runtime_paths import read_data
+from komira_plan_harness import CanonPolicy, render_batch
+from runtime_paths import data_path, read_data
+from sdk_exec.engine_context import EngineContext
+from sdk_exec.engine_options import EngineOptions
+from sdk_exec.engine_sql import run_sql
 
 
 def _uncompressed_text(file: String) -> Bool:
@@ -65,14 +83,26 @@ def _uncompressed_text(file: String) -> Bool:
 
 def test_duckdb_reads_each_file_as_its_own() raises:
     var files = case_files(read_data("cases.sql"))
-    assert_equal(len(files), 22)
+    assert_equal(len(files), 28)
     var counts = tsv_pairs(read_data("counts.tsv"))
     assert_equal(len(counts), len(files))
     var same_bytes = 0
+    var trees = 0
     for i in range(len(files)):
         var c = case_name(files[i])
         var row = tsv_row(read_data(c + ".check.tsv"))
-        if _uncompressed_text(files[i]):
+        if "komira_files" in row:
+            trees += 1
+            assert_equal(row["komira_files"], row["duckdb_files"], c + ": the tree")
+            if c == "hive_empty":
+                # DuckDB's CSV writes the empty string quoted.
+                assert_equal(len(row), 2, c)
+                assert_equal(row["duckdb_files"], '""', c)
+                assert_equal(counts[c], "0", c + ": Count")
+                continue
+            assert_equal(len(row), 7, c)
+            assert_true(row["komira_files"] != '""', c + ": no files")
+        elif _uncompressed_text(files[i]):
             assert_equal(len(row), 6, c)
             assert_equal(row["same_bytes"], "true", c + ": the bytes of DuckDB's file")
             same_bytes += 1
@@ -84,6 +114,12 @@ def test_duckdb_reads_each_file_as_its_own() raises:
         assert_equal(row["komira_rows"], row["duckdb_rows"], c)
         assert_equal(counts[c], row["duckdb_rows"], c + ": Count")
     assert_equal(same_bytes, 10)
+    assert_equal(trees, 6)
+    assert_equal(
+        tsv_row(read_data("hive_years.check.tsv"))["duckdb_files"],
+        "year=2026/month=10/data_0.parquet year=2026/month=11/data_0.parquet"
+        " year=2026/month=12/data_0.parquet year=2026/month=9/data_0.parquet",
+    )
     assert_equal(tsv_row(read_data("empty.check.tsv"))["komira_rows"], "0")
     assert_equal(tsv_row(read_data("empty_csv.check.tsv"))["komira_rows"], "0")
 
@@ -107,6 +143,31 @@ def test_the_readers_of_the_files() raises:
     var pairs = tsv_pairs("case\tcount\nx\t3\n\nbad\n")
     assert_equal(len(pairs), 1)
     assert_equal(pairs["x"], "3")
+
+
+def _rows(mut ctx: EngineContext, sql: String) raises -> String:
+    var out = run_sql(ctx, sql)
+    if out.refusal:
+        raise Error(
+            "refused at " + out.refusal.value().step + ": "
+            + out.refusal.value().reason + " -- " + sql
+        )
+    return render_batch(out.batches[0], CanonPolicy()).to_text()
+
+
+def test_komira_reads_both_trees_alike() raises:
+    var ctx = EngineContext(EngineOptions(worker_count=2))
+    var trees = List[String]()
+    trees.append("hive_years.parquet")
+    trees.append("hive_types.parquet")
+    for i in range(len(trees)):
+        var q = String(
+            "SELECT * FROM read_parquet('{}/**/*.parquet', hive_partitioning = true) ORDER BY id"
+        )
+        var duck = _rows(ctx, q.replace("{}", data_path("duckdb/" + trees[i])))
+        var mine = _rows(ctx, q.replace("{}", data_path("komira/" + trees[i])))
+        assert_equal(mine, duck, trees[i])
+        assert_true(duck.count("\n") > 4, trees[i] + ": " + duck)
 
 
 def main() raises:

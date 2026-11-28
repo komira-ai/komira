@@ -16,8 +16,9 @@ Around the context:
 
 - `arrow_result` readies those batches for the Arrow C stream.
 - `COPY ... TO` writes a query's result to a local Parquet, CSV or
-  newline-delimited JSON file, and `run_plan_write` writes the result of a plan
-  built without SQL the same way.
+  newline-delimited JSON file, or with `PARTITION_BY` to a Hive-partitioned
+  directory of Parquet or CSV files, and `run_plan_write` writes the result of
+  a plan built without SQL to one file the same way.
 
 Views, other writes, the plan cache and the plan gates' call sites are not wired
 into the context yet.
@@ -51,6 +52,7 @@ do is a free function in a module of its own.
 | `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema; a scan of an S3 or GCS bucket or an Azure container has no facts, since `ctx.footers` reads the local file system only; an Iceberg scan is planned by `iceberg_scan.scan_planner.plan_iceberg_scan`, which reads its manifests, prunes by the pushed filter and matches the delete files) and `lower_for_context` |
 | `engine_execute` | `run_lowered_plan_with(ctx, lowered, opener)`: a `RealBuilder` over a per-run metadata cache (keyed per file system) and expression pool, reading a Parquet scan of a bucket through the file system the `ScanFsOpener` opens on it (`objectstore_s3.S3ScanFs` for S3, `objectstore_gcs.GcsScanFs` for GCS, `azure_blob.AzureScanFs` for Azure; one opener, so one remote store kind, per run), the segment pool sized from the memory budget, the context's spill directory (when it has one) on the builder, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation, sort and window sink data (`params.agg`, `params.sort`, `params.window`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch. `run_lowered_plan(ctx, lowered)` is that with `LocalOnlyScanFs`, which refuses a scan of a bucket with `SCAN_FS_UNSERVED`. `run_lowered_plan_with(ctx, lowered, opener, control)` runs under a `RunControl`: `run_plan` polls a clone of its token and counts the plan's segments into its progress; without one the run's token is its own and nothing cancels it |
 | `engine_write` | `write_copy_result(batch, dest, fmt, codec)`: the result batch as a file at the local path `dest` in the format `fmt`, through `fs.atomic_write.write_file_atomic` (all or nothing), returning the rows written; `write_parquet_result(batch, dest, codec)` and `write_text_result(batch, dest, fmt, codec)` (CSV or JSON), which it calls; `count_result(rows)`, the one-row BIGINT `Count` batch a COPY answers; `check_copy_target(dest, fmt, codec)`, the refusals of a URL and of lz4 for CSV or JSON |
+| `engine_write_partitioned` | `write_partitioned_result(batch, dest, fmt, codec, partition_by)`: a `COPY ... (PARTITION_BY (...))` result as DuckDB writes it, one `<column>=<value>` directory level per partition column and one `data_0.<ext>` file per distinct combination (`partition_file_name`), written with `engine_write`'s `write_copy_result`, returning the rows written; `check_partitioned_target(dest, partition_by)`, the refusals of a target that is a file or a directory holding anything (`COPY_TARGET_EXISTS`) and of a missing parent directory (`STORAGE_NOT_FOUND`); `partition_value_segment(value)`, a value's escaped directory text |
 | `engine_write_text` | `encode_csv(batch)` and `encode_ndjson(batch)`: the bytes DuckDB's COPY writes for a result as CSV and as newline-delimited JSON; `compress_text(bytes, codec)`, the whole file as gzip or zstd; `text_writable(type)`; and the cell texts they are made of, `csv_double_text`, `json_double_text`, `date_text`, `decimal_text` |
 | `engine_plan` | `run_plan(ctx, plan) -> SqlOutcome`: a logical plan that is already built (decoded from a `WirePlanEnvelope` by `plan_wire.plan_from_bytes`, or built in Mojo) optimized, lowered and run, with no SQL front end: the module imports none of `sql`'s tokenizer, parser, binder or front end, and a scan leaf carries its own source, so no table need be registered. `run_plan_batch(ctx, plan, opener, step)` is those three steps, which `run_sql` runs after it binds, so both doors share one route from the optimizer down. `run_plan_write(ctx, plan, target)` (and `run_plan_write(ctx, plan, target, opener)`) is the plan door's `COPY <plan> TO <target>`: it refuses the destination as `COPY ... TO` does, at step `bind` and before the plan runs or a file is touched (`STORAGE_URL_REFUSED` for a path with `://`, `COPY_COMPRESSION_UNSUPPORTED` for CSV or JSON with lz4), runs the plan's three steps, writes the result with `engine_write`'s `write_copy_result` and answers `count_result(rows)`, the one-row BIGINT `Count`; the bytes of the file are the ones `run_sql` writes for the same rows. `optimize_for_run(plan)` is `optimize` (refusing a plan that needs a scalar subquery executed first, `OPTIMIZE_UNRESOLVED_SCALAR`) and then `plan_cse_eliminate`, which holds each subtree the plan repeats once (a CTE read twice, two equal UNION ALL branches) so lowering cuts it once and every reference reads it (`lowering.cut_shared`). Nothing raises: `SqlOutcome.refusal` holds the step (`optimize`, `lower`, `execute`) and that step's own message. `run_plan_with(ctx, plan, opener)` runs with the opener a scan of a bucket is read through. `SqlOutcome`, `SqlRefusal` and those step names (`bind` among them) are defined here |
 | `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, then `engine_plan`'s steps (`optimize_for_run`, lower, run), and for a `COPY ... TO` write the file and answer `Count`. Each call adds one to `ctx.statements_parsed` as it starts to parse, so a caller can tell that a run went through the SQL front end. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`), that step's own message, and for `parse` the `SqlPosition` (line and column, from 1) where the text stopped parsing (`SqlRefusal.position`, `None` for every other step and for `run_plan`); `engine_plan`'s `SqlOutcome`, `SqlRefusal`, `OPTIMIZE_UNRESOLVED_SCALAR` and step names are named here too. `run_sql_with(ctx, text, opener)` runs with the opener a scan of a bucket is read through. `run_sql(ctx, text, control)` and `run_sql_with(ctx, text, opener, control)` run under a `RunControl`: a cancel stops the plan's run at its next check and is refused at step `execute` with `pipeline_exec`'s cancelled error; parse, bind, optimize, lower and a COPY's write are not polled |
@@ -146,6 +148,42 @@ DuckDB answers: one row, one BIGINT NOT NULL column `Count`, the rows written.
 - `CREATE TABLE ... AS` writes into a catalog table, and no catalog is bound:
   it is refused with `STATEMENT_NOT_A_QUERY` at `bind`, naming the COPY that
   writes a file.
+
+**COPY ... TO a Hive-partitioned directory.** `COPY (<query>) TO '<dir>'
+(FORMAT parquet, PARTITION_BY (year, month))` writes the tree the pinned
+DuckDB writes for the same statement (`engine_write_partitioned`):
+
+```text
+<dir>/year=2027/month=1/data_0.parquet
+<dir>/year=2027/month=2/data_0.parquet
+<dir>/year=2028/month=1/data_0.parquet
+```
+
+- One directory level per listed column, in the list's order; `PARTITION_BY
+  year` names one column. Each file holds the rows of its combination in the
+  result's order and every column but the partition columns. `FORMAT csv`
+  writes `data_0.csv` (`.csv.gz`, `.csv.zst` when compressed); `FORMAT json`
+  is refused at `parse`, as DuckDB refuses it.
+- A directory is `<column>=<value>`, both URL-escaped as DuckDB escapes them
+  (every byte but ASCII letters, digits and `- _ . ~` as `%XX`); the value is
+  its VARCHAR text, NULL is `__HIVE_DEFAULT_PARTITION__` and the empty string
+  an empty value. A partition column is an integer, BOOLEAN, VARCHAR, DATE or
+  DECIMAL; any other type is `COPY_TYPE_UNSUPPORTED` at `execute`, before
+  anything is made.
+- A listed column the result does not have, or a list covering every column,
+  is a bind error; a name listed twice, an empty list and the option given
+  twice are refused at `parse`. `OVERWRITE`, `OVERWRITE_OR_IGNORE`, `APPEND`,
+  `WRITE_PARTITION_COLUMNS`, `FILE_SIZE_BYTES`, `PER_THREAD_OUTPUT` and
+  `FILENAME_PATTERN` are refused by name at `parse`.
+- The target must not exist (its parent must) or must be an empty directory: a
+  file or a directory holding anything is `COPY_TARGET_EXISTS`, a missing
+  parent `STORAGE_NOT_FOUND`, both at `bind` before the query runs. An empty
+  result leaves the target an empty directory.
+- The result is held in memory and grouped there, as a COPY to one file holds
+  it. Each file is written all or nothing, but the tree is not one unit: a
+  failure part way leaves the files written before it.
+- Only the SQL door writes a tree: `run_plan_write`'s `WriteTarget` has no
+  partition columns yet.
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo

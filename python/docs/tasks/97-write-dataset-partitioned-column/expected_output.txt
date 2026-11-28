@@ -1,0 +1,6 @@
+rows written: 4
+year=2027/month=1/data_0.parquet
+year=2027/month=2/data_0.parquet
+year=2028/month=1/data_0.parquet
+[{'order_id': 1, 'amount': 120, 'year': 2027, 'month': 1}, {'order_id': 2, 'amount': 40, 'year': 2027, 'month': 2}, {'order_id': 3, 'amount': 75, 'year': 2028, 'month': 1}, {'order_id': 4, 'amount': 200, 'year': 2027, 'month': 1}]
+[{'order_id': 1}, {'order_id': 4}]

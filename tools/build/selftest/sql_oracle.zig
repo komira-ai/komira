@@ -44,6 +44,10 @@
 //! (`notes.sql.mysql`, `out.<f>.m<f>`), so a check of the first entry only,
 //! a substring test or a suffix without its dot passes one of them. (The
 //! `.`/`..` arms are covered by the name pattern too.)
+//! An `output_dirs` entry that is not a plain name (second in its list), that
+//! is also an output, or that is also an input path, and an `input_dirs` entry
+//! that is not a path of `inputs` (second in its list): the output_dir_* and
+//! input_dir_not_input refusals.
 //! An `extensions` entry that does not end in `.duckdb_extension` (second in
 //! its list), one that holds a quote, and one named twice (the extension_*
 //! refusals).
@@ -109,6 +113,26 @@ const REFUSALS = [_]lib.Row{
         .name = "no_outputs",
         .target = PKG ++ "no_outputs",
         .text = PKG ++ "no_outputs: outputs is empty: an oracle writes its answer to declared files (COPY ... TO)",
+    },
+    .{
+        .name = "output_dir_in_directory",
+        .target = PKG ++ "output_dir_in_directory",
+        .text = PKG ++ "output_dir_in_directory: output_dirs entry \"sub/tree\" is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.-]*$): output directories land in the working directory itself",
+    },
+    .{
+        .name = "output_dir_is_output",
+        .target = PKG ++ "output_dir_is_output",
+        .text = PKG ++ "output_dir_is_output: output_dirs entry \"out.tsv\" is also an output or named twice",
+    },
+    .{
+        .name = "output_dir_is_input",
+        .target = PKG ++ "output_dir_is_input",
+        .text = PKG ++ "output_dir_is_input: output_dirs entry \"staged.csv\" is also an input path",
+    },
+    .{
+        .name = "input_dir_not_input",
+        .target = PKG ++ "input_dir_not_input",
+        .text = PKG ++ "input_dir_not_input: input_dirs entry \"tree\" is not a path of inputs",
     },
     .{
         .name = "output_is_input",

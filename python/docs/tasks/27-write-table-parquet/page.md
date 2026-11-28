@@ -55,10 +55,10 @@ rows written: 3
 - The write returns a one-row result holding the number of rows written.
 - `df.to_parquet(path, compression="snappy")` runs the frame once and writes its rows to one Parquet file, the bytes `COPY` writes for the same rows, and returns `None`; `compression` is snappy (the default), gzip, zstd, lz4 or None.
 - `lf.sink_parquet(path, compression="zstd")` runs the polars-shaped frame once and writes its rows to one Parquet file, the file `COPY ... (FORMAT parquet, COMPRESSION zstd)` writes for the same rows, and returns `None`; `compression` is zstd (polars' default), snappy, gzip, lz4 or uncompressed, and brotli, `compression_level`, `mkdir=True` and `lazy=True` are refused by name. `write_parquet` is polars' eager `DataFrame`'s, which `komira.pl` does not have: its `AttributeError` names `sink_parquet`.
-- One file per `COPY`: writing a directory of files partitioned by a column is not supported yet: komira-ai/komira#2346.
+- One file per `COPY`. Add `PARTITION_BY (<columns>)` to write a directory of files partitioned by those columns, as DuckDB does ([rank 97](../97-write-dataset-partitioned-column/page.md)).
 
 ## Related
 
 - [How do I read a CSV file?](../1-read-csv-file/page.md) (rank 1, works)
 - [How do I write a table to a CSV file?](../11-write-table-csv-file/page.md) (rank 11, partial)
-- How do I write a dataset partitioned by a column? (rank 97, gap; no page yet)
+- [How do I write a dataset partitioned by a column?](../97-write-dataset-partitioned-column/page.md) (rank 97, works)

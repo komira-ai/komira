@@ -16,7 +16,7 @@ Nothing built with these rules is shipped.
 
 | rule | what it builds |
 |---|---|
-| `sql_oracle(name, srcs, inputs, outputs, extensions)` | runs `srcs` (one `.sql` file, or a list run in order in one session) with the pinned DuckDB. `inputs` are the files the SQL reads: a list of sources, each staged at its path in the package, or `{path: source}`, where a build output is allowed (`{"a/rows.csv": ":write[rows.csv]"}`). `outputs` are the file names the SQL writes with `COPY ... TO '<name>'`, each ending in `.parquet`, `.csv`, `.tsv` or `.json`, or in `.gz` or `.zst` (a file DuckDB compressed); each is a sub-target `[<name>]`, and all of them are the default outputs. `extensions` (default none) are DuckDB extension files, each named `<name>.duckdb_extension`, loaded in the order listed (see below). |
+| `sql_oracle(name, srcs, inputs, outputs, extensions)` | runs `srcs` (one `.sql` file, or a list run in order in one session) with the pinned DuckDB. `inputs` are the files the SQL reads: a list of sources, each staged at its path in the package, or `{path: source}`, where a build output is allowed (`{"a/rows.csv": ":write[rows.csv]"}`). `outputs` are the file names the SQL writes with `COPY ... TO '<name>'`, each ending in `.parquet`, `.csv`, `.tsv` or `.json`, or in `.gz` or `.zst` (a file DuckDB compressed); each is a sub-target `[<name>]`, and all of them are the default outputs. `extensions` (default none) are DuckDB extension files, each named `<name>.duckdb_extension`, loaded in the order listed (see below). `output_dirs` (default none) are plain names of directories the SQL writes a tree into (`COPY ... TO '<dir>' (PARTITION_BY ...)`), each a sub-target `[<dir>]` and a default output; `input_dirs` (default none) are the paths of `inputs` that are directories. Either adds `SET allowed_directories = [<input_dirs>, <output_dirs>]` (see below). |
 | `duckdb_dist(name, binary, native_libs, version)` | the pinned binary, the directory whose `lib/` holds the C++ runtime it links (`libstdc++.so.6`, `libgcc_s.so.1`), and the version it must report, digits and dots only (anything else, which would be written into the version check's SQL, is refused at analysis). `sql_oracle` takes `komira//third_party/duckdb:duckdb`. |
 
 The macro sets `exec_compatible_with` to the linux x86_64 execution
@@ -86,6 +86,12 @@ duckdb -no-init -batch -bail \
     `.system`, `.read`, `.output`, `.cd`, `.open`, `.import`).
 - **`-bail`**: the first error stops the run with exit status 1, and buck2
   shows DuckDB's message.
+- **Directories.** An oracle with `input_dirs` or `output_dirs` sets
+  `allowed_directories` to them after `allowed_paths` (which then lists the
+  output directories too), so the SQL may write, read and glob the files under
+  exactly those directories, and nothing else outside its inputs and outputs.
+  An oracle with neither runs the invocation above unchanged. An output
+  directory a partitioned COPY leaves empty (no rows) is still made, by DuckDB.
 - **Missing outputs**: after the SQL, each declared output must exist
   (`sql_oracle: the SQL wrote no <name>, a declared output`); buck2 also
   fails an action that leaves a declared output unwritten.
@@ -97,7 +103,9 @@ Analysis refuses: no `srcs`, a src that is not a `.sql` file, no `outputs`,
 an output that is not a plain file name (no directory, no glob character)
 or does not end in `.parquet`, `.csv`, `.tsv`, `.json`, `.gz` or `.zst`, an output named twice or
 also an input path or an input's directory, an input path that is empty,
-absolute or ends in `/`, an input path with a segment that is not a plain
+absolute or ends in `/`, an `output_dirs` entry that is not a plain name or is also an output, another
+`output_dirs` entry or an input path, an `input_dirs` entry that is not a path
+of `inputs`, an input path with a segment that is not a plain
 name (empty, `.`, `..` or a glob character; a segment may hold `=` after its
 first character, for a Hive layout, which an output name may not), an input that is both a file
 and another input's directory, a source named twice in the list form of

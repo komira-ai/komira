@@ -43,6 +43,7 @@ from sql.sql_bind_window_order import (
     _classify_order_keys, _order_output_column, _bind_order,
 )
 from sql.sql_catalog import SqlCatalog
+from sql.sql_copy_partition import partition_columns_of
 
 
 struct BoundStatement(Movable):
@@ -64,6 +65,10 @@ struct BoundStatement(Movable):
         fmt         - the WFMT_* write format (STMT_COPY).
         codec       - the WCOMP_* write compression (STMT_COPY).
         register_as - the STMT_CREATE_TABLE_AS table name ("" otherwise).
+        partition_by - STMT_COPY: the result columns a PARTITION_BY option
+                      names, in its order and spelled as the result spells
+                      them (`partition_columns_of`); empty for a COPY to one
+                      file and every other kind.
 
     Move-only (it holds a move-only `LogicalPlan`)."""
 
@@ -73,6 +78,7 @@ struct BoundStatement(Movable):
     var fmt: UInt8
     var codec: UInt8
     var register_as: String
+    var partition_by: List[String]
 
     def __init__(
         out self,
@@ -82,6 +88,7 @@ struct BoundStatement(Movable):
         fmt: UInt8,
         codec: UInt8,
         register_as: String,
+        var partition_by: List[String] = List[String](),
     ):
         self.kind = kind
         self._plan = Optional[LogicalPlan](plan^)
@@ -89,6 +96,7 @@ struct BoundStatement(Movable):
         self.fmt = fmt
         self.codec = codec
         self.register_as = register_as
+        self.partition_by = partition_by^
 
     def take_plan(mut self) -> LogicalPlan:
         """Move the source/query `LogicalPlan` out (leaving `_plan` empty)."""
@@ -107,7 +115,9 @@ def bind_statement[P: SqlParquetFooters](
     takes the whole SELECT grammar.
 
     A COPY with no destination, or a CTAS with no target name, is a bind error
-    (the parser already refuses both)."""
+    (the parser already refuses both), and so is a COPY whose PARTITION_BY
+    names a column the query's result does not have, or every column of it
+    (`partition_columns_of`)."""
     var cte_scope = CteScope(collect_parquet_facts(stmt, catalog, footers))
     # Only a query's result carries DuckDB's duplicate-keeping names
     # (`_result_display_names`); a COPY / CTAS writes a table, whose columns
@@ -118,8 +128,14 @@ def bind_statement[P: SqlParquetFooters](
     if stmt.kind == STMT_COPY:
         if stmt.dest_path == "":
             raise Error("SQL bind error: COPY ... TO requires a destination path")
+        var partition_by = List[String]()
+        if len(stmt.partition_by) > 0:
+            partition_by = partition_columns_of(
+                stmt.partition_by, plan.output_schema
+            )
         return BoundStatement(
-            STMT_COPY, plan^, stmt.dest_path, stmt.fmt, stmt.codec, String("")
+            STMT_COPY, plan^, stmt.dest_path, stmt.fmt, stmt.codec, String(""),
+            partition_by^,
         )
     if stmt.kind == STMT_CREATE_TABLE_AS:
         if stmt.target_table == "":

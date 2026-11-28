@@ -274,6 +274,46 @@ sql_oracle(
     outputs = ["out.tsv"],
 )
 
+# REFUSED: an output directory that is not a plain name.
+sql_oracle(
+    name = "output_dir_in_directory",
+    srcs = "ok.sql",
+    outputs = ["out.tsv"],
+    output_dirs = [
+        "tree",
+        "sub/tree",
+    ],
+)
+
+# REFUSED: an output directory that is also an output.
+sql_oracle(
+    name = "output_dir_is_output",
+    srcs = "ok.sql",
+    outputs = ["out.tsv"],
+    output_dirs = ["out.tsv"],
+)
+
+# REFUSED: an output directory that is also an input path.
+sql_oracle(
+    name = "output_dir_is_input",
+    srcs = "ok.sql",
+    inputs = ["staged.csv"],
+    outputs = ["out.tsv"],
+    output_dirs = ["staged.csv"],
+)
+
+# REFUSED: an input directory that is not a path of `inputs`.
+sql_oracle(
+    name = "input_dir_not_input",
+    srcs = "ok.sql",
+    inputs = ["staged.csv"],
+    outputs = ["out.tsv"],
+    input_dirs = [
+        "staged.csv",
+        "tree",
+    ],
+)
+
 # REFUSED: a source named twice in the list form of `inputs`.
 sql_oracle(
     name = "input_twice",
