@@ -183,6 +183,7 @@ from plan_expr.expr import (
     STRFNN_LEVENSHTEIN, STRFNN_DAMERAU_LEVENSHTEIN, STRFNN_HAMMING,
     STRFNN_TRANSLATE,
     STRFNN_JARO, STRFNN_JARO_WINKLER, STRFNN_JACCARD,
+    STRFNN_STRPTIME, STRFNN_TRY_STRPTIME,
     string_fn_n_arity,
     REGEXP_LIKE, REGEXP_MATCH, REGEXP_REPLACE, REGEXP_EXTRACT,
     EXTRACT_DAYOFWEEK, EXTRACT_ISODOW, EXTRACT_DAYOFYEAR,
@@ -2500,16 +2501,17 @@ def test_every_string_fn_n_member_round_trips() raises:
         STRFNN_LEVENSHTEIN, STRFNN_DAMERAU_LEVENSHTEIN, STRFNN_HAMMING,
         STRFNN_TRANSLATE,
         STRFNN_JARO, STRFNN_JARO_WINKLER, STRFNN_JACCARD,
+        STRFNN_STRPTIME, STRFNN_TRY_STRPTIME,
     ]
     assert_equal(
-        len(sfnn_ops), 14,
-        "the corpus does not carry fourteen StringFnN members; a short list"
+        len(sfnn_ops), 16,
+        "the corpus does not carry sixteen StringFnN members; a short list"
         + " silently stops testing the members it omits.",
     )
     assert_equal(
-        STRING_FN_N_WIRE_MEMBERS, 14,
-        "the DERIVED StringFnN vocabulary no longer has fourteen members and"
-        + " this corpus still enumerates fourteen. Add the new STRFNN_* to"
+        STRING_FN_N_WIRE_MEMBERS, 16,
+        "the DERIVED StringFnN vocabulary no longer has sixteen members and"
+        + " this corpus still enumerates sixteen. Add the new STRFNN_* to"
         + " `sfnn_ops` above and bump both numbers together.",
     )
     # ⭐ THE TWO NUMBERS MUST AGREE, NOT ONLY EACH MATCH A LITERAL. Two

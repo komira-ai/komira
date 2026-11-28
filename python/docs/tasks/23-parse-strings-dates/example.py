@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 import komira
@@ -23,15 +22,52 @@ with komira.Session() as s:
     print(result.schema.field("shipped").type)
     print(result.to_pylist())
 
-# Any other format: parse the text with pyarrow, then give komira the dates.
-text = pa.table({"id": [1, 2, 3], "shipped": ["09/15/2026", "10/20/2026", "12/31/2026"]})
-parsed = pc.strptime(text["shipped"], format="%m/%d/%Y", unit="s").cast(pa.date32())
-pq.write_table(text.set_column(1, "shipped", parsed), "us_orders.parquet")
+# Any other format: strptime(text, format) parses the text in SQL. The format
+# is a constant string of % directives and the result is a timestamp.
+Path("us_orders.csv").write_text(
+    "id,shipped\n"
+    "1,09/15/2026\n"
+    "2,10/20/2026\n"
+    "3,12/31/2026\n"
+)
 with komira.Session() as s:
-    s.register_parquet("us_orders", "us_orders.parquet")
+    s.register_csv("us_orders", "us_orders.csv")
     result = s.sql(
-        "SELECT id, shipped, year(shipped) AS year FROM us_orders"
-        " WHERE shipped < DATE '2026-12-01' ORDER BY id"
+        "SELECT id, strptime(shipped, '%m/%d/%Y') AS shipped"
+        " FROM us_orders ORDER BY id"
     ).to_arrow()
     print(result.schema.field("shipped").type)
     print(result.to_pylist())
+
+# ISO text held as a string column: CAST gives a date, TRY_CAST gives NULL for
+# text that is not a date (a column that mixes dates with "unknown" is text).
+Path("text_dates.csv").write_text(
+    "id,shipped\n"
+    "1,2026-09-15\n"
+    "2,unknown\n"
+    "3,2026-12-31\n"
+)
+with komira.Session() as s:
+    s.register_csv("text_dates", "text_dates.csv")
+    result = s.sql(
+        "SELECT id, TRY_CAST(shipped AS DATE) AS shipped"
+        " FROM text_dates ORDER BY id"
+    ).to_arrow()
+    print(result.schema.field("shipped").type)
+    print(result.to_pylist())
+    s.register_csv("text_ok", "orders.csv", all_varchar=True)
+    result = s.sql(
+        "SELECT id, CAST(shipped AS DATE) AS shipped FROM text_ok ORDER BY id"
+    ).to_arrow()
+    print(result.schema.field("shipped").type)
+    print(result.to_pylist())
+
+# pandas-shaped: astype("date32") on a string column parses it like CAST.
+pq.write_table(
+    pa.table({"id": [1, 2], "shipped": ["2026-09-15", "2026-10-01"]}),
+    "strings.parquet",
+)
+df = komira.read_parquet("strings.parquet")
+typed = df.astype({"shipped": "date32"}).sort_values("id").materialize().to_arrow()
+print(typed.schema.field("shipped").type)
+print(typed.to_pylist())

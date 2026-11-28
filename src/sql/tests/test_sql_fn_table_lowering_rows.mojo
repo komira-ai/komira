@@ -2,7 +2,7 @@
 # Row pins: every LOWERING row of sql_scalar_fn_spec, one call per spelling
 # =============================================================================
 #
-# What it proves: each of the 191 spellings on the table's 160 lowering rows
+# What it proves: each of the 193 spellings on the table's 162 lowering rows
 # (every kind except FNK_REFUSED) resolves to its row's kind, op and
 # inclusive arity, claims the name (`lowers_to_a_node` True) and carries no
 # reason. Every alias of a row is called, so every `name == ...` operand of
@@ -149,10 +149,12 @@ from sql.sql_fn_table import (
     DSG_PI,
     DSG_RIGHT,
     DSG_STRING_SPLIT,
+    DSG_STRPTIME,
     DSG_STRUCT_EXTRACT,
     DSG_STRUCT_EXTRACT_AT,
     DSG_SUBSTRING,
     DSG_TRY_CAST,
+    DSG_TRY_STRPTIME,
     FNK_BINARY_OP,
     FNK_CONST,
     FNK_DESUGAR,
@@ -383,6 +385,8 @@ def test_lowering_rows_4() raises:
     _lowers("make_timestamp", FNK_DESUGAR, DSG_MAKE_TS_US, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     _lowers("make_timestamp_ms", FNK_DESUGAR, DSG_MAKE_TS_MS, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     _lowers("make_timestamp_ns", FNK_DESUGAR, DSG_MAKE_TS_NS, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
+    _lowers("strptime", FNK_DESUGAR, DSG_STRPTIME, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
+    _lowers("try_strptime", FNK_DESUGAR, DSG_TRY_STRPTIME, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
 
 
 def main() raises:

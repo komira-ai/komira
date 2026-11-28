@@ -28,6 +28,7 @@ mojo_library(
         "tests/test_cast_bool_numeric.mojo",
         "tests/test_cast_int_to_decimal128.mojo",
         "tests/test_cast_small_int_widening.mojo",
+        "tests/test_cast_string_to_temporal.mojo",
         "tests/test_col_int_float_scalar_kerneldirect.mojo",
         "tests/test_conjunction_narrowing.mojo",
         "tests/test_date32_col_vs_col_compare.mojo",

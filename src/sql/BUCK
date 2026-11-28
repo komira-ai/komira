@@ -84,6 +84,7 @@ mojo_library(
         "tests/test_sql_bind_scope_direct.mojo",
         "tests/test_sql_bind_set_op.mojo",
         "tests/test_sql_bind_subquery.mojo",
+        "tests/test_sql_bind_text_temporal.mojo",
         "tests/test_sql_bind_union.mojo",
         "tests/test_sql_bind_udf_call_direct.mojo",
         "tests/test_sql_bind_window_order_direct.mojo",

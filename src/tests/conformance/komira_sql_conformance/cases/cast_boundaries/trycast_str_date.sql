@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k, TRY_CAST(CASE WHEN k = 3 THEN '2028-02-29' ELSE s END AS DATE) FROM T

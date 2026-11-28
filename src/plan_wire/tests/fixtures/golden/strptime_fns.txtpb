@@ -1,0 +1,340 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 4
+plan {
+  output_schema {
+    fields {
+      name: "parsed"
+      arrow_type_id: 24
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "try_parsed"
+      arrow_type_id: 24
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  project {
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_STRPTIME
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "%m/%d/%Y"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "parsed"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_TRY_STRPTIME
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "%m/%d/%Y"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "try_parsed"
+      }
+    }
+    child {
+      output_schema {
+        fields {
+          name: "a"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+          metadata_keys: "unit"
+          metadata_values: "cents"
+        }
+        fields {
+          name: "b"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "i"
+          arrow_type_id: 4
+          dtype_code: _DT_INT32
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "f"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "d"
+          arrow_type_id: 18
+          nullable: true
+          decimal_precision: 12
+          decimal_scale: 2
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "s"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "dt"
+          arrow_type_id: 15
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "ts"
+          arrow_type_id: 24
+          dtype_code: _DT_INT64
+          nullable: true
+          tz: "UTC"
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "iv"
+          arrow_type_id: 40
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "st"
+          arrow_type_id: 21
+          nullable: true
+          dict_index_type_id: 4
+          child_names: "k"
+          child_names: "v"
+          child_type_ids: 5
+          child_type_ids: 13
+          child_nullables: false
+          child_nullables: true
+        }
+      }
+      scan {
+        source {
+          binding {
+            kind_id: 1056219456
+            kind_name: "komira.orc"
+            name: "wide"
+            params {
+              key: "has_footer"
+              tag: PARAM_BOOL
+              i: 1
+            }
+            params {
+              key: "path"
+              tag: PARAM_STR
+              s: "/data/wide.orc"
+            }
+            params {
+              key: "stripe_count"
+              tag: PARAM_I64
+              i: 7
+            }
+            schema {
+              fields {
+                name: "a"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+                metadata_keys: "unit"
+                metadata_values: "cents"
+              }
+              fields {
+                name: "b"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "i"
+                arrow_type_id: 4
+                dtype_code: _DT_INT32
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "f"
+                arrow_type_id: 12
+                dtype_code: _DT_FLOAT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "d"
+                arrow_type_id: 18
+                nullable: true
+                decimal_precision: 12
+                decimal_scale: 2
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "s"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "dt"
+                arrow_type_id: 15
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "ts"
+                arrow_type_id: 24
+                dtype_code: _DT_INT64
+                nullable: true
+                tz: "UTC"
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "iv"
+                arrow_type_id: 40
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "st"
+                arrow_type_id: 21
+                nullable: true
+                dict_index_type_id: 4
+                child_names: "k"
+                child_names: "v"
+                child_type_ids: 5
+                child_type_ids: 13
+                child_nullables: false
+                child_nullables: true
+              }
+            }
+            fingerprint: 3735928559
+            structural_id: 4277009102
+            pushdown_gate {
+              mode: GATE_SHAPED
+              allowed_binary_ops: 63
+              allow_and_recurse: true
+              allow_in_list: true
+              require_stat_friendly_col: true
+            }
+            snapshot_policy: SNAPSHOT_PINNED
+            snapshot_token: 1234567890
+            orientation: SOURCE_KIND_COLUMNAR
+            variant_tag: SOURCE_VARIANT_ORC
+          }
+        }
+        has_schema: true
+        schema {
+          fields {
+            name: "a"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+            metadata_keys: "unit"
+            metadata_values: "cents"
+          }
+          fields {
+            name: "b"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "i"
+            arrow_type_id: 4
+            dtype_code: _DT_INT32
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "f"
+            arrow_type_id: 12
+            dtype_code: _DT_FLOAT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "d"
+            arrow_type_id: 18
+            nullable: true
+            decimal_precision: 12
+            decimal_scale: 2
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "s"
+            arrow_type_id: 13
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "dt"
+            arrow_type_id: 15
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "ts"
+            arrow_type_id: 24
+            dtype_code: _DT_INT64
+            nullable: true
+            tz: "UTC"
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "iv"
+            arrow_type_id: 40
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "st"
+            arrow_type_id: 21
+            nullable: true
+            dict_index_type_id: 4
+            child_names: "k"
+            child_names: "v"
+            child_type_ids: 5
+            child_type_ids: 13
+            child_nullables: false
+            child_nullables: true
+          }
+        }
+        source_kind: SOURCE_KIND_COLUMNAR
+      }
+    }
+  }
+}

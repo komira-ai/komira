@@ -6,6 +6,7 @@
 # UDF call's output column. Each is one arm of `eval_column._eval_column_expr`.
 # =============================================================================
 
+from arrow.arrow_types import ArrowType
 from arrow.bitmap import Bitmap
 from arrow.column import Column
 from arrow.primitive_array import PrimitiveArray
@@ -13,7 +14,9 @@ from arrow.schema import RecordBatch
 from arrow.string_array import StringArray
 from byte_buffer.heap_region import HeapRegion
 from column_kernels.compiler_helpers import copy_column
+from column_kernels.strptime_format import compile_strptime_format, strptime_column
 from plan_expr.expr import (
+    EXPR_LITERAL,
     Expr,
     STRFNN_CONCAT,
     STRFNN_CONCAT_WS,
@@ -28,7 +31,9 @@ from plan_expr.expr import (
     STRFNN_REPLACE,
     STRFNN_RPAD,
     STRFNN_STRPOS,
+    STRFNN_STRPTIME,
     STRFNN_TRANSLATE,
+    STRFNN_TRY_STRPTIME,
     STRING_FN_N_REPEAT_MAX_BYTES,
     string_fn_n_arity,
     string_fn_n_arity_ok,
@@ -55,6 +60,27 @@ from .string_metrics import (
     _jaro_winkler_bytes,
     _levenshtein_bytes,
 )
+
+
+def _project_strptime(
+    expr: Expr, try_mode: Bool, batch: RecordBatch
+) raises -> Column[HeapRegion]:
+    """`strptime(text, format)` / `try_strptime(text, format)` ->
+    TIMESTAMP_US (`column_kernels.strptime_format`).
+
+    The format is argument 1 and must be a string literal: DuckDB refuses a
+    format that is not a constant ("strptime format must be a constant"), and
+    the binder lowers a NULL format to a NULL value before it gets here. The
+    format is compiled once per batch."""
+    ref fmt_expr = expr.string_fn_n_arg_ref(1)
+    if fmt_expr.tag != EXPR_LITERAL or not fmt_expr.literal_value().is_string():
+        raise Error("Invalid Input Error: strptime format must be a constant")
+    var fmt = compile_strptime_format(fmt_expr.literal_value().string_val)
+    var subj = _sfnn_string_arg(expr, 0, batch)
+    var micros = strptime_column(subj, fmt, try_mode)
+    var out = Column.from_primitive[DType.int64](micros)
+    out.arrow_type = ArrowType.TIMESTAMP_US
+    return out^
 
 
 def _project_string_fn_n(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion]:
@@ -85,6 +111,9 @@ def _project_string_fn_n(expr: Expr, batch: RecordBatch) raises -> Column[HeapRe
             + " (negative = variadic floor, 0 = unknown op)"
         )
     var sfnn_rows = batch.num_rows()
+
+    if sfnn_op == STRFNN_STRPTIME or sfnn_op == STRFNN_TRY_STRPTIME:
+        return _project_strptime(expr, sfnn_op == STRFNN_TRY_STRPTIME, batch)
 
     # ---- LPAD / RPAD / REPEAT: slot 1 is a COUNT, not a string --------
     #

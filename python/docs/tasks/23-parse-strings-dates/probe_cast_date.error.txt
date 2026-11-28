@@ -1,1 +1,0 @@
-UnsupportedOperation: bind: SQL not supported: CAST to DATE. This engine converts to INTEGER / BIGINT / REAL / DOUBLE — the four targets its cast kernels reach from every numeric source — and refuses every other target BY NAME rather than approximating it with the nearest one: a CAST that answered a number of the wrong type would be a wrong answer with a success code.

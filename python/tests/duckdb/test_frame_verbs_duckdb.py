@@ -44,6 +44,8 @@ below is a copy of its own, since a test file cannot import another.
 - Series.dt: year, quarter, month, day, hour, minute, second, microsecond,
   dayofweek and aliases, dayofyear, floor("D"), floor("h") on the timestamp;
   year, month, day and dayofweek on the date; a filter on a field;
+- astype("date32") of a string column of date text (ISO, single-digit month and
+  day, surrounding spaces, a NULL, in a file of its own) equals CAST(... AS DATE);
 - casts and string functions the engine does not run build their plan and are
   refused at materialize() with the engine's step (ENGINE_REFUSED);
 - columns are equal by name and order; ints, strings, bools, dates and
@@ -88,6 +90,9 @@ STAMPS = [
     datetime.datetime(2099, 12, 31, 23, 59, 59, 0),
     datetime.datetime(2100, 1, 1, 0, 0, 1, 999999),
     datetime.datetime(2026, 11, 6, 18, 45, 30, 250000),
+]
+DATE_TEXTS = [
+    "2026-09-15", "2026-10-01", None, "2027-02-28", " 2026-09-30 ", "2026-9-5", "2026-12-31",
 ]
 DATES = [
     datetime.date(2028, 2, 29),
@@ -143,6 +148,20 @@ def write_data(path):
         }
     )
     pq.write_table(table, path, row_group_size=7)
+    return path
+
+
+def write_date_text(path):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    table = pa.table(
+        {
+            "id": pa.array(range(len(DATE_TEXTS)), pa.int64()),
+            "ds": pa.array(DATE_TEXTS, pa.string()),
+        }
+    )
+    pq.write_table(table, path)
     return path
 
 
@@ -529,7 +548,8 @@ RENAMES = [
 # ---- astype ------------------------------------------------------------------
 # The casts the engine runs: int32 and int64 to each other, to float64 and to
 # string, float32 to float64, float of whole numbers to int64, string of digits
-# to int64 and float64, the numbers to bool and bool to the numbers. The others
+# to int64 and float64, the numbers to bool and bool to the numbers; a string
+# of date text to a date is DATE_TEXT_CASTS, over a file of its own. The others
 # are in ENGINE_REFUSED.
 
 CASTS = [
@@ -1044,12 +1064,20 @@ TYPES = [
     ),
 ]
 
+DATE_TEXT_CASTS = [
+    Case(
+        "astype string of date text to date32 parses as CAST AS DATE",
+        lambda d: d.astype({"ds": "date32"}),
+        "SELECT * REPLACE (CAST(ds AS DATE) AS ds) FROM t",
+    ),
+]
+
 # Programs whose plan the verb builds and the engine does not run: each is
 # refused at materialize() with the engine's step, never answered otherwise.
 # When the engine runs one, its check fails and the program moves to a case list.
 #   - a cast from a bool to a string, from a date or timestamp to a
-#     string, from a timestamp to a date, from a string to a date: the engine's
-#     cast has no arm for those pairs;
+#     string, from a timestamp to a date: the engine's cast has no arm for
+#     those pairs;
 #   - a regex over a computed string (the lowered Series): the engine's regex
 #     operations take a column as their input, not an expression.
 ENGINE_REFUSED = [
@@ -1057,7 +1085,6 @@ ENGINE_REFUSED = [
     ("a cast of a timestamp to a string", lambda d: d.astype({"t": "string"})),
     ("a cast of a date to a string", lambda d: d.astype({"d": "string"})),
     ("a cast of a timestamp to a date", lambda d: d.astype({"t": "date32"})),
-    ("a cast of a string to a date", lambda d: d.astype({"s": "date32"})),
     (
         "a regex replace over a lowered string",
         lambda d: on(d[["n", "s"]], lambda f: f.assign(r=f["s"].str.lower().str.replace("a", "b", regex=True))),
@@ -1301,8 +1328,9 @@ def main(args):
         path = write_data(os.path.join(work, "frame.parquet"))
         for test in WITH_FILE:
             test(path)
+        run_cases(write_date_text(os.path.join(work, "date_text.parquet")), DATE_TEXT_CASTS)
     assert not FAILED, "{} cases failed:\n".format(len(FAILED)) + "\n".join(FAILED)
-    lists = (TYPES, FILLS, DROPS, RENAMES, CASTS, TAILS, CONCATS, COUNTS_BY_GROUP, STRS, DTS)
+    lists = (TYPES, FILLS, DROPS, RENAMES, CASTS, DATE_TEXT_CASTS, TAILS, CONCATS, COUNTS_BY_GROUP, STRS, DTS)
     print("frame verbs duckdb: {} cases".format(sum(len(c) for c in lists)))
 
 

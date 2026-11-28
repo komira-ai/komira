@@ -2395,6 +2395,19 @@ equal") accepts a call the parity target rejects.
 
 ⚠ CASE-SENSITIVE: `jaccard('ABC','abc')` = 0."""
 
+comptime STRFNN_STRPTIME: UInt8 = 14
+"""`strptime(text, format)` — EXACTLY 2 args, Utf8 -> TIMESTAMP. The output is
+a TIMESTAMP in microseconds (Arrow TIMESTAMP_US), DuckDB's `strptime` return
+type. `args[1]` is the format and MUST be a string literal: the binder and
+the evaluator refuse a non-literal format, and this factory does not check
+(it stays non-raising like the rest of the family). A text that does not match
+the format raises; `STRFNN_TRY_STRPTIME` answers NULL there."""
+
+comptime STRFNN_TRY_STRPTIME: UInt8 = 15
+"""`try_strptime(text, format)` — the same shape as `STRFNN_STRPTIME`
+(EXACTLY 2 args, literal format, TIMESTAMP_US output), answering NULL where
+the strict form raises."""
+
 
 def string_fn_n_returns_int(op: UInt8) -> Bool:
     """Does `STRFNN_<op>` produce an INT64 column rather than a Utf8 one?
@@ -2441,6 +2454,12 @@ def string_fn_n_returns_float(op: UInt8) -> Bool:
     )
 
 
+def string_fn_n_returns_timestamp(op: UInt8) -> Bool:
+    """Does `STRFNN_<op>` produce a TIMESTAMP_US column? True only for
+    `STRFNN_STRPTIME` and `STRFNN_TRY_STRPTIME`. Total, never raising."""
+    return op == STRFNN_STRPTIME or op == STRFNN_TRY_STRPTIME
+
+
 def string_fn_n_type_is_coherent(op: UInt8) -> Bool:
     """Is `STRFNN_<op>`'s declared output type a single answer?
 
@@ -2453,7 +2472,14 @@ def string_fn_n_type_is_coherent(op: UInt8) -> Bool:
 
     Total, never raising.
     """
-    return not (string_fn_n_returns_int(op) and string_fn_n_returns_float(op))
+    var kinds = 0
+    if string_fn_n_returns_int(op):
+        kinds += 1
+    if string_fn_n_returns_float(op):
+        kinds += 1
+    if string_fn_n_returns_timestamp(op):
+        kinds += 1
+    return kinds <= 1
 
 
 def string_fn_n_arity(op: UInt8) -> Int:
@@ -2534,6 +2560,10 @@ def string_fn_n_arity(op: UInt8) -> Int:
         return 2
     if op == STRFNN_JACCARD:
         return 2
+    if op == STRFNN_STRPTIME:
+        return 2
+    if op == STRFNN_TRY_STRPTIME:
+        return 2
     return 0
 
 
@@ -2590,6 +2620,10 @@ def string_fn_n_name(op: UInt8) -> String:
         return String("jaro_winkler_similarity")
     if op == STRFNN_JACCARD:
         return String("jaccard")
+    if op == STRFNN_STRPTIME:
+        return String("strptime")
+    if op == STRFNN_TRY_STRPTIME:
+        return String("try_strptime")
     return String("strfnn#") + String(Int(op))
 
 

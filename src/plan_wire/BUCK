@@ -35,6 +35,7 @@ mojo_library(
         "tests/test_plan_wire_rel_goldens_join.mojo",
         "tests/test_plan_wire_round_trip_ir.mojo",
         "tests/test_plan_wire_scan_variant_tag.mojo",
+        "tests/test_plan_wire_strptime_goldens.mojo",
         "tests/test_plan_wire_udf_tier.mojo",
         "tests/test_plan_wire_udf_args.mojo",
         "tests/test_plan_wire_udf_goldens.mojo",
@@ -67,6 +68,10 @@ mojo_library(
         "tests/test_plan_wire_rel_goldens_join.mojo": glob(["tests/fixtures/golden/rel_*.hex"]),
         "tests/test_plan_wire_scan_variant_tag.mojo": [
             "tests/fixtures/golden/scan.canonical.hex",
+        ],
+        "tests/test_plan_wire_strptime_goldens.mojo": [
+            "tests/fixtures/golden/strptime_fns.hex",
+            "tests/fixtures/golden/strptime_fns.canonical.hex",
         ],
         "tests/test_plan_wire_udf_goldens.mojo": glob(["tests/fixtures/golden/udf_*.hex"]),
     },
@@ -142,6 +147,7 @@ _GOLDEN = [
     "scan",
     "scan_nested",
     "sort",
+    "strptime_fns",
     "topic_live",
     "topn",
     "udf_frame",

@@ -137,6 +137,9 @@ the same name:
 - `string`, `binary`
 - `date32`
 
+`astype("date32")` on a string column parses the text as `CAST(... AS DATE)` does: ISO `YYYY-MM-DD` and the other
+forms DuckDB accepts, and a value that does not parse fails the query. It is not `to_datetime`, which stays refused.
+
 The pandas-shaped skin also takes pandas' spellings of those: `"Int64"` and the other capitalised
 integer and float names (`"UInt8"`, `"Float64"`, ...), `"boolean"`, and `"str"`, and Python's types `bool`, `int` (int64), `float` (float64) and
 `str` (string). `"object"` and `"category"` are refused by name, because neither

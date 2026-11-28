@@ -16,6 +16,10 @@ from column_kernels.cast_null import (
     eval_cast_float_to_int,
 )
 from column_kernels.compiler_helpers import clone_array_validity, int64_to_float64
+from column_kernels.temporal_parse import (
+    cast_string_to_date32,
+    cast_string_to_timestamp_us,
+)
 from kernels.cast_to_varchar_kernels import (
     cast_float32_to_string,
     cast_float64_to_string,
@@ -36,6 +40,7 @@ from .column_decimal import (
     _ts_unit_factor,
 )
 from .eval_column import _eval_column_expr
+from .eval_dict import _materialize_dict_to_string
 from .string_bytes import string_array_of
 
 
@@ -139,6 +144,38 @@ def _widen_small_int(
     return _widen_float[DType.uint64](col, target)
 
 
+def _cast_string_to_temporal(
+    child_col: Column[HeapRegion], target_arrow: ArrowType, try_mode: Bool
+) raises -> Column[HeapRegion]:
+    """`CAST(<text> AS DATE)` -> DATE32 and `CAST(<text> AS TIMESTAMP)` ->
+    TIMESTAMP_US, with DuckDB's text grammar (`column_kernels.temporal_parse`).
+    A timestamp of any other unit is refused by name: DuckDB's text cast to
+    TIMESTAMP answers microseconds, and no other unit is reached from SQL."""
+    # A dictionary-encoded text column (a low-cardinality parquet column) is
+    # expanded to its values first.
+    var sa = (
+        _materialize_dict_to_string(child_col)
+        if child_col.arrow_type == ArrowType.DICTIONARY
+        else string_array_of(child_col)
+    )
+    if target_arrow == ArrowType.DATE32:
+        var days = cast_string_to_date32(sa, try_mode)
+        var out = Column.from_primitive[DType.int32](days)
+        out.arrow_type = ArrowType.DATE32
+        return out^
+    if target_arrow != ArrowType.TIMESTAMP_US:
+        raise Error(
+            "SQL not supported: a cast from text to " + String(target_arrow)
+            + ". Text is parsed to DATE or to TIMESTAMP (microseconds), the"
+            " two text casts DuckDB's CAST serves with this grammar; cast the"
+            " TIMESTAMP to another unit afterwards."
+        )
+    var micros = cast_string_to_timestamp_us(sa, try_mode)
+    var tout = Column.from_primitive[DType.int64](micros)
+    tout.arrow_type = ArrowType.TIMESTAMP_US
+    return tout^
+
+
 def _project_cast(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion]:
     """The `EXPR_CAST` arm of `_eval_column_expr`."""
     var child_col = _eval_column_expr(expr.cast_child_ref(), batch)
@@ -150,6 +187,16 @@ def _project_cast(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion]:
         return _eval_cast_to_decimal128(child_col, expr.cast_decimal_precision(), expr.cast_decimal_scale(), batch, _expr_name_hint(expr.cast_child_ref()))
     if src_at == ArrowType.DECIMAL128:
         return _eval_cast_from_decimal128(child_col, target, target_arrow, batch, _expr_name_hint(expr.cast_child_ref()))
+    # --- STRING -> DATE32 / TIMESTAMP: parse the text ---
+    # Keyed on `target_arrow`, and placed before every arm keyed on the
+    # physical `target` DType: DATE32 is physically int32 and TIMESTAMP_US
+    # int64, so the STRING -> int32 / int64 arms below would read the text as
+    # an integer. `cast_is_try` is TRY_CAST: NULL for a row that does not
+    # parse instead of DuckDB's error.
+    if (src_at == ArrowType.STRING or src_at == ArrowType.DICTIONARY) and (
+        target_arrow == ArrowType.DATE32 or target_arrow.is_timestamp()
+    ):
+        return _cast_string_to_temporal(child_col, target_arrow, expr.cast_is_try())
     # =====================================================================
     # THE NUMERIC CAST MATRIX — {I32, I64, F32, F64}, ALL 12 ORDERED PAIRS
     # =====================================================================

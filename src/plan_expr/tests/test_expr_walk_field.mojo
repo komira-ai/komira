@@ -34,7 +34,10 @@ from plan_expr.expr import (
     REGEXP_SPLIT_TO_ARRAY, REGEXP_EXTRACT_ALL, REGEXP_COUNT, REGEXP_INSTR,
     REGEXP_SUBSTR, REGEXP_FULL_MATCH,
     EXTRACT_YEAR, EXTRACT_TRUNC_MONTH,
-    STRFNN_STRPOS, STRFNN_JARO,
+    STRFNN_STRPOS, STRFNN_JARO, STRFNN_STRPTIME, STRFNN_TRY_STRPTIME,
+    string_fn_n_type_is_coherent, string_fn_n_returns_timestamp,
+    string_fn_n_returns_int, string_fn_n_returns_float, string_fn_n_arity,
+    string_fn_n_name,
 )
 from plan_expr.expr_walk import (
     walk_expr_field,
@@ -380,6 +383,40 @@ def test_string_functions() raises:
     _is(_x(Expr.string_fn_n(STRFNN_STRPOS, a2^)), "string_fn_n", ArrowType.INT64, True)
     var a3: List[Expr] = [_c("s"), _c("s")]
     _is(_x(Expr.string_fn_n(STRFNN_JARO, a3^)), "string_fn_n", ArrowType.FLOAT64, True)
+
+
+def test_strptime_family_types_as_nullable_timestamp_us() raises:
+    """`strptime` and `try_strptime` produce TIMESTAMP_US, nullable, named
+    after the function."""
+    var a1: List[Expr] = [_c("s"), Expr.literal(ScalarValue.from_string("%Y"))]
+    _is(
+        _x(Expr.string_fn_n(STRFNN_STRPTIME, a1^)),
+        "strptime", ArrowType.TIMESTAMP_US, True,
+    )
+    var a2: List[Expr] = [_c("s"), Expr.literal(ScalarValue.from_string("%Y"))]
+    _is(
+        _x(Expr.string_fn_n(STRFNN_TRY_STRPTIME, a2^)),
+        "try_strptime", ArrowType.TIMESTAMP_US, True,
+    )
+
+
+def test_string_fn_n_output_type_is_coherent_for_every_op() raises:
+    """No op 0..15 is in more than one of int/float/timestamp; the timestamp
+    predicate holds for exactly the two strptime ops, each of arity 2."""
+    for op in range(16):
+        var o = UInt8(op)
+        assert_true(string_fn_n_type_is_coherent(o), String("op ") + String(op))
+        var is_ts = string_fn_n_returns_timestamp(o)
+        assert_equal(is_ts, op == 14 or op == 15)
+        if is_ts:
+            assert_false(string_fn_n_returns_int(o))
+            assert_false(string_fn_n_returns_float(o))
+    assert_equal(Int(STRFNN_STRPTIME), 14)
+    assert_equal(Int(STRFNN_TRY_STRPTIME), 15)
+    assert_equal(string_fn_n_arity(STRFNN_STRPTIME), 2)
+    assert_equal(string_fn_n_arity(STRFNN_TRY_STRPTIME), 2)
+    assert_equal(string_fn_n_name(STRFNN_STRPTIME), "strptime")
+    assert_equal(string_fn_n_name(STRFNN_TRY_STRPTIME), "try_strptime")
 
 
 def test_udf_and_json_take_their_declared_type() raises:

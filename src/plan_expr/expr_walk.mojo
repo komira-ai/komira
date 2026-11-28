@@ -95,6 +95,8 @@ from plan_expr.expr import (
     string_fn_returns_int,
     string_fn_n_returns_int,
     string_fn_n_returns_float,
+    string_fn_n_returns_timestamp,
+    string_fn_n_name,
     REGEXP_LIKE,
     REGEXP_MATCH,
     REGEXP_REPLACE,
@@ -1236,6 +1238,12 @@ def walk_expr_field[P: ColRefFieldPolicy](
             return Field("string_fn_n", ArrowType.INT64, True)
         if string_fn_n_returns_float(expr.string_fn_n_op()):
             return Field("string_fn_n", ArrowType.FLOAT64, True)
+        if string_fn_n_returns_timestamp(expr.string_fn_n_op()):
+            return Field(
+                string_fn_n_name(expr.string_fn_n_op()),
+                ArrowType.TIMESTAMP_US,
+                True,
+            )
         return Field("string_fn_n", ArrowType.STRING, True)
 
     elif expr.tag == EXPR_MATH_FN or expr.tag == EXPR_MATH_FN2:
