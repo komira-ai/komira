@@ -600,7 +600,10 @@ tests, which no pull request builds. The rest of this section is about `release-
   `//python:wheel_libs_macos_arm64`, `//python:wheel_same_macos_arm64`,
   `//python/smoke:pypi_smoke_macos_arm64`) and the pinned macOS pyarrow and protobuf wheels its install test reads
   (`//python/tests:pyarrow-25.0.1-cp313-cp313-macosx_12_0_arm64.whl`,
-  `//python/tests:protobuf-7.36.2-cp310-abi3-macosx_10_9_universal2.whl`) stay out of the check twice: each has an `EXCLUDED` row in
+  `//python/tests:protobuf-7.36.2-cp310-abi3-macosx_10_9_universal2.whl`), and the macOS files of the two protobuf edges that
+  the CPython 3.13 edge wheels read when configured for macOS
+  (`//python/tests:protobuf-5.29.1-cp38-abi3-macosx_10_9_universal2.whl`,
+  `//python/tests:protobuf-5.28.3-cp38-abi3-macosx_10_9_universal2.whl`), stay out of the check twice: each has an `EXCLUDED` row in
   `tools/build/ci/rules.bzl`, so the pull-request selector never picks it, and each has
   `target_compatible_with = DARWIN_ARM64` (limit `pypi-wheel-macos-arm64` in
   `tools/build/platforms/limits.tsv`), so it builds only with `--target-platforms

@@ -29,6 +29,9 @@ by nothing and give one row. No SQL text is written.
 - Missing values are NULL. A NaN is a value in these reductions (ruling 6).
 - A Python function as an aggregate is an aggregate UDF, which no query runs
   yet: it is refused by name, as are the choices that need row order.
+- `df.resample(rule, on=column)` (komira/_resample.py) is a `GroupBy` by the
+  bucket of a date column, `sort=False` and `dropna=True`; its window verbs
+  are refused, since its rows are its buckets.
 - On one selected column, `transform`, `cumsum`, `cummin`, `cummax` and
   `rank` give a Series of the frame `groupby` was called on, one value per
   row, computed over the row's group by a window (komira/_windows.py). Under
@@ -368,7 +371,7 @@ class GroupBy:
     `df.groupby(by)`: each reduction is a frame of the keys and one column
     per output, and runs nothing."""
 
-    __slots__ = ("_frame", "_keys", "_sort", "_dropna", "_selection", "_single", "_origin")
+    __slots__ = ("_frame", "_keys", "_sort", "_dropna", "_selection", "_single", "_origin", "_restore")
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         raise TypeError('a komira GroupBy is made by a frame: df.groupby("key")')
@@ -383,6 +386,7 @@ class GroupBy:
         selection: tuple[str, ...] | None = None,
         single: bool = False,
         origin: tuple[DataFrame, int] | None = None,
+        restore: tuple[tuple[str, str], ...] = (),
     ) -> GroupBy:
         out = object.__new__(cls)
         object.__setattr__(out, "_frame", frame)
@@ -392,8 +396,13 @@ class GroupBy:
         object.__setattr__(out, "_selection", selection)
         object.__setattr__(out, "_single", single)
         # The frame groupby() was called on and its generation then: a
-        # window verb's Series is a Series of that frame.
+        # window verb's Series is a Series of that frame. None for the groups
+        # of df.resample() (komira/_resample.py), whose window verbs are refused.
         object.__setattr__(out, "_origin", origin)
+        # (key, Arrow type) of each key grouped as its integer count and cast
+        # back to its type above the aggregate: the engine has no group key
+        # sink for a timestamp (komira/_resample.py).
+        object.__setattr__(out, "_restore", restore)
         return out
 
     @classmethod
@@ -433,14 +442,20 @@ class GroupBy:
                 raise ValueError(f"the column {name!r} is a group key, and its groups already hold it once")
         if len(set(names)) != len(names):
             raise ValueError("a GroupBy subscript names a column twice: " + ", ".join(names))
-        return GroupBy._of(self._frame, self._keys, self._sort, self._dropna, names, single, self._origin)
+        return GroupBy._of(
+            self._frame, self._keys, self._sort, self._dropna, names, single, self._origin, self._restore
+        )
 
     # ---- agg -------------------------------------------------------------
 
     def _run(self, items: list[_Item], where: str, hint: str) -> DataFrame:
-        return _aggregate(
+        out = _aggregate(
             self._frame, self._keys, items, sort=self._sort, dropna=self._dropna, where=where, hint=hint
         )
+        if not self._restore:
+            return out
+        back = tuple((key, _ops.Cast(_ops.ColRef(key), None, arrow=arrow)) for key, arrow in self._restore)
+        return out._derive(_ops.with_columns(out._plan, back))
 
     def _reduce(self, how: str, numeric_only: bool = False, zero: bool = True) -> DataFrame:
         where = f"{how}()"
@@ -534,6 +549,11 @@ class GroupBy:
             raise UnsupportedOperation(
                 f"{verb} of a GroupBy gives one value per row, as a Series of one column: "
                 f'select the column first, as df.groupby(...)["column"].{verb}'
+            )
+        if self._origin is None:
+            raise UnsupportedOperation(
+                f"{verb} of a resample gives one value per row, and a resample's rows are its buckets: "
+                "reduce the buckets with agg() or one of the reductions"
             )
         frame, generation = self._origin
         if frame._generation != generation:

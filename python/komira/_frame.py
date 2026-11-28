@@ -22,6 +22,8 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
   row; each builds one aggregate node (komira/_groupby.py).
   `drop_duplicates` builds a distinct over every column, and over a `subset`
   of them, as `duplicated` does, a window per value (komira/_windows.py).
+  `resample(rule, on=column)` gives a `GroupBy` by the day, week or month of
+  a date column (komira/_resample.py).
 - `merge` joins two frames with one join node, and `df[df["k"].isin(o["k"])]`
   (`~` for its negation) is a semi (anti) join (komira/_merge.py).
 - A Series may read windows (`cumsum`, `rank`, `rolling`, a group's
@@ -63,7 +65,7 @@ from collections.abc import Callable, Iterable
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
-from . import _display, _groupby, _merge, _ops, _refusals, _verbs, _windows, _write
+from . import _display, _groupby, _merge, _ops, _refusals, _resample, _verbs, _windows, _write
 from ._errors import UnsupportedOperation
 from ._groupby import GroupBy
 from ._missing import present
@@ -709,6 +711,27 @@ class DataFrame:
         out the rows with a missing key, `dropna=False` keeps their group."""
         return GroupBy._new(self, by, as_index, sort, dropna)
 
+    def resample(
+        self,
+        rule: str,
+        *,
+        closed: str | None = None,
+        label: str | None = None,
+        on: str | None = None,
+        level: object = None,
+        origin: str = "start_day",
+        offset: object = None,
+    ) -> GroupBy:
+        """The rows bucketed by the date or timestamp column `on` into days
+        (`"D"`), weeks from Monday to Sunday labelled by their Sunday (`"W"`,
+        pandas' `W-SUN`), or months labelled by their first (`"MS"`) or last
+        (`"ME"`, `"M"`) day, as a `GroupBy` by the bucket, which keeps the
+        column's name (komira/_resample.py). A row with no date is left out;
+        a bucket with no rows has no row, and the answer has no row order."""
+        return _resample.resample(
+            self, rule, closed=closed, label=label, on=on, level=level, origin=origin, offset=offset
+        )
+
     def agg(self, arg: object = None, **named: object) -> DataFrame:
         """The frame reduced to one row: by named aggregates,
         `agg(total=("v", "sum"), n=("v", "size"))`; by a dict of column to
@@ -1088,6 +1111,8 @@ def read_csv(
     sep: str = ",",
     header: int | str | None = "infer",
     skiprows: int | None = None,
+    chunksize: int | None = None,
+    iterator: bool = False,
     session: Session | None = None,
 ) -> DataFrame:
     """A frame of the local CSV file at `path`, its column names and types
@@ -1098,7 +1123,15 @@ def read_csv(
     before the header, as SQL's `read_csv(..., skip = n)` does; a list of row
     numbers or a function of the row number, which pandas reads as rows to
     drop, is not built. Needs libkomira ABI 1.11 when `skiprows` is above 0.
-    Failures, paths and `session` are as for `read_parquet`."""
+    Failures, paths and `session` are as for `read_parquet`. pandas' chunked
+    reading, `chunksize` other than None and `iterator` other than False,
+    raises `UnsupportedOperation` before the file is touched."""
+    for name, value, default in (("chunksize", chunksize, None), ("iterator", iterator, False)):
+        if value is not default:
+            raise UnsupportedOperation(
+                f"read_csv({name}={value!r}) reads the file in chunks: chunked reading waits for the engine "
+                "to hand out batches as it makes them"
+            )
     if header is None:
         has_header = False
     elif header == "infer" or (header == 0 and not isinstance(header, bool)):
