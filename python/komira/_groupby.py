@@ -19,21 +19,28 @@ by nothing and give one row. No SQL text is written.
 - `sum`, `mean`, `median`, `std` and `var` need a numeric or boolean column
   (ruling 4): a reduction of every column names the first one that is not,
   unless `numeric_only=True` leaves it out. pandas counts True as 1: a
-  boolean column is summed as `CASE WHEN b = true THEN 1 ELSE 0 END` (a
-  missing value adds 0, as it is skipped), and cast to int64 for
-  `sum(min_count=1)` and to float64 for the others, where a missing value
-  must stay missing.
+  boolean column is cast to int64 for `sum` (a missing value stays missing,
+  so the sum skips it) and to float64 for the others. The cast, not
+  `CASE WHEN b = true`, since the engine compares no computed boolean
+  with a boolean literal, and `df.isna().sum()` sums computed ones.
 - A sum of nothing is 0, as in pandas' `min_count=0` (ruling 10): the sum is
   read through `CASE WHEN s IS NOT NULL THEN s ELSE 0 END` above the
   aggregate. `min_count=1` keeps the missing sum.
 - Missing values are NULL. A NaN is a value in these reductions (ruling 6).
 - A Python function as an aggregate is an aggregate UDF, which no query runs
   yet: it is refused by name, as are the choices that need row order.
+- `df.resample(rule, on=column)` (komira/_resample.py) is a `GroupBy` by the
+  bucket of a date column, `sort=False` and `dropna=True`; its window verbs
+  are refused, since its rows are its buckets.
 - On one selected column, `transform`, `cumsum`, `cummin`, `cummax` and
   `rank` give a Series of the frame `groupby` was called on, one value per
   row, computed over the row's group by a window (komira/_windows.py). Under
   `dropna=True` a row whose key is missing is in no group, and its value is
   missing, as in pandas.
+- `drop_duplicates` over every column is a DISTINCT (an AGGREGATE for
+  `keep=False`); over fewer columns, a `subset`, it is a window that numbers
+  or counts the rows of each value, under a filter (komira/_windows.py), and
+  the row it keeps of a value is any one of them (a plan has no row order).
 """
 
 from __future__ import annotations
@@ -138,9 +145,7 @@ def _agg_node(dtypes: dict[str, str], item: _Item, where: str, hint: str) -> _op
             raise UnsupportedOperation(
                 f"{where} needs numeric or boolean columns, and the column {item.column!r} is {dtype}: {hint}"
             )
-        if dtype == "bool" and item.how == "sum" and item.zero:
-            ref = _ops.When(((_ops.Compare("eq", ref, _ops.Lit(True)), _ops.Lit(1)),), _ops.Lit(0))
-        elif dtype == "bool":
+        if dtype == "bool":
             ref = _ops.Cast(ref, "int64" if item.how == "sum" else "float64")
     return _ops.Agg(_FUNCS[item.how], (ref,))
 
@@ -366,7 +371,7 @@ class GroupBy:
     `df.groupby(by)`: each reduction is a frame of the keys and one column
     per output, and runs nothing."""
 
-    __slots__ = ("_frame", "_keys", "_sort", "_dropna", "_selection", "_single", "_origin")
+    __slots__ = ("_frame", "_keys", "_sort", "_dropna", "_selection", "_single", "_origin", "_restore")
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         raise TypeError('a komira GroupBy is made by a frame: df.groupby("key")')
@@ -381,6 +386,7 @@ class GroupBy:
         selection: tuple[str, ...] | None = None,
         single: bool = False,
         origin: tuple[DataFrame, int] | None = None,
+        restore: tuple[tuple[str, str], ...] = (),
     ) -> GroupBy:
         out = object.__new__(cls)
         object.__setattr__(out, "_frame", frame)
@@ -390,8 +396,13 @@ class GroupBy:
         object.__setattr__(out, "_selection", selection)
         object.__setattr__(out, "_single", single)
         # The frame groupby() was called on and its generation then: a
-        # window verb's Series is a Series of that frame.
+        # window verb's Series is a Series of that frame. None for the groups
+        # of df.resample() (komira/_resample.py), whose window verbs are refused.
         object.__setattr__(out, "_origin", origin)
+        # (key, Arrow type) of each key grouped as its integer count and cast
+        # back to its type above the aggregate: the engine has no group key
+        # sink for a timestamp (komira/_resample.py).
+        object.__setattr__(out, "_restore", restore)
         return out
 
     @classmethod
@@ -431,14 +442,20 @@ class GroupBy:
                 raise ValueError(f"the column {name!r} is a group key, and its groups already hold it once")
         if len(set(names)) != len(names):
             raise ValueError("a GroupBy subscript names a column twice: " + ", ".join(names))
-        return GroupBy._of(self._frame, self._keys, self._sort, self._dropna, names, single, self._origin)
+        return GroupBy._of(
+            self._frame, self._keys, self._sort, self._dropna, names, single, self._origin, self._restore
+        )
 
     # ---- agg -------------------------------------------------------------
 
     def _run(self, items: list[_Item], where: str, hint: str) -> DataFrame:
-        return _aggregate(
+        out = _aggregate(
             self._frame, self._keys, items, sort=self._sort, dropna=self._dropna, where=where, hint=hint
         )
+        if not self._restore:
+            return out
+        back = tuple((key, _ops.Cast(_ops.ColRef(key), None, arrow=arrow)) for key, arrow in self._restore)
+        return out._derive(_ops.with_columns(out._plan, back))
 
     def _reduce(self, how: str, numeric_only: bool = False, zero: bool = True) -> DataFrame:
         where = f"{how}()"
@@ -532,6 +549,11 @@ class GroupBy:
             raise UnsupportedOperation(
                 f"{verb} of a GroupBy gives one value per row, as a Series of one column: "
                 f'select the column first, as df.groupby(...)["column"].{verb}'
+            )
+        if self._origin is None:
+            raise UnsupportedOperation(
+                f"{verb} of a resample gives one value per row, and a resample's rows are its buckets: "
+                "reduce the buckets with agg() or one of the reductions"
             )
         frame, generation = self._origin
         if frame._generation != generation:
@@ -630,26 +652,47 @@ def agg_frame(frame: DataFrame, arg: object, named: dict[str, object]) -> DataFr
     return GroupBy._of(frame, (), False, False).agg(arg, **named)
 
 
-def drop_duplicates(frame: DataFrame, subset: object, keep: object) -> DataFrame:
-    """`df.drop_duplicates(subset, keep=...)` over every column: a DISTINCT,
-    or for `keep=False` the rows no other row equals (an AGGREGATE by every
-    column with count(*) = 1, then the columns)."""
+def subset_of(frame: DataFrame, subset: object, verb: str) -> tuple[str, ...]:
+    """The columns `subset` names for `verb` (`drop_duplicates`,
+    `duplicated`), each once in the order first given; every column of the
+    frame when it is None."""
     columns = frame._plan.columns
-    if subset is not None:
-        names = (subset,) if isinstance(subset, str) else subset
-        if not isinstance(names, (list, tuple)):
-            raise TypeError(f"drop_duplicates subset takes column names, not a {type(subset).__name__}")
-        for name in names:
-            if not isinstance(name, str):
-                raise TypeError(f"drop_duplicates subset takes column names, which are str, not {type(name).__name__}")
-        _ops.require_columns(tuple(names), columns)
-        if set(names) != set(columns):
-            listed = list(names)
-            raise UnsupportedOperation(
-                f"drop_duplicates(subset={listed!r}) keeps one whole row of each group of rows equal on "
-                f"those columns, which this release does not build: keep only those columns first, as "
-                f"df[{listed!r}].drop_duplicates()"
-            )
+    if subset is None:
+        return tuple(columns)
+    names = (subset,) if isinstance(subset, str) else subset
+    if not isinstance(names, (list, tuple)):
+        raise TypeError(f"{verb} subset takes column names, not a {type(subset).__name__}")
+    for name in names:
+        if not isinstance(name, str):
+            raise TypeError(f"{verb} subset takes column names, which are str, not {type(name).__name__}")
+    if not names:
+        raise ValueError(f"{verb} subset names no column: name at least one, or leave it out to compare every column")
+    _ops.require_columns(tuple(names), columns)
+    return tuple(dict.fromkeys(names))
+
+
+def check_keep(keep: object) -> object:
+    """`keep` of `drop_duplicates` and `duplicated`: "first", "last" or
+    False, which pandas also accepts as a value equal to it (0); returned as
+    "first", "last" or False."""
+    if keep not in ("first", "last", False):
+        raise ValueError("keep must be either \"first\", \"last\" or False")
+    return keep if keep in ("first", "last") else False
+
+
+def drop_duplicates(frame: DataFrame, subset: object, keep: object) -> DataFrame:
+    """`df.drop_duplicates(subset, keep=...)`. Over every column (no subset,
+    or one naming every column): a DISTINCT, or for `keep=False` the rows no
+    other row equals (an AGGREGATE by every column with count(*) = 1, then the
+    columns). Over fewer columns: the rows `duplicated(subset, keep)` holds
+    false, by a window (komira/_windows.py, `unique_rows`) over the frame with
+    its sort dropped. The answer has no row order."""
+    names = subset_of(frame, subset, "drop_duplicates")
+    keep = check_keep(keep)
+    columns = frame._plan.columns
+    if set(names) != set(columns):
+        plan = frame._plan.child if isinstance(frame._plan, _ops.Sort) else frame._plan
+        return frame._derive(_windows.unique_rows(plan, names, keep))
     if keep is False:
         count = "count"
         while count in columns:
@@ -657,8 +700,6 @@ def drop_duplicates(frame: DataFrame, subset: object, keep: object) -> DataFrame
         plan = _ops.aggregate(frame._plan, columns, ((count, _ops.Agg("count")),))
         plan = _ops.filter_(plan, _ops.Compare("eq", _ops.ColRef(count), _ops.Lit(1)))
         return frame._derive(_ops.select(plan, columns))
-    if keep not in ("first", "last"):
-        raise ValueError("keep must be either \"first\", \"last\" or False")
     # Rows equal on every column are the same row, so "first" and "last"
     # keep the same one.
     return frame._derive(_ops.distinct(frame._plan))

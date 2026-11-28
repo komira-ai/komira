@@ -54,8 +54,8 @@ Output:
 
 - `date_trunc` of a date is a date: the first day of the month, or the Monday that starts the week (ISO weeks). `date_trunc` of a timestamp stays a timestamp, cut to the start of the unit (midnight of the first day for month and week).
 - `date_trunc` also takes `year`, `quarter` and `day`, and the same unit's DuckDB aliases.
-- The pandas-shaped frame has no `.dt.week`, no `resample` and no `.dt.to_period`: group by `.dt.year` and `.dt.month` as above, or use SQL for weeks.
-- komira.pl (the polars-shaped door) has no `dt.truncate`; use SQL for a truncated date.
+- The pandas-shaped frame has no `.dt.week` and no `.dt.to_period`: group by `.dt.year` and `.dt.month` as above, or bucket the rows by week or month with `df.resample("W", on="sold_on")` or `df.resample("MS", on="sold_on")` (pandas labels a week by its Sunday; see [rank 38](../38-resample-time-series-daily-weekly-monthly/page.md)).
+- komira.pl (the polars-shaped door) has `col("sold_on").dt.truncate("1w")` and `"1mo"`, and `group_by_dynamic("sold_on", every="1mo")`.
 - Rows come back in no promised order without `ORDER BY`. `ORDER BY` a date sorts by the day, earliest first, and puts NULLs last in both directions, as DuckDB does; write `NULLS FIRST` to put them first. `ORDER BY ... LIMIT n` keeps the first `n` periods. A pandas-shaped `groupby` sorts by its keys.
 
 ## Related

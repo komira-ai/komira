@@ -14,8 +14,10 @@
 
 Lazy frames and unbound expressions, as in polars (docs/design/dataframe_surface.md).
 A frame is a plan of the package's private node tree. No verb runs a query:
-`collect()` encodes the plan and runs it through libkomira's plan entry
-(`komira_plan_stream`), and returns the package's `Result`, read once. Nothing
+the two terminals do. `collect()` encodes the plan and runs it through
+libkomira's plan entry (`komira_plan_stream`), and returns the package's
+`Result`, read once; `sink_csv`, `sink_parquet` and `sink_ndjson` run it there
+with a write target and write the rows to a local file, returning None. Nothing
 here writes SQL text, and nothing imports polars to compute.
 
 The names are exactly `__all__`. A name the module or one of its classes does
@@ -30,11 +32,13 @@ protobuf, which the encoder imports when the first frame is made.
 from __future__ import annotations
 
 from . import _names
+from ._dt import ExprDateTimeNameSpace
 from ._expr import Expr, ExprStringNameSpace, col, len, lit, when
 from ._frame import LazyFrame, concat, scan_csv, scan_ndjson, scan_parquet
 
 __all__ = [
     "Expr",
+    "ExprDateTimeNameSpace",
     "ExprStringNameSpace",
     "LazyFrame",
     "col",
