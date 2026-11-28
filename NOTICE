@@ -59,8 +59,8 @@ Third-party code inside the native files
 ----------------------------------------
 
 Four of the native owner libraries that libkomira links, and that the Linux
-wheel carries, hold third-party code compiled in (docs/design/wheel_licence_audit.md
-lists every native file of the wheel). The other native files are komira's own
+wheel carries, hold third-party code compiled in, and libkomira itself holds
+lz4 (docs/design/wheel_licence_audit.md lists every native file of the wheel). The other native files are komira's own
 code, except the three Mojo runtime libraries the wheel carries,
 which are Modular's (the last section). Redistributed here in binary form, with the notices their licenses
 require.
@@ -160,13 +160,83 @@ require.
        s2n
        Copyright 2014-2015 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+6. zstd 1.5.7, statically linked into `libkomira_compression_native.so.1`
+   with its symbols prefixed `komira_zstd_`. Dual-licensed BSD-3-Clause or
+   GPL-2.0; komira uses it under BSD-3-Clause. Pinned in third_party/zstd/BUCK.
+
+       BSD License
+
+       For Zstandard software
+
+       Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
+
+       Redistribution and use in source and binary forms, with or without modification,
+       are permitted provided that the following conditions are met:
+
+        * Redistributions of source code must retain the above copyright notice, this
+          list of conditions and the following disclaimer.
+
+        * Redistributions in binary form must reproduce the above copyright notice,
+          this list of conditions and the following disclaimer in the documentation
+          and/or other materials provided with the distribution.
+
+        * Neither the name Facebook, nor Meta, nor the names of its contributors may
+          be used to endorse or promote products derived from this software without
+          specific prior written permission.
+
+       THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+       ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+       WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+       DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+       ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+       (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+       LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+       ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+       (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+       SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+   The archive's LICENSE is extracted unmodified as
+   `//third_party/zstd:src[LICENSE]`; it is the text above.
+
+7. lz4 1.10.0 (the library: the block, high-compression, frame and xxHash
+   sources of lib/), statically linked into libkomira itself with its symbols
+   prefixed `komira_lz4_`. BSD-2-Clause. Pinned in third_party/lz4/BUCK.
+
+       LZ4 Library
+       Copyright (c) 2011-2020, Yann Collet
+       All rights reserved.
+
+       Redistribution and use in source and binary forms, with or without modification,
+       are permitted provided that the following conditions are met:
+
+       * Redistributions of source code must retain the above copyright notice, this
+         list of conditions and the following disclaimer.
+
+       * Redistributions in binary form must reproduce the above copyright notice, this
+         list of conditions and the following disclaimer in the documentation and/or
+         other materials provided with the distribution.
+
+       THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+       ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+       WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+       DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+       ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+       (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+       LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+       ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+       (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+       SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+   The archive's lib/LICENSE is extracted unmodified as
+   `//third_party/lz4:src[lib/LICENSE]`; it is the text above.
+
 None of the other libraries the wheel's files need at run time is carried: not
 the C++ runtime the Mojo runtime libraries need (libstdc++.so.6, libgcc_s.so.1),
 not the system's glibc (`libc.so.6`, `libpthread.so.0`), and not the codec
-libraries libz, liblz4, libzstd, libbz2 and liblzma, which komira opens by name
-from the host when a file uses that codec. The macOS arm64 wheel carries no
-owner library: its libkomira.dylib links the C archives of its closure (the
-four libraries above among them) statically, so whatever of that third-party
+libraries libz, libbz2 and liblzma, which komira opens by name from the host
+when a file uses that codec. The macOS arm64 wheel carries no owner library:
+its libkomira.dylib links the C archives of its closure (the libraries above
+among them) statically, so whatever of that third-party
 code it calls is inside libkomira.dylib, under the same notices.
 
 The Mojo runtime: Modular's libraries, carried in the wheel

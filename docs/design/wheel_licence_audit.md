@@ -15,7 +15,7 @@ the built files; this page adds what each file contains.
 
 | file | third-party code inside | licence | required notice | `NOTICE` section |
 |---|---|---|---|---|
-| `libkomira.so` | none: komira's own Mojo, compiled by Modular's compiler | Apache-2.0 | none beyond `LICENSE` | (LICENSE) |
+| `libkomira.so` | lz4 1.10.0, the library (static, names prefixed `komira_lz4_`); otherwise komira's own Mojo, compiled by Modular's compiler | BSD-2-Clause (lz4); Apache-2.0 | lz4: copyright notice, conditions and disclaimer reproduced for binary redistribution | "Third-party code inside the native files" 7; (LICENSE) |
 | `libkomira_async_rt_native.so.1` | none: komira's C | Apache-2.0 | none | (LICENSE) |
 | `libkomira_async_api_native.so.1` | none: komira's C | Apache-2.0 | none | (LICENSE) |
 | `libkomira_fs_native.so.1` | none: komira's C | Apache-2.0 | none | (LICENSE) |
@@ -23,7 +23,7 @@ the built files; this page adds what each file contains.
 | `libkomira_metrics_native.so.1` | none: komira's C | Apache-2.0 | none | (LICENSE) |
 | `libkomira_objectstore_native.so.1` | none: komira's C | Apache-2.0 | none | (LICENSE) |
 | `libkomira_scan_source_native.so.1` | none: komira's C | Apache-2.0 | none | (LICENSE) |
-| `libkomira_compression_native.so.1` | snappy 1.3.1 (static); LLVM libc++ and libc++abi from the Zig toolchain (static, symbols local) | BSD-3-Clause; Apache-2.0 with LLVM exceptions | snappy: copyright notice, conditions and disclaimer reproduced for binary redistribution; libc++: none for object code (LLVM exception), recorded anyway | "Third-party code inside the native files" 1 and 3 |
+| `libkomira_compression_native.so.1` | snappy 1.3.1 (static); zstd 1.5.7 (static, names prefixed `komira_zstd_`); LLVM libc++ and libc++abi from the Zig toolchain (static, symbols local) | BSD-3-Clause (snappy); BSD-3-Clause, the option komira takes of zstd's BSD-3-Clause or GPL-2.0; Apache-2.0 with LLVM exceptions | snappy and zstd: copyright notice, conditions and disclaimer reproduced for binary redistribution; libc++: none for object code (LLVM exception), recorded anyway | "Third-party code inside the native files" 1, 3 and 6 |
 | `libkomira_parquet_codec_native.so.1` | Brotli decoder 1.1.0 (static, names prefixed `komira_brotli_`) | MIT | copyright notice and permission notice reproduced | same section, 2 |
 | `libkomira_crypto_native.so.1` | aws-lc 1.39.0 libcrypto (static, names prefixed `komira_awslc_`), with komira's SHA-256 C | Apache-2.0 OR ISC (AWS-LC's files); OpenSSL License and original SSLeay License, ISC, MIT, BSD-3-Clause (inherited parts, as its LICENSE states) | its NOTICE reproduced in `NOTICE`; its LICENSE (every notice, condition and disclaimer of those licences) carried unmodified as `.dist-info/licenses/AWS_LC_LICENSE` | same section, 4 |
 | `libkomira_http_core_native.so.1` | s2n-tls 1.5.6 (static, names prefixed `komira_s2n_`); `DT_NEEDED` on the crypto owner above | Apache-2.0 | its NOTICE reproduced in `NOTICE`; its LICENSE carried unmodified as `.dist-info/licenses/S2N_TLS_LICENSE` | same section, 5 |
@@ -33,8 +33,9 @@ the built files; this page adds what each file contains.
 
 Sources and pins: snappy `//third_party/snappy` (version and archive sha256
 there), Brotli `//third_party/brotli`, aws-lc `//third_party/aws-lc`, s2n-tls
-`//third_party/s2n-tls` (same). The archive's `COPYING` and
-`LICENSE` are extracted unmodified as that target's files.
+`//third_party/s2n-tls`, zstd `//third_party/zstd`, lz4 `//third_party/lz4`
+(same). The archive's `COPYING`, `LICENSE` and (lz4) `lib/LICENSE` are
+extracted unmodified as that target's files.
 
 ## What the wheel does not carry
 
@@ -47,10 +48,10 @@ there), Brotli `//third_party/brotli`, aws-lc `//third_party/aws-lc`, s2n-tls
   `libpthread.so.0`, `ld-linux-x86-64.so.2` (glibc; the wheel tag
   `manylinux_2_35` is its floor: `libAsyncRTRuntimeGlobals.so` needs
   `GLIBC_2.35`, one above the floor of komira's own files).
-- **Codec libraries opened at run time**: `libz`, `liblz4`, `libzstd`,
-  `libbz2`, `liblzma` are opened with `dlopen` by soname on first use of
-  their codec (`src/compression/src/compression/codec_libraries.mojo` and the
-  zlib and lz4 packages). They are not `DT_NEEDED`, not carried, and are
+- **Codec libraries opened at run time**: `libz`, `libbz2`, `liblzma` are
+  opened with `dlopen` by soname on first use of their codec
+  (`src/compression/src/compression/codec_libraries.mojo` and the zlib
+  package). zstd and lz4 are not among them: they are linked in (above). They are not `DT_NEEDED`, not carried, and are
   the host's own files under their own licences; komira neither copies nor
   links them, so no notice of theirs is owed by the wheel.
   If one is absent, the first call of that codec aborts with

@@ -17,9 +17,9 @@
 #   - BROTLI:       the statically linked Brotli decoder
 #                   (brotli/brotli_ffi.mojo); read only.
 # The LZ4 frame codec (lz4_frame/lz4_ffi.mojo) is also reachable directly,
-# for `.lz4` text files. snappy, libzstd, libz and liblz4 are
-# compression's (it declares the snappy symbols and owns every codec
-# soname); only the Brotli decoder is linked and called from this package.
+# for `.lz4` text files. snappy, zstd, libz and lz4 are compression's (it
+# links snappy, zstd and lz4 and owns libz's soname); only the Brotli
+# decoder is linked and called from this package.
 #
 # Contract:
 #   - Every entry takes its input as a `Span[UInt8]` and writes into a
