@@ -2,12 +2,13 @@
 # Row pins: every REFUSAL row of sql_scalar_fn_spec, grouped by its reason
 # =============================================================================
 #
-# What it proves: each of the 538 refused names resolves to an FNK_REFUSED
-# row that carries exactly its family's `_R_*` reason (77 families), lowers
-# to no node (so a UDF may take the name) and has op 0 and the open arity
-# sentinels. Every refused name is called, so every one of those rows is
-# taken once.
-# Mutants it catches: a row wired to a sibling family's reason, a refused
+# What it proves: each refused name resolves to an FNK_REFUSED row that
+# carries exactly its family's `_R_*` reason, lowers to no node (so a UDF may
+# take the name) and has op 0 and the open arity sentinels. Every refused name
+# is called, so every one of those rows is taken once. No count of names or
+# families is written here: sql_fn_table.mojo's header gives the command that
+# counts each.
+# Catches: a row wired to a sibling family's reason, a refused
 # name dropped (it then reads FNK_NONE), a refusal constructor that derives
 # `lowers_to_a_node` from the kind, a reason constant edited to empty.
 # The name lists were generated from the rows.

@@ -25,8 +25,10 @@ load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 #
 # The tests, each run as a build action:
 #   test_sql_e2e -- every case equals DuckDB's answer or is refused as
-#     listed; the count of cases is pinned; the whole corpus with one DuckDB
-#     answer changed in one cell fails that case alone, by name.
+#     listed; the staged corpus holds as many cases as cases/ does (the count
+#     is `len(_CASES)`, given to the test as the define SQL_E2E_CASES); the
+#     whole corpus with one DuckDB answer changed in one cell fails that case
+#     alone, by name.
 #   test_sql_e2e_checks -- the runner and the corpus reader fed wrong
 #     answers and broken lists: a wrong cell, a missing or extra row, another row order or
 #     column name; a refusal not listed, listed but answered, or worded
@@ -227,6 +229,9 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     conda = False,
     deps = _DEPS,
+    # The number of cases under cases/, for test_sql_e2e: derived here, so a
+    # change that adds a case edits no count.
+    test_defines = ["SQL_E2E_CASES=" + str(len(_CASES))],
     test_srcs = [
         "tests/test_sql_e2e.mojo",
         "tests/test_sql_capability_checks.mojo",

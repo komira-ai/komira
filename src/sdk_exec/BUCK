@@ -2,6 +2,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 load(":copy_cases.bzl", "copy_cases")
 
+# The test data below is a block per test (its cases, its oracle, its
+# *_TEST_DATA map) and one `test_data` entry per test. The blocks and the
+# lists in them are in the order they were added, not sorted, and are not
+# re-sorted. A new block goes directly after the block of the test whose name
+# sorts last before its own, and a new list or `test_data` entry on its own
+# line directly after the entry that sorts last before it (first when none
+# does), never at the end, so two changes that each add a test change
+# different lines.
+
 # DuckDB's answers for test_run_sql_csv: each line of tests/csv/cases.sql runs
 # one query over the committed CSV files and writes its answer.
 _CSV_CASES = [
@@ -24,7 +33,13 @@ _CSV_CASES = [
     "header_only_count",
 ]
 
-_CSV_FILES = ["typed", "quoted", "nulls", "pipe", "header_only"]
+_CSV_FILES = [
+    "typed",
+    "quoted",
+    "nulls",
+    "pipe",
+    "header_only",
+]
 
 sql_oracle(
     name = "csv_oracle",
@@ -700,8 +715,8 @@ _WINDOW_FRAMES_TEST_DATA.update({f + ".parquet": ":window_frames_oracle[" + f + 
 
 _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".tsv]" for c in _WINDOW_FRAMES_CASES})
 
-# The engine-execution layer of the SDK: twelve modules (ten leaves plus the
-# plan gate modules) and the engine context with its SQL door and its plan
+# The engine-execution layer of the SDK: its leaf modules, the plan gate
+# modules and the engine context with its SQL door and its plan
 # door (see README.md). Each module's header says what it is for.
 #
 # The welded tests are every tests/test_*.mojo file but the one the

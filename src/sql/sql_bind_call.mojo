@@ -31,7 +31,9 @@ from sql.sql_bind_ops import _bind_sql_division
 from sql.sql_bind_scope import (
     CteScope, BindScope,
 )
-from sql.sql_bind_timestamp import _bind_make_timestamp_epoch
+from sql.sql_bind_timestamp import (
+    _bind_make_timestamp_epoch,
+)
 from sql.sql_catalog import SqlCatalog
 from sql.sql_fn_table import (
     CONST_FALSE, CONST_INT_ZERO, CONST_TRUE, CONST_USER, DSG_CAST, DSG_CENTURY,
