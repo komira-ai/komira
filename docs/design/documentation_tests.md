@@ -28,7 +28,7 @@ here)* marks one from our other repositories, and *[est]* marks an estimate.
 |---|---|
 | First | the block reader; the example directory with probes; the runner; the exact compare; include freshness and `fill`. Languages: Mojo (READMEs) and Python (task pages, SDK pages) |
 | Second | the ledger of unchecked blocks and its tree guard; `record` as a patch; reruns against the published packages; the site step (claim guard, banner, plain `.md` copy, `llms.txt`) |
-| Held | install cases (`sh`), tutorial steps, TypeScript: each needs a contract this doc does not write (below) |
+| Held | install cases (`sh`), tutorial steps, TypeScript: each needs a contract this doc does not write (below); for task pages in TypeScript and Mojo, [task_examples_three_languages.md](task_examples_three_languages.md) proposes one |
 
 Without the second tier, a failing compare prints the whole actual stdout, and the author pastes it
 into the expected file and reads the diff. Unrun blocks are not listed one by one; the reader
