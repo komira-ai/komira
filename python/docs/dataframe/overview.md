@@ -23,24 +23,52 @@ runs it through the engine's plan entry (`komira_plan_stream`, which takes no
 SQL), and returns a `Result`, read once as above. Every call runs the plan
 again. The install test runs this program on the installed wheel.
 
-- [Readers](readers.md): `read_parquet`, `read_csv`, `read_json`.
-- [Verbs](verbs.md): subscripts, `assign`, `sort_values`, `head`, `copy`.
-- [Missing values](missing_values.md): `fillna`, `dropna`, `isna`, `notna` (newer than 0.1.1623).
-- [Names and types](names_and_types.md): `rename`, `add_prefix`, `add_suffix`, `astype` (newer than 0.1.1623).
+- [Readers](readers.md):
+  - `read_csv`
+  - `read_json`
+  - `read_parquet`
+- [Verbs](verbs.md):
+  - `assign`
+  - `copy`
+  - `head`
+  - `sort_values`
+  - subscripts
+- [Missing values](missing_values.md) (newer than 0.1.1623):
+  - `dropna`
+  - `fillna`
+  - `isna`
+  - `notna`
+- [Names and types](names_and_types.md) (newer than 0.1.1623):
+  - `add_prefix`
+  - `add_suffix`
+  - `astype`
+  - `rename`
 - [tail and concat](tail_and_concat.md) (newer than 0.1.1623).
 - [Series](series.md): the operators of a column, with the
   [`.str`](str_accessor.md) and [`.dt`](dt_accessor.md) accessors
   (newer than 0.1.1623).
-- [Schema without a query](schema.md): `columns`, `dtypes`, `repr`.
+- [Schema without a query](schema.md):
+  - `columns`
+  - `dtypes`
+  - `repr`
 - [Row order](row_order.md): which verbs keep an order.
 - [No index, and nothing runs by accident](no_index.md): what is refused.
 - [Explain](explain.md): the engine's text of a plan.
-- [Writing files](writing_files.md): `to_parquet`, `to_csv`, `to_json`.
+- [Writing files](writing_files.md):
+  - `to_csv`
+  - `to_json`
+  - `to_parquet`
 - [Group-by and aggregates](groupby.md), with
   [what the engine runs today](aggregates_engine.md) and
   [drop_duplicates](drop_duplicates.md).
 - [merge, and isin with another frame](merge.md) (newer than 0.1.1623): joins.
-- [Windows](windows.md): `transform`, `cumsum`, `cummin`, `cummax`, `rolling`, `rank` (newer than 0.1.1623).
+- [Windows](windows.md) (newer than 0.1.1623):
+  - `cummax`
+  - `cummin`
+  - `cumsum`
+  - `rank`
+  - `rolling`
+  - `transform`
 - [In a notebook](display.md).
 
 The polars-shaped surface, `komira.pl`, is in [../pl/](../pl/frames.md).

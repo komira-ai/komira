@@ -50,56 +50,58 @@ store.
 
 ## The C surface
 
+The calls, one declaration each, in name order:
+
 ```text
 int32_t  komira_abi_version(void);
+int32_t  komira_add_sql_binding(void *ctx, const char *name,
+                                const uint8_t *source, uint64_t source_len,
+                                int32_t scope);
+int32_t  komira_credential_add(void *ctx, int32_t kind, const char *name,
+                               int32_t *out_id);
+int32_t  komira_credential_seal(void *ctx, int32_t id, int32_t scope);
+int32_t  komira_credential_set(void *ctx, int32_t id, int32_t field,
+                               const uint8_t *value, uint64_t value_len);
+int32_t  komira_csv_binding(void *ctx, const char *path, uint8_t delimiter,
+                            int32_t has_header, int32_t all_varchar,
+                            uint8_t *out_buf, uint64_t out_cap,
+                            uint64_t *out_len);
+void     komira_ctx_free(void *ctx);
 void    *komira_ctx_new(void);
 void    *komira_ctx_new_with_options(int64_t worker_count,
                                      int64_t memory_budget_bytes);
-void     komira_ctx_free(void *ctx);
+int32_t  komira_json_binding(void *ctx, const char *path, uint8_t *out_buf,
+                             uint64_t out_cap, uint64_t *out_len);
 int32_t  komira_last_error(void *ctx, uint8_t *out_buf, uint64_t out_cap,
                            uint64_t *out_len);
 int32_t  komira_last_error_code(void *ctx, uint8_t *out_buf,
                                 uint64_t out_cap, uint64_t *out_len);
 int32_t  komira_last_error_step(void *ctx);
-int32_t  komira_register_parquet(void *ctx, const char *name,
-                                 const char *path);
 int32_t  komira_parquet_schema(void *ctx, const char *path, uint8_t *out_buf,
                                uint64_t out_cap, uint64_t *out_len);
-int32_t  komira_csv_binding(void *ctx, const char *path, uint8_t delimiter,
-                            int32_t has_header, int32_t all_varchar,
-                            uint8_t *out_buf, uint64_t out_cap,
-                            uint64_t *out_len);
-int32_t  komira_json_binding(void *ctx, const char *path, uint8_t *out_buf,
-                             uint64_t out_cap, uint64_t *out_len);
 int32_t  komira_plan_render(void *ctx, const uint8_t *plan, uint64_t plan_len,
                             uint8_t *out_buf, uint64_t out_cap,
                             uint64_t *out_len);
-int32_t  komira_credential_add(void *ctx, int32_t kind, const char *name,
-                               int32_t *out_id);
-int32_t  komira_credential_set(void *ctx, int32_t id, int32_t field,
-                               const uint8_t *value, uint64_t value_len);
-int32_t  komira_credential_seal(void *ctx, int32_t id, int32_t scope);
-int32_t  komira_sql_stream(void *ctx, const char *sql,
-                           struct ArrowArrayStream *out);
+int32_t  komira_plan_stream(void *ctx, const uint8_t *plan, uint64_t plan_len,
+                            struct ArrowArrayStream *out);
+int32_t  komira_register_arrow_stream(void *ctx, const char *name,
+                                      struct ArrowArrayStream *stream);
 int32_t  komira_register_csv(void *ctx, const char *name, const char *path,
                              uint8_t delimiter, int32_t has_header,
                              int32_t all_varchar);
 int32_t  komira_register_json(void *ctx, const char *name,
                               const char *path);
-void    *komira_run_new(void);
-void     komira_run_free(void *run);
+int32_t  komira_register_parquet(void *ctx, const char *name,
+                                 const char *path);
 int32_t  komira_run_cancel(void *run);
+void     komira_run_free(void *run);
+void    *komira_run_new(void);
 int32_t  komira_run_progress(void *run, uint64_t *out_done,
                              uint64_t *out_total);
+int32_t  komira_sql_stream(void *ctx, const char *sql,
+                           struct ArrowArrayStream *out);
 int32_t  komira_sql_stream_run(void *ctx, const char *sql, void *run,
                                struct ArrowArrayStream *out);
-int32_t  komira_plan_stream(void *ctx, const uint8_t *plan, uint64_t plan_len,
-                            struct ArrowArrayStream *out);
-int32_t  komira_register_arrow_stream(void *ctx, const char *name,
-                                      struct ArrowArrayStream *stream);
-int32_t  komira_add_sql_binding(void *ctx, const char *name,
-                                const uint8_t *source, uint64_t source_len,
-                                int32_t scope);
 ```
 
 **Status codes.** Every fallible call returns one: `KOMIRA_OK` (0),
@@ -303,7 +305,7 @@ refused (-3, with a last error) before it is used.
 | `komira_register_json(ctx, name, path)` | the same for a newline-delimited JSON file, the scan `read_json` builds; the schema comes from the leading records | as `komira_register_csv` |
 | `komira_plan_render(ctx, plan, plan_len, out_buf, out_cap, out_len)` | decodes the serialized plan `plan[0..plan_len]` (a `WirePlanEnvelope`) and writes its text as authored, before any optimizer rule; the plan is not run | NULL `plan` or `out_len`: -2. `plan_len` above 64 MiB (`KOMIRA_MAX_INPUT_BYTES`): -5, checked before the plan is read or anything is allocated; exactly 64 MiB is accepted. Bytes that are not an admissible plan: -3 |
 
-The four calls with an `out_buf` follow the two-call protocol above. The
+The calls with an `out_buf` follow the two-call protocol above. The
 binding and schema bytes are what a plan author splices into a scan leaf: the
 fingerprint, kind id and snapshot fields come from the engine and are not
 computed by the caller. A NULL `ctx` is -1 for all seven.
@@ -702,43 +704,46 @@ On values, the call is `add_sql_binding` over the source's bytes (`so.bindings`)
 ```
 
 The library is published only if the gate passes: the exports check, then
-nineteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
-foreign host would. Seven cover the skeleton: the version (1010, which is 1.10),
-create and free (distinct handles, separate sessions), no symbol beyond the
-twenty-six, a fresh session's empty error, the two-call protocol (zero capacity, one
-byte short, exact, larger), a NULL context, and a NULL `out_len`. `gate_error_code_step`
-checks that `komira_last_error_code` and `komira_last_error_step` exist and, on a
-fresh session, give an empty code and step 0, and that a NULL context is -1 and
-step 0. One driver per
-new call writes its input file under `$TEST_TMPDIR` and checks a good input,
-NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
-with the message as the last error) and, for the four calls with an output, the
-two-call protocol; a good call after a refusal leaves no error.
-`gate_credentials` defines a credential through the three calls and checks each
-named refusal word for word, the NULL and length cases, and that `*out_id` is
-untouched on a refusal.
-`gate_register_csv` and `gate_register_json` register a file they write (the
-CSV driver once for each dialect argument), and check a taken name (in any
-case, and taken by the other call) and an empty one word for word, the NULL
-cases, a missing and an empty file and a path that is not UTF-8, and that a
-refused name stays free.
-`gate_register_arrow_stream` checks the refusals met before any chunk is
-read: a released stream (five NULL words) and an empty name or one that is
-not UTF-8 are -3 word for word, the NULL cases -1 and -2, and each leaves the
-name free; the streams the library drains are the C driver's.
-`gate_add_sql_binding` binds a local Parquet file it writes through a
-`WireBoundSource` it encodes by hand (0, and again under the same name), and
-checks the NULL cases (-1, -2 with the named last error), a `source_len` of 64 MiB
-plus one (-5 with its last error), and each -3 word for word with step `bind`
-and its code: a scope other than 1, an empty name, a name that is not UTF-8, a
-one-byte source, a zero-length source and a missing file; a good call after a
-refusal leaves no error.
-`exports_exact` makes the twenty-six names above the whole dynamic symbol table.
+the drivers of `tests/gate/`, which open it with `RTLD_NOW` and call it as a
+foreign host would. Seven cover the skeleton: the version, create and free
+(distinct handles, separate sessions), no symbol beyond the exports, a fresh
+session's empty error, the two-call protocol (zero capacity, one byte short,
+exact, larger), a NULL context, and a NULL `out_len`. One driver per new call
+writes its input file under `$TEST_TMPDIR` and checks a good input, NULL
+context (-1), a NULL input (-2 with a last error), a bad file or plan (-3 with
+the message as the last error) and, for a call with an output, the two-call
+protocol; a good call after a refusal leaves no error. The drivers that check
+more, one per line in name order:
+
+- `gate_add_sql_binding` binds a local Parquet file it writes through a
+  `WireBoundSource` it encodes by hand (0, and again under the same name), and
+  checks the NULL cases (-1, -2 with the named last error), a `source_len` of
+  64 MiB plus one (-5 with its last error), and each -3 word for word with step
+  `bind` and its code: a scope other than 1, an empty name, a name that is not
+  UTF-8, a one-byte source, a zero-length source and a missing file; a good
+  call after a refusal leaves no error.
+- `gate_credentials` defines a credential through the three calls and checks
+  each named refusal word for word, the NULL and length cases, and that
+  `*out_id` is untouched on a refusal.
+- `gate_error_code_step` checks that `komira_last_error_code` and
+  `komira_last_error_step` exist and, on a fresh session, give an empty code
+  and step 0, and that a NULL context is -1 and step 0.
+- `gate_register_arrow_stream` checks the refusals met before any chunk is
+  read: a released stream (five NULL words) and an empty name or one that is
+  not UTF-8 are -3 word for word, the NULL cases -1 and -2, and each leaves
+  the name free; the streams the library drains are the C driver's.
+- `gate_register_csv` and `gate_register_json` register a file they write (the
+  CSV driver once for each dialect argument), and check a taken name (in any
+  case, and taken by the other call) and an empty one word for word, the NULL
+  cases, a missing and an empty file and a path that is not UTF-8, and that a
+  refused name stays free.
+
+`exports_exact` makes the names above the whole dynamic symbol table.
 On Linux the eleven C owners in the library's closure (async, async_api,
 compression, crypto, fs, http_core, libc, metrics, objectstore, parquet_codec,
 scan_source) are linked as their own shared libraries (`native_owners`), not
 embedded; on macOS arm64 there are none, and the C archives are linked
-statically into `libkomira.dylib`. On Linux the nineteenth driver, `gate_native_owners`,
+statically into `libkomira.dylib`. On Linux the driver `gate_native_owners`
 reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
 the SONAME of each of the eleven (`libkomira_<owner>_native.so.1`); an owner
 dropped from `native_owners` leaves its C embedded, and that driver fails.
@@ -906,7 +911,7 @@ headers. The golden does not check that its version was raised when
 a row changed: that compares with the previous release.
 
 `tests/c/abi_driver.c` is a C program that includes `komira.h` and nothing of
-ours. It opens `./libkomira.so`, binds each of the twenty-six functions to a pointer
+ours. It opens `./libkomira.so`, binds each function of the header to a pointer
 declared with the header's own prototype, and checks the version in the header
 against `komira_abi_version()`, the status codes, the input bound
 (`KOMIRA_MAX_INPUT_BYTES` plus one is -5), and the last-error round trip (NULL

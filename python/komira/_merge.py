@@ -1,5 +1,5 @@
 """`DataFrame.merge` and the semi and anti joins of `isin` (docs/design/dataframe_surface.md,
-section 8, rulings 7, 8 and 16; dataframe_surface_verbs.md, the `join_*` rows).
+section 8, rulings 7, 8 and 16; dataframe_surface_verbs.md, the `join_*` sections).
 
 Each builds one JOIN plan node of the two frames' plans, run with the rest of
 the plan at the terminal; no SQL text is written.

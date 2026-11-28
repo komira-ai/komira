@@ -929,26 +929,67 @@ def test_a_chain_of_verbs_reaches_the_session_only_as_plan_bytes():
         assert list(envelope.plan.sort.keys) == ["z", "b"]
 
 
+# FRAME_MODULES and ALLOWED_IMPORTS hold one entry per line in sorted order; a
+# comment on an entry's line says which module needs it.
 FRAME_MODULES = (
-    "_frame.py", "_groupby.py", "_series.py", "_refusals.py", "_verbs.py", "_missing.py", "_cast.py", "_accessors.py",
-    "_display.py", "_merge.py", "_windows.py", "_write.py", "_resample.py",
+    "_accessors.py",
+    "_cast.py",
+    "_display.py",
+    "_frame.py",
+    "_groupby.py",
+    "_merge.py",
+    "_missing.py",
+    "_refusals.py",
+    "_resample.py",
+    "_series.py",
+    "_verbs.py",
+    "_windows.py",
+    "_write.py",
 )
 PRIVATE_SESSION = {"_plan_stream", "_plan_render", "_plan_write", "_parquet_schema", "_csv_binding", "_json_binding"}
 ALLOWED_IMPORTS = {
-    "__future__:annotations", "collections.abc:Callable", "types:ModuleType", "typing:TYPE_CHECKING",
-    ".:_ops", ".:_refusals", ".:_plan", "._errors:UnsupportedOperation", "._series:Series", "._series:operand",
-    "._session:Result", "._session:Session", "._session:_local_path", "._session:default_session",
-    "._plan:_wire", ".plan.v1:plan_pb2", "._frame:DataFrame", "os", ".:_groupby", "._groupby:GroupBy",
-    ".:_merge", ".:_windows", "._series:_Membership", "._windows:Windows", "._windows:merged",
-    "._plan._window:window_field", "hashlib",
-    ".:_verbs", ".:_cast", ".:_accessors", "._missing:present", "._series:_fits",
-    "typing:Any", "re",
-    # The notebook display (komira/_display.py): it escapes HTML and formats
-    # a result's rows with pyarrow, and reads no stream.
-    ".:_display", "html", "collections.abc:Sequence", "pyarrow", "pyarrow.compute",
-    ".:_write", "collections.abc:Mapping",
-    # DataFrame.resample (komira/_resample.py) builds the bucket and a GroupBy.
-    ".:_resample", "._frame:DataFrame", "._groupby:GroupBy",
+    ".:_accessors",
+    ".:_cast",
+    ".:_display",  # komira/_display.py: escapes HTML and formats a result's rows
+    ".:_groupby",
+    ".:_merge",
+    ".:_ops",
+    ".:_plan",
+    ".:_refusals",
+    ".:_resample",  # komira/_resample.py: DataFrame.resample builds the bucket and a GroupBy
+    ".:_verbs",
+    ".:_windows",
+    ".:_write",
+    "._errors:UnsupportedOperation",
+    "._frame:DataFrame",
+    "._groupby:GroupBy",
+    "._missing:present",
+    "._plan._window:window_field",
+    "._plan:_wire",
+    "._series:Series",
+    "._series:_Membership",
+    "._series:_fits",
+    "._series:operand",
+    "._session:Result",
+    "._session:Session",
+    "._session:_local_path",
+    "._session:default_session",
+    "._windows:Windows",
+    "._windows:merged",
+    ".plan.v1:plan_pb2",
+    "__future__:annotations",
+    "collections.abc:Callable",
+    "collections.abc:Mapping",
+    "collections.abc:Sequence",  # komira/_display.py: escapes HTML and formats a result's rows
+    "hashlib",
+    "html",  # komira/_display.py: escapes HTML and formats a result's rows
+    "os",
+    "pyarrow",  # komira/_display.py: escapes HTML and formats a result's rows
+    "pyarrow.compute",  # komira/_display.py: escapes HTML and formats a result's rows
+    "re",
+    "types:ModuleType",
+    "typing:Any",
+    "typing:TYPE_CHECKING",
 }
 
 

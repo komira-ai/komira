@@ -1446,7 +1446,19 @@ def main(args):
         for test in WITH_FILE:
             test(path)
     assert not FAILED, "{} cases failed:\n".format(len(FAILED)) + "\n".join(FAILED)
-    lists = (TYPES, FILLS, DROPS, MISSING, RENAMES, CASTS, TAILS, CONCATS, COUNTS_BY_GROUP, STRS, DTS)
+    lists = (
+        CASTS,
+        CONCATS,
+        COUNTS_BY_GROUP,
+        DROPS,
+        DTS,
+        FILLS,
+        MISSING,
+        RENAMES,
+        STRS,
+        TAILS,
+        TYPES,
+    )
     print("frame verbs duckdb: {} cases".format(sum(len(c) for c in lists)))
 
 

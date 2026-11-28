@@ -23,7 +23,7 @@ that a check holds sorted.
 | An interpreter file under `python/komira` or `python/tests` | nothing: the glob rows `python/komira/**/*.py` and `python/tests/**/*.py` cover them | every other interpreter file, and every non-`.py` one under those directories, still needs a reviewed row; rows are one per line, sorted and unique, and a glob row that covers no file is stale ([gates_test_welding_and_lints.md](gates_test_welding_and_lints.md)) |
 | An `sdk_exec` test | a new file `src/sdk_exec/tests/test_*.mojo` whose header says what it holds | `test_srcs` of the library is a glob, so the file is welded with no list edit |
 | A DataFrame or `komira.pl` feature's documentation | a page of its own under `python/docs/dataframe/` or `python/docs/pl/` | `//:docs` resolves every link; the README links the directories, not each page |
-| What is built and what is not | its row of [dataframe_surface_verbs.md](dataframe_surface_verbs.md) | the Status paragraph of [dataframe_surface.md](dataframe_surface.md) points to that table instead of listing verbs |
+| What is built and what is not | its section of [dataframe_surface_verbs.md](dataframe_surface_verbs.md) | the Status paragraph of [dataframe_surface.md](dataframe_surface.md) points to that document instead of listing verbs |
 
 ## The changelog at release
 
@@ -42,4 +42,4 @@ A change that edited the old places rebases like this: its `## Unreleased` bulle
 versions it uses, and its stanza and shard rows are dropped (a test with inputs no family has keeps a
 stanza); its allowlist row for a `.py` file under `python/komira` or `python/tests` is dropped; its
 `test_srcs` entry is dropped and its README bullet becomes the test file's header; and its README or
-design-doc verb text becomes a page under `python/docs/` and a row of the capability table.
+design-doc verb text becomes a page under `python/docs/` and a section of the capability map.

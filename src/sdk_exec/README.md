@@ -294,11 +294,22 @@ a window function of a kind, type or frame the window sink does not serve is
 `LOWERING_WINDOW_UNSERVED` at `lower`).
 Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
-`lowering_inputs` descends only scan, filter, project, limit, aggregate,
-distinct, sort, window (PARTITION_BY), union and join nodes (a union's branches in order; a join's
-left child, then its right, for every join, so a join the cutter refuses has
-its scans' facts read first) and gives a facts entry per scan it reaches; the
-cutter refuses any other node by name before it asks for the scans below it.
+`lowering_inputs` descends only these nodes, one per line in name order, and
+gives a facts entry per scan it reaches; the cutter refuses any other node by
+name before it asks for the scans below it:
+
+- aggregate;
+- distinct;
+- filter;
+- join: its left child, then its right, for every join, so a join the cutter
+  refuses has its scans' facts read first;
+- limit;
+- project;
+- scan;
+- sort;
+- union: its branches in order;
+- window (PARTITION_BY).
+
 `worker_count` and
 `memory_budget_bytes` have a lower bound of 1 and no upper bound. A
 call is cancelled through the `RunControl` it is given (`run_sql(ctx, text,
@@ -406,21 +417,37 @@ directory; a query that does not spill never creates it. Not spilled, and
 refused over the budget as before: a GROUP BY with COUNT(DISTINCT) (its
 refusal says so), a GROUP BY over a string or a mixed string key, the sort
 (ORDER BY), and the output rows of every partition, which must fit the budget
-together, since the result is returned whole. `run_sql` serves the plans `lowering` cuts: Parquet scans (one file or several; through `run_sql_with`, objects of an S3 or GCS bucket or an Azure container too, from a catalog table whose source names the bucket: no SQL text names an object-store URL yet, the context's footers read local files only, and the session holds no store settings or credentials), `read_csv`
-scans of one local file with a header row (decoded whole before the first
-morsel; `header=false` is refused at lowering, because the reader would name
-the columns `col_0`, `col_1`, ... where DuckDB names them `column0`,
-`column1`, ...), the one-row relation a SELECT with no FROM reads (an integer
-literal of the result's SELECT list or of a UNION ALL branch's is INT32 when it fits, as in DuckDB; an
-integer literal anywhere else, `1 + 1` included, is still INT64), filter,
-projection, limit (with or without an offset), aggregation, distinct, sort and
-top-n, window functions (ranking, LAG and LEAD, FIRST/LAST/NTH_VALUE and SUM,
-COUNT, AVG, MIN and MAX over any `ROWS` or `RANGE` frame SQL allows, a
-`RANGE` offset over one INT64, INT32 or FLOAT64 order key, with INT64, INT32,
-FLOAT64, BOOL or STRING partition and order keys)
-and UNION ALL, the
-concatenation of its branches (UNION is a distinct over that concatenation). The post-rewrite gate and
-the plan validation gate are not called from `run_sql`.
+together, since the result is returned whole.
+
+`run_sql` serves the plans `lowering` cuts, one kind per line in name order:
+
+- aggregation;
+- distinct;
+- filter;
+- limit (with or without an offset);
+- Parquet scans (one file or several; through `run_sql_with`, objects of an S3
+  or GCS bucket or an Azure container too, from a catalog table whose source
+  names the bucket: no SQL text names an object-store URL yet, the context's
+  footers read local files only, and the session holds no store settings or
+  credentials);
+- projection;
+- `read_csv` scans of one local file with a header row (decoded whole before
+  the first morsel; `header=false` is refused at lowering, because the reader
+  would name the columns `col_0`, `col_1`, ... where DuckDB names them
+  `column0`, `column1`, ...);
+- sort and top-n;
+- the one-row relation a SELECT with no FROM reads (an integer literal of the
+  result's SELECT list or of a UNION ALL branch's is INT32 when it fits, as in
+  DuckDB; an integer literal anywhere else, `1 + 1` included, is still INT64);
+- UNION ALL, the concatenation of its branches (UNION is a distinct over that
+  concatenation);
+- window functions (ranking, LAG and LEAD, FIRST/LAST/NTH_VALUE and SUM,
+  COUNT, AVG, MIN and MAX over any `ROWS` or `RANGE` frame SQL allows, a
+  `RANGE` offset over one INT64, INT32 or FLOAT64 order key, with INT64,
+  INT32, FLOAT64, BOOL or STRING partition and order keys).
+
+The post-rewrite gate and the plan validation gate are not called from
+`run_sql`.
 
 `post_rewrite_gate` is a free-standing check; its call sites belong to the
 engine context. The plan validation gate that `plan_validation_routes` is the

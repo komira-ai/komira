@@ -48,22 +48,22 @@ MODULE = {
 # Each class: name -> message, `{name}` standing for the name looked up.
 TABLES = {
     "LazyFrame": {
+        "cache": _RUNS_AT,
+        "collect_async": _RUNS_AT,
+        "explode": _NO_NODE,
+        "fetch": _PLAN,
         "materialize": (
             ".materialize() is the pandas-shaped skin's word; this frame runs at .collect()"
         ),
+        "profile": _RUNS_AT,
+        "to_arrow": _PLAN,
         "to_pandas": _PLAN,
         "to_polars": _PLAN,
-        "to_arrow": _PLAN,
-        "fetch": _PLAN,
-        "with_column": "with_column() is not a polars verb; use with_columns()",
         "unpivot": _NO_NODE,
-        "explode": _NO_NODE,
-        "cache": _RUNS_AT,
-        "profile": _RUNS_AT,
-        "collect_async": _RUNS_AT,
+        "with_column": "with_column() is not a polars verb; use with_columns()",
         "write_csv": _EAGER_WRITE.replace("{sink}", "sink_csv"),
-        "write_parquet": _EAGER_WRITE.replace("{sink}", "sink_parquet"),
         "write_ndjson": _EAGER_WRITE.replace("{sink}", "sink_ndjson"),
+        "write_parquet": _EAGER_WRITE.replace("{sink}", "sink_parquet"),
     },
     "Expr": {
         "apply": "Expr.apply is not a polars verb; use map_elements(f, return_dtype=...)",

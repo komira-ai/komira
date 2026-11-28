@@ -242,6 +242,13 @@ holds M1 and M4 to M8.
 - **B24 SHOULD.** Site pages: install first, then demo, then why; features not built yet are tagged
   "specified"; demos replay real runs, never invented numbers; competitors are described only as
   "not completely open source".
+- **P13 SHOULD.** Two pull requests that each add one entry never touch the same line. A place
+  that several changes add to (a list, a table, the keys of a dict, a block of imports or
+  declarations, a docstring's or a document's list of names) holds one entry per line in sorted
+  order, with a trailing comma where the language allows one. A new entry goes in its sorted place,
+  never at the end, and never into a sentence or a table cell that already lists others. A count
+  of things that changes add to is not written as a literal: say it without the number, or give
+  the command that counts it.
 - **T14 BLOCK.** Tests that touch a cloud clean up after themselves and tag every billable resource
   with the validation run id.
 
