@@ -31,7 +31,8 @@ pattern is a regular expression in the engine's dialect, which pandas'
 `str.replace(regex=True)` takes too: RE2's syntax without backreferences or
 lookaround, matched over bytes. `literal=True` takes the pattern and the
 value as text. In the value, `$1` and `${1}` are group 1, `$0` the whole match
-and `$$` a `$`. A named group, `n=` other than 1 and an empty pattern raise
+and `$$` a `$`. A named group, `n=` other than 1 and a pattern that matches the
+empty string (`""`, `x*`, `^`) raise
 `UnsupportedOperation`. A regular expression over a computed expression
 (`col("s").str.to_lowercase().str.replace(p, v)`) is refused at `collect()`
 today: add the computed column with `with_columns` first.

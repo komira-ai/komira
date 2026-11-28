@@ -11,7 +11,9 @@ library. Checked:
 - `polars_replacement` reads `$$`, `$n`, `${n}`, a `$` that starts no group,
   a group the pattern does not have (''), `$0` and a backslash as polars does,
   and refuses a named group, a group past 9 and a pattern whose groups
-  cannot be counted, each by its full message.
+  cannot be counted, each by its full message, and reads a digit outside
+  ASCII as no group number;
+- `matches_empty` is true of exactly the patterns that match the empty string.
 
     test_text.py
 """
@@ -73,6 +75,15 @@ def test_escape_puts_a_backslash_before_each_character_of_syntax_and_no_other():
     assert _text.escape("") == ""
 
 
+def test_matches_empty_is_true_of_a_pattern_that_matches_the_empty_string_and_no_other():
+    for pattern in ("", "x*", "a?", "a|", "^", "$", "(b)*", "[0-9]{0,2}"):
+        assert _text.matches_empty(pattern), pattern
+    for pattern in ("a", "x+", "[0-9]", "\\$", "a|b", "\\b"):
+        assert not _text.matches_empty(pattern), pattern
+    # a pattern Python's re cannot read is left to the engine
+    assert not _text.matches_empty("(a")
+
+
 def test_polars_replacement_reads_dollars_as_polars_and_a_backslash_as_itself():
     two = "(a)(b)"
     read = lambda value, pattern=two: _text.polars_replacement(value, pattern, "str.replace")
@@ -123,6 +134,14 @@ def test_polars_replacement_refusals_by_message():
         "str.replace: the groups of the pattern '(a' cannot be counted (missing ), unterminated subpattern at "
         "position 0), and the value refers to one; write the value without $"
     ), e.args[0]
+    # a digit outside ASCII is no group number: polars reads `${²}` as a name
+    for name in ("²", "٣"):
+        refuses(
+            lambda name=name: _text.polars_replacement("${" + name + "}", "(a)", "str.replace"),
+            UnsupportedOperation,
+            f"str.replace: the value refers to the group named {name!r}, and the engine refers to a group by its "
+            "number only: write $1 for the first group",
+        )
     # with no group referred to, the pattern is not read
     assert _text.polars_replacement("$$x", "(a", "str.replace") == "$x"
 

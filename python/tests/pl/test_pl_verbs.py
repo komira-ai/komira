@@ -511,11 +511,19 @@ def test_replace_refusals_by_message():
     refused(lambda: kpl.col("g").str.replace("a", "b", n=1.0), TypeError, "str.replace: n must be an int, not float")
     for verb in ("replace", "replace_all"):
         method = getattr(kpl.col("g").str, verb)
+        for pattern in ("", "x*", "a?", "a|", "^"):
+            refused(
+                lambda pattern=pattern: method(pattern, "b"),
+                UnsupportedOperation,
+                f"str.{verb}: the pattern {pattern!r} matches the empty string, so it matches between characters, "
+                "which the engine counts in bytes and polars in characters: give a pattern that matches at least "
+                "one character",
+            )
         refused(
-            lambda: method("", "b"),
+            lambda: method("", "b", literal=True),
             UnsupportedOperation,
-            f"str.{verb}: an empty pattern matches between every two characters, which the engine counts in "
-            "bytes and polars in characters: give a pattern with a character in it",
+            f"str.{verb}: the pattern '' matches the empty string, so it matches between characters, which the "
+            "engine counts in bytes and polars in characters: give a pattern that matches at least one character",
         )
         refused(lambda: method(kpl.col("g"), "b"), TypeError, f"str.{verb}: pattern must be a str, not Expr")
         refused(lambda: method("a", 1), TypeError, f"str.{verb}: value must be a str, not int")

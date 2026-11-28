@@ -869,10 +869,11 @@ class ExprStringNameSpace:
         _need_text(verb, "value", value)
         if not isinstance(literal, builtins.bool):
             raise TypeError(f"{verb}: literal must be a bool, not {type(literal).__name__}")
-        if pattern == "":
+        if pattern == "" or (not literal and _text.matches_empty(pattern)):
             raise UnsupportedOperation(
-                f"{verb}: an empty pattern matches between every two characters, which the engine counts in "
-                "bytes and polars in characters: give a pattern with a character in it"
+                f"{verb}: the pattern {pattern!r} matches the empty string, so it matches between characters, "
+                "which the engine counts in bytes and polars in characters: give a pattern that matches at least "
+                "one character"
             )
         if literal and every:
             return self._expr._unary(lambda a, s: StringFnN("replace", (a, Lit(pattern), Lit(value))))

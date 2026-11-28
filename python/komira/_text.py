@@ -24,7 +24,7 @@ import re
 from . import _ops
 from ._errors import UnsupportedOperation
 
-__all__ = ["PYTHON_WHITESPACE", "UNICODE_WHITE_SPACE", "escape", "polars_replacement", "trim"]
+__all__ = ["PYTHON_WHITESPACE", "UNICODE_WHITE_SPACE", "escape", "matches_empty", "polars_replacement", "trim"]
 
 UNICODE_WHITE_SPACE = (
     "\t\n\v\f\r \x85\xa0 "
@@ -48,6 +48,17 @@ def trim(child: _ops.Node, chars: str, side: str) -> _ops.Node:
 def escape(text: str) -> str:
     """`text` as an engine regular expression that matches exactly it."""
     return "".join("\\" + c if c in _META else c for c in text)
+
+
+def matches_empty(pattern: str) -> bool:
+    """Does the regular expression `pattern` match the empty string (`""`,
+    `x*`, `a?`, `a|`, `^`)? Such a pattern matches between characters, which
+    the engine counts in bytes. A pattern Python's `re` cannot read is left to
+    the engine, which refuses it by name if it cannot read it either."""
+    try:
+        return re.compile(pattern).fullmatch("") is not None
+    except re.error:
+        return False
 
 
 def _group_count(pattern: str, verb: str) -> int:
@@ -87,7 +98,7 @@ def polars_replacement(value: str, pattern: str, verb: str) -> str:
             out.append("$")
             i += 1
             continue
-        if not name.isdigit():
+        if _DIGITS.fullmatch(name) is None:
             raise UnsupportedOperation(
                 f"{verb}: the value refers to the group named {name!r}, and the engine refers to a group by its "
                 "number only: write $1 for the first group"
@@ -106,6 +117,7 @@ def polars_replacement(value: str, pattern: str, verb: str) -> str:
 
 
 _NAME = re.compile(r"[0-9A-Za-z_]+")
+_DIGITS = re.compile(r"[0-9]+")
 
 
 def _reference(value: str, i: int) -> tuple[str | None, int]:
