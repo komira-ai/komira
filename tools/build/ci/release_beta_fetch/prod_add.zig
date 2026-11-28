@@ -62,6 +62,7 @@ pub const add_set = [_][]const u8{
     "komira-ai/crypto",
     "komira-ai/libc",
     "komira-ai/log",
+    "komira-ai/lz4",
     "komira-ai/metrics",
 };
 

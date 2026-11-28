@@ -58,6 +58,7 @@ from komira._ops import (
 from komira._session import Result, Session, _local_path, default_session
 
 from . import _join, _names, _sink, _window
+from ._dt import truncate_unit
 from ._expr import Expr, col, lit
 from ._group import LazyGroupBy, group_keys
 from ._scope import Broadcast, Scope, Windows
@@ -418,6 +419,67 @@ class LazyFrame:
             )
         return LazyGroupBy(self, group_keys(self, "group_by", by))
 
+    def group_by_dynamic(
+        self,
+        index_column,
+        *,
+        every: str,
+        period: str | None = None,
+        offset: str | None = None,
+        include_boundaries: bool = False,
+        closed: str = "left",
+        label: str = "left",
+        group_by=None,
+        start_by: str = "window",
+    ) -> LazyGroupBy:
+        """The groups of the rows by the day (`every="1d"`), the week from
+        Monday (`"1w"`) or the month (`"1mo"`) of the Date or Datetime column
+        `index_column`, to aggregate with `agg(...)`: the window's start,
+        `col(index_column).dt.truncate(every)`, is the key, under the column's
+        name, after the `group_by` keys. A row whose index is null is in no
+        window; a window with no rows has no row; the windows come out in no
+        order (komira/pl/_dt.py). Only polars' default windows are built: one
+        `every` long, closed and labelled on the left, starting at a window
+        boundary."""
+        verb = "group_by_dynamic"
+        unit = truncate_unit(verb, every)
+        for name, value, default in (
+            ("closed", closed, "left"),
+            ("label", label, "left"),
+            ("start_by", start_by, "window"),
+            ("include_boundaries", include_boundaries, False),
+        ):
+            if value != default or type(value) is not type(default):
+                raise UnsupportedOperation(
+                    f"{verb}: {name}={value!r} is not supported; the windows built are polars' default, "
+                    f"{name}={default!r}"
+                )
+        if (period is not None and period != every) or offset is not None:
+            raise UnsupportedOperation(
+                f"{verb}: period and offset move the windows off whole days, weeks and months, which is "
+                "not supported; leave them at their default"
+            )
+        if not isinstance(index_column, (str, Expr)):
+            raise TypeError(
+                f"{verb}: index_column is a column name or komira.pl.col(...), not {type(index_column).__name__}"
+            )
+        (index,) = group_keys(self, verb, (index_column,))
+        keys = group_keys(self, verb, (group_by,)) if group_by is not None else ()
+        if index in keys:
+            raise ValueError(f"{verb}: the column '{index}' is both the index and a group_by key")
+        frame = self.filter(col(index).is_not_null())
+        scope = frame._scope(verb)
+        from ._dt import truncated
+
+        node = truncated(verb, ColRef(index), scope, unit)
+        arrow = scope.arrow_type(ColRef(index))
+        if arrow == "date32":
+            return LazyGroupBy(frame._with(with_columns(frame._plan, ((index, node),)), None), keys + (index,))
+        # The engine groups by no timestamp key: the window is grouped as its
+        # count of ticks and cast back to the Datetime above the aggregate.
+        ticks = frame._with(with_columns(frame._plan, ((index, Cast(node, "int64")),)), None)
+        return LazyGroupBy(ticks, keys + (index,), ((index, arrow),))
+
     def join(
         self,
         other: LazyFrame,
@@ -524,6 +586,10 @@ class LazyFrame:
         plan again. A plan the engine cannot run raises `KomiraError` (or
         `UnsupportedOperation`) with the engine's code and step."""
         return self._session._plan_stream(self._encode())
+
+    def _komira_rows(self) -> Result:
+        """The frame's rows, run now: what `Session.register` registers."""
+        return self.collect()
 
     def explain(self) -> str:
         """The engine's text of the plan, which is not run."""

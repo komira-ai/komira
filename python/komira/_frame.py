@@ -22,15 +22,19 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
   row; each builds one aggregate node (komira/_groupby.py).
   `drop_duplicates` builds a distinct over every column, and over a `subset`
   of them, as `duplicated` does, a window per value (komira/_windows.py).
+  `resample(rule, on=column)` gives a `GroupBy` by the day, week or month of
+  a date column (komira/_resample.py).
 - `merge` joins two frames with one join node, and `df[df["k"].isin(o["k"])]`
   (`~` for its negation) is a semi (anti) join (komira/_merge.py).
 - A Series may read windows (`cumsum`, `rank`, `rolling`, a group's
   `transform`, komira/_windows.py): `assign`, `df["x"] = ...` and `df[cond]`
   compute them in a projection of their own first.
-- `fillna`, `dropna`, `rename`, `add_prefix`, `add_suffix` and `astype` each
-  build one projection or filter. A value is missing when it is NULL, or NaN
-  in a float column (komira/_missing.py): `fillna` replaces it with a literal
-  of the column's type, and `dropna` filters on it. `astype` casts through
+- `fillna`, `dropna`, `isna`, `notna`, `rename`, `add_prefix`, `add_suffix`
+  and `astype` each build one projection or filter. A value is missing when it
+  is NULL, or NaN in a float column (komira/_missing.py): `fillna` replaces it
+  with a literal of the column's type, `dropna` filters on it, and `isna` and
+  `notna` (aliases `isnull` and `notnull`) mark it in a frame of booleans of
+  the same columns. `astype` casts through
   komira/_cast.py. `tail` takes the last rows of a sorted frame as a TOPN by
   the reversed keys, sorted back. `komira.concat` is a union of frames of one
   schema, checked in komira/_verbs.py before it is built.
@@ -39,8 +43,8 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
   changes none of them, a `dropna` and `head`
   keep it ordered, the builder placing filters and projections under the sort
   and a limit above it, and a sort above a limit when a verb comes after one.
-  `tail` of a sorted frame is sorted. A reduction, `drop_duplicates`,
-  `concat` and `merge` give an unordered frame, except that
+  `tail` of a sorted frame is sorted. A reduction, `isna`, `notna`,
+  `drop_duplicates`, `concat` and `merge` give an unordered frame, except that
   `groupby(sort=True)` and `merge(sort=True)` sort by their keys; a semi or
   anti join keeps the order, as a filter does.
 - The write terminals `to_parquet`, `to_csv` and `to_json(orient="records",
@@ -61,7 +65,7 @@ from collections.abc import Callable
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
-from . import _display, _groupby, _merge, _ops, _refusals, _verbs, _windows, _write
+from . import _display, _groupby, _merge, _ops, _refusals, _resample, _verbs, _windows, _write
 from ._errors import UnsupportedOperation
 from ._groupby import GroupBy
 from ._missing import present
@@ -529,6 +533,32 @@ class DataFrame:
         predicate = _ops.and_all(tests) if how == "any" else _ops.or_all(tests)
         return self._ordered(_ops.filter_(self._plan, predicate), lambda keys: True)
 
+    def isna(self) -> DataFrame:
+        """A frame of the same columns, each True where its value is missing
+        (NULL, and NaN in a float column) and False elsewhere, never NULL; so
+        `df.isna().sum()` counts the missing values of each column. Builds one
+        projection; every column is replaced, a sort key too, so the frame
+        is unordered. `isnull` is the same method."""
+        return self._marked(missing=True)
+
+    def notna(self) -> DataFrame:
+        """A frame of the same columns, each True where its value is present
+        and False where it is missing: the negation of `isna`, column by
+        column. `notnull` is the same method."""
+        return self._marked(missing=False)
+
+    isnull = isna
+    notnull = notna
+
+    def _marked(self, missing: bool) -> DataFrame:
+        dtypes = self.dtypes
+        items = []
+        for name in self._plan.columns:
+            test = present(_ops.ColRef(name), dtypes[name])
+            items.append((name, _ops.Unary("not", test) if missing else test))
+        plan = _ops.with_columns(self._plan, tuple(items))
+        return self._ordered(plan, lambda keys: False)
+
     def rename(
         self,
         mapper: object = None,
@@ -680,6 +710,27 @@ class DataFrame:
         sorts the answer by the keys, missing keys last; `dropna=True` leaves
         out the rows with a missing key, `dropna=False` keeps their group."""
         return GroupBy._new(self, by, as_index, sort, dropna)
+
+    def resample(
+        self,
+        rule: str,
+        *,
+        closed: str | None = None,
+        label: str | None = None,
+        on: str | None = None,
+        level: object = None,
+        origin: str = "start_day",
+        offset: object = None,
+    ) -> GroupBy:
+        """The rows bucketed by the date or timestamp column `on` into days
+        (`"D"`), weeks from Monday to Sunday labelled by their Sunday (`"W"`,
+        pandas' `W-SUN`), or months labelled by their first (`"MS"`) or last
+        (`"ME"`, `"M"`) day, as a `GroupBy` by the bucket, which keeps the
+        column's name (komira/_resample.py). A row with no date is left out;
+        a bucket with no rows has no row, and the answer has no row order."""
+        return _resample.resample(
+            self, rule, closed=closed, label=label, on=on, level=level, origin=origin, offset=offset
+        )
 
     def agg(self, arg: object = None, **named: object) -> DataFrame:
         """The frame reduced to one row: by named aggregates,
@@ -836,6 +887,10 @@ class DataFrame:
         `Result`, read once (`to_arrow`, `to_pandas`, ...). Every call runs
         the plan again. A plan the engine refuses raises its error here."""
         return self._session._plan_stream(self._plan_bytes())
+
+    def _komira_rows(self) -> Result:
+        """The frame's rows, run now: what `Session.register` registers."""
+        return self.materialize()
 
     def to_parquet(self, path: str | os.PathLike[str], *, compression: str | None = "snappy") -> None:
         """Runs the frame's plan and writes all its rows to the Parquet file

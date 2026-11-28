@@ -2,8 +2,8 @@
 # lz4.mojo: the LZ4 raw block and the LZ4 frame, from lz4
 # =============================================================================
 #
-# Re-exports lz4's Span API, the implementation layer that owns liblz4
-# (its soname, its process-lifetime handle and its FFI) for this package. A
+# Re-exports lz4's Span API, the implementation layer that owns lz4 (linked
+# statically as komira_lz4_*, and its FFI) for this package. A
 # package outside compression imports these names from here.
 #
 # Raw block (`LZ4_*`; Parquet LZ4_RAW, ORC LZ4):

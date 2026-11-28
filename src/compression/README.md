@@ -4,10 +4,12 @@ Byte-stream codec trait and the eight codec implementations, and the codec
 API the file formats call.
 
 This package is meant to be the one owner of the codec libraries: the snappy
-C API (statically linked from `//third_party/snappy`) and the sonames of
-libzstd, libbz2 and liblzma, each opened once per process
-(`codec_libraries.mojo`). libz and liblz4 are opened by its implementation
-layers `zlib` and `lz4`, which it re-exports. avro,
+C API (statically linked from `//third_party/snappy`), zstd (statically linked
+from `//third_party/zstd`, every symbol renamed `komira_zstd_*`) and the
+sonames of libbz2 and liblzma, each opened once per process
+(`codec_libraries.mojo`). libz is opened by its implementation layer `zlib`,
+and lz4 is linked by its implementation layer `lz4`; it re-exports both. No
+host needs a libzstd or a liblz4. avro,
 orc and parquet_codec still declare their own copies of the
 snappy symbols and open some of these sonames themselves; they move onto
 this package's API in follow-up changes.
@@ -35,13 +37,12 @@ this package's API in follow-up changes.
   `lz4_frames_decompress_into` for concatenated frames.
 
 Every entry takes Spans: the destination's length is its capacity, and no
-signature holds a pointer. When libzstd, libbz2 or liblzma cannot be
-loaded, the process aborts at first use with the message
-`compression: cannot load <soname>: <the loader's error>`. libz and
-liblz4 are opened by `zlib` and `lz4`, which abort with their
-own messages (`libz dlopen failed (zlib FFI handle init)` and
-`liblz4 dlopen failed (lz4 raw-block handle init)`), naming neither
-the soname nor the loader's error.
+signature holds a pointer. When libbz2 or liblzma cannot be loaded, the
+process aborts at first use with the message
+`compression: cannot load <soname>: <the loader's error>`. libz is opened by
+`zlib`, which aborts with its own message
+(`libz dlopen failed (zlib FFI handle init)`), naming neither the soname nor
+the loader's error.
 
 ## Examples
 
@@ -66,10 +67,11 @@ for i in range(len(src)):
     assert_equal(out[i], src[i])
 ```
 
-The codecs opened at run time, each a round trip: zstd (libzstd), gzip (libz)
-and the LZ4 frame (liblz4) through their conformers, bzip2 (libbz2) and xz
-(liblzma) through the block API. From an installed package, each library is
-the one its conda dependency put in the environment:
+The other codecs, each a round trip: zstd and the LZ4 frame (both linked into
+the program) and gzip (libz, opened at run time) through their conformers,
+bzip2 (libbz2) and xz (liblzma), both opened at run time, through the block
+API. From an installed package, each library opened at run time is the one
+its conda dependency put in the environment:
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
@@ -114,8 +116,8 @@ for d in range(len(decoded)):
 
 A library missing from the host ends the process at its first use, because
 the handle is opened in an initializer that cannot raise. A caller that must
-not die (libkomira) probes libzstd, libz and liblz4 first; a missing one is a
-raise naming it:
+not die (libkomira) probes libz first, the one library a Parquet, CSV or JSON
+read or write opens; a missing library is a raise naming it:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
@@ -125,7 +127,7 @@ from compression.codec_libraries import (
     probe_libraries,
 )
 
-assert_equal(len(codec_probe_sonames()), 3)  # libzstd, libz, liblz4
+assert_equal(len(codec_probe_sonames()), 1)  # libz
 probe_codec_libraries()
 var refused = String("")
 try:
@@ -139,7 +141,7 @@ assert_true(refused.startswith("compression: cannot load libkomira-no-such-codec
 
 This package is built with buildrules' `mojo_package` and packaged for mopm as `compression`, version 0.1.0
 (`mopm.toml`). The library is `src/compression/`, its tests are `tests/`. It depends on `lz4` and
-`zlib`, and it has one native library of its own and three it opens at run time:
+`zlib`, and it has two native libraries of its own and two it opens at run time:
 
 - snappy is linked: `[native.snappy]` of `mopm.toml`, whose archive `libsnappy.a` is built by the `native_library`
   target `//third_party/snappy:snappy_native` (snappy 1.3.1 from its pinned release archive, C++17, the C API renamed
@@ -148,13 +150,17 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
   `provided = true` (mopm compiles no source for it) and `link = ["c++"]`: snappy is C++, so the link of every program
   that includes it, the package's tests and an installed user's alike, ends with `-lc++`, which `mopm pack` records in
   the package's metadata.
-- libbz2, liblzma and libzstd are opened by name when a codec is first used, so `mopm.toml` declares them under
-  `[native-dependencies]` with `mode = "load"` and the conda package records `bzip2`, `liblzma` and `zstd` as
+- zstd is linked: `[native.komira_zstd]` of `mopm.toml`, whose archive `libkomira_zstd.a` is built by the
+  `native_library` target `//third_party/zstd:zstd_native` (zstd 1.5.7 from its pinned release archive, C, every
+  symbol renamed `komira_zstd_*`, so the copy can share a process with any other libzstd) and named in `natives` of
+  `BUCK`, `provided = true` as snappy's is. `:conda` holds it at `lib/libkomira_zstd.a`.
+- libbz2 and liblzma are opened by name when a codec is first used, so `mopm.toml` declares them under
+  `[native-dependencies]` with `mode = "load"` and the conda package records `bzip2` and `liblzma` as
   dependencies; `mopm.lock` pins them for each platform.
 
 | file | what |
 |---|---|
-| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the two Mojo dependencies, the three libraries opened at run time, snappy, where the library and its tests are |
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the two Mojo dependencies, the two libraries opened at run time, snappy and zstd, where the library and its tests are |
 | `mopm.lock` | what `mopm lock` writes (with no registry reachable): the path dependencies and, under `system_libs`, the conda packages of the libraries opened at run time, for each platform |
 | `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
 | `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
@@ -165,8 +171,8 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 `komira//src/compression:lib` on the farm.
 
 `:conda` is the `.conda` of the mopm package (`mojo-komira-ai.compression-0.1.0-mojo1.1.0_0.conda`): the `.mojoc` and
-`lib/libsnappy.a`, requiring `lz4`, `zlib` and the three conda packages above; `:conda_holds` reads it back.
-`:compression` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`); it declares the three
-sonames in `dlopen`, which `:compression_conda` (the release set's packaging) turns into the same requirements,
-and it names `:komira_compression_native`, the shared library of the release set that links the older
-`//third_party/snappy:snappy`. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.
+`lib/libsnappy.a` and `lib/libkomira_zstd.a`, requiring `lz4`, `zlib` and the two conda packages above;
+`:conda_holds` reads it back. `:compression` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`); it
+declares the two sonames in `dlopen`, which `:compression_conda` (the release set's packaging) turns into the same
+requirements, and it names `:komira_compression_native`, the shared library of the release set that links the older
+`//third_party/snappy:snappy` and `//third_party/zstd:zstd`. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.
