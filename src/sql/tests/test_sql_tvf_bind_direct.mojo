@@ -396,7 +396,7 @@ def test_csv_scan_carries_skip() raises:
     var o = _semicolon_opts()
     o.skip = 1
     var schema = csv_tvf_schema(path, o)
-    var plan = tvf_relation_scan(FromRelation.tvf_of(path, TVF_CSV, o))
+    var plan = tvf_relation_scan(FromRelation.tvf_of(path, TVF_CSV, o.copy()))
     _assert_same_schema(plan.output_schema, schema, "csv skip scan schema")
     ref source = plan.scan_data_ref().source
     var mtime = _mtime(path)
