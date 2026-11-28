@@ -58,10 +58,10 @@ in the generator. A repository lint fails if you do.
 comptime PLAN_WIRE_UNSPECIFIED_VALUE: Int32 = 0
 """Wire 0, in every space. Never a valid tag."""
 
-comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 359
-"""Total published members across all 33 spaces. A drift tripwire a test can pin."""
+comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 363
+"""Total published members across all 34 spaces. A drift tripwire a test can pin."""
 
-comptime PLAN_WIRE_SPACE_COUNT: Int = 33
+comptime PLAN_WIRE_SPACE_COUNT: Int = 34
 """Number of enumerated tag spaces the vocabulary publishes."""
 
 
@@ -255,19 +255,19 @@ def plan_tag_wire_name(wire: Int32) -> String:
 #     SortData/TopNData, not as an Expr arm
 # ==========================================================================
 
-comptime EXPR_TAG_WIRE_MEMBERS: Int = 28
+comptime EXPR_TAG_WIRE_MEMBERS: Int = 29
 comptime EXPR_TAG_ENGINE_MIN: UInt8 = 0
-comptime EXPR_TAG_ENGINE_MAX: UInt8 = 27
+comptime EXPR_TAG_ENGINE_MAX: UInt8 = 28
 comptime EXPR_TAG_WIRE_MIN: Int32 = 1
-comptime EXPR_TAG_WIRE_MAX: Int32 = 28
+comptime EXPR_TAG_WIRE_MAX: Int32 = 29
 
 
 def expr_tag_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this ExprTag value?
 
-    Runs: [(0, 27)]. Total, never raising.
+    Runs: [(0, 28)]. Total, never raising.
     """
-    return engine_tag <= 27
+    return engine_tag <= 28
 
 
 def expr_tag_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -418,6 +418,9 @@ def write_expr_tag_wire_name[W: Writer](mut writer: W, wire: Int32):
         return
     if wire == 28:
         writer.write("EXPR_UDF_APPLY")
+        return
+    if wire == 29:
+        writer.write("EXPR_ROUND_DIGITS")
         return
     writer.write("ExprTag#", Int(wire))
 
@@ -4077,7 +4080,8 @@ def snapshot_policy_wire_name(wire: Int32) -> String:
 # or RIGHT (engine 1). The engine's UNSET (255) is not in this space: it is
 # the wire's unspecified (0), which a raw plan carries and an optimized plan
 # refuses (plan_wire_optimized.mojo).
-# This space is the last index, so that no earlier index moves.
+# This space is not the last index: RoundDigitsOp follows it, so that no
+# earlier index moves.
 # Declared in: src/plan_ir/plan_decisions.mojo
 # ==========================================================================
 
@@ -4169,8 +4173,107 @@ def join_build_side_wire_name(wire: Int32) -> String:
 
 
 # ==========================================================================
+# RoundDigitsOp — engine prefix `RDG_`
+# The rounding rule of a digit-count round (EXPR_ROUND_DIGITS): round with
+# halves away from zero (engine 0), truncate toward zero (1), round with
+# halves to even (2).
+# This space is the last index, so that no earlier index moves.
+# Declared in: src/plan_expr/expr.mojo
+# ==========================================================================
+
+comptime ROUND_DIGITS_OP_WIRE_MEMBERS: Int = 3
+comptime ROUND_DIGITS_OP_ENGINE_MIN: UInt8 = 0
+comptime ROUND_DIGITS_OP_ENGINE_MAX: UInt8 = 2
+comptime ROUND_DIGITS_OP_WIRE_MIN: Int32 = 1
+comptime ROUND_DIGITS_OP_WIRE_MAX: Int32 = 3
+
+
+def round_digits_op_is_declared(engine_tag: UInt8) -> Bool:
+    """Does the engine declare this RoundDigitsOp value?
+
+    Runs: [(0, 2)]. Total, never raising.
+    """
+    return engine_tag <= 2
+
+
+def round_digits_op_to_wire(engine_tag: UInt8) raises -> Int32:
+    """Engine tag -> permanent wire number for RoundDigitsOp.
+
+    RAISES on a value the engine does not declare: encoding a tag
+    this vocabulary has never heard of would write bytes that no
+    reader can name."""
+    if not round_digits_op_is_declared(engine_tag):
+        raise Error("RoundDigitsOp: engine tag " + String(Int(engine_tag))
+            + " is not in the plan wire vocabulary")
+    return Int32(Int(engine_tag)) + 1
+
+
+def round_digits_op_from_wire(wire: Int32) raises -> UInt8:
+    """Wire number -> engine tag for RoundDigitsOp.
+
+    RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
+    field decodes to) and on any value this reader does not know.
+    Fail loud; never guess a plan node."""
+    if wire < 0:
+        raise Error("RoundDigitsOp: wire value " + String(Int(wire))
+            + " is negative; no RoundDigitsOp value has a negative wire number")
+    if wire == 0:
+        raise Error("RoundDigitsOp: wire 0 is RDG_WIRE_UNSPECIFIED — an absent"
+            + " proto3 enum field is not a tag")
+    if wire > 256:
+        raise Error("RoundDigitsOp: wire value " + String(Int(wire))
+            + " is out of range for a UInt8 engine tag")
+    var engine_tag = UInt8(Int(wire) - 1)
+    if not round_digits_op_is_declared(engine_tag):
+        raise Error("RoundDigitsOp: wire value " + String(Int(wire))
+            + " is unknown to this reader")
+    return engine_tag
+
+
+def write_round_digits_op_wire_name[W: Writer](mut writer: W, wire: Int32):
+    """WRITE the stable wire NAME for a RoundDigitsOp value.
+
+    ⚠ THIS WRITES; IT DOES NOT RETURN — see the LADDER SHAPE banner
+    at the top of this file. Every arm writes its literal into
+    `writer`; no string constant is ever selected and returned, so
+    the compiler synthesises no parallel (pointer, length) constant
+    arrays for this ladder and there is no pair for a later link to
+    cross. Total, never raising: this is the diagnostic path, and a
+    diagnostic that raises is one you cannot use inside an error
+    handler. An unknown value renders as `<enum>#<n>`."""
+    if wire == 0:
+        writer.write("RDG_WIRE_UNSPECIFIED")
+        return
+    if wire == 1:
+        writer.write("RDG_ROUND")
+        return
+    if wire == 2:
+        writer.write("RDG_TRUNC")
+        return
+    if wire == 3:
+        writer.write("RDG_ROUND_HALF_EVEN")
+        return
+    writer.write("RoundDigitsOp#", Int(wire))
+
+
+def round_digits_op_wire_name(wire: Int32) -> String:
+    """The stable wire NAME for a RoundDigitsOp value, as a String.
+
+    A thin `String`-collecting wrapper over
+    `write_round_digits_op_wire_name`, for the many diagnostic call sites
+    that build a message by concatenation and have no `Writer` in
+    scope. The LADDER lives in the writing helper — keep it that
+    way; moving the arms back in here restores the shape the banner
+    describes. Total, never raising.
+    """
+    var out = String()
+    write_round_digits_op_wire_name(out, wire)
+    return out^
+
+
+# ==========================================================================
 # SPACE-INDEXED DISPATCH — one generic codec over all
-# 33 spaces, addressed by a stable space index.
+# 34 spaces, addressed by a stable space index.
 #
 # The index is an INTERNAL addressing scheme, not a wire value:
 # it is derived from the generator's space order and may move if
@@ -4211,6 +4314,7 @@ comptime PLAN_WIRE_SPACE_PARAM_TAG: Int = 29
 comptime PLAN_WIRE_SPACE_PUSHDOWN_GATE_MODE: Int = 30
 comptime PLAN_WIRE_SPACE_SNAPSHOT_POLICY: Int = 31
 comptime PLAN_WIRE_SPACE_JOIN_BUILD_SIDE: Int = 32
+comptime PLAN_WIRE_SPACE_ROUND_DIGITS_OP: Int = 33
 
 
 def write_plan_wire_space_name[W: Writer](mut writer: W, space: Int):
@@ -4318,6 +4422,9 @@ def write_plan_wire_space_name[W: Writer](mut writer: W, space: Int):
     if space == 32:
         writer.write("JoinBuildSide")
         return
+    if space == 33:
+        writer.write("RoundDigitsOp")
+        return
     writer.write("PlanWireSpace#", space)
 
 
@@ -4338,7 +4445,7 @@ def plan_wire_space_member_count(space: Int) raises -> Int:
     if space == 0:
         return 19
     if space == 1:
-        return 28
+        return 29
     if space == 2:
         return 38
     if space == 3:
@@ -4401,6 +4508,8 @@ def plan_wire_space_member_count(space: Int) raises -> Int:
         return 3
     if space == 32:
         return 2
+    if space == 33:
+        return 3
     raise Error("plan wire: no such space index " + String(space))
 
 
@@ -4409,7 +4518,7 @@ def plan_wire_space_engine_max(space: Int) raises -> UInt8:
     if space == 0:
         return 20
     if space == 1:
-        return 27
+        return 28
     if space == 2:
         return 37
     if space == 3:
@@ -4472,6 +4581,8 @@ def plan_wire_space_engine_max(space: Int) raises -> UInt8:
         return 2
     if space == 32:
         return 1
+    if space == 33:
+        return 2
     raise Error("plan wire: no such space index " + String(space))
 
 
@@ -4547,6 +4658,8 @@ def plan_wire_is_declared(space: Int, engine_tag: UInt8) raises -> Bool:
         return snapshot_policy_is_declared(engine_tag)
     if space == 32:
         return join_build_side_is_declared(engine_tag)
+    if space == 33:
+        return round_digits_op_is_declared(engine_tag)
     raise Error("plan wire: no such space index " + String(space))
 
 
@@ -4618,6 +4731,8 @@ def plan_wire_to_wire(space: Int, engine_tag: UInt8) raises -> Int32:
         return snapshot_policy_to_wire(engine_tag)
     if space == 32:
         return join_build_side_to_wire(engine_tag)
+    if space == 33:
+        return round_digits_op_to_wire(engine_tag)
     raise Error("plan wire: no such space index " + String(space))
 
 
@@ -4689,6 +4804,8 @@ def plan_wire_from_wire(space: Int, wire: Int32) raises -> UInt8:
         return snapshot_policy_from_wire(wire)
     if space == 32:
         return join_build_side_from_wire(wire)
+    if space == 33:
+        return round_digits_op_from_wire(wire)
     raise Error("plan wire: no such space index " + String(space))
 
 
@@ -4798,6 +4915,9 @@ def write_plan_wire_name[W: Writer](mut writer: W, space: Int, wire: Int32):
         return
     if space == 32:
         write_join_build_side_wire_name(writer, wire)
+        return
+    if space == 33:
+        write_round_digits_op_wire_name(writer, wire)
         return
     writer.write("PlanWireSpace#", space, "/", Int(wire))
 

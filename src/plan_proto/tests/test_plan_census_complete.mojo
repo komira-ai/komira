@@ -130,6 +130,7 @@ from plan_proto.plan import (
     WireStructField,
     WireStructFieldIdx,
     WireSubstring,
+    WireRoundDigits,
     WireTopNNode,
     WireUdf,
     WireUdfApply,
@@ -165,6 +166,7 @@ from plan_proto.plan_vocabulary import (
     PlanTag,
     PushdownGateMode,
     RegexpOp,
+    RoundDigitsOp,
     ScalarKind,
     ScalarTimeUnit,
     SnapshotPolicy,
@@ -498,6 +500,8 @@ def _fields_of(message: String) raises -> _Shape:
         return _vocabulary[WireCastToVarcharNode]()
     elif message == "WireUdfApply":
         return _vocabulary[WireUdfApply]()
+    elif message == "WireRoundDigits":
+        return _vocabulary[WireRoundDigits]()
     elif message == "WireMapBatchesNode":
         return _vocabulary[WireMapBatchesNode]()
     elif message == "WireStepNode":
@@ -610,6 +614,8 @@ def _values_of(enum: String) raises -> String:
         return ExtractField.known_json_names()
     elif enum == "RegexpOp":
         return RegexpOp.known_json_names()
+    elif enum == "RoundDigitsOp":
+        return RoundDigitsOp.known_json_names()
     elif enum == "ArrowType":
         return ArrowType.known_json_names()
     elif enum == "WriteFormat":

@@ -35,6 +35,8 @@ from plan_expr.expr import (
     STR_LIKE,
     MATH_SQRT,
     MATH2_POW,
+    RDG_ROUND,
+    RDG_TRUNC,
 )
 from plan_expr.scalar_value import ScalarValue
 from plan_expr.agg_expr import AggExpr, AGG_SUM, AGG_MAX, AGG_MIN
@@ -347,6 +349,32 @@ def test_extract_walks_every_container_and_counts() raises:
     var in_when = _when(_max_total(), Expr.agg_fn(AGG_MIN, _total()), _lit(0))
     with assert_raises():
         _ = _extract_single_agg_fn(in_when^)
+
+
+def test_round_digits_is_walked_substituted_and_extracted() raises:
+    # Catches: a RoundDigits arm dropped from `_expr_has_agg_fn`,
+    # `_substitute_agg_fn` or `_walk_for_agg_fn`, or a rebuild that loses op
+    # or digits.
+    assert_true(
+        _expr_has_agg_fn(Expr.round_digits(RDG_ROUND, _max_total(), 2))
+    )
+    assert_false(_expr_has_agg_fn(Expr.round_digits(RDG_ROUND, _total(), 2)))
+    var out = _substitute_agg_fn(
+        Expr.round_digits(RDG_TRUNC, _max_total(), -2), ScalarValue.from_int(9)
+    )
+    assert_false(_expr_has_agg_fn(out))
+    assert_equal(Int(out.round_digits_op()), Int(RDG_TRUNC))
+    assert_equal(Int(out.round_digits_count()), -2)
+    assert_equal(
+        Int(out.round_digits_child_ref().literal_value().int_val), 9
+    )
+    var one = _extract_single_agg_fn(
+        Expr.round_digits(RDG_ROUND, _max_total(), 1)
+    )
+    assert_equal(Int(one[0]), Int(AGG_MAX))
+    assert_equal(one[1], String("total"))
+    with assert_raises():
+        _ = _extract_single_agg_fn(Expr.round_digits(RDG_ROUND, _total(), 1))
 
 
 def test_the_inner_sub_plan_is_an_ungrouped_reduction() raises:

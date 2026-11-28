@@ -82,6 +82,7 @@ from plan_expr.expr import (
     EXTRACT_YEAR,
     MATH2_POW,
     MATH_SQRT,
+    RDG_ROUND,
     STRFN_UPPER,
     STRFNN_CONCAT,
     STR_LIKE,
@@ -539,6 +540,7 @@ def _hidden_in(var call: Expr) raises -> List[Expr]:
     out.append(Expr.udf_call(String("affine"), Optional[Int](7), ArrowType.INT64, ArrowType.INT64, call.copy()))
     out.append(Expr.extract(EXTRACT_YEAR, call.copy()))
     out.append(Expr.math_fn(MATH_SQRT, call.copy()))
+    out.append(Expr.round_digits(RDG_ROUND, call.copy(), 2))
     out.append(Expr.agg_fn(AGG_SUM, call.copy()))
     var values = List[ScalarValue]()
     values.append(ScalarValue.from_int64(1))

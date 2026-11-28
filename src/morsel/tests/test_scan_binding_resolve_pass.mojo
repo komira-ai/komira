@@ -64,6 +64,7 @@ from plan_expr.expr import (
     EXTRACT_YEAR,
     MATH2_ATAN2,
     MATH_SIN,
+    RDG_ROUND,
     REGEXP_LIKE,
     STRFNN_CONCAT,
     STRFN_UPPER,
@@ -1988,6 +1989,12 @@ def test_every_expr_slot_descends_to_an_open_leaf() raises:
     )
     _assert_expr_descends(
         Expr.math_fn(MATH_SIN, _exists(set)), set, "MATH_FN", seen
+    )
+    _assert_expr_descends(
+        Expr.round_digits(RDG_ROUND, _exists(set), 2),
+        set,
+        "ROUND_DIGITS",
+        seen,
     )
     _assert_expr_descends(
         Expr.math_fn2(MATH2_ATAN2, _exists(set), _c()),

@@ -4,7 +4,7 @@
 #
 # THE ENUM-VALUE CENSUS of `komira.plan.v1` (plan_vocabulary.proto),
 # part 2 of 2: the function, type and option enums: StringOp, StringFn, StringFnN, ColSide,
-# MathFn1, MathFn2, ExtractField, RegexpOp, ArrowType, WriteFormat,
+# MathFn1, MathFn2, RoundDigitsOp, ExtractField, RegexpOp, ArrowType, WriteFormat,
 # WriteCompression, ScalarKind, ScalarTimeUnit, ParamTag,
 # PushdownGateMode, SnapshotPolicy, DTypeCode. The other part is test_plan_enum_numbers_nodes.mojo.
 #
@@ -35,6 +35,7 @@ from plan_proto.plan import (
     WireParam,
     WirePushdownGate,
     WireRegexp,
+    WireRoundDigits,
     WireScalar,
     WireScanBinding,
     WireStringFn,
@@ -52,6 +53,7 @@ from plan_proto.plan_vocabulary import (
     ParamTag,
     PushdownGateMode,
     RegexpOp,
+    RoundDigitsOp,
     ScalarKind,
     ScalarTimeUnit,
     SnapshotPolicy,
@@ -382,6 +384,11 @@ def _check(enum: String, v: String, n: Int) raises:
         var b = _rec(1, n)  # WireMathFn2.op
         var m = decode_proto[WireMathFn2](b.copy())
         _host(m.op.json_name(), encode_proto(m), b, v, q)
+    elif enum == "RoundDigitsOp":
+        _names_agree[RoundDigitsOp](v, n, q)
+        var b = _rec(1, n)  # WireRoundDigits.op
+        var m = decode_proto[WireRoundDigits](b.copy())
+        _host(m.op.json_name(), encode_proto(m), b, v, q)
     elif enum == "ExtractField":
         _names_agree[ExtractField](v, n, q)
         var b = _rec(1, n)  # WireExtract.unit
@@ -532,6 +539,10 @@ MathFn1.MATH_GAMMA 24
 MathFn2.MATH2_WIRE_UNSPECIFIED 0
 MathFn2.MATH2_ATAN2 1
 MathFn2.MATH2_POW 2
+RoundDigitsOp.RDG_WIRE_UNSPECIFIED 0
+RoundDigitsOp.RDG_ROUND 1
+RoundDigitsOp.RDG_TRUNC 2
+RoundDigitsOp.RDG_ROUND_HALF_EVEN 3
 ExtractField.EXTRACT_WIRE_UNSPECIFIED 0
 ExtractField.EXTRACT_YEAR 1
 ExtractField.EXTRACT_QUARTER 2

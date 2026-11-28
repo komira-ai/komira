@@ -46,7 +46,7 @@
 #   The collect shape emits only these three; a plan carrying OP_JOIN_PROBE
 #   is a DIFFERENT shape and must not be silently flattened into this one.
 #
-# --- Expr: 5 of 24 tags modelled ----------------------------------------------
+# --- Expr: 5 of 29 tags modelled ----------------------------------------------
 #   ENCODED    COL_REF, LITERAL, BINARY_OP, UNARY_OP, ALIAS
 #   REFUSED    every other tag -> PPLAN_WIRE_UNSUPPORTED_EXPR_TAG
 #   ⚠ CAST is REFUSED, not encoded. Rebuilding one needs all six `CastData`

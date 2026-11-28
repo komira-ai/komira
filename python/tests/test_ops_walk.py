@@ -23,6 +23,7 @@ from komira._ops import (
     MathFn,
     MathFn2,
     Regexp,
+    RoundDigits,
     StringFn,
     StringFnN,
     StringOp,
@@ -66,6 +67,7 @@ def one_of_each():
         Arith: Arith("add", A, B),
         BoolOp: BoolOp("and", p, Compare("gt", B, ONE)),
         Unary: Unary("negate", A),
+        RoundDigits: RoundDigits("round_half_even", A, -1),
         Cast: Cast(A, "int64"),
         When: When(((p, A), (Compare("lt", B, ONE), B)), C),
         StringOp: StringOp("contains", A, "x"),
@@ -113,6 +115,7 @@ def test_children_of_two_operand_nodes_are_left_then_right():
 def test_children_of_one_operand_nodes_is_the_child():
     for node in (
         Unary("abs", A),
+        RoundDigits("trunc", A, 2),
         Cast(A, "float64", True),
         StringOp("starts_with", A, "p"),
         Regexp("extract", A, "(x)", group=1),
@@ -323,6 +326,8 @@ def test_substitute_keeps_the_other_fields_of_a_rebuilt_node():
     assert got == Alias(B, "out"), got
     got = substitute(StructField(A, "f"), {"a": B})
     assert got == StructField(B, "f"), got
+    got = substitute(RoundDigits("round_half_even", A, -2), {"a": B})
+    assert got == RoundDigits("round_half_even", B, -2), got
     got = substitute(Extract("trunc_day", A), {"a": B})
     assert got == Extract("trunc_day", B), got
 

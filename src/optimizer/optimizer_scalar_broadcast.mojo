@@ -63,6 +63,7 @@ from plan_expr.expr import (
     EXPR_WHEN,
     EXPR_AGG_FN,
     EXPR_MATH_FN,
+    EXPR_ROUND_DIGITS,
     EXPR_MATH_FN2,
     WhenCaseData,
 )
@@ -123,6 +124,8 @@ def _expr_has_agg_fn(expr: Expr) -> Bool:
     # arm here needs its twin in `_substitute_agg_fn` and `_walk_for_agg_fn`.
     if expr.tag == EXPR_MATH_FN:
         return _expr_has_agg_fn(expr.math_fn_child_ref())
+    if expr.tag == EXPR_ROUND_DIGITS:
+        return _expr_has_agg_fn(expr.round_digits_child_ref())
     if expr.tag == EXPR_MATH_FN2:
         if _expr_has_agg_fn(expr.math_fn2_left_ref()):
             return True
@@ -182,6 +185,13 @@ def _substitute_agg_fn(
     if expr.tag == EXPR_MATH_FN:
         var new_child = _substitute_agg_fn(expr.math_fn_child_ref(), scalar_value)
         return Expr.math_fn(expr.math_fn_op(), new_child^)
+    if expr.tag == EXPR_ROUND_DIGITS:
+        var new_child = _substitute_agg_fn(
+            expr.round_digits_child_ref(), scalar_value
+        )
+        return Expr.round_digits(
+            expr.round_digits_op(), new_child^, expr.round_digits_count()
+        )
     if expr.tag == EXPR_MATH_FN2:
         var new_left = _substitute_agg_fn(expr.math_fn2_left_ref(), scalar_value)
         var new_right = _substitute_agg_fn(expr.math_fn2_right_ref(), scalar_value)
@@ -664,6 +674,11 @@ def _walk_for_agg_fn(
         return
     if expr.tag == EXPR_MATH_FN:
         _walk_for_agg_fn(expr.math_fn_child_ref(), found_op, found_col, count)
+        return
+    if expr.tag == EXPR_ROUND_DIGITS:
+        _walk_for_agg_fn(
+            expr.round_digits_child_ref(), found_op, found_col, count
+        )
         return
     if expr.tag == EXPR_MATH_FN2:
         _walk_for_agg_fn(expr.math_fn2_left_ref(), found_op, found_col, count)

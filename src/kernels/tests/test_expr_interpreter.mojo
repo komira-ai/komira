@@ -30,6 +30,9 @@ from plan_expr.expr import (
     UN_NEGATE,
     UN_IS_NULL,
     UN_IS_NOT_NULL,
+    RDG_ROUND,
+    RDG_TRUNC,
+    RDG_ROUND_HALF_EVEN,
 )
 
 from kernels.expr_interpreter import (
@@ -252,6 +255,74 @@ def test_mod_int() raises:
     assert_equal(r.kind, EVAL_KIND_INT)
     assert_equal(r.int_val, 2)
 
+
+
+# -----------------------------------------------------------------------------
+# EXPR_ROUND_DIGITS
+# -----------------------------------------------------------------------------
+
+
+def _rdg(op: UInt8, child: Expr, digits: Int) -> Expr:
+    return Expr.round_digits(op, child.copy(), Int32(digits))
+
+
+def test_round_digits_float_rules() raises:
+    var ctx = RowContext.empty()
+    var r = interpret_expr(_rdg(RDG_ROUND, _lit_f64(2.345), 2), ctx)
+    assert_equal(r.kind, EVAL_KIND_FLOAT)
+    assert_equal(r.float_val, 2.35)
+    assert_equal(
+        interpret_expr(_rdg(RDG_ROUND, _lit_f64(-2.5), 0), ctx).float_val, -3.0
+    )
+    assert_equal(
+        interpret_expr(_rdg(RDG_TRUNC, _lit_f64(-2.789), 1), ctx).float_val,
+        -2.7,
+    )
+    assert_equal(
+        interpret_expr(_rdg(RDG_ROUND_HALF_EVEN, _lit_f64(2.5), 0), ctx).float_val,
+        2.0,
+    )
+    assert_equal(
+        interpret_expr(_rdg(RDG_ROUND, _lit_f64(1e308), 1), ctx).float_val, 1e308
+    )
+
+
+def test_round_digits_int_rules() raises:
+    var ctx = RowContext.empty()
+    var r = interpret_expr(_rdg(RDG_ROUND, _lit_i64(1250), -2), ctx)
+    assert_equal(r.kind, EVAL_KIND_INT)
+    assert_equal(r.int_val, Int64(1300))
+    assert_equal(
+        interpret_expr(_rdg(RDG_TRUNC, _lit_i64(-255), -2), ctx).int_val,
+        Int64(-200),
+    )
+    assert_equal(
+        interpret_expr(_rdg(RDG_ROUND, _lit_i64(1250), 3), ctx).int_val,
+        Int64(1250),
+    )
+    assert_equal(
+        interpret_expr(_rdg(RDG_ROUND, _lit_i64(5), -19), ctx).int_val, Int64(0)
+    )
+    assert_equal(
+        interpret_expr(_rdg(RDG_ROUND_HALF_EVEN, _lit_i64(25), -1), ctx).int_val,
+        Int64(20),
+    )
+
+
+def test_round_digits_reads_a_column_and_null_stays_null() raises:
+    var ctx = RowContext.empty()
+    ctx.set_float("x", 0.125)
+    var r = interpret_expr(_rdg(RDG_TRUNC, _col("x"), 2), ctx)
+    assert_equal(r.kind, EVAL_KIND_FLOAT)
+    assert_equal(r.float_val, 0.12)
+    var missing = interpret_expr(_rdg(RDG_ROUND, _col("absent"), 2), ctx)
+    assert_equal(missing.kind, EVAL_KIND_NULL)
+
+
+def test_round_digits_unknown_rule_is_null() raises:
+    var ctx = RowContext.empty()
+    var r = interpret_expr(_rdg(UInt8(9), _lit_f64(1.5), 0), ctx)
+    assert_equal(r.kind, EVAL_KIND_NULL)
 
 # -----------------------------------------------------------------------------
 # Test driver

@@ -47,6 +47,7 @@ from plan_expr.expr import (
     EXPR_BINARY_OP,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
+    EXPR_ROUND_DIGITS,
     EXPR_CAST,
     EXPR_STRUCT_FIELD,
     EXPR_STRUCT_FIELD_IDX,
@@ -326,13 +327,15 @@ def _is_cast_output(imm e: Expr) -> Bool:
 
 def _is_num_typepres_output(imm e: Expr) -> Bool:
     """True iff `e` is `abs`, `sign`, `trunc`, `round` or `bit_count` (the
-    `EXPR_UNARY_OP` members the walkers have no node for), under any number
-    of aliases.
+    `EXPR_UNARY_OP` members the walkers have no node for), or a rounding to a
+    digit count (`EXPR_ROUND_DIGITS`), under any number of aliases.
 
     Not every unary op: negation has walker nodes and keeps that route, and
     NOT and the null tests are BOOL-valued. The result type varies per op and
     per operand (`bit_count` is INT8 whatever its operand), so the
     evaluator's declared-type check does real work for this family."""
+    if e.tag == EXPR_ROUND_DIGITS:
+        return True
     if e.tag == EXPR_UNARY_OP:
         var op = e.unary_op()
         return (

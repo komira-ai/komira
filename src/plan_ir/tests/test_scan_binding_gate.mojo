@@ -53,6 +53,8 @@ from plan_expr.expr import (
     EXTRACT_YEAR,
     STR_CONTAINS,
     UN_NOT,
+    RDG_ROUND,
+    RDG_TRUNC,
     EXPR_TAG_COUNT,
 )
 from plan_expr.partition_expr import PartitionExpr
@@ -569,6 +571,8 @@ def test_one_child_expressions_descend_their_child() raises:
     _gate_expr(Expr.json_extract_json(_subq(10), String("$.k")), 1, _hs(10))
     _gate_expr(Expr.extract(EXTRACT_YEAR, _subq(11)), 1, _hs(11))
     _gate_expr(Expr.sqrt(_subq(12)), 1, _hs(12))
+    _gate_expr(Expr.round_digits(RDG_ROUND, _subq(16), 2), 1, _hs(16))
+    _gate_expr(Expr.round_digits(RDG_TRUNC, _subq(17), -1), 1, _hs(17))
     _gate_expr(Expr.substring(_subq(13), 1, 2), 1, _hs(13))
     _gate_expr(Expr.upper(_subq(14)), 1, _hs(14))
     _gate_expr(

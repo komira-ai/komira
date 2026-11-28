@@ -28,6 +28,7 @@ from plan_expr.expr import (
     EXPR_REGEXP,
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
+    EXPR_ROUND_DIGITS,
     EXPR_UDF_CALL,
     BIN_AND,
     BIN_EQ,
@@ -734,6 +735,11 @@ def _predicate_refs_in_schema(expr: Expr, schema: Schema) -> Bool:
             ):
                 return False
         return True
+
+    elif expr.tag == EXPR_ROUND_DIGITS:
+        # The column refs are ONLY in the child; op and digits are
+        # plan-literals.
+        return _predicate_refs_in_schema(expr.round_digits_child_ref(), schema)
 
     elif expr.tag == EXPR_UDF_CALL:
         # Added on 2026-09-02. `filter(affine(col("x")) > lit(10))` is one of

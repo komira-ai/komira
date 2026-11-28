@@ -11,6 +11,15 @@ Comparisons, `+ - * /` (true division, as Python's), unary `-`,
 or one taken before `df["x"] = ...` changed its frame, raises
 `UnsupportedOperation`.
 
+`s.round(decimals=0)` rounds an int or float column (int8 to int64, float32,
+float64) to `decimals` places, halves to even as pandas does: `2.5` becomes
+`2.0` and `0.5` becomes `0.0`, while SQL's `round(x, d)` rounds halves away
+from zero (`round(2.5)` is 3). A negative `decimals` rounds left of the point
+(`round(-2)` of 1250 is 1200, and SQL's gives 1300), and an int column is
+unchanged for `decimals >= 0`. The result has the column's type. `decimals` is
+an int within int32. A decimal, unsigned, string or other column, and the
+`*args` and `**kwargs` pandas ignores, are refused by name.
+
 `s.value_counts()` (newer than 0.1.1623) is refused by name: pandas gives a
 Series indexed by the values, and a komira Series has no index. Count the rows
 per value with `df.groupby(column).size()`, and sort them with

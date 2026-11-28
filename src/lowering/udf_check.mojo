@@ -57,6 +57,7 @@ from plan_expr.expr import (
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
     EXPR_REGEXP,
+    EXPR_ROUND_DIGITS,
     EXPR_SORT_KEY,
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
@@ -273,6 +274,8 @@ def _udf_apply_count(e: Expr) raises -> Int:
         return _udf_apply_count(e.extract_child_ref())
     if tag == EXPR_MATH_FN:
         return _udf_apply_count(e.math_fn_child_ref())
+    if tag == EXPR_ROUND_DIGITS:
+        return _udf_apply_count(e.round_digits_child_ref())
     if tag == EXPR_AGG_FN:
         return _udf_apply_count(e.agg_fn_child_ref())
     if tag == EXPR_IN_LIST:

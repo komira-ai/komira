@@ -50,7 +50,7 @@ from plan_ir.logical_plan import (
     LogicalPlan,
     SOURCE_PARQUET,
 )
-from plan_expr.expr import Expr, BIN_GT
+from plan_expr.expr import Expr, BIN_GT, RDG_ROUND, RDG_TRUNC
 from plan_ir.expr_udf_sites import (
     collect_udf_calls,
     expr_carries_udf_call,
@@ -211,6 +211,26 @@ def test_the_collector_collects_a_plain_udf_call() raises:
     _ = e^
 
 
+def test_the_collector_finds_a_udf_call_under_round_digits() raises:
+    """`round(affine(x), 2)` holds one UDF site; `round(x, 2)` holds none,
+    and a correlated subquery under it is refused like under any container."""
+    var with_call = Expr.round_digits(RDG_ROUND, _udf_call(), 2)
+    var sites = List[Expr]()
+    collect_udf_calls(with_call, sites)
+    assert_equal(len(sites), 1, "one UDF call under round_digits")
+    assert_equal(sites[0].udf_call_name(), String("affine"))
+    assert_true(expr_carries_udf_call(with_call))
+    var without = Expr.round_digits(RDG_TRUNC, Expr.col_ref("x"), -1)
+    var none = List[Expr]()
+    collect_udf_calls(without, none)
+    assert_equal(len(none), 0, "no UDF call, no site")
+    assert_false(expr_carries_udf_call(without))
+    var corr = Expr.round_digits(RDG_ROUND, _corr_subquery(), 1)
+    var out = List[Expr]()
+    with assert_raises():
+        collect_udf_calls(corr, out, True)
+
+
 def test_the_slab_form_answers_for_a_correlated_subquery_too() raises:
     """`exprs_carry_udf_call` is the PROJECT door; the filter door is the
     single-expression form above. Both reach the same walk and both had the
@@ -239,5 +259,6 @@ def main() raises:
         test_the_refusal_does_not_tell_an_uncorrelated_caller_to_decorrelate
     ]()
     ts.test[test_the_collector_collects_a_plain_udf_call]()
+    ts.test[test_the_collector_finds_a_udf_call_under_round_digits]()
     ts.test[test_the_slab_form_answers_for_a_correlated_subquery_too]()
     ts^.run()

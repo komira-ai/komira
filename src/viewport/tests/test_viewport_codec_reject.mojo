@@ -18,7 +18,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
-from plan_expr.expr import Expr, UN_NOT
+from plan_expr.expr import Expr, RDG_ROUND, UN_NOT
 from plan_expr.scalar_value import ScalarValue
 from viewport import (
     ViewportWriter,
@@ -261,6 +261,11 @@ def test_encode_refuses_tags_outside_the_allow_list() raises:
     var w2 = ViewportWriter()
     with assert_raises(contains="Expr tag 5 is not in the viewport protocol v1 allow-list"):
         encode_expr(w2, Expr.cast(Expr.col_ref(String("a")), DType.int64))
+    var w3 = ViewportWriter()
+    with assert_raises(contains="Expr tag 28 is not in the viewport protocol v1 allow-list"):
+        encode_expr(
+            w3, Expr.round_digits(RDG_ROUND, Expr.col_ref(String("a")), Int32(2))
+        )
 
 
 def test_decode_refuses_tags_outside_the_allow_list() raises:

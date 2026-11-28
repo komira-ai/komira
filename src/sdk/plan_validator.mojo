@@ -42,6 +42,7 @@ from plan_expr.expr import (
     EXPR_EXTRACT,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
+    EXPR_ROUND_DIGITS,
     EXPR_SUBSTRING,
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
@@ -909,6 +910,11 @@ def _validate_expr_columns(
 
     elif expr.tag == EXPR_MATH_FN:
         _validate_expr_columns(expr.math_fn_child_ref(), schema, context, report)
+
+    elif expr.tag == EXPR_ROUND_DIGITS:
+        _validate_expr_columns(
+            expr.round_digits_child_ref(), schema, context, report
+        )
 
     elif expr.tag == EXPR_IN_LIST:
         # The VALUES are `ScalarValue` literals -- no column names in them.

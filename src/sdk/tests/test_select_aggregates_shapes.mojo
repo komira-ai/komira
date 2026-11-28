@@ -28,6 +28,9 @@ from plan_expr.expr import (
     EXPR_LITERAL,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
+    EXPR_ROUND_DIGITS,
+    RDG_ROUND,
+    RDG_TRUNC,
     EXPR_UNARY_OP,
     EXPR_WHEN,
     UN_NEGATE,
@@ -75,7 +78,7 @@ def _case(var cond: Expr, var result: Expr, var default: Expr) -> Expr:
 def test_rebuildable_tags() raises:
     var yes: List[UInt8] = [
         EXPR_ALIAS, EXPR_BINARY_OP, EXPR_UNARY_OP, EXPR_CAST, EXPR_MATH_FN,
-        EXPR_MATH_FN2, EXPR_WHEN,
+        EXPR_MATH_FN2, EXPR_ROUND_DIGITS, EXPR_WHEN,
     ]
     for i in range(len(yes)):
         assert_true(_rebuildable(yes[i]), String(Int(yes[i])))
@@ -98,6 +101,13 @@ def test_has_aggregate_every_slot() raises:
     assert_true(has_aggregate(Expr.unary(UN_NEGATE, _agg())), "unary")
     assert_true(has_aggregate(Expr.cast(_agg(), DType.float64)), "cast")
     assert_true(has_aggregate(Expr.sqrt(_agg())), "math_fn")
+    assert_true(
+        has_aggregate(Expr.round_digits(RDG_ROUND, _agg(), 2)), "round_digits"
+    )
+    assert_false(
+        has_aggregate(Expr.round_digits(RDG_ROUND, _c("v"), 2)),
+        "round_digits without",
+    )
     assert_true(has_aggregate(Expr.atan2(_agg(), _lit())), "math_fn2 left")
     assert_true(has_aggregate(Expr.atan2(_lit(), _agg())), "math_fn2 right")
     assert_true(has_aggregate(_case(_agg(), _lit(), _lit())), "case condition")
@@ -121,6 +131,13 @@ def test_reads_a_row_every_slot() raises:
     assert_true(reads_a_row(Expr.unary(UN_NEGATE, _c("v"))), "unary")
     assert_true(reads_a_row(Expr.cast(_c("v"), DType.float64)), "cast")
     assert_true(reads_a_row(Expr.sqrt(_c("v"))), "math_fn")
+    assert_true(
+        reads_a_row(Expr.round_digits(RDG_ROUND, _c("v"), 2)), "round_digits"
+    )
+    assert_false(
+        reads_a_row(Expr.round_digits(RDG_ROUND, _agg(), 2)),
+        "round_digits of an aggregate",
+    )
     assert_true(reads_a_row(Expr.atan2(_c("v"), _agg())), "math_fn2 left")
     assert_true(reads_a_row(Expr.atan2(_agg(), _c("v"))), "math_fn2 right")
     assert_true(reads_a_row(_case(_c("v"), _lit(), _lit())), "case condition")
@@ -174,6 +191,14 @@ def test_hoist_every_arm() raises:
     assert_equal(Int(m.tag), Int(EXPR_MATH_FN))
     assert_equal(Int(m.math_fn_op()), Int(Expr.sqrt(_lit()).math_fn_op()))
     assert_equal(m.math_fn_child_ref().col_ref_name(), _hidden(0))
+
+    aggs = List[Expr]()
+    var rd = hoist_aggregates(Expr.round_digits(RDG_TRUNC, _agg(), -3), aggs)
+    assert_equal(Int(rd.tag), Int(EXPR_ROUND_DIGITS))
+    assert_equal(Int(rd.round_digits_op()), Int(RDG_TRUNC))
+    assert_equal(Int(rd.round_digits_count()), -3)
+    assert_equal(rd.round_digits_child_ref().col_ref_name(), _hidden(0))
+    assert_equal(len(aggs), 1)
 
     aggs = List[Expr]()
     var m2 = hoist_aggregates(Expr.atan2(_agg(), Expr.agg_fn(AGG_MEAN, _c("w"))), aggs)

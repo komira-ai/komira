@@ -41,7 +41,7 @@
 #   * EXPR_CAST to FLOAT64 over an I64 or F64 operand -> EXPR_I64_TO_F64 (or
 #     the operand itself when it is already F64).
 #
-# Everything else raises. `count_and_conjuncts` counts the conjuncts of a
+# Everything else raises; EXPR_ROUND_DIGITS raises by name. `count_and_conjuncts` counts the conjuncts of a
 # translated AND chain.
 #
 # The operator arms are in `lower_untyped_expr_ops`; the family inference is
@@ -80,6 +80,7 @@ from plan_expr.expr import (
     EXPR_WHEN,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
+    EXPR_ROUND_DIGITS,
     MATH_SIN,
     MATH_COS,
     MATH_SQRT,
@@ -455,6 +456,12 @@ def _translate_node(
     # Every other tag (EXPR_COL_IDX, any other cast, EXPR_REGEXP, the nested
     # and temporal extracts, aggregate and window calls, subqueries) has no
     # runtime node.
+    if e.tag == EXPR_ROUND_DIGITS:
+        raise Error(
+            "UnsupportedByLowerUntypedExpr: EXPR_ROUND_DIGITS (round / trunc"
+            " to a digit count) has no walker node; the column evaluator"
+            " serves it."
+        )
     raise Error(
         "UnsupportedByLowerUntypedExpr: Expr tag "
         + String(Int(e.tag))

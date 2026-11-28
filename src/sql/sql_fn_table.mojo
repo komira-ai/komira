@@ -205,11 +205,12 @@ Routing these through it would be a silent type divergence — a column read
 at the wrong width (int32 data read at an 8-byte stride) gives a plausible
 value and no error, so it is worth a kind of its own.
 
-⚠ ONE ARGUMENT, AND THE TWO-ARGUMENT FORMS ARE REFUSED WITH THEIR OWN MESSAGE
-rather than by a generic count. DuckDB has `round(x, digits)` and
-`trunc(x, digits)`; `EXPR_UNARY_OP` is unary and cannot carry the second
-operand, and silently rounding to zero digits would answer a different
-question. See `_fn_arity_msg`."""
+⚠ `abs`, `sign` AND `bit_count` TAKE ONE ARGUMENT; `round` AND `trunc` TAKE ONE
+OR TWO. The 1-argument call is `EXPR_UNARY_OP`. The 2-argument call
+`round(x, digits)` / `trunc(x, digits)` is `EXPR_ROUND_DIGITS` (`RDG_ROUND` /
+`RDG_TRUNC`) with the digit count as an INT32 literal in the node; the binder
+branches on the argument count and refuses a digit count that is not an
+integer literal. Arity text is in `_fn_arity_msg`."""
 
 comptime FNK_BINARY_OP: UInt8 = 11
 """`Expr.binary(op, left, right)` — EXPR_BINARY_OP, with the `op` read in the
@@ -782,17 +783,12 @@ comptime _R_INTERVAL: String = (
 
 comptime _R_ROUNDN: String = (
     "SQL not supported: `round_even`/`roundbankers` are DuckDB v1.5.3 "
-    "MACROs and THREE separate things block them, of which arity is the "
-    "weakest. (1) Measured, they are 2-ARGUMENT-ONLY there — "
-    "`round_even(2.5)` is a Binder Error naming `round_even(x, n)` — so "
-    "there is no unary form to bind. (2) This engine's `UN_ROUND` is "
-    "UNARY: `EXPR_UNARY_OP` cannot carry a digits operand, so `round(x, "
-    "n)` is inexpressible whatever the arity check says. (3) The "
-    "published body needs `%` (`(abs(x) * power(10, n+1)) % 10 = 5`); "
-    "`BIN_MOD` has a `compiler_eval_column` projection arm, so this "
-    "one is NOT A BLOCKER and is recorded as discharged rather than "
-    "omitted — (1) and (2) are what "
-    "refuse this name, and widening the `round` row fixes neither."
+    "MACROs with their own body and their own rounding rule (banker's "
+    "rounding on a digit test of `abs(x) * power(10, n+1)`), and this "
+    "engine does not serve that body under these names. Measured, they "
+    "are 2-ARGUMENT-ONLY there — `round_even(2.5)` is a Binder Error "
+    "naming `round_even(x, n)`. `round(x, n)` is a different function "
+    "(half away from zero) and widening it does not answer these names."
 )
 
 comptime _R_TABLEFN: String = (
@@ -2651,11 +2647,12 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     # negative absolute value (DuckDB: `Out of Range Error`). The kernel gets
     # both right; see `UN_ABS` in `plan_expr/expr.mojo`.
     #
-    # ⚠ `round`/`trunc` ARE 1-ARG HERE AND DuckDB ALSO HAS A 2-ARG FORM. The
-    # max_args of 1 makes that a NAMED refusal via `_fn_arity_msg`, not a
-    # silent zero-digit round.
+    # ⚠ `round`/`trunc` TAKE 1 OR 2 ARGUMENTS. The 1-argument call is
+    # `UN_ROUND` / `UN_TRUNC`; the 2-argument call binds to
+    # `EXPR_ROUND_DIGITS` (`RDG_ROUND` / `RDG_TRUNC`) with an integer-literal
+    # digit count (`_round_digits_literal`).
     #
-    # ⛔⛔ DO NOT CLOSE THE 2-ARG FORM WITH THE OBVIOUS DESUGAR
+    # ⛔⛔ THE 2-ARG FORM IS A KERNEL AND NOT THE OBVIOUS DESUGAR
     # `round(x * power(10,n)) / power(10,n)`. IT OVERFLOWS TO ±inf AND DuckDB
     # DOES NOT. MEASURED v1.5.3 over a real DOUBLE column (not a
     # literal — `values (2.345)` is DECIMAL(4,3) there and rounds by a
@@ -2675,22 +2672,19 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     # visibly wrong in one cell. `trunc(x, n)` has the identical shape and
     # DIVERGES on 6 of 45 cells for the identical reason.
     #
-    # ⇒ THE 2-ARG FORM NEEDS A REAL KERNEL, not a desugar. Held out as a
-    # NAMED refusal until one exists, because "we have round(x,n)" that answers
-    # inf on a large column is worse than "we do not have it". A spot check
-    # of the desugar passes if its probes are all small magnitudes at small n,
-    # the region where it is genuinely exact — so a handful of green probes is
-    # not evidence for it.
+    # ⇒ THE 2-ARG FORM IS A REAL KERNEL, which is why it is not a desugar: a
+    # spot check of the desugar passes if its probes are all small magnitudes
+    # at small n, the region where it is genuinely exact — so a handful of
+    # green probes is not evidence for it.
     #
     # ⛔ NOT ROWS, DELIBERATELY: `round_even` / `roundbankers` are DuckDB
-    # MACROS that take (x, n) — a two-argument, banker's-rounding shape that
-    # shares neither this arity nor this rounding rule (measured: they are
-    # 2-arg-only on v1.5.3, so there is no unary form to bind). `@` is DuckDB's
+    # MACROS with their own body and rounding rule (banker's rounding) that
+    # this engine does not serve under these names. `@` is DuckDB's
     # prefix ABS OPERATOR, a grammar entry rather than a function name.
     if name == "abs": return SqlFnSpec(FNK_UNARY_NUM, UN_ABS, 1, 1)
     if name == "sign": return SqlFnSpec(FNK_UNARY_NUM, UN_SIGN, 1, 1)
-    if name == "trunc": return SqlFnSpec(FNK_UNARY_NUM, UN_TRUNC, 1, 1)
-    if name == "round": return SqlFnSpec(FNK_UNARY_NUM, UN_ROUND, 1, 1)
+    if name == "trunc": return SqlFnSpec(FNK_UNARY_NUM, UN_TRUNC, 1, 2)
+    if name == "round": return SqlFnSpec(FNK_UNARY_NUM, UN_ROUND, 1, 2)
     # ---- `bit_count`: THE ONE BIT FUNCTION THAT NEEDS NEITHER THE BIT TYPE
     #      NOR A BITWISE BINARY NODE, and it is served
     #      here and not through `FNK_MATH_FN` because `EXPR_MATH_FN` is ALWAYS
@@ -2980,14 +2974,9 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     # BLOCKED, not absent. ⇒ IT IS A ROW — an `FNK_REFUSED` one carrying that
     # sentence, in the blocked macro tier at the bottom of this table.
     #
-    # ⛔ `round_even` / `roundbankers` are also `FNK_REFUSED` ROWS, and their
-    # reason names THREE candidate blockers where the note above `abs` names
-    # only the weakest. Arity is real (measured 2-ARGUMENT-ONLY on v1.5.3;
-    # `round_even(2.5)` is a Binder Error naming `round_even(x, n)`) but a
-    # future reader could "fix" it by widening the `round` row, and that would
-    # not close the other one that still holds: `UN_ROUND` is unary and cannot
-    # carry a digits operand at all. (The published body's `%` is served; see
-    # `_R_ROUNDN`.)
+    # ⛔ `round_even` / `roundbankers` are also `FNK_REFUSED` ROWS: they are
+    # DuckDB macros with their own body and rounding rule, which widening the
+    # `round` row would not serve (see `_R_ROUNDN`).
     if name == "fdiv": return SqlFnSpec(FNK_DESUGAR, DSG_FDIV, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     if name == "fmod": return SqlFnSpec(FNK_DESUGAR, DSG_FMOD, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     if name == "nullif": return SqlFnSpec(FNK_DESUGAR, DSG_NULLIF, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)

@@ -58,6 +58,7 @@ from plan_expr.expr import (
     BIN_GT,
     BIN_MOD,
     MATH_GAMMA,
+    RDG_ROUND,
     MATH_LN,
     MATH2_ATAN2,
     MATH2_POW,
@@ -180,6 +181,20 @@ def _li(v: Int) -> Expr:
 
 def _lf(v: Float64) -> Expr:
     return Expr.literal(ScalarValue.from_float(v))
+
+
+# =============================================================================
+# Rounding to a digit count
+# =============================================================================
+
+
+def test_round_digits_is_refused_by_name() raises:
+    """`EXPR_ROUND_DIGITS` has no walker node: the translator refuses it with
+    its own name, at the top and under an alias. Catches a refusal that names
+    only the tag number."""
+    var e = Expr.round_digits(RDG_ROUND, _c("x"), Int32(2))
+    _assert_refused(e, "EXPR_ROUND_DIGITS")
+    _assert_refused(Expr.alias(e.copy(), String("r")), "EXPR_ROUND_DIGITS")
 
 
 # =============================================================================

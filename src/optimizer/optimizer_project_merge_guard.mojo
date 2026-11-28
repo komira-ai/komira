@@ -46,6 +46,7 @@ from plan_expr.expr import (
     EXPR_CAST,
     EXPR_ALIAS,
     EXPR_MATH_FN,
+    EXPR_ROUND_DIGITS,
     EXPR_MATH_FN2,
     EXPR_WHEN,
     EXPR_SUBSTRING,
@@ -125,6 +126,12 @@ def substitute_project_refs(
         )
         expr._math_fn.value().child[] = c^
         return expr^
+    if expr.tag == EXPR_ROUND_DIGITS:
+        var c = substitute_project_refs(
+            expr.round_digits_child_ref().copy(), inner_names, inner_exprs
+        )
+        expr._round_digits.value().child[] = c^
+        return expr^
     if expr.tag == EXPR_MATH_FN2:
         var l = substitute_project_refs(
             expr.math_fn2_left_ref().copy(), inner_names, inner_exprs
@@ -200,6 +207,10 @@ def _every_ref_reachable(
         return _every_ref_reachable(e.alias_child_ref(), inner_names, inner_exprs)
     if e.tag == EXPR_MATH_FN:
         return _every_ref_reachable(e.math_fn_child_ref(), inner_names, inner_exprs)
+    if e.tag == EXPR_ROUND_DIGITS:
+        return _every_ref_reachable(
+            e.round_digits_child_ref(), inner_names, inner_exprs
+        )
     if e.tag == EXPR_MATH_FN2:
         return _every_ref_reachable(
             e.math_fn2_left_ref(), inner_names, inner_exprs

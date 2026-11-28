@@ -170,8 +170,16 @@ def test_arity_refused_and_unknown_functions() raises:
         "ERR: SQL not supported: `nextafter` is a real DuckDB v1.5.3 SCALAR function — TWO overloads, `DOUBLE(DOUBLE, DOUBLE)` and `FLOAT(FLOAT, FLOAT)` — and THE MISSING PRIMITIVE IS A `MATH2_` OP. `EXPR_MATH_FN2` carries exactly TWO members on this engine's wire, `MATH2_ATAN2` (engine 0) and `MATH2_POW` (engine 1), pinned by `MATH_FN2_WIRE_MEMBERS = 2` in `plan_wire_vocabulary.mojo`, and neither computes a next-representable step. ⚠ THE COST IS WHY THIS IS A REFUSAL AND NOT A ONE-LINE ROW: a new `MATH2_` member reaches `scalar_math.eval_math_binary`, the wire vocabulary's member COUNT and its engine/wire MIN and MAX as well as its to_wire/from_wire pair, `plan.proto` + `plan_vocabulary.proto`, `expr.mojo`, `lower_untyped_expr`, `xl_scalar_numeric` and this table — a strictly wider surface than a `STRFN_` tag, and the wire codec REFUSES an op it does not carry rather than silently dropping it. ⚠ `compiler_eval_column` is NOT on that list: it reaches a `MATH2_` op ONLY through `eval_math_binary` and therefore needs no per-member edit at all. ⛔ AND NO EXISTING OP IS NEAR ENOUGH TO BORROW, WHICH IS THE PART A NEAREST-MATCH FIX WOULD GET WRONG. MEASURED v1.5.3 through `printf('%.17g')` (a bare `duckdb -csv` does not round-trip a double): `nextafter(1.0, 2.0)` = 1.0000000000000002 but `nextafter(1.0, 0.0)` = 0.99999999999999989 — the two steps have DIFFERENT magnitudes because the binade changes below 1.0; `nextafter(0.0, 1.0)` = 4.9406564584124654e-324, the smallest SUBNORMAL and not an epsilon; and `nextafter(1.0, 1.0)` = 1.0, so equal operands are the IDENTITY and not a step. Every one of those is a property of the IEEE-754 bit pattern rather than of arithmetic over the operands, so any approximation would be wrong at exactly the call sites that ask for this function. YOU CAN SUPPLY THIS FUNCTION YOURSELF: this name lowers to nothing here, so it is DECLARABLE as a UDF — declare one named `nextafter` with `catalog.declare_udf(f)`, and this binder will resolve your function in place of this refusal."
     )
     _check(
-        "SELECT round(v, 2) FROM t",
-        "ERR: SQL bind error: round() takes exactly 1 argument here — got 2. DuckDB also has a 2-argument round(x, digits) / trunc(x, digits); this engine lowers the 1-argument form onto a UNARY node that has no slot for a digit count, so the 2-argument form is REFUSED rather than rounded to zero digits."
+        "SELECT round(v, 1, 2) FROM t",
+        "ERR: SQL bind error: round() takes 1 argument (x) or 2 arguments (x, digits) — got 3"
+    )
+    _check(
+        "SELECT trunc(v, 1, 2) FROM t",
+        "ERR: SQL bind error: trunc() takes 1 argument (x) or 2 arguments (x, digits) — got 3"
+    )
+    _check(
+        "SELECT abs(v, 2) FROM t",
+        "ERR: SQL bind error: abs() takes exactly 1 argument here — got 2. DuckDB has no 2-argument form of abs()."
     )
     _check(
         "SELECT trim(s, 'x') FROM t",
@@ -180,6 +188,48 @@ def test_arity_refused_and_unknown_functions() raises:
     _check(
         "SELECT median(v) FROM t WHERE upper(median(v)) = 'x'",
         "ERR: SQL bind error: aggregate function 'median' is not allowed in this position"
+    )
+
+
+def test_round_and_trunc_with_digits_bind_to_round_digits() raises:
+    """`round(x, d)` / `trunc(x, d)` bind to a RoundDigits node carrying the
+    literal digit count; the 1-argument forms keep their UnaryOp node."""
+    _check(
+        "SELECT round(v, 2) AS a, trunc(v, 1) AS b, round(k, -2) AS c, trunc(dc, -1) AS d, round(v) AS e, trunc(v) AS f FROM t",
+        "Project(exprs=[Alias(RoundDigits(op=0, digits=2, ColRef(v)), \"a\"), Alias(RoundDigits(op=1, digits=1, ColRef(v)), \"b\"), Alias(RoundDigits(op=0, digits=-2, ColRef(k)), \"c\"), Alias(RoundDigits(op=1, digits=-1, ColRef(dc)), \"d\"), Alias(UnaryOp(ROUND, ColRef(v)), \"e\"), Alias(UnaryOp(TRUNC, ColRef(v)), \"f\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT round(v, -2147483648) AS a, round(v, 2147483647) AS b FROM t",
+        "Project(exprs=[Alias(RoundDigits(op=0, digits=-2147483648, ColRef(v)), \"a\"), Alias(RoundDigits(op=0, digits=2147483647, ColRef(v)), \"b\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def test_round_digit_count_must_be_an_integer_literal() raises:
+    _check(
+        "SELECT round(v, k) FROM t",
+        "ERR: SQL not supported: round() digit count must be an integer literal here - got the column k"
+    )
+    _check(
+        "SELECT trunc(v, 1 + 1) FROM t",
+        "ERR: SQL not supported: trunc() digit count must be an integer literal here - got an expression"
+    )
+    _check(
+        "SELECT round(v, NULL) FROM t",
+        "ERR: SQL not supported: round() digit count must be an integer literal here - got a NULL literal"
+    )
+    _check(
+        "SELECT round(v, 2.5) FROM t",
+        "ERR: SQL not supported: round() digit count must be an integer literal here - got a non-integer number literal"
+    )
+    _check(
+        "SELECT round(v, 3000000000) FROM t",
+        "ERR: SQL not supported: round() digit count must be an integer literal here - got the integer literal 3000000000, outside the INT32 range"
+    )
+    _check(
+        "SELECT trunc(v, -2147483649) FROM t",
+        "ERR: SQL not supported: trunc() digit count must be an integer literal here - got the integer literal -2147483649, outside the INT32 range"
     )
 
 

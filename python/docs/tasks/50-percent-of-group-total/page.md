@@ -19,22 +19,22 @@ Path("sales.csv").write_text(
 )
 
 # SQL: a window SUM gives each row its group total; a second SELECT divides.
-# round(x * 1000 / total) / 10 keeps one decimal.
+# round(x, 1) keeps one decimal.
 with komira.Session() as s:
     s.register_csv("sales", "sales.csv")
     shares = s.sql(
-        "SELECT region, rep, amount, round(amount * 1000.0 / total) / 10 AS pct"
+        "SELECT region, rep, amount, round(amount * 100.0 / total, 1) AS pct"
         " FROM (SELECT region, rep, amount,"
         " SUM(amount) OVER (PARTITION BY region) AS total FROM sales)"
         " ORDER BY region, rep"
     )
     print(shares.to_arrow().to_pylist())
 
-# pandas-shaped: divide by the group's transform('sum'), round when printing.
+# pandas-shaped: divide by the group's transform('sum'), then round to one decimal.
 df = komira.read_csv("sales.csv")
-df["pct"] = df["amount"] / df.groupby("region")["amount"].transform("sum") * 100
+df["pct"] = (df["amount"] / df.groupby("region")["amount"].transform("sum") * 100).round(1)
 for row in df.sort_values("rep").materialize().to_arrow().to_pylist():
-    print(row["rep"], f"{row['pct']:.1f}")
+    print(row["rep"], row["pct"])
 ```
 
 Output:
@@ -54,8 +54,7 @@ Flo 100.0
 
 - The window total has to be its own SELECT item: komira refuses a window function nested inside an expression, so `amount * 100.0 / SUM(amount) OVER (...)` in one SELECT fails, and the division goes in an outer query (komira-ai/komira#2379). `probe_window_in_expression.py` beside this page tries the one-SELECT form and must fail with the line in `probe_window_in_expression.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
 - The inner query lists its columns: `SELECT *` next to a window function is refused too (komira-ai/komira#2379).
-- SQL `round(x, 1)` with a digit count is refused (the engine has only one-argument `round`), so the example scales by 1000, rounds, and divides by 10 (komira-ai/komira#2381).
-- The pandas-shaped Series has no `round` yet (komira-ai/komira#2381), so the example formats the percent in Python when printing; the stored column keeps full precision.
+- The two roundings differ on exact halves: SQL `round(2.5)` is 3, halves away from zero, as DuckDB does; `Series.round` gives 2 for 2.5, halves to even, as pandas does. This example has no exact half, so both print the same values.
 - Each row stays: `transform("sum")` and the window both put the group total beside every row, unlike `GROUP BY`, which collapses the rows.
 - Rows come back in no promised order unless the query sorts them: add `ORDER BY` or `sort_values`.
 

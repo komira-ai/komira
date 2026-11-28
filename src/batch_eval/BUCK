@@ -71,6 +71,7 @@ mojo_library(
         "tests/test_regexp_extras.mojo",
         "tests/test_regexp_match_family.mojo",
         "tests/test_regexp_replace.mojo",
+        "tests/test_round_digits_projection.mojo",
         "tests/test_s1_carve_outs.mojo",
         "tests/test_scalar_broadcast_agg_eval.mojo",
         "tests/test_scalar_left_sub_keeps_nulls.mojo",

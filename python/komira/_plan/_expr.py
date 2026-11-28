@@ -11,6 +11,7 @@ would have built itself:
     Arith        binary_op add sub mul div mod
     BoolOp       binary_op and or
     Unary        unary_op
+    RoundDigits  round_digits: the rounding rule, the operand and the digit count
     Cast         cast: DType, Arrow type, precision, scale, try (cast_parts)
     When         when: the cases in order and the default
     StringOp     string_op with its pattern
@@ -52,6 +53,7 @@ from komira._ops._expr import (
     MathFn2,
     Node,
     Regexp,
+    RoundDigits,
     StringFn,
     StringFnN,
     StringOp,
@@ -159,6 +161,10 @@ def _encode(out: pb.WireExpr, node: Node, columns, udfs, as_float: bool = False)
     elif isinstance(node, Unary):
         out.unary_op.op = member("UN_", node.op)
         _encode(out.unary_op.child, node.child, columns, udfs)
+    elif isinstance(node, RoundDigits):
+        out.round_digits.op = member("RDG_", node.op)
+        _encode(out.round_digits.child, node.child, columns, udfs)
+        out.round_digits.digits = node.digits
     elif isinstance(node, Cast):
         _cast(out, node, columns, udfs)
     elif isinstance(node, When):

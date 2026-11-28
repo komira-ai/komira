@@ -21,6 +21,7 @@ from plan_expr.expr import (
     BIN_GT,
     UN_NOT,
     STR_CONTAINS,
+    RDG_ROUND,
 )
 from plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_SUM, AGG_MAX
 from plan_expr.scalar_value import ScalarValue
@@ -87,6 +88,7 @@ def test_root_one_child_arms() raises:
     _root_is(Expr.unary(UN_NOT, _x()), "x", "unary")
     _root_is(Expr.cast(_x(), DType.float64), "x", "cast")
     _root_is(Expr.sqrt(_x()), "x", "math_fn")
+    _root_is(Expr.round_digits(RDG_ROUND, _x(), 2), "x", "round_digits")
     _root_is(Expr.string_op(STR_CONTAINS, _x(), "a"), "x", "string_op")
     _root_is(Expr.upper(_x()), "x", "string_fn")
     _root_is(Expr.substring(_x(), 1, 2), "x", "substring")

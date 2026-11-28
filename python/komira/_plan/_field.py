@@ -33,6 +33,7 @@ from komira._ops._expr import (
     MathFn2,
     Node,
     Regexp,
+    RoundDigits,
     StringFn,
     StringFnN,
     StringOp,
@@ -273,6 +274,20 @@ def _unary(node: Unary, columns: dict[str, pb.WireField]) -> pb.WireField:
     return field(_UNARY_KEEPS_TYPE[node.op], child.arrow_type_id, child.nullable)
 
 
+def _round_digits(node: RoundDigits, columns: dict[str, pb.WireField]) -> pb.WireField:
+    """The type of a digit-count round of an integer or float operand is the
+    operand's, named `trunc` for `trunc` and `round` otherwise, as the engine
+    names it. A DECIMAL operand, whose scale the engine derives from the digit
+    count, is refused here: no verb of this package builds one."""
+    child = field_of(node.child, columns)
+    if child.arrow_type_id == _DECIMAL128:
+        raise UnsupportedOperation(
+            "a digit-count round of a decimal128 operand cannot be encoded here"
+        )
+    name = "trunc" if node.op == "trunc" else "round"
+    return field(name, child.arrow_type_id, child.nullable)
+
+
 def _cast(node: Cast, columns: dict[str, pb.WireField]) -> pb.WireField:
     child = field_of(node.child, columns)
     _, type_id, precision, scale = cast_parts(node)
@@ -342,6 +357,8 @@ def field_of(node: Node, columns: dict[str, pb.WireField]) -> pb.WireField:
         return _arith(node, columns)
     if isinstance(node, Unary):
         return _unary(node, columns)
+    if isinstance(node, RoundDigits):
+        return _round_digits(node, columns)
     if isinstance(node, Cast):
         return _cast(node, columns)
     if isinstance(node, When):

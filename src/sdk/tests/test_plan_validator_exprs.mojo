@@ -24,6 +24,8 @@ from plan_expr.expr import (
     BIN_GT,
     EXPR_BETWEEN,
     EXPR_SORT_KEY,
+    RDG_ROUND,
+    RDG_TRUNC,
     STR_CONTAINS,
     UN_NOT,
 )
@@ -98,6 +100,8 @@ def test_one_child_kinds() raises:
     _bad(Expr.upper(_c("nope")), "string_fn")
     _bad(Expr.year(_c("nope")), "extract")
     _bad(Expr.sqrt(_c("nope")), "math_fn")
+    _bad(Expr.round_digits(RDG_ROUND, _c("nope"), 2), "round_digits")
+    _bad(Expr.round_digits(RDG_TRUNC, _c("nope"), -1), "round_digits (trunc)")
     var vals = List[ScalarValue]()
     vals.append(ScalarValue.from_int(1))
     _bad(Expr.in_list_node(_c("nope"), vals^), "in_list")
@@ -110,6 +114,7 @@ def test_one_child_kinds() raises:
         "udf_call",
     )
     _ok(Expr.upper(_c("s")), "string_fn over a known column")
+    _ok(Expr.round_digits(RDG_ROUND, _c("a"), 2), "round_digits over a known column")
     _ok(Expr.alias(Expr.sqrt(_c("a")), "r"), "nested one-child kinds")
 
 

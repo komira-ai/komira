@@ -40,6 +40,7 @@
 from std.ffi import external_call
 
 from column_kernels.cast_null import round_half_to_even
+from column_kernels.round_digits import round_digits_f64, round_digits_i64
 from plan_expr.scalar_value import ScalarValue
 from plan_expr.expr import (
     Expr,
@@ -47,6 +48,8 @@ from plan_expr.expr import (
     EXPR_LITERAL,
     EXPR_BINARY_OP,
     EXPR_UNARY_OP,
+    EXPR_ROUND_DIGITS,
+    RDG_OP_COUNT,
     EXPR_CAST,
     EXPR_ALIAS,
     BIN_ADD,
@@ -212,6 +215,7 @@ struct RowContext(Copyable, Movable):
 #   - EXPR_BINARY_OP: recurse on left + right, dispatch on op + operand
 #     dtypes, return result.
 #   - EXPR_UNARY_OP: recurse on child, dispatch on op, return.
+#   - EXPR_ROUND_DIGITS: recurse on child, round an INT or FLOAT by the rule.
 #   - EXPR_CAST: recurse on child, convert via `EvalScalar.as_*`.
 #   - EXPR_ALIAS: recurse through (alias is a name-rebind, not a value op).
 #   - other tags (EXPR_WHEN / EXPR_IN_LIST / EXPR_REGEXP / etc.):
@@ -263,6 +267,26 @@ def interpret_expr(expr: Expr, ctx: RowContext) -> EvalScalar:
         var u_op = expr.unary_op()
         var child = interpret_expr(expr.unary_child_ref(), ctx)
         return _eval_unary(u_op, child^)
+
+    if expr.tag == EXPR_ROUND_DIGITS:
+        # `round(x, d)` / `trunc(x, d)` / half-even. An INT carries no source
+        # width here, so it takes the INT64 rule; a value of any other kind,
+        # and a rule outside `RDG_*`, answers NULL as the other unsupported
+        # inputs do.
+        var rd_child = interpret_expr(expr.round_digits_child_ref(), ctx)
+        var rd_op = expr.round_digits_op()
+        var rd_digits = Int(expr.round_digits_count())
+        if Int(rd_op) >= RDG_OP_COUNT:
+            return EvalScalar.null()
+        if rd_child.kind == EVAL_KIND_INT:
+            return EvalScalar.from_int(
+                round_digits_i64(rd_op, rd_child.int_val, rd_digits)
+            )
+        if rd_child.kind == EVAL_KIND_FLOAT:
+            return EvalScalar.from_float(
+                round_digits_f64(rd_op, rd_child.float_val, rd_digits)
+            )
+        return EvalScalar.null()
 
     if expr.tag == EXPR_CAST:
         var child = interpret_expr(expr.cast_child_ref(), ctx)

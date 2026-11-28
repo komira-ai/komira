@@ -40,6 +40,7 @@ from plan_expr.expr import (
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
     EXPR_REGEXP,
+    EXPR_ROUND_DIGITS,
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
     EXPR_STRING_OP,
@@ -65,6 +66,7 @@ from .project_access import (
 )
 from .project_cast import _project_cast
 from .project_ops import _project_binary_op, _project_unary_op
+from .project_round_digits import _project_round_digits
 from .project_string import (
     _project_regexp,
     _project_string_fn,
@@ -97,7 +99,7 @@ def _eval_column_expr(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegio
     next one cannot arrive unmeasured.
 
     # DERIVED FACTS — re-derive with the gate, never hand-count.
-    # arms: 22
+    # arms: 23
     # unwalked: EXPR_BETWEEN EXPR_COL_IDX EXPR_CORRELATED_SUBQUERY EXPR_SORT_KEY EXPR_WINDOW_FN
 
     `EXPR_COL_IDX` is handled inside the EXPR_COL_REF arm via
@@ -150,6 +152,11 @@ def _eval_column_expr(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegio
         var r_arr = _column_to_float64(math_right)
         var out2 = eval_math_binary(expr.math_fn2_op(), l_arr, r_arr)
         return Column.from_primitive[DType.float64](out2)
+
+    elif expr.tag == EXPR_ROUND_DIGITS:
+        # `round(x, d)` / `trunc(x, d)` / half-even: child column, then the
+        # rounding kernel of its type.
+        return _project_round_digits(expr, batch)
 
     elif expr.tag == EXPR_ALIAS:
         # Evaluate the child expression; the alias name is handled by the schema

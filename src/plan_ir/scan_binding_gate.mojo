@@ -102,6 +102,7 @@ from plan_expr.expr import (
     EXPR_EXTRACT,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
+    EXPR_ROUND_DIGITS,
     EXPR_SUBSTRING,
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
@@ -489,6 +490,12 @@ def check_expr_scan_bindings[
         if not expr._math_fn:
             return 0
         return check_expr_scan_bindings(resolver, expr.math_fn_child_ref())
+    if tag == EXPR_ROUND_DIGITS:
+        if not expr._round_digits:
+            return 0
+        return check_expr_scan_bindings(
+            resolver, expr.round_digits_child_ref()
+        )
     if tag == EXPR_SUBSTRING:
         if not expr._substring:
             return 0

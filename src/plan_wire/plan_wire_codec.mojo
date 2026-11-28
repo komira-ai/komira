@@ -157,12 +157,12 @@
 #              vocabulary keeps its wire number (19) reserved, so encoding one
 #              raises in `plan_tag_to_wire` with the tag's name.
 #
-# --- EXPR TAGS: 25 of 27 modelled --------------------------------------------
+# --- EXPR TAGS: 27 of 29 modelled --------------------------------------------
 #   MODELLED   COL_REF, COL_IDX, LITERAL, BINARY_OP, UNARY_OP, ALIAS, IN_LIST,
 #              CAST, CORRELATED_SUBQUERY, WHEN, AGG_FN, EXTRACT, MATH_FN,
 #              MATH_FN2, SUBSTRING, STRING_OP, STRING_FN, STRING_FN_N, REGEXP,
 #              STRUCT_FIELD, STRUCT_FIELD_IDX, MAP_GET, JSON_EXTRACT,
-#              WINDOW_FN, UDF_CALL
+#              WINDOW_FN, UDF_CALL, UDF_APPLY, ROUND_DIGITS
 #   REFUSED    the other 2 — BETWEEN and SORT_KEY. They are tags NO factory
 #              builds a payload for: `Expr` declares no `_between` /
 #              `_sort_key` field, so the only way to construct one is the bare
@@ -444,6 +444,7 @@ from plan_proto.plan import (
     WireCseRefNode,
     WireCastToVarcharNode,
     WireUdfApply,
+    WireRoundDigits,
     WireMapBatchesNode,
     WireStepNode,
     UdfRef as WireUdfRef,
@@ -468,6 +469,7 @@ from plan_proto.plan_vocabulary import (
     MathFn1,
     MathFn2,
     ParamTag,
+    RoundDigitsOp,
     PushdownGateMode,
     RegexpOp,
     ScalarKind,
@@ -522,6 +524,8 @@ from plan_expr.expr import (
     # carries the index and the arguments, and the decoder fills the type in
     # from the list it decodes against.
     EXPR_UDF_APPLY,
+    # Rounding to a digit count: the rule, the count and one child.
+    EXPR_ROUND_DIGITS,
     string_fn_n_arity,
     string_fn_n_arity_ok,
     string_fn_n_name,
@@ -588,6 +592,8 @@ from plan_wire.plan_wire_vocabulary import (
     math_fn2_from_wire,
     plan_tag_to_wire,
     plan_tag_wire_name,
+    round_digits_op_to_wire,
+    round_digits_op_from_wire,
     expr_tag_wire_name,
     regexp_op_to_wire,
     regexp_op_from_wire,
@@ -1518,6 +1524,7 @@ def _expr_to_wire(e: Expr, optimized: Bool) raises -> WireExpr:
     var string_fn_n = List[WireStringFnN]()
     var udf_call = List[WireUdfCall]()
     var udf_apply = List[WireUdfApply]()
+    var round_digits = List[WireRoundDigits]()
     var regexp = List[WireRegexp]()
     var struct_field = List[WireStructField]()
     var struct_field_idx = List[WireStructFieldIdx]()
@@ -1954,6 +1961,18 @@ def _expr_to_wire(e: Expr, optimized: Bool) raises -> WireExpr:
         for i in range(e.udf_apply_num_args()):
             ua_args.append(_expr_to_wire(e.udf_apply_arg_ref(i), optimized))
         udf_apply.append(WireUdfApply(UInt32(e.udf_apply_index()), ua_args^))
+    elif tag == EXPR_ROUND_DIGITS:
+        # Arm ordinal, not field number — `round_digits` is field 28, arm 27.
+        arm = 27
+        var rd_child = List[WireExpr]()
+        rd_child.append(_expr_to_wire(e.round_digits_child_ref(), optimized))
+        round_digits.append(
+            WireRoundDigits(
+                RoundDigitsOp(Int(round_digits_op_to_wire(e.round_digits_op()))),
+                rd_child^,
+                e.round_digits_count(),
+            )
+        )
     else:
         raise Error(
             PLAN_WIRE_UNSUPPORTED_EXPR_TAG + ": '"
@@ -1968,7 +1987,7 @@ def _expr_to_wire(e: Expr, optimized: Bool) raises -> WireExpr:
         alias_^, in_list^, cast^, corr_subq^, when_^, agg_fn^, extract^,
         math_fn^, math_fn2^, substring^, string_op^, regexp^, struct_field^,
         struct_field_idx^, map_get^, json_extract^, window_fn^,
-        string_fn^, string_fn_n^, udf_call^, udf_apply^,
+        string_fn^, string_fn_n^, udf_call^, udf_apply^, round_digits^,
     )
 
 
@@ -2083,6 +2102,8 @@ def _expr_tag_of_arm(arm: Int) raises -> UInt8:
         return EXPR_UDF_CALL
     if arm == 26:
         return EXPR_UDF_APPLY
+    if arm == 27:
+        return EXPR_ROUND_DIGITS
     if arm == 0:
         raise _malformed(
             "a WireExpr with NO `node` arm set. The arm IS the node kind — the"
@@ -2545,6 +2566,18 @@ def _expr_from_wire(w: WireExpr, ctx: _DecodeCtx) raises -> Expr:
         # check has required (`_udf_ref_from_wire`).
         return Expr.udf_apply(
             index, ctx.udfs[index].return_type.value().copy(), ua_args^
+        )
+    if tag == EXPR_ROUND_DIGITS:
+        if not w.round_digits:
+            raise _malformed("EXPR_ROUND_DIGITS with no round_digits payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
+        ref rd = w.round_digits[0]
+        # The op is read before the child so an unspecified or unknown rule is
+        # refused by its name whatever the child holds.
+        var rd_op = round_digits_op_from_wire(Int32(rd.op.number()))
+        return Expr.round_digits(
+            rd_op,
+            _one_expr(rd.child, "WireRoundDigits.child", ctx),
+            rd.digits,
         )
     # UNREACHABLE BY CONSTRUCTION and kept anyway: `_expr_tag_of_arm` returns
     # only the 22 tags the ladder above handles and raises on everything else,

@@ -33,6 +33,7 @@ from plan_expr.expr import (
     STR_LIKE,
     REGEXP_LIKE,
     EXTRACT_YEAR,
+    RDG_ROUND,
 )
 from plan_expr.partition_expr import (
     PartitionExpr,
@@ -178,6 +179,7 @@ def test_a_call_under_every_one_child_expression_is_found() raises:
     _found(_project(Expr.udf_call("f", None, ArrowType.FLOAT64, ArrowType.FLOAT64, _bad())), "UDF_CALL")
     _found(_project(Expr.extract(EXTRACT_YEAR, _bad())), "EXTRACT")
     _found(_project(Expr.sqrt(_bad())), "MATH_FN")
+    _found(_project(Expr.round_digits(RDG_ROUND, _bad(), 2)), "ROUND_DIGITS")
     _found(_project(Expr.agg_fn(AGG_SUM, _bad())), "AGG_FN")
     var vals = List[ScalarValue]()
     vals.append(ScalarValue.from_int(1))

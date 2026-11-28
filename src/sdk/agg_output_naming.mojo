@@ -139,7 +139,7 @@ from std.collections import Optional
 from plan_expr.expr import (
     Expr,
     EXPR_COL_REF, EXPR_ALIAS, EXPR_BINARY_OP, EXPR_UNARY_OP, EXPR_CAST,
-    EXPR_MATH_FN, EXPR_MATH_FN2, EXPR_STRING_OP, EXPR_STRING_FN,
+    EXPR_MATH_FN, EXPR_MATH_FN2, EXPR_ROUND_DIGITS, EXPR_STRING_OP, EXPR_STRING_FN,
     EXPR_SUBSTRING, EXPR_IN_LIST, EXPR_AGG_FN, EXPR_WHEN, EXPR_LITERAL,
 )
 from plan_expr.agg_expr import AggExpr, AGG_COUNT
@@ -257,6 +257,8 @@ def polars_root_name(e: Expr, literal_named: Bool = False) -> Optional[String]:
         return polars_root_name(e.cast_child_ref(), literal_named)
     if e.tag == EXPR_MATH_FN:
         return polars_root_name(e.math_fn_child_ref(), literal_named)
+    if e.tag == EXPR_ROUND_DIGITS:
+        return polars_root_name(e.round_digits_child_ref(), literal_named)
     if e.tag == EXPR_MATH_FN2:
         return polars_root_name(e.math_fn2_left_ref(), literal_named)
     if e.tag == EXPR_STRING_OP:

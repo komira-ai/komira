@@ -84,6 +84,7 @@ from plan_expr.expr import (
     EXPR_MAP_GET,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
+    EXPR_ROUND_DIGITS,
     EXPR_SUBSTRING,
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
@@ -125,6 +126,11 @@ from plan_expr.expr import (
     UN_BIT_COUNT,
     UN_TRUNC,
     UN_ROUND,
+    RDG_TRUNC,
+)
+from plan_expr.round_digits_type import (
+    round_digits_decimal_all_zero,
+    round_digits_decimal_scale,
 )
 
 
@@ -320,7 +326,7 @@ def walk_expr_column_refs[S: ExprNameSink](expr: Expr, mut sink: S):
         ONLY under the un-armed tag, so the scan never reads it.
 
     # DERIVED FACTS — re-derive with the gate, never hand-count.
-    # arms: 23
+    # arms: 24
     # unwalked: EXPR_BETWEEN EXPR_COL_IDX EXPR_LITERAL EXPR_SORT_KEY
 
     `EXPR_COL_IDX` (a column by INDEX — no name to add) and `EXPR_LITERAL`
@@ -439,6 +445,10 @@ def walk_expr_column_refs[S: ExprNameSink](expr: Expr, mut sink: S):
         # Binary scalar math (atan2/pow) — both children.
         walk_expr_column_refs(expr.math_fn2_left_ref(), sink)
         walk_expr_column_refs(expr.math_fn2_right_ref(), sink)
+    elif expr.tag == EXPR_ROUND_DIGITS:
+        # `round(x, d)` / `trunc(x, d)` — one child; the digit count is a
+        # plan-literal.
+        walk_expr_column_refs(expr.round_digits_child_ref(), sink)
     elif expr.tag == EXPR_SUBSTRING:
         # `substring(s, start, length)` — the string child carries the refs;
         # start/length are plan-literals.
@@ -712,7 +722,7 @@ def walk_expr_field[P: ColRefFieldPolicy](
     everything else, it is this function.
 
     # DERIVED FACTS — re-derive with the gate, never hand-count.
-    # arms: 22
+    # arms: 23
     # unwalked: EXPR_AGG_FN EXPR_COL_IDX EXPR_CORRELATED_SUBQUERY EXPR_SORT_KEY EXPR_WINDOW_FN
 
     Every member of the unwalked set still lands on the `null` fallback and
@@ -1082,6 +1092,40 @@ def walk_expr_field[P: ColRefFieldPolicy](
         if uop == UN_ROUND:
             return Field("round", pres_child.arrow_type, pres_child.nullable)
         return Field("neg", pres_child.arrow_type, pres_child.nullable)
+
+    elif expr.tag == EXPR_ROUND_DIGITS:
+        # `round(x, d)` / `trunc(x, d)` keep the operand's INT and FLOAT type.
+        # DECIMAL128(w, s) follows `round_digits_type`; a type with no
+        # rounding rule keeps its own type and the evaluator refuses it by
+        # name. Nullable follows the child, except the all-zero DECIMAL case,
+        # whose every row (NULL included) is 0.
+        var rdg_child = walk_expr_field[P](
+            expr.round_digits_child_ref(), schema, missing
+        )
+        var rdg_op = expr.round_digits_op()
+        var rdg_digits = Int(expr.round_digits_count())
+        if rdg_child.arrow_type == ArrowType.DECIMAL128:
+            var rdg_w = rdg_child.decimal_precision
+            var rdg_s = rdg_child.decimal_scale
+            var rdg_nullable = rdg_child.nullable and not (
+                round_digits_decimal_all_zero(rdg_op, rdg_w, rdg_s, rdg_digits)
+            )
+            if rdg_op == RDG_TRUNC:
+                var fd_t = Field("trunc", ArrowType.DECIMAL128, rdg_nullable)
+                fd_t.decimal_precision = rdg_child.decimal_precision
+                fd_t.decimal_scale = (
+                    round_digits_decimal_scale(rdg_op, rdg_s, rdg_digits)
+                )
+                return fd_t^
+            var fd_r = Field("round", ArrowType.DECIMAL128, rdg_nullable)
+            fd_r.decimal_precision = rdg_child.decimal_precision
+            fd_r.decimal_scale = (
+                round_digits_decimal_scale(rdg_op, rdg_s, rdg_digits)
+            )
+            return fd_r^
+        if rdg_op == RDG_TRUNC:
+            return Field("trunc", rdg_child.arrow_type, rdg_child.nullable)
+        return Field("round", rdg_child.arrow_type, rdg_child.nullable)
 
     elif expr.tag == EXPR_CAST:
         var child_field = walk_expr_field[P](expr.cast_child_ref(), schema, missing)

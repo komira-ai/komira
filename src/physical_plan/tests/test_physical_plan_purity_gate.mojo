@@ -53,6 +53,8 @@ from plan_expr.expr import (
     EXTRACT_YEAR,
     MATH2_POW,
     MATH_SQRT,
+    RDG_ROUND,
+    RDG_TRUNC,
     STRFN_UPPER,
     STRFNN_CONCAT,
     STR_LIKE,
@@ -313,6 +315,20 @@ def test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips() ra
     assert_equal(
         _walk(Expr.string_fn(STRFN_UPPER, _corr())), String("T"),
         "STRING_FN child",
+    )
+
+    # EXPR_ROUND_DIGITS — the one child, for every digit mode.
+    assert_equal(
+        _walk(Expr.round_digits(RDG_ROUND, _corr(), 2)), String("T"),
+        "ROUND_DIGITS child",
+    )
+    assert_equal(
+        _walk(Expr.round_digits(RDG_TRUNC, _corr(), -1)), String("T"),
+        "ROUND_DIGITS (trunc) child",
+    )
+    assert_equal(
+        _walk(Expr.round_digits(RDG_ROUND, _plain(), 2)), String("F"),
+        "ROUND_DIGITS over a plain child",
     )
 
     # EXPR_STRING_FN_N — hidden in the THIRD argument, which is what catches an

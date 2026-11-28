@@ -28,6 +28,9 @@ UNARY_OPS = frozenset(
     }
 )
 PREDICATE_UNARY_OPS = frozenset({"not", "is_null", "is_not_null"})
+# The rounding rules of a digit-count round: SQL round (halves away from
+# zero), SQL trunc (toward zero) and numpy round (halves to even).
+ROUND_DIGITS_OPS = frozenset({"round", "trunc", "round_half_even"})
 
 STRING_OPS = frozenset({"contains", "starts_with", "ends_with"})
 STRING_FNS = frozenset(

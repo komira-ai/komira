@@ -35,6 +35,7 @@ from plan_proto.plan import (
     WireMathFn,
     WireMathFn2,
     WireRegexp,
+    WireRoundDigits,
     WireStringFn,
     WireStringFnN,
     WireStringOp,
@@ -556,6 +557,26 @@ def test_math_fn2_and_string_fn_n(mut L: _Ledger) raises:
     _same(encode_proto(s), n, "WireStringFnN")
 
 
+def test_round_digits(mut L: _Ledger) raises:
+    var b = List[UInt8]()
+    _u(L, b, "WireRoundDigits.op", 3)
+    _m(L, b, "WireRoundDigits.child", _expr(L, 78))
+    _i(L, b, "WireRoundDigits.digits", -5)
+    var m = decode_proto[WireRoundDigits](b.copy())
+    assert_equal(m.op.number(), 3, "WireRoundDigits: m.op.number()")
+    assert_equal(_idx(m.child[0]), 78, "WireRoundDigits: _idx(m.child[0])")
+    assert_equal(m.digits, Int32(-5), "WireRoundDigits: m.digits")
+    _same(encode_proto(m), b, "WireRoundDigits")
+
+    # The count is an int32: a positive count and an end of the range read
+    # back as written.
+    var c = List[UInt8]()
+    _i(L, c, "WireRoundDigits.digits", 2147483647)
+    var top = decode_proto[WireRoundDigits](c.copy())
+    assert_equal(top.digits, Int32(2147483647), "WireRoundDigits: top.digits")
+    _same(encode_proto(top), c, "WireRoundDigits max digits")
+
+
 def test_udf_call(mut L: _Ledger) raises:
     var b = List[UInt8]()
     _s(L, b, "WireUdfCall.name", "my_fn")
@@ -754,6 +775,8 @@ def _arm_of(e: WireExpr) -> String:
         out.append("udf_call")
     if len(e.udf_apply) > 0:
         out.append("udf_apply")
+    if len(e.round_digits) > 0:
+        out.append("round_digits")
     var joined = String("")
     for i in range(len(out)):
         joined += (String(",") if i > 0 else String("")) + out[i]
@@ -761,13 +784,14 @@ def _arm_of(e: WireExpr) -> String:
 
 
 def test_expr_arms(mut L: _Ledger) raises:
-    """oneof node { 2 col_ref .. 27 udf_apply } (1 is reserved): each arm,
+    """oneof node { 2 col_ref .. 28 round_digits } (1 is reserved): each arm,
     written under its ledger number, decodes as that arm by name."""
     var arms = _names(
         "col_ref col_idx literal binary_op unary_op alias in_list cast"
         + " correlated_subquery when agg_fn extract math_fn math_fn2 substring"
         + " string_op regexp struct_field struct_field_idx map_get json_extract"
         + " window_fn string_fn string_fn_n udf_call udf_apply"
+        + " round_digits"
     )
     for k in range(len(arms)):
         var q = "WireExpr." + arms[k]
@@ -829,6 +853,7 @@ def main() raises:
     test_when(L)
     test_functions_of_one_child(L)
     test_math_fn2_and_string_fn_n(L)
+    test_round_digits(L)
     test_udf_call(L)
     test_substring_and_string_op(L)
     test_regexp(L)
@@ -840,7 +865,7 @@ def main() raises:
     print("ALL komira.plan.v1 EXPRESSION FIELD NUMBERS PINNED:", len(L.names), "fields")
 
 
-# ---- THE LEDGER: every field of the 28 expression messages, numbers written by hand --------
+# ---- THE LEDGER: every field of the 29 expression messages, numbers written by hand --------
 # Change a number here only with the .proto, and only one that never
 # shipped: a shipped number is permanent.
 
@@ -881,6 +906,9 @@ WireMathFn.child 2
 WireMathFn2.op 1
 WireMathFn2.left 2
 WireMathFn2.right 3
+WireRoundDigits.op 1
+WireRoundDigits.child 2
+WireRoundDigits.digits 3
 WireStringFn.op 1
 WireStringFn.child 2
 WireStringFnN.op 1
@@ -950,6 +978,7 @@ WireExpr.string_fn 24
 WireExpr.string_fn_n 25
 WireExpr.udf_call 26
 WireExpr.udf_apply 27
+WireExpr.round_digits 28
 WireAggExpr.func 1
 WireAggExpr.has_child0 2
 WireAggExpr.child0 3

@@ -200,6 +200,7 @@ from plan_expr.expr import (
     EXPR_EXTRACT,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
+    EXPR_ROUND_DIGITS,
     EXPR_SUBSTRING,
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
@@ -596,6 +597,12 @@ def bind_expr_inmem_payloads(
         if not expr._math_fn:
             return 0
         return bind_expr_inmem_payloads(registry, expr._math_fn.value().child[])
+    if tag == EXPR_ROUND_DIGITS:
+        if not expr._round_digits:
+            return 0
+        return bind_expr_inmem_payloads(
+            registry, expr._round_digits.value().child[]
+        )
     if tag == EXPR_SUBSTRING:
         if not expr._substring:
             return 0

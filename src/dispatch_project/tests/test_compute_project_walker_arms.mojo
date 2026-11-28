@@ -32,6 +32,8 @@ from plan_expr.expr import (
     BIN_ADD,
     BIN_GT,
     BIN_MUL,
+    RDG_ROUND,
+    RDG_TRUNC,
 )
 from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import ExprArray
@@ -209,6 +211,23 @@ def test_a_domain_checked_op_takes_the_column_evaluator_without_a_null() raises:
 # =============================================================================
 # The walker route
 # =============================================================================
+
+
+def test_round_digits_takes_the_column_evaluator_with_its_declared_type() raises:
+    """`round(x, 0)` and `trunc(x, 1)` over FLOAT64 and `round(m, -1)` over an
+    INT32 column holding a NULL are served by the column evaluator with the
+    input's own type; a declared type that is not the input's declines."""
+    var out = _served(Expr.round_digits(RDG_ROUND, _c("x"), Int32(0)), ArrowType.FLOAT64)
+    assert_equal(out.column_as_primitive_float64(0).get(0), 2.0)
+    assert_equal(out.column_as_primitive_float64(0).get(3), 0.0)
+    out = _served(Expr.round_digits(RDG_TRUNC, _c("x"), Int32(1)), ArrowType.FLOAT64)
+    assert_equal(out.column_as_primitive_float64(0).get(3), 0.2)
+    var m = _served(Expr.round_digits(RDG_ROUND, _c("m"), Int32(-1)), ArrowType.INT32)
+    var arr = m.column_as_primitive_int32(0)
+    assert_equal(Int(arr.get(0)), 10)
+    assert_true(arr.is_null(1))
+    assert_equal(Int(arr.get(3)), 10)
+    assert_false(Bool(_run(Expr.round_digits(RDG_ROUND, _c("x"), Int32(0)), ArrowType.INT64)))
 
 
 def test_each_walker_channel_and_its_declines() raises:

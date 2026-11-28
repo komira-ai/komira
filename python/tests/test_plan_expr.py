@@ -22,6 +22,7 @@ from komira._ops import (
     Compare,
     Extract,
     Lit,
+    RoundDigits,
     StringFnN,
     StructField,
     Unary,
@@ -372,6 +373,60 @@ def test_unary_types_keep_the_operands_nullability():
         name="abs", arrow_type_id=type_id("INT64"), dtype_code=vocab._DT_INT64, dict_index_type_id=4
     )
     assert expr_field(Unary("negate", D), SCHEMA).decimal_precision == 0
+
+
+# ---- digit-count rounds -----------------------------------------------------
+
+
+def test_round_digits_encodes_its_rule_its_child_and_its_digits():
+    for op, member in (("round", "RDG_ROUND"), ("trunc", "RDG_TRUNC"), ("round_half_even", "RDG_ROUND_HALF_EVEN")):
+        for digits in (-(2**31), -2, 0, 3, 2**31 - 1):
+            got = encode_expr(RoundDigits(op, F, digits), SCHEMA)
+            assert got.WhichOneof("node") == "round_digits", got
+            assert got.round_digits.op == getattr(vocab, member), (op, got)
+            assert got.round_digits.digits == digits, (op, digits, got)
+            assert got.round_digits.child == encode_expr(F, SCHEMA)
+    assert vocab.RDG_ROUND_HALF_EVEN == 3 and vocab.RDG_ROUND == 1 and vocab.RDG_TRUNC == 2
+
+
+def test_round_digits_of_an_expression_encodes_the_operand_inside():
+    node = RoundDigits("round_half_even", Arith("mul", F, Lit(2.0)), 1)
+    got = encode_expr(node, SCHEMA)
+    assert got.round_digits.child == encode_expr(Arith("mul", F, Lit(2.0)), SCHEMA)
+    assert got.round_digits.digits == 1
+
+
+def test_round_digits_zero_is_a_real_count():
+    got = encode_expr(RoundDigits("round_half_even", F, 0), SCHEMA)
+    assert got.WhichOneof("node") == "round_digits"
+    assert got.round_digits.digits == 0
+    assert got.round_digits.op == vocab.RDG_ROUND_HALF_EVEN
+
+
+def test_round_digits_type_is_the_operands_and_its_name_is_the_engines():
+    for node, name, arrow, nullable in (
+        (RoundDigits("round_half_even", F, 1), "round", "FLOAT64", True),
+        (RoundDigits("round", A, -1), "round", "INT64", False),
+        (RoundDigits("trunc", I, 0), "trunc", "INT32", True),
+    ):
+        f = expr_field(node, SCHEMA)
+        assert (f.name, arrow_of(node), f.nullable) == (name, arrow, nullable), (node, f)
+
+
+def test_round_digits_of_a_decimal_operand_is_refused_by_name():
+    refuses(
+        lambda: expr_field(RoundDigits("round", D, 1), SCHEMA),
+        UnsupportedOperation,
+        "a digit-count round of a decimal128 operand cannot be encoded here",
+    )
+
+
+def test_round_digits_of_an_unknown_column_is_refused_before_encoding():
+    refuses(
+        lambda: encode_expr(RoundDigits("round", ColRef("nope"), 1), SCHEMA),
+        KeyError,
+        "no column named 'nope' in this frame; the frame's columns are: a, b, i, f, d, s, st",
+    )
 
 
 # ---- casts ------------------------------------------------------------------

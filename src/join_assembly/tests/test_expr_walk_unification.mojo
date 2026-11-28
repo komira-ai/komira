@@ -103,6 +103,8 @@ from plan_expr.expr import (
     EXPR_EXTRACT,
     EXPR_MATH_FN,
     EXPR_MATH_FN2,
+    EXPR_ROUND_DIGITS,
+    RDG_ROUND,
     EXPR_SUBSTRING,
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
@@ -270,6 +272,8 @@ def _corpus_expr(t: Int) raises -> Expr:
         return Expr.sqrt(Expr.col_ref("a"))
     elif tag == EXPR_MATH_FN2:
         return Expr.atan2(Expr.col_ref("a"), Expr.col_ref("b"))
+    elif tag == EXPR_ROUND_DIGITS:
+        return Expr.round_digits(RDG_ROUND, Expr.col_ref("a"), 2)
     elif tag == EXPR_SUBSTRING:
         return Expr.substring(Expr.col_ref("s"), 1, 2)
     elif tag == EXPR_STRING_FN:
@@ -448,6 +452,28 @@ def test_known_unarmed_shapes_collect_their_column() raises:
         "EXPR_STRING_FN must collect its child's column -- its absence made"
         " the late-mat route decode a ZERO-column batch",
     )
+
+
+def test_round_digits_collects_its_child_column_under_both_sinks() raises:
+    """`round(x, d)` carries its column ONLY in the child: both the set
+    adapter (`_collect_expr_columns`, which scan projection pruning reads) and
+    the ordered adapter must see it, for every digit mode and a nested child."""
+    var e = Expr.round_digits(RDG_ROUND, Expr.col_ref("a"), -2)
+    var unique = _unique_names(e)
+    assert_equal(len(unique), 1)
+    assert_true("a" in unique, "round_digits must collect its child's column")
+    var ordered = _ordered_names(e)
+    assert_equal(len(ordered), 1)
+    assert_equal(ordered[0], "a")
+    var nested = Expr.round_digits(
+        RDG_ROUND, Expr.binary(BIN_ADD, Expr.col_ref("p"), Expr.col_ref("q")), 1
+    )
+    var nested_unique = _unique_names(nested)
+    assert_equal(len(nested_unique), 2)
+    assert_true("p" in nested_unique)
+    assert_true("q" in nested_unique)
+    _ = e^
+    _ = nested^
 
 
 def test_window_fn_collects_all_three_name_channels() raises:
@@ -791,6 +817,7 @@ def main() raises:
     ts.test[test_corpus_refuses_an_unmodelled_tag]()
     ts.test[test_both_name_sinks_agree_on_every_tag]()
     ts.test[test_known_unarmed_shapes_collect_their_column]()
+    ts.test[test_round_digits_collects_its_child_column_under_both_sinks]()
     ts.test[test_window_fn_collects_all_three_name_channels]()
     ts.test[test_late_mat_column_order_is_first_seen_left_to_right]()
     ts.test[test_ordered_sink_keeps_duplicates_and_unique_sink_folds_them]()
