@@ -146,7 +146,7 @@ def test_where_and_order_by_bind_around_the_unnest() raises:
         got,
     )
     assert_equal(String(lines[2]), "    Unnest(column=__unnest, keep_empty=false)")
-    assert_true(String(lines[4]).startswith("      Filter("), got)
+    assert_true(String(lines[4]).startswith("        Filter("), got)
     # A column the items do not produce is carried to the sort and pruned.
     assert_equal(
         _schema_text("SELECT unnest(tags) AS tag FROM t ORDER BY id, tag"),

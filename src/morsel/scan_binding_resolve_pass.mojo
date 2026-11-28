@@ -1022,7 +1022,7 @@ def resolve_plan_binding_leaves(
         if not plan._unnest:
             return 0
         return resolve_plan_binding_leaves(
-            plan.unnest_data_ref().child[],
+            plan._unnest.value()[].child[],
             resolvers,
             scan_registry,
             snapshots,
