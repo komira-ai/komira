@@ -22,8 +22,9 @@ offers the same over the Node addon ([python_package.md](python_package.md),
 - Python and Node do not import Mojo libraries. They reach the engine through the C calls of
   `libkomira` (`src/so`, [libkomira_run_abi.md](libkomira_run_abi.md)).
 
-This document says what the Mojo SDK is (one page of code), computes exactly what must be published
-for it, and sets the order of the work. It adds no code and publishes nothing.
+This document says what the Mojo SDK is: up to three surfaces, each with what it is, who it is for
+and what it rests on. The first is one page of code. The document also computes exactly what must be
+published for them and sets the order of the work. It adds no code and publishes nothing.
 
 Fixed before this design, and not reopened here:
 - **One engine route.** SQL and plans share one route from the optimizer down, in `sdk_exec`
@@ -36,7 +37,25 @@ Fixed before this design, and not reopened here:
 - **The Mojo rules** of [AGENTS.md](../../AGENTS.md) and
   [mojo_safety_and_idioms.md](mojo_safety_and_idioms.md) hold for every new line.
 
-## 1. The page a stranger writes
+## The three surfaces
+
+The Mojo SDK can be up to three surfaces. They differ in what the user writes and in how much of the
+engine's route the user's code skips.
+
+| | A. The session | B. The physical-plan builder (untyped) | C. The typed SDK |
+|---|---|---|---|
+| what the user writes | files and SQL text; reads rows back | the physical plan itself: pipelines, their operators and the sink that ends each, with schemas as run-time values | a program whose schema is a compile-time value, run by operators specialised for it |
+| who it is for | anyone who would write SQL, the same users as Python and Node; the examples the owner's three-language gate needs | Mojo authors who want a plan run exactly as written: no binder, no optimizer, no lowering | Mojo authors who know their schema when they compile and want the compiler to check columns and specialise the operators |
+| what it rests on | `sdk_exec.run_sql`: parse, bind, optimize, lower, execute, the route Python and Node take (§1) | the executor door `sdk_exec.engine_execute.run_lowered_plan_with` and the physical IR of `physical_plan` and `lowering.lowered_plan`, behind a builder of its own (§2) | the typed operator tables (`op_agg_stage`, `op_sort`'s `Stage_Sort`, `op_window`'s top-n stages) and the compile-time schema descriptor (`plan_expr.typed_schema`, `sdk.auto_schema`); its front end is not in this repository (§3) |
+| libraries to publish | the 56 of §4, then `sdk_exec` and `komira` | none beyond A's: B is a module of the same package (§2) | its own set, larger than A's (§3) |
+| recommended | first | second | later, with a design of its own |
+
+The order is decision D6. A comes first because the examples gate needs it and because B and C need
+every library A publishes anyway. B comes second because it adds no library and mostly needs a check
+at the executor's door (§2). C comes later because its front end has to be designed and written
+first.
+
+## 1. Surface A: the session, and the page a stranger writes
 
 **PROPOSED.** The whole program:
 
@@ -67,7 +86,7 @@ mopm build main.mojo -o main --prefix .mopm/.pixi/envs/default
 type names, one line per row (at most 20), then a line with the row count (`N rows`, with
 `(showing 20, ... M more rows)` when rows were cut). The printer is `sdk`'s `format_table`, which
 **EXISTS** ([src/sdk/table_display.mojo](../../src/sdk/table_display.mojo)). The exact text a
-release prints is whatever its README e2e runs (§5). This document invents no output.
+release prints is whatever its README e2e runs (§7). This document invents no output.
 
 Three lines in the setup are sourced, not invented:
 - The `mopm init`, `[toolchain] mojo` and `mopm add komira-ai/<name>` lines are what the release's
@@ -117,7 +136,7 @@ The behaviour:
 - **`files`.**
   - An empty location is refused.
   - A location that starts with a URL scheme (`<scheme>://`) is refused with `STORAGE_URL_REFUSED`,
-    the code the C calls already use for a URL they cannot serve. Remote files are slice 4.
+    the code the C calls already use for a URL they cannot serve. Remote files are slice 7.
   - A relative path is made absolute against the working directory when `files` is called, as
     Python's `komira.files` does (`python/komira/_sources.py`).
   - `files` names Parquet, as Python's `files` does today. Choosing the format from the extension
@@ -129,8 +148,10 @@ The behaviour:
 - **What is not there.** There is no `register_parquet` (the owner prefers one `files` source) and
   no `read_csv`, `read_parquet` or other reader per format. There are no frames, no remote stores,
   no credentials, no cancel or progress, and no write call: `COPY ... TO` in SQL already writes a
-  local file. Each of these is a later slice (§8), added beside the four names without changing
-  them.
+  local file. `sql` has no per-call `bindings` argument yet: credentials_and_writes.md (decision
+  12) gives Mojo `session.sql(query, bindings)` with a `Dict[String, Source]`, which is a later,
+  additive overload. Each of these is a later slice (§9), added beside the four names without
+  changing them.
 
 Two cases outside the session rules:
 - **Missing codec libraries.** A missing system codec library (libzstd, libz, liblz4) is an error
@@ -149,8 +170,8 @@ Two cases outside the session rules:
   `std.`, so a top-level `komira` collides with nothing. No `src/komira` exists, and `komira` is not
   yet claimed on the prod registry (`release/prod_claimed_names.txt`). Decision D1.
 - **Not `sdk_exec` itself.** Its public surface is the engine's: `EngineContext`'s public fields
-  hold the catalog, the footer cache and the `async_rt` worker runtime, and it has about 20 modules
-  to import by name. Making that the public promise would freeze engine internals. `komira` keeps
+  hold the catalog, the footer cache and the `async_rt` worker runtime, and it has 25 modules
+  (`ls src/sdk_exec/*.mojo | wc -l`) to import by name. Making that the public promise would freeze engine internals. `komira` keeps
   them in a private field (`_ctx: EngineContext`), so `sdk_exec` can change underneath.
 - **Not `sdk`.** `sdk` builds plans and executes nothing ([docs/architecture.md](../architecture.md)).
   A frame API belongs there later, not a session.
@@ -167,9 +188,222 @@ This design does not include a frame API. One would rest on what **EXISTS**:
 
 Python's two frame surfaces ([dataframe_surface.md](dataframe_surface.md)) are the reference for
 its names. It would be one more name on `Session` that takes a frame, and changes none of the four.
-Its closure is the same as this one's, since `sdk` is already in it (§2).
+Its closure is the same as this one's, since `sdk` is already in it (§4).
 
-## 2. The exact closure
+## 2. Surface B: the physical-plan builder
+
+**PROPOSED.** The user's code writes the physical plan: the pipelines, the operators inside each one,
+and the sink that ends each pipeline. The plan goes to the executor as written. There is no binder,
+no optimizer and no lowering, so nothing reorders, pushes down, fuses or chooses a sink for the user.
+Schemas are run-time values: the plan reads them from the sources when it is submitted.
+
+### What exists to build on
+
+All of this is **EXISTS** and public:
+- **The physical IR** (`src/physical_plan/physical_plan.mojo`, IR version 21). A plan is a list of
+  `SegmentDescPod`, one per pipeline. Each holds a source (`SourceSpecPod`, for example
+  `SourceSpecPod.parquet(path, projection, pushed_filter, spec_is_total, fs)`), a chain of
+  `MorselOp` (`filter`, `project`, `limit`, `join_probe`), and a sink tag (`SINK_AGG`,
+  `SINK_COLLECT`, `SINK_SORT`, `SINK_TOPN`, `SINK_HASH_BUILD`, ...). The sink also has a key type tag,
+  an orientation, an order key and its dependencies with their edge tags.
+- **The plan as lowering emits it.** `LoweredPlan(segments, params, result_seg_id)`
+  (`src/lowering/lowered_plan.mojo`). Its `ParamTable` holds each sink's data by index. For example
+  `AggSinkData(group_by_exprs, agg_exprs, output_schema, ...)` (`src/physical_plan/sink_data.mojo`).
+- **Expressions.** `Expr` is an owned tree with factories (`Expr.col_ref(name)`, `Expr.col_idx(i)`,
+  `Expr.literal(ScalarValue...)`, `Expr.binary(op, l, r)`). `AggExpr(func, child, alias)` holds an
+  aggregate (`src/plan_expr`).
+- **The executor door.** `run_lowered_plan_with(ctx, lowered, opener) raises -> RecordBatch`
+  (`src/sdk_exec/engine_execute.mojo`). It feeds the `ParamTable` to the segment builder in index
+  order and runs the segments on the context's workers.
+- **A precedent.** `src/pipeline_exec/tests/test_group_agg_plan.mojo` builds a scan, filter and
+  grouped-aggregate plan by hand. `src/pipeline_exec/plan_harness.mojo` has its helpers, which are
+  test support.
+
+None of those public signatures takes or returns a pointer (§5).
+
+### What the user writes, for one real pipeline
+
+One local Parquet file, scanned, filtered, grouped and aggregated, then printed. In SQL this is
+`SELECT city, count(*) AS trips, sum(fare) AS total FROM 'trips.parquet' WHERE fare > 10 GROUP BY city`.
+*(PROPOSED; the spelling of list arguments follows whatever the pinned compiler accepts for lists of
+the SDK's `Expr`.)*
+
+```mojo
+from komira import Session
+from komira.physical import PhysicalPlan, parquet, col, lit, count_rows, sum_of
+
+def main() raises:
+    var session = Session()
+    var plan = PhysicalPlan()
+    # One pipeline: a Parquet scan, a filter, and a hash aggregate, the sink that ends it.
+    var trips = plan.pipeline(parquet("trips.parquet", columns=["city", "fare"]))
+    plan.filter(trips, col("fare") > lit(10.0))
+    plan.hash_aggregate(trips, keys=[col("city")],
+                        aggregates=[count_rows("trips"), sum_of(col("fare"), "total")])
+    plan.set_result(trips)
+    print(session.schema_of(plan, trips))   # the pipeline's output schema, a run-time value
+    var result = session.run(plan^)          # check the plan, then run it as written
+    print(result)
+```
+
+Each call maps to the IR, and the builder fills the fields the user does not choose:
+
+| builder call | what it emits |
+|---|---|
+| `plan.pipeline(parquet(path, columns))` | a `SegmentDescPod` with `SOURCE_PARQUET` and `SourceSpecPod.parquet(path, columns, None, spec_is_total=True)`; its id is its position. The IR says the flag is derived and never declared, so the builder makes it true by what it accepts: one local file (a glob or a directory is listed into `SourceSpecPod.parquet_files` first) |
+| `plan.filter(p, e)`, `plan.project(p, exprs, names)`, `plan.limit(p, n)` | `MorselOp.filter`, `MorselOp.project` and `MorselOp.limit` appended to that pipeline |
+| `plan.hash_aggregate(p, keys, aggregates)` | sink `SINK_AGG`, with the key type tag taken from the key's type in the run-time schema (`KEY_DTYPE_STRING` here, `KEY_DTYPE_COMPOSITE` for several keys) and always `SINK_ORIENT_COLUMNAR`; lowering may pick `SINK_ORIENT_DICT_ENCODED` from footer facts, which the builder does not read. The `AggSinkData` is appended to `params.agg`, and its `output_schema` comes from the input schema and the aggregate list. `ORDER_ROW_RANGE` is set when a sum or mean is over a float, so the answer does not depend on the worker count |
+| no sink named | `SINK_COLLECT` |
+| `plan.pipeline(output_of(p))` | `SourceSpecPod.from_sink_output(p)`, with `p` in the new pipeline's `deps` and the waiting edge `EDGE_E3_PUBLISH_WAIT` |
+| later: `sort`, `top_n`, `hash_join(build=p1, probe=p2, ...)` | `SINK_SORT`, `SINK_TOPN`, and `SINK_HASH_BUILD` on `p1` with `MorselOp.join_probe` on `p2` |
+| `session.run(plan)` | reads each source's schema, checks the whole plan (below), builds the `LoweredPlan`, and calls `run_lowered_plan_with(ctx, lowered, LocalOnlyScanFs())` |
+
+The user chooses the shape: how the plan is cut into pipelines, where a filter runs, which sink ends
+each pipeline, and which side of a join is built. That is what B has and A does not. The builder
+chooses only what follows from those choices.
+
+### What lowering guarantees today, and how B checks it instead
+
+`lower` builds most invariants by construction. The executor checks part of the rest:
+- `check_plan` (`src/pipeline_exec/plan_check.mojo`) runs before any pipeline does.
+- `RealBuilder` checks each pipeline as it builds it, after earlier pipelines have already run.
+- A few things nothing checks.
+
+A hand-built plan could break any of them, so B's rule is a check at submit, before any pipeline
+runs. A broken plan is refused by name and never crashes. The table shows what the executor does
+today with a broken plan and what B does.
+
+| invariant | today, for a plan `lower` did not build | B |
+|---|---|---|
+| IR version, ids equal positions, deps in range and acyclic, edge tags with a policy, the order key only on `SINK_AGG` | named, before any pipeline runs (`check_plan`) | by construction, and `check_plan` still runs |
+| the Parquet spec is total | a named refusal at build | by construction (one file, or a listed set) |
+| a sink's data index is in range for its sink kind | named, but late (at that pipeline's build) | by construction: the builder assigns the indices and feeds them in order |
+| the sink's (kind, key type, orientation) is one the executor serves | named, late. The capability table (`lowering.sink_capability.admit_plan`) is checked only inside `lower`, and `pipeline_exec` does not import it | checked at submit: `PHYSICAL_PLAN_SINK_UNSERVED` |
+| a join probe's build pipeline ends in `SINK_HASH_BUILD` | **not checked**: the probe takes whatever the build pipeline published | by construction (`hash_join` names both sides) |
+| the result pipeline is published and is the plan's only root | partly: a missing result is named; a stray root is not checked | checked at submit: `PHYSICAL_PLAN_RESULT_NOT_ROOT` |
+| a column named in an expression exists in the rows that reach it | named, but at the first morsel, inside a worker | checked at submit against the run-time schema: `PHYSICAL_PLAN_COLUMN_UNKNOWN` |
+| a column given by position is in range | **unchecked in a release build**: `Slab.__getitem__` is a `debug_assert` only, so an out-of-range ordinal reads out of bounds | B's expressions name columns by name and never by position |
+| expression types fit (a filter is boolean, a sum is over a number) | partly: aggregate output types at sink build (`check_declared_type`), the rest when a kernel meets the data | checked at submit: `PHYSICAL_PLAN_TYPE_MISMATCH` |
+| a sink's `output_schema` agrees with what the sink produces (names, types, nullability) | partly: `check_declared_type`, and a NULL in a non-nullable column at run time | by construction: the builder derives it |
+| no logical plan or correlated subquery inside an expression | checked only inside `lower` (the purity gate). The evaluator returns NULL for that tag, so the result would be wrong | by construction: B's expression vocabulary has no subquery |
+| a float sum gives the same answer at any worker count | not checked; lowering sets `ORDER_ROW_RANGE` | by construction (the table above) |
+
+Two changes make this hold, both **PROPOSED**:
+- **In the executor.** The sink capability table moves from `lowering` to `physical_plan`, and
+  `check_plan` runs it for every plan before any pipeline runs. `check_plan` and `run_plan` take
+  only the segments, and the result segment's id lives in `LoweredPlan`, which `pipeline_exec`
+  does not depend on. So the check that the result pipeline exists and is the plan's only root
+  goes in `run_lowered_plan_with` in `sdk_exec`, before it calls `run_plan`. Today a missing
+  result is named only after the whole run (`out.take(lowered.result_seg_id)`). A lowered plan
+  passes both checks, and the table becomes the one list `lowering` and the executor share.
+- **In `komira.physical`.** The checks that need schemas: column names, types and output schemas.
+  The builder holds the flowing schema of each pipeline when the plan is submitted, so it can run
+  them.
+
+Each refusal is a `raises` with the text `<code>: <what>`, which names the pipeline, the operator and
+the column. That is the same form as A's errors.
+
+### What is stable enough to expose, and what is not
+
+The physical IR is not stable, and the design documents say so:
+- [lowering_and_pipeline.md](lowering_and_pipeline.md) §2.2 calls it the interim IR and lists six
+  changes still to come: `parquet_spec_is_total` goes, the `ParamTable` indices become inline sink
+  parameters, `cancel_slot` and `error_slot` go, logical subtrees become pipeline references, a wire
+  form replaces the version door, and each pipeline gets a memory budget. Every one of them breaks
+  a plan written against today's fields.
+- The version door is an exact match. A producer and the executor must be the same build.
+- The IR changes about weekly. Commits since 2026-10-01 (`git log --since=2026-10-01 --oneline --
+  <dir> | wc -l`): `physical_plan` 12, `lowering` 25, `pipeline_exec` 23.
+
+So:
+- **Exposed.** The builder's own vocabulary:
+  - `PhysicalPlan` and `PipelineId` (an id, not an `Int`);
+  - the sources: `parquet` now, and CSV and JSON with surface A's;
+  - the operators `filter`, `project` and `limit`;
+  - the sinks `hash_aggregate` and collect, then `sort`, `top_n` and `hash_join`;
+  - the expressions: `col`, `lit`, comparisons, arithmetic, `and`, `or`, `not`, `is_null`;
+  - the aggregates `count_rows`, `count`, `sum_of`, `min_of`, `max_of`, `mean_of`;
+  - `Schema` and `RecordBatch` from `arrow`.
+
+  These words name what the executor does: a pipeline ends at the sink that breaks it,
+  lowering_and_pipeline.md §2.3. They outlast any one layout of the IR *(inferred)*.
+- **Not exposed.** `SegmentDescPod`, `SourceSpecPod`, `MorselOp`, `ParamTable`, sink indices, edge
+  tags, `ir_version`, key type and orientation tags, order keys, morsel sizes, the estimates and the
+  slots. The builder writes them. When the IR changes, the change updates the builder and its welded
+  tests in the same pull request, because `komira` is built in this repository. A user's program
+  does not change.
+
+One design statement bears on B. lowering_and_pipeline.md (§2.2, "Exit condition") says no consumer
+of the interim IR exists outside `pipeline_exec`, and nothing serializes a `LoweredPlan`, until the
+self-contained IR lands. B adds a second producer, in the same process and the same build, and
+nothing serializes its plans. This document reads that as allowed. If the owner reads the exit
+condition as also closing the IR to a second producer, B waits for the self-contained IR (decision
+D6).
+
+### Which libraries B needs
+
+**B lives in the same package**, as the module `komira.physical`, over the same `Session`. Every
+library it imports is already in A's closure of 86:
+- `physical_plan`, `plan_expr`, `plan_ir`;
+- `lowering`, for `LoweredPlan` and `ParamTable`;
+- `pipeline_exec`, for `LocalOnlyScanFs`;
+- `parquet_footers`, for the schema of a source;
+- `sdk_exec` and `arrow`.
+
+So B adds no library to publish (§4). The one change outside `komira` is the executor check above,
+in `physical_plan` and `pipeline_exec`.
+
+**A separate package without the SQL front end is possible, but not recommended now.** The executor
+alone is smaller. Computed the same way as §4:
+- `pipeline_exec`'s closure is 69 libraries, 45 of them unpublished, with no `sql`, `optimizer` or
+  `lowering`;
+- `lowering`'s is 21.
+
+The door B uses needs `EngineContext`, though, which holds the SQL catalog (`sql`) and the footer
+cache (`parquet_footers`, whose closure has `sql` and `lowering`). A package without them needs an
+execution context outside `sdk_exec`. Since A publishes every library B needs anyway, that split
+saves nothing on the road this document sets *(inferred)*.
+
+### How B is tested
+
+The tests are the same kind as A's (§7, §8):
+- **The README example.** The README of `komira` gains the plan above, writing its Parquet file
+  first with surface A's `COPY`. It asserts the rows, so the README e2e runs it against the installed
+  packages.
+- **Welded tests.**
+  - The same query through A and through B gives the same rows.
+  - Each submit refusal of the table above is asserted by its exact message: an unknown column, a
+    filter that is not boolean, a sum over a string, an unserved sink, a result pipeline that is
+    not the root, and a pipeline that reads the output of a pipeline that does not exist.
+  - Under the executor change, a hand-made `LoweredPlan` with an unserved sink and one with a stray
+    root are refused before any pipeline runs.
+
+## 3. Surface C: the typed SDK
+
+A typed program has a schema that is a compile-time value. A column is named by type parameters,
+so a missing column is a compile error. The compiler specialises each operator for the program's
+key and aggregate types. [lowering_and_pipeline.md](lowering_and_pipeline.md) §4.1 names this as
+the shape the typed operator tables are for, and explains why a run-time plan cannot use them.
+
+What **EXISTS**:
+- the operator tables `op_agg_stage`'s `HashAggTable[KB, *Aggs]`, `op_sort`'s `Stage_Sort`, and
+  `op_window`'s top-n stages;
+- the `ExprX` traits and the `Stage[Program]` vocabulary in `expr`;
+- the compile-time schema descriptor in `plan_expr.typed_schema`;
+- `sdk.auto_schema`'s `derive_schema[T]()`, which makes a descriptor from a Mojo struct.
+
+What does not exist is its front end: a typed frame, typed columns, and the driver that runs a typed
+program from a source to a sink. The port left them out on purpose ("Typed execution path not
+kept", [port_audit/sdk_group.md](port_audit/sdk_group.md)). No test runs a typed program end to end.
+The tests drive one typed operator at a time by hand.
+
+C is later, with a design of its own. It needs the front end written, and it runs on the typed
+tables, not on the physical plan A and B share. It would publish its own libraries (`eval`, `op_agg_stage`
+and `op_join_stage` among them) beyond A's; `expr`, `op_sort` and `op_window` are already in A's
+closure. `op_typed_source_api` is not part of C: its
+"typed" means a source whose file system is a type, not a schema.
+
+## 4. The exact closure
 
 ### How it was computed
 
@@ -198,8 +432,8 @@ The result:
 Three facts about the graph:
 - **The declared `deps` are incomplete.** `sdk_exec`'s own `deps` list 87 of the 93. The other 6
   (`decimal_literal`, `iceberg`, `op_agg_hash`, `op_fused_kernels`, `op_join_build`, `rowcell`) are
-  reached only through its dependencies. Rule M11 asks for the full closure. Slice 0 adds the 4 of them that stay in the recommended
-  closure (`iceberg` and `rowcell` leave it).
+  reached only through its dependencies. Rule M11 asks for the full closure. Slice 0 adds the 4 of them that
+  stay in the recommended closure (`iceberg` and `rowcell` leave it).
 - **The ledger's import lists can be shorter.** For several libraries the "imports" in
   UNPUBLISHED.md (each library's own imports) name fewer libraries than its BUCK `deps` (which hold
   the full closure). Two examples:
@@ -235,7 +469,7 @@ The same walk over the imports of `sdk_exec`'s other modules then gives:
 | of the 56: no README example | 16 |
 | of the 56: native dependency pending | 5: `async_rt`, `fs`, `objectstore`, `parquet_codec`, `scan_source` |
 | of the 56: none | 2: `arrow`, `secret_store` |
-| left for slice 5 (Iceberg catalogs) | `http_client`, `http_core`, `iceberg`, `iceberg_catalog`, `net`, `sdk_exec_iceberg` |
+| left for slice 8 (Iceberg catalogs) | `http_client`, `http_core`, `iceberg`, `iceberg_catalog`, `net`, `sdk_exec_iceberg` |
 
 The split matters most for `http_core`. It is the one native library with no path in a single pull
 request: s2n-tls built on komira's renamed aws-lc (`komira_s2n_*` called by `external_call`) would
@@ -377,13 +611,17 @@ and `komira`. Five of them carry a native move. The coverage and README work com
 them. Libraries of one wave that are ready can share a pull request, and a library that needs tests
 first goes in a later one of the same wave.
 
-## 3. The Mojo rules, and what a user's build needs
+## 5. The Mojo rules, and what a user's build needs
 
 How `komira` obeys the rules:
 - **M1, no pointer type in a public API.** None of the four names takes or returns a pointer.
   - `Session` holds its `EngineContext` in a private field.
   - `Result` lends its batch as `ref [self] RecordBatch`.
   - `Files` holds a `String`.
+  - Surface B's `komira.physical` exposes only its own values (`PhysicalPlan`, `PipelineId`, its
+    `Expr` and aggregates) and `arrow`'s `Schema` and `RecordBatch`. The IR it emits is pointer-free
+    in its public fields too (`physical_plan.mojo`'s header: inert data, no `UnsafePointer`), and
+    `Expr` keeps its `OwnedPointer` children in private fields.
   - The `sdk_exec` calls it wraps take and return values. A search of `engine_*.mojo`,
     `arrow_result.mojo`, `run_control.mojo` and `sdk/table_display.mojo` for `UnsafePointer`,
     `OpaquePointer` and the wildcard origins finds none.
@@ -395,7 +633,9 @@ How `komira` obeys the rules:
     package is a `.conda` with `mopm.toml`.
   - Its BUCK `deps` are the whole closure: `sdk_exec` and its 86.
   - Its `mopm.toml` `[dependencies]` names only what it imports: `sdk_exec`, `sdk` (for
-    `format_table`), `arrow`, `column_kernels` and `compression`. mopm resolves the rest from each
+    `format_table`), `arrow`, `column_kernels` and `compression`. With surface B it also names
+    `physical_plan`, `plan_expr`, `plan_ir`, `lowering`, `pipeline_exec` and `parquet_footers`, all
+    already in the closure. mopm resolves the rest from each
     package's own dependencies (`>=0.1,<0.2` per dependency, [docs/ci.md](../ci.md)).
 - **M15, T6, T18.** Every file stays under 1,000 lines, every test file is in `test_srcs`, and every
   public name appears in a README example.
@@ -415,7 +655,7 @@ A user adds one package, `komira-ai/komira`, and nothing else: its dependencies 
 The natives are static archives inside the packages, which `mopm build` links
 ([tools/build/readme_e2e/README.md](../../tools/build/readme_e2e/README.md), "link").
 
-## 4. The relation to the C ABI
+## 6. The relation to the C ABI
 
 The route from the optimizer down is the same for all three languages:
 
@@ -446,14 +686,19 @@ What differs for a Mojo caller:
 | options | `komira_ctx_new_with_options`: two integers | `Session(threads, memory_limit)`, the same two; `EngineOptions.spill_directory` is a later, additive argument |
 | threads | one thread per handle at a time; Python adds a lock, Node a session thread | the compiler holds it (`mut self`) |
 | cancel and progress | a run handle (`komira_run_new`, ABI 1.6) | `RunControl`, which **EXISTS** in `sdk_exec`; a later `sql` overload |
-| remote stores and credentials | `so`'s bindings and credentials | not in the first slices (slice 4) |
+| remote stores and credentials | `so`'s bindings and credentials | not in the first slices (slice 7) |
 | native code | one `libkomira.so` linked on its native owners, loaded by the binding | static archives in each package, linked into the user's program by `mopm build` |
 | abort containment | libkomira probes codec libraries before each run; a fail-fast abort still ends the host | `Session()` probes once; a fail-fast abort ends the program |
 
 The SDK adds no C call and changes no libkomira behaviour. A plan built in Mojo later (the frame
 API) would take the plan door, `run_plan`, which is libkomira's `komira_plan_stream` door too.
 
-## 5. How a Mojo example is tested as a stranger runs it
+Surface B has no C counterpart. libkomira has two doors, SQL text and a logical plan, and both go
+through the optimizer and lowering. B enters below them, at `run_lowered_plan_with`. From there
+down it is the same executor and the same segment builder as every other route. B never crosses a
+process or a build, so the physical IR needs no wire form for it.
+
+## 7. How a Mojo example is tested as a stranger runs it
 
 Two tests run every README example of `komira`, and both run in the pull request check.
 
@@ -481,9 +726,10 @@ Two tests run every README example of `komira`, and both run in the pull request
 
 What the tool gives an example, and what the example does:
 - **No data files.** The e2e gives an example no files, so the README example writes its own Parquet
-  file first, with SQL, into that working directory *(inferred: the runner's test root is scratch it
-  made, so writable; the welded README gate already runs `sdk_exec`'s `COPY` examples)*. `COPY (SELECT ...) TO 'trips.parquet'` already **EXISTS** in `run_sql`, and
-  `sdk_exec`'s README uses it. This is the rule for every documentation example: "the example writes
+  file first, with SQL, into that working directory *(inferred: the runner's test root is a directory
+  it made, so writable; the welded README gate already runs `sdk_exec`'s `COPY` examples)*.
+  `COPY (SELECT ...) TO 'trips.parquet'` already **EXISTS** in `run_sql`, and `sdk_exec`'s README
+  uses it. This is the rule for every documentation example: "the example writes
   its own sample data into its working directory, so a page hides no input"
   ([documentation_tests.md](documentation_tests.md)). No change to the e2e tool is needed.
 - **No output comparison.** The e2e judges an example by its exit status, and an example asserts in
@@ -514,7 +760,7 @@ release then also proves that the real registry serves `komira-ai/komira` and it
 `mopm add` and `mopm sync`. That job runs in the release workflow, not in the pull request check
 (rule B9).
 
-## 6. Tests of the library itself
+## 8. Tests of the library itself
 
 The welded tests in `src/komira/tests/`, each in `test_srcs` (T6), cover the following.
 
@@ -538,20 +784,26 @@ That list covers each branch of the four names: each argument's refusal, each st
 at, and each way a binding can fail. Everything beneath those branches is `sdk_exec`'s, already
 tested there.
 
-## 7. Slices, in order
+## 9. Slices, in order
 
 | slice | what lands | ends with |
 |---|---|---|
-| 0 | one pull request: `engine_iceberg.mojo` moves to `sdk_exec_iceberg` (decision D2), `src/so` imports it from there, and `sdk_exec`'s `deps` drop `iceberg_catalog` and gain the 4 libraries of the 86 they lack, `decimal_literal`, `op_agg_hash`, `op_fused_kernels` and `op_join_build` (M11). No behaviour changes | `sdk_exec`'s closure is the 86 of §2 |
-| 1 | the 56 in the order of §2, then `sdk_exec`, then `komira` with the surface of §1, its tests (§6) and its README example (§5) | **the stranger-shaped test**: `//release/readme_e2e/verify:komira` installs `komira-ai/komira` and its closure from the staged set into an empty project, compiles the README example against the installed packages only, and runs one query over one local Parquet file; then `prod-add` does `mopm add komira-ai/komira` from the prod registry on the next release |
-| 2 | the Mojo examples of the task pages ([docs/tasks/](../tasks/README.md)): the SQL-only tasks written in Mojo, each run from the installed packages like the README e2e | the owner's gate for the three languages, for the tasks SQL can show |
-| 3 | `files` chooses the format from the extension (CSV, newline-delimited JSON), in step with Python ([credentials_and_writes.md](credentials_and_writes.md)) | CSV and JSON over the same four names |
-| 4 | remote files and credentials: `files("s3://...", credential=...)`, the Mojo credential values and an opener over `objectstore_s3`, `gcs` and `azure_blob`. This brings in `http_core`, whose s2n-tls must first be a `native_library` (the hard native) | `run_sql_with` with an opener, the same as `so`'s |
-| 5 | Iceberg catalogs: `sdk_exec_iceberg`, `iceberg_catalog` and the HTTP stack published, and the `iceberg` source of credentials_and_writes.md | a catalog table bound by name |
-| 6 | a Mojo frame API: its own design, over `sdk`'s plan builders and `run_plan` (§1) | — |
+| 0 | one pull request: `engine_iceberg.mojo` moves to `sdk_exec_iceberg` (decision D2), `src/so` imports it from there, and `sdk_exec`'s `deps` drop `iceberg_catalog` and gain the 4 libraries of the 86 they lack, `decimal_literal`, `op_agg_hash`, `op_fused_kernels` and `op_join_build` (M11). No behaviour changes | `sdk_exec`'s closure is the 86 of §4 |
+| 1 | the 56 in the order of §4, then `sdk_exec`, then `komira` with the surface of §1, its tests (§8) and its README example (§7) | **the stranger-shaped test**: `//release/readme_e2e/verify:komira` installs `komira-ai/komira` and its closure from the staged set into an empty project, compiles the README example against the installed packages only, and runs one query over one local Parquet file; then `prod-add` does `mopm add komira-ai/komira` from the prod registry on the next release |
+| 2 | A: the Mojo examples of the task pages ([docs/tasks/](../tasks/README.md)): the SQL-only tasks written in Mojo, each run from the installed packages like the README e2e | the owner's gate for the three languages, for the tasks SQL can show |
+| 3 | B: the executor's own checks: the sink capability table moves to `physical_plan` and `check_plan` refuses an unserved sink, and `run_lowered_plan_with` refuses a missing result or a stray root, both before any pipeline runs (§2) | a hand-made `LoweredPlan` with either fault refused by name |
+| 4 | B: `komira.physical`: `PhysicalPlan`, `parquet`, `filter`, `project`, `limit`, `hash_aggregate`, collect, the expressions and aggregates, the checks at submit, and `session.run` (§2). No new library to publish | the README example of §2 run by the README e2e against the installed packages; the same query through A and B gives the same rows |
+| 5 | B: `sort`, `top_n`, `output_of` and `hash_join` | a two-pipeline join plan run as written |
+| 6 | A: `files` chooses the format from the extension (CSV, newline-delimited JSON), in step with Python ([credentials_and_writes.md](credentials_and_writes.md)) | CSV and JSON over the same four names |
+| 7 | A: remote files and credentials: `files("s3://...", credential=...)`, the Mojo credential values and an opener over `objectstore_s3`, `gcs` and `azure_blob`. This brings in `http_core`, whose s2n-tls must first be a `native_library` (the hard native) | `run_sql_with` with an opener, the same as `so`'s |
+| 8 | A: Iceberg catalogs: `sdk_exec_iceberg`, `iceberg_catalog` and the HTTP stack published, and the `iceberg` source of credentials_and_writes.md | a catalog table bound by name |
+| 9 | a Mojo frame API: its own design, over `sdk`'s plan builders and `run_plan` (§1) | — |
+| 10 | C: the typed SDK, its own design first: the front end over the typed operator tables (§3) | — |
 
-Slice 1 has many pull requests and is the bulk of the work (§2, "What each kind of row takes"). It
-is the one slice whose order the dependency graph fixes. Slices 2 and 3 can go in either order.
+Slice 1 has many pull requests and is the bulk of the work (§4, "What each kind of row takes"). It
+is the one slice whose order the dependency graph fixes. The order after it is decision D6. Slice 4
+needs slice 3, and slice 5 needs slice 4. Slice 2, the gate's examples, needs only slice 1, and
+slices 6 to 8 can go in any order after it.
 
 ## Decisions for the owner
 
@@ -576,8 +828,20 @@ is the one slice whose order the dependency graph fixes. Slices 2 and 3 can go i
   and `mopm_migrate` refuses every dependent of a package with `[native-dependencies]` *(read in its
   README)*. The 8 libraries of the 56 above `parquet_codec`, then `sdk_exec` and `komira`, would all
   be moved by hand.
-- **D5. The names on the prod registry.** 50 of the 58 names are not claimed (§2). Claiming a name
+- **D5. The names on the prod registry.** 50 of the 58 names are not claimed (§4). Claiming a name
   is a registry step only the owner can take, ahead of each package's pull request.
+- **D6. Which surfaces, and in what order.** Recommended: A first, B second, C later.
+  - **A** is the gate's examples, and every library it publishes is one B and C need too.
+  - **B** adds no library. It needs the executor's own checks (slice 3) and its builder (slice 4),
+    and it reads lowering_and_pipeline.md's exit condition as closing the interim IR to a second
+    consumer, not to a second producer in the same build (§2).
+  - **C** needs a front end that the port left out, and it gets its own design.
+
+  The other choices:
+  - B before A's task pages (slice 2), if hand-written plans matter more than the gate.
+  - B only after the self-contained IR, if the exit condition also closes the IR to a second
+    producer.
+  - No C at all.
 
 ## What this design does not change
 
@@ -586,7 +850,7 @@ is the one slice whose order the dependency graph fixes. Slices 2 and 3 can go i
   each member of `PACKAGES` ([docs/releases.md](../releases.md)).
 - Two documents disagree with the code they describe, and this design leaves them as they are:
   - [native_packaging.md](native_packaging.md) plans one shared library per native owner. The
-    published natives are static archives in their packages, the route §2 follows.
+    published natives are static archives in their packages, the route §4 follows.
   - Python's documented module-level `sql` and `register_parquet` are not exported
     ([python_package.md](python_package.md)).
 
