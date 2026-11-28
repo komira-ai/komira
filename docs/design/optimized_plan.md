@@ -83,6 +83,7 @@ one host, it is cut into **optimized segments**, a second defined type built fro
 | **Executor host** | Admits a segment or a plan (§7), lowers it, and applies only the named host-local rules (§5.3). It never re-optimizes. It loads every UDF runtime from the plan's environment image into its own process and calls each through the runtime C ABI; how a runtime executes user code (native in-process, Python and Node in worker processes the runtime manages) is the runtime's (§10.10, `udf_runtime_interface.md` §1.2). |
 
 The producer optimizes, the scheduler places, the coordinator cuts and the host lowers. Each step runs once.
+How a producer sends the plan to a job manager, and what it gets back, is [`submit_api.md`](submit_api.md).
 
 *A future option, not part of this design:* a SQL gateway for BI tools that speak only SQL would itself be a producer,
 built on the SDK's producer library. It would submit `OptimizedPlan`s like any other producer and need no scheduler
