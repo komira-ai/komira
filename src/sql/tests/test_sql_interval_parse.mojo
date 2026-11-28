@@ -134,5 +134,21 @@ def test_interval_refusals_are_named() raises:
     _refuses("interval '1' millisecond", "INTERVAL unit 'millisecond'")
 
 
+def test_a_quoted_interval_word_or_unit_is_a_name() raises:
+    # `"interval"` is a column, so the string after it is a stray token.
+    var m = _err("\"interval\" '1' day")
+    assert_true("expected keyword 'from'" in m, m)
+    # A quoted unit is no unit: after a string count it is missing.
+    _refuses("interval '1' \"day\"", "needs a unit")
+    # After a signed integer, a quoted word does not make it an interval
+    # literal: it is `interval - 3` with the alias "day".
+    var e = _e("interval -3 \"day\"")
+    assert_equal(Int(e.tag), Int(SX_BINARY))
+    assert_equal(Int(e.op), Int(SXOP_SUB))
+    var l = e._binary.value().left[].copy()
+    assert_equal(Int(l.tag), Int(SX_COLUMN))
+    assert_equal(l.text, "interval")
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

@@ -7,7 +7,8 @@
 # expression text, or the binder's message.
 #   1. greatest / least (over floats a NaN is the greatest and a tie keeps the
 #      first argument), coalesce / ifnull (a NULL argument dropped, all-NULL
-#      refused).
+#      refused; integer arguments of different widths cast to INT64, and the
+#      result cast back to INT32 when that is DuckDB's type).
 #   2. date_part / date_trunc and their unit refusals; left / right /
 #      substring; the year-derived parts, nanosecond, the float classes and
 #      string_split.
@@ -42,9 +43,9 @@ def _two(
 
 
 def _catalog() raises -> SqlCatalog:
-    """t(k, v, s, g, d, ts, i32, dc, b, f32, u64, j), u(k, w, s), kk(k, a),
-    mm(k, b), up(K, B), kk2(k, k_right): parquet tables with given schemas
-    (no file is opened)."""
+    """t(k, v, s, g, d, ts, i32, dc, b, f32, u64, j), u(k, w, s),
+    iw(i8, i16, i32, i64, u8, u16, u32, u64, s), kk(k, a), mm(k, b), up(K, B),
+    kk2(k, k_right): parquet tables with given schemas (no file is opened)."""
     var cat = SqlCatalog()
     var t = SchemaBuilder()
     t.add_field(Field(String("k"), ArrowType.INT64, False))
@@ -65,6 +66,17 @@ def _catalog() raises -> SqlCatalog:
     u.add_field(Field(String("w"), ArrowType.INT64, True))
     u.add_field(Field(String("s"), ArrowType.STRING, True))
     cat.add_parquet(String("u"), String("u.parquet"), u.build())
+    var iw = SchemaBuilder()
+    iw.add_field(Field(String("i8"), ArrowType.INT8, True))
+    iw.add_field(Field(String("i16"), ArrowType.INT16, True))
+    iw.add_field(Field(String("i32"), ArrowType.INT32, True))
+    iw.add_field(Field(String("i64"), ArrowType.INT64, True))
+    iw.add_field(Field(String("u8"), ArrowType.UINT8, True))
+    iw.add_field(Field(String("u16"), ArrowType.UINT16, True))
+    iw.add_field(Field(String("u32"), ArrowType.UINT32, True))
+    iw.add_field(Field(String("u64"), ArrowType.UINT64, True))
+    iw.add_field(Field(String("s"), ArrowType.STRING, True))
+    cat.add_parquet(String("iw"), String("iw.parquet"), iw.build())
     _two(cat, "kk", "k", ArrowType.INT64, "a", ArrowType.INT64)
     _two(cat, "mm", "k", ArrowType.INT64, "b", ArrowType.INT64)
     _two(cat, "up", "K", ArrowType.INT64, "B", ArrowType.INT64)
@@ -151,6 +163,154 @@ def test_greatest_least_coalesce() raises:
     _check(
         "SELECT coalesce(NULL, NULL) FROM t",
         "ERR: SQL not supported: a NULL literal is served as a comparison operand (`x = NULL`, `x <> NULL`) and as an IN-list member (`x IN (1, NULL)`, `x NOT IN (1, NULL)`), as a CASE's `ELSE NULL`, as a CASE `THEN NULL` beside INT64 or FLOAT64 arms, and as a COALESCE / IFNULL argument beside a typed one; anywhere else (a projected NULL, `NOT NULL`, `NULL = NULL`, any other function argument, arithmetic, a CASE or COALESCE whose EVERY value is NULL) it needs a typed NULL value this engine's plan does not carry"
+    )
+
+
+def _proj(item: String) -> String:
+    """The `_got` text of a one-item projection over a table."""
+    return (
+        "Project(exprs=[" + item + "])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def _c64(col: String) -> String:
+    """A column cast to INT64, as the unified arms are bound."""
+    return "Cast(ColRef(" + col + "), int64)"
+
+
+def _int(v: String) -> String:
+    return "Literal(ScalarValue(int64, " + v + "))"
+
+
+def _coalesce2(a: String, b: String) -> String:
+    return "When(WHEN UnaryOp(IS_NOT_NULL, " + a + ") THEN " + a + ", ELSE " + b + ")"
+
+
+def _greatest_least(op: String, a: String, b: String) -> String:
+    return (
+        "When(WHEN UnaryOp(IS_NULL, " + a + ") THEN " + b
+        + ", WHEN UnaryOp(IS_NULL, " + b + ") THEN " + a
+        + ", WHEN BinaryOp(" + op + ", " + a + ", " + b + ") THEN " + a
+        + ", ELSE " + b + ")"
+    )
+
+
+def _int32(tree: String) -> String:
+    """A CASE cast to INT32, DuckDB's type for it."""
+    return "Cast(" + tree + ", int32)"
+
+
+def _narrow(t: String) -> String:
+    """The `_check` text of the refusal of a CASE whose integer arms have the
+    common type `t`, which this engine's CASE cannot produce."""
+    return (
+        "ERR: SQL not supported: a CASE, coalesce, ifnull, nullif, greatest or least whose integer arms have the common type " + t + " in DuckDB. This engine computes such a CASE in BIGINT and casts an answer back to INTEGER only, so the result would have another type than DuckDB's. CAST an argument to INTEGER or BIGINT to pick the result type."
+    )
+
+
+def test_coalesce_over_mixed_integer_widths() raises:
+    # INTEGER beside a literal that fits it: INT64 CASE, cast back to INT32.
+    _check(
+        "SELECT coalesce(i32, -100) AS c FROM iw",
+        _proj("Alias(" + _int32(_coalesce2(_c64("i32"), _int("-100"))) + ", \"c\")"),
+    )
+    _check(
+        "SELECT ifnull(i32, 0) AS c FROM iw",
+        _proj("Alias(" + _int32(_coalesce2(_c64("i32"), _int("0"))) + ", \"c\")"),
+    )
+    # A literal that is no INTEGER value makes the type BIGINT: no cast back.
+    _check(
+        "SELECT coalesce(i32, 3000000000) AS c FROM iw",
+        _proj("Alias(" + _coalesce2(_c64("i32"), _int("3000000000")) + ", \"c\")"),
+    )
+    # A literal that fits the arm's type keeps it: TINYINT and SMALLINT, which
+    # the engine's CASE cannot produce, so each is refused by name.
+    _check("SELECT coalesce(i8, 100) AS c FROM iw", _narrow("TINYINT"))
+    _check("SELECT coalesce(i16, -1) AS d FROM iw", _narrow("SMALLINT"))
+    _check("SELECT coalesce(i8, i8) AS d FROM iw", _narrow("TINYINT"))
+    # A literal that does not fit TINYINT counts as INTEGER, above or below.
+    _check(
+        "SELECT coalesce(i8, 200) AS c, coalesce(i8, -200) AS d FROM iw",
+        _proj(
+            "Alias(" + _int32(_coalesce2(_c64("i8"), _int("200"))) + ", \"c\"), Alias("
+            + _int32(_coalesce2(_c64("i8"), _int("-200"))) + ", \"d\")"
+        ),
+    )
+    # Three arguments: the guarded ones are cast, the literal ELSE is not.
+    _check(
+        "SELECT coalesce(i16, i32, 7) AS c FROM iw",
+        _proj(
+            "Alias(" + _int32(
+                "When(WHEN UnaryOp(IS_NOT_NULL, " + _c64("i16") + ") THEN " + _c64("i16")
+                + ", WHEN UnaryOp(IS_NOT_NULL, " + _c64("i32") + ") THEN " + _c64("i32")
+                + ", ELSE " + _int("7") + ")"
+            ) + ", \"c\")"
+        ),
+    )
+
+
+def test_coalesce_over_unsigned_and_signed_integers() raises:
+    # UTINYINT with INTEGER, USMALLINT with TINYINT: INTEGER.
+    _check(
+        "SELECT coalesce(u8, i32) AS c, coalesce(u16, i8) AS d FROM iw",
+        _proj(
+            "Alias(" + _int32(_coalesce2(_c64("u8"), _c64("i32"))) + ", \"c\"), Alias("
+            + _int32(_coalesce2(_c64("u16"), _c64("i8"))) + ", \"d\")"
+        ),
+    )
+    # UINTEGER with INTEGER is BIGINT: served, no cast back.
+    _check(
+        "SELECT coalesce(u32, i32) AS c FROM iw",
+        _proj("Alias(" + _coalesce2(_c64("u32"), _c64("i32")) + ", \"c\")"),
+    )
+    # UTINYINT with TINYINT is SMALLINT, UTINYINT with USMALLINT is USMALLINT,
+    # UINTEGER alone is UINTEGER: types the CASE cannot produce, refused.
+    _check("SELECT coalesce(u8, i8) AS d FROM iw", _narrow("SMALLINT"))
+    _check("SELECT coalesce(u8, u16) AS e FROM iw", _narrow("USMALLINT"))
+    _check("SELECT coalesce(u32, 5) AS e FROM iw", _narrow("UINTEGER"))
+    # A literal that is no UTINYINT value (300, or negative) counts as INTEGER;
+    # 255 is one, so the type stays UTINYINT and is refused.
+    _check(
+        "SELECT coalesce(u8, 300) AS c, coalesce(u8, -1) AS d FROM iw",
+        _proj(
+            "Alias(" + _int32(_coalesce2(_c64("u8"), _int("300"))) + ", \"c\"), Alias("
+            + _int32(_coalesce2(_c64("u8"), _int("-1"))) + ", \"d\")"
+        ),
+    )
+    _check("SELECT coalesce(u8, 255) AS e FROM iw", _narrow("UTINYINT"))
+
+
+def test_coalesce_integer_arms_left_as_bound() raises:
+    # Every arm INT64: no cast. A narrow arm beside INT64 is cast and the
+    # CASE is BIGINT. UINT64 and a string arm leave the call as it was.
+    _check(
+        "SELECT coalesce(i64, 5) AS a, coalesce(i8, i64) AS b, coalesce(u64, i32) AS c, coalesce(i32, s) AS d FROM iw",
+        _proj(
+            "Alias(" + _coalesce2("ColRef(i64)", _int("5")) + ", \"a\"), Alias("
+            + _coalesce2(_c64("i8"), "ColRef(i64)") + ", \"b\"), Alias("
+            + _coalesce2("ColRef(u64)", "ColRef(i32)") + ", \"c\"), Alias("
+            + _coalesce2("ColRef(i32)", "ColRef(s)") + ", \"d\")"
+        ),
+    )
+
+
+def test_greatest_least_over_mixed_integer_widths() raises:
+    _check(
+        "SELECT greatest(i16, i32) AS g, least(i32, i16) AS l FROM iw",
+        _proj(
+            "Alias(" + _int32(_greatest_least("GT", _c64("i16"), _c64("i32"))) + ", \"g\"), Alias("
+            + _int32(_greatest_least("LT", _c64("i32"), _c64("i16"))) + ", \"l\")"
+        ),
+    )
+    # A literal beyond TINYINT makes INTEGER; beside an INT64 column nothing
+    # is cast back.
+    _check(
+        "SELECT least(i8, 300) AS l, greatest(i64, i32) AS g FROM iw",
+        _proj(
+            "Alias(" + _int32(_greatest_least("LT", _c64("i8"), _int("300"))) + ", \"l\"), Alias("
+            + _greatest_least("GT", "ColRef(i64)", _c64("i32")) + ", \"g\")"
+        ),
     )
 
 

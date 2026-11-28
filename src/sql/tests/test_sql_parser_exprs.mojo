@@ -31,6 +31,15 @@
 #   8. Words DuckDB reads as an operator after an expression are refused by
 #      name in the SELECT list, and are ordinary aliases elsewhere.
 #      (catches: `count(*) EXPORT_STATE` answered as an alias)
+#   9. A double-quoted identifier is a name and never a keyword: a column or an
+#      alias spelled like a keyword, a quoted word where the bare one opens a
+#      literal (`"date" '...'`, `"true"`, `"null"`), a predicate word
+#      (`NOT "exists"`, `NOT "in"`, `SIMILAR "to"`), an `IS NOT "null"` pair,
+#      CAST / EXTRACT / POSITION / SUBSTRING / `DOUBLE "precision"` and
+#      `OVER`; a quoted word keeps its case, a qualified name takes either
+#      part quoted, and `"SUM"(x)` is the aggregate `sum` (a function name
+#      resolves case-insensitively).
+#      (catches: a quoted word taken as the keyword it spells)
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -40,12 +49,14 @@ from sql.sql_ast import (
     SqlStatement,
     SX_COLUMN, SX_INT, SX_FLOAT, SX_STRING, SX_BINARY, SX_AGG, SX_STAR,
     SX_DATE, SX_LIKE, SX_CALL, SX_SUBQUERY, SX_CASE, SX_UNARY, SX_BOOL,
-    SX_TIMESTAMP, SX_NULL,
+    SX_TIMESTAMP, SX_NULL, SX_INTERVAL, SX_WINDOW,
     TSLIT_NAIVE, TSLIT_AWARE,
     SXOP_EQ, SXOP_NE, SXOP_LT, SXOP_LE, SXOP_GT, SXOP_GE, SXOP_AND, SXOP_OR,
     SXOP_ADD, SXOP_SUB, SXOP_MUL, SXOP_DIV, SXOP_IDIV, SXOP_MOD, SXOP_POW,
     SXOP_CONCAT, SXOP_STARTS_WITH,
     SXUN_NOT, SXUN_IS_NULL, SXUN_IS_NOT_NULL, SXUN_NEGATE, SXUN_ABS,
+    SXUN_IS_TRUE, SXUN_IS_NOT_TRUE, SXUN_IS_FALSE, SXUN_IS_NOT_FALSE,
+    SXOP_DISTINCT, SXOP_NOT_DISTINCT,
     SXLIKE_LIKE, SXLIKE_ILIKE,
     SXAGG_COUNT, SXAGG_AVG, SXAGG_SUM,
     SUBQ_SCALAR, SUBQ_EXISTS, SUBQ_NOT_EXISTS, SUBQ_IN, SUBQ_NOT_IN,
@@ -342,8 +353,94 @@ def test_null_tests() raises:
     _is_un(_w("a !~ 'x' ISNULL"), SXUN_IS_NULL)
     _is_un(_w("a ~~ 'x' ISNULL"), SXUN_IS_NULL)
     _is_un(_w("a NOT LIKE 'x' ISNULL"), SXUN_IS_NULL)
-    _refuses("a IS 5", "expected NULL after IS (only `IS [NOT] NULL` is supported")
-    _refuses("a IS NOT 5", "expected NULL after IS NOT (only")
+    assert_equal(
+        _err("SELECT a IS 5 FROM t"),
+        "SQL syntax error: expected NULL, TRUE, FALSE or DISTINCT FROM after IS",
+    )
+    assert_equal(
+        _err("SELECT a IS NOT 5 FROM t"),
+        "SQL syntax error: expected NULL, TRUE, FALSE or DISTINCT FROM after IS NOT",
+    )
+
+
+def test_boolean_tests() raises:
+    _is_un(_w("a IS TRUE"), SXUN_IS_TRUE)
+    _is_un(_w("a IS NOT TRUE"), SXUN_IS_NOT_TRUE)
+    _is_un(_w("a IS FALSE"), SXUN_IS_FALSE)
+    _is_un(_w("a IS NOT FALSE"), SXUN_IS_NOT_FALSE)
+    _is_col(_child(_w("a is true")), "a")
+    # A test after a comparison tests the comparison; chains nest outward.
+    var cmp = _w("a = 1 IS TRUE")
+    _is_un(cmp, SXUN_IS_TRUE)
+    _is_bin(_child(cmp), SXOP_EQ)
+    var chain = _w("a IS TRUE IS NOT NULL")
+    _is_un(chain, SXUN_IS_NOT_NULL)
+    _is_un(_child(chain), SXUN_IS_TRUE)
+    # NOT is looser than IS: `NOT a IS TRUE` is `NOT (a IS TRUE)`.
+    var neg = _w("NOT a IS FALSE")
+    _is_un(neg, SXUN_NOT)
+    _is_un(_child(neg), SXUN_IS_FALSE)
+    # `IS` stays an ordinary identifier where no test follows.
+    _is_col(_e("is"), "is")
+
+
+def test_is_distinct_from() raises:
+    var d = _w("a IS DISTINCT FROM b")
+    _is_bin(d, SXOP_DISTINCT)
+    _is_col(_l(d), "a")
+    _is_col(_r(d), "b")
+    var nd = _w("a IS NOT DISTINCT FROM NULL")
+    _is_bin(nd, SXOP_NOT_DISTINCT)
+    assert_equal(Int(_r(nd).tag), Int(SX_NULL))
+    # Arithmetic binds tighter than the test, on both sides.
+    var sum = _w("a + 1 IS DISTINCT FROM b * 2")
+    _is_bin(sum, SXOP_DISTINCT)
+    _is_bin(_l(sum), SXOP_ADD)
+    _is_bin(_r(sum), SXOP_MUL)
+    # A comparison on the left is the test's left operand (`IS` is looser
+    # than `=`), and AND is looser than the test.
+    var eq = _w("a = 1 IS DISTINCT FROM b")
+    _is_bin(eq, SXOP_DISTINCT)
+    _is_bin(_l(eq), SXOP_EQ)
+    var conj = _w("a IS DISTINCT FROM 1 AND b IS NOT DISTINCT FROM 2")
+    _is_bin(conj, SXOP_AND)
+    _is_bin(_l(conj), SXOP_DISTINCT)
+    _is_bin(_r(conj), SXOP_NOT_DISTINCT)
+    # The right operand is a comparison-level expression, as in DuckDB:
+    # `a IS DISTINCT FROM b = 2` is `a IS DISTINCT FROM (b = 2)`, and an IN or
+    # BETWEEN there is the right operand too.
+    var rcmp = _w("a IS DISTINCT FROM b = 2")
+    _is_bin(rcmp, SXOP_DISTINCT)
+    _is_col(_l(rcmp), "a")
+    _is_bin(_r(rcmp), SXOP_EQ)
+    var rbetween = _w("a IS NOT DISTINCT FROM b BETWEEN 1 AND 3")
+    _is_bin(rbetween, SXOP_NOT_DISTINCT)
+    _is_bin(_r(rbetween), SXOP_AND)
+    # A parenthesized test is a right operand like any other.
+    var rparen = _w("a IS DISTINCT FROM (b IS TRUE)")
+    _is_bin(rparen, SXOP_DISTINCT)
+    _is_un(_r(rparen), SXUN_IS_TRUE)
+    # Any test after the right operand is refused, as DuckDB refuses it.
+    var after = String(
+        "SQL syntax error: a test after IS [NOT] DISTINCT FROM <operand>"
+        " needs parentheses around the DISTINCT test"
+    )
+    assert_equal(_err("SELECT a IS DISTINCT FROM 1 IS TRUE FROM t"), after)
+    assert_equal(_err("SELECT a IS DISTINCT FROM b = 2 IS NULL FROM t"), after)
+    assert_equal(_err("SELECT a IS NOT DISTINCT FROM 1 ISNULL FROM t"), after)
+    assert_equal(_err("SELECT a IS DISTINCT FROM 1 NOTNULL FROM t"), after)
+    assert_equal(_err("SELECT a IS DISTINCT FROM 1 NOT NULL FROM t"), after)
+    # A parenthesized DISTINCT test takes a test after it.
+    var wrapped = _w("(a IS DISTINCT FROM 1) IS TRUE")
+    _is_un(wrapped, SXUN_IS_TRUE)
+    _is_bin(_child(wrapped), SXOP_DISTINCT)
+    # `NOT` after the operand that is not `NOT NULL` is left to the caller.
+    _refuses("a IS DISTINCT FROM 1 NOT 2", "")
+    # Two comparisons on the right are refused as trailing tokens, as DuckDB
+    # refuses them.
+    _refuses("a IS DISTINCT FROM 2 = 2 = 3", "")
+    _refuses("a IS DISTINCT b", "expected keyword 'from'")
+    _refuses("(a IS NOT DISTINCT)", "expected keyword 'from'")
 
 
 def test_extract_position_and_casts() raises:
@@ -469,6 +566,145 @@ def test_select_list_aliases_and_operator_words() raises:
     assert_equal(w.query.select_items[0].out_alias.value(), "filter")
     assert_equal(w.query.select_items[1].out_alias.value(), "at")
     assert_equal(w.query.select_items[2].out_alias.value(), "within")
+
+
+def _wrefuses(pred: String, needle: String) raises:
+    var m = _err("SELECT * FROM t WHERE " + pred)
+    assert_true(needle in m, "WHERE `" + pred + "` raised: " + m)
+
+
+def test_quoted_keywords_are_columns_and_aliases() raises:
+    var st = _parse('SELECT "order", "select" AS "From", "Mixed Case" FROM t')
+    _is_col(st.query.select_items[0].expr, "order")
+    assert_false(Bool(st.query.select_items[0].out_alias))
+    _is_col(st.query.select_items[1].expr, "select")
+    assert_equal(st.query.select_items[1].out_alias.value(), "From")
+    # A quoted word keeps its case; the bare spelling is folded.
+    _is_col(st.query.select_items[2].expr, "Mixed Case")
+    _is_col(_e("Total"), "total")
+    # The words a bare column reading is guarded for stay names when quoted.
+    _is_col(_e('"true"'), "true")
+    _is_col(_e('"false"'), "false")
+    _is_col(_e('"null"'), "null")
+    _is_col(_e('"case"'), "case")
+    _is_col(_e('"date"'), "date")
+    _is_col(_e('"timestamp"'), "timestamp")
+    _is_col(_e('"interval"'), "interval")
+    _is_col(_e('"exists"'), "exists")
+    _is_col(_e('"extract"'), "extract")
+    _is_col(_e('"cast"'), "cast")
+    _is_col(_e('"position"'), "position")
+    _is_col(_e('"substring"'), "substring")
+    _is_col(_e('"sum"'), "sum")
+    _is_col(_e('"rank"'), "rank")
+    # Where the bare word opens a literal, the quoted one is a column and the
+    # string after it is a stray token.
+    assert_equal(Int(_e("date '2020-01-01'").tag), Int(SX_DATE))
+    _refuses("\"date\" '2020-01-01'", "expected keyword 'from'")
+    _refuses("\"timestamp\" '2020-01-01'", "expected keyword 'from'")
+    _refuses("\"timestamptz\" '2020-01-01'", "expected keyword 'from'")
+    assert_equal(Int(_e("interval '1' day").tag), Int(SX_INTERVAL))
+    _refuses("\"interval\" '1' day", "expected keyword 'from'")
+    # Bare `true` is the literal; a quoted `"true"` followed by `.` is a
+    # qualifier.
+    assert_equal(Int(_e("true").tag), Int(SX_BOOL))
+    var qual = _e('"true"."x"')
+    assert_equal(qual.qualifier, "true")
+    assert_equal(qual.text, "x")
+
+
+def test_a_quoted_word_beside_a_predicate_keyword_is_a_name() raises:
+    # Bare `NOT EXISTS (...)` is a subquery predicate; `NOT "exists"` negates
+    # the column called exists.
+    var neg = _w('NOT "exists"')
+    _is_un(neg, SXUN_NOT)
+    _is_col(_child(neg), "exists")
+    _is_col(_w('"exists"'), "exists")
+    _is_bin(_w('"exists" = 1'), SXOP_EQ)
+    # `a NOT <word>` is the postfix predicate only for the bare words; with a
+    # quoted word the NOT is no operator here and the statement is refused.
+    _ = _w("a NOT IN (1)")
+    _ = _w("a NOT LIKE 'x'")
+    _ = _w("a NOT BETWEEN 1 AND 2")
+    _ = _w("a NOT ILIKE 'x'")
+    _ = _w("a NOT SIMILAR TO 'x'")
+    _wrefuses("a NOT \"in\" (1)", "unexpected trailing tokens after query")
+    _wrefuses("a NOT \"like\" 'x'", "unexpected trailing tokens after query")
+    _wrefuses("a NOT SIMILAR \"to\" 'x'", "unexpected trailing tokens after query")
+    _wrefuses("a NOT \"similar\" TO 'x'", "unexpected trailing tokens after query")
+    # `NOT NULL` as a postfix test, and its quoted lookalike.
+    var nn = _e("a NOT NULL")
+    _is_un(nn, SXUN_IS_NOT_NULL)
+    _refuses("a NOT \"null\"", "SQL syntax error")
+    # `ISNULL` / `NOTNULL` are postfix tests bare and aliases quoted.
+    var st = _parse('SELECT a "isnull", b "notnull" FROM t')
+    assert_equal(st.query.select_items[0].out_alias.value(), "isnull")
+    assert_equal(st.query.select_items[1].out_alias.value(), "notnull")
+    _is_un(_e("a ISNULL"), SXUN_IS_NULL)
+
+
+def test_quoted_words_in_the_special_call_grammars_are_plain_names() raises:
+    # Bare, each of these is its own grammar; quoted, it is an ordinary call
+    # (or, where no call can follow, a syntax error at the word).
+    _refuses("cast(a)", "CAST is missing the AS keyword")
+    var c = _e('"cast"(a)')
+    assert_equal(Int(c.tag), Int(SX_CALL))
+    assert_equal(c.text, "cast")
+    _refuses("\"extract\"(year FROM a)", "expected ')'")
+    _refuses("position('a' \"in\" b)", "expected ')'")
+    _refuses("substring(a \"from\" 1)", "expected ')'")
+    _refuses("cast(a AS double \"precision\")", "')' to close CAST(...)")
+    _ = _e("cast(a AS double precision)")
+    # A quoted TYPE name resolves case-insensitively, as in DuckDB: it reaches
+    # the binder lower-folded, in both cast spellings.
+    assert_equal(_arg(_e('CAST(a AS "INTEGER")'), 1).text, "integer")
+    assert_equal(_arg(_e('a::"BigInt"'), 1).text, "bigint")
+    # A quoted `"over"` after a call is an alias, not the window clause.
+    var lag = _parse('SELECT lag(a) "over" FROM t')
+    assert_equal(Int(lag.query.select_items[0].expr.tag), Int(SX_CALL))
+    assert_equal(lag.query.select_items[0].out_alias.value(), "over")
+    var win = _e("lag(a) OVER (ORDER BY b)")
+    assert_equal(Int(win.tag), Int(SX_WINDOW))
+
+
+def test_a_quoted_function_name_resolves_case_insensitively() raises:
+    var s = _e('"SUM"(a)')
+    assert_equal(Int(s.tag), Int(SX_AGG))
+    assert_equal(s.text, "sum")
+    var agg = _e('"sum"(a)')
+    assert_equal(Int(agg.tag), Int(SX_AGG))
+    var c = _e('"Abs"(a)')
+    assert_equal(Int(c.tag), Int(SX_CALL))
+    assert_equal(c.text, "abs")
+    # A quoted aggregate name without a call is a column.
+    _is_col(_e('"SUM"'), "SUM")
+
+
+def test_quoted_qualified_names_and_aliases() raises:
+    var a = _e('"t"."c"')
+    assert_equal(a.qualifier, "t")
+    assert_equal(a.text, "c")
+    var b = _e('t."C"')
+    assert_equal(b.qualifier, "t")
+    assert_equal(b.text, "C")
+    var c = _e('"T".c')
+    assert_equal(c.qualifier, "T")
+    assert_equal(c.text, "c")
+    var st = _parse('SELECT a AS "X""y", b "Two Words", c AS "select" FROM t')
+    assert_equal(st.query.select_items[0].out_alias.value(), 'X"y')
+    assert_equal(st.query.select_items[1].out_alias.value(), "Two Words")
+    assert_equal(st.query.select_items[2].out_alias.value(), "select")
+    # A quoted word is an implicit alias even where the bare word is an
+    # operator this grammar refuses by name, or a clause word.
+    var words: List[String] = [
+        "export_state", "collate", "glob", "escape", "filter", "at", "within",
+        "not", "from", "where", "group", "order", "limit", "having", "union",
+        "qualify", "window", "isnull", "notnull",
+    ]
+    for i in range(len(words)):
+        var w = _parse('SELECT a "' + words[i] + '", b FROM t')
+        assert_equal(w.query.select_items[0].out_alias.value(), words[i])
+        _is_col(w.query.select_items[1].expr, "b")
 
 
 def main() raises:

@@ -10,6 +10,8 @@
 #      1000 levels deep is refused rather than overflowing the stack: without
 #      the limit, about 300 levels fill an 8 MiB stack in the parser alone.
 #   3. Siblings at depth do not add up: the count returns when a level closes.
+#   4. A double-quoted "select" or "case" is a name: a paren before it counts
+#      as a level and the name opens none, as the parser reads them.
 
 from std.testing import TestSuite, assert_equal
 
@@ -159,6 +161,22 @@ def test_derived_tables_in_set_operations_nest_to_the_maximum() raises:
         _accepted_at_the_maximum(_derived_set_operations(100, op))
         assert_equal(_refusal(_derived_set_operations(101, op)), _REFUSAL)
         assert_equal(_refusal(_derived_set_operations(1000, op)), _REFUSAL)
+
+
+def test_quoted_select_and_case_names_nest_as_parentheses() raises:
+    # A double-quoted "select" or "case" is a column name, not a keyword: a
+    # paren before "select" is a parenthesised expression (one level), and a
+    # "case" column opens no level of its own.
+    var selects = "SELECT " + _rep('("select" + ', 100) + "1" + _rep(")", 100)
+    _accepted_at_the_maximum(selects)
+    var past = "SELECT " + _rep('("select" + ', 101) + "1" + _rep(")", 101)
+    assert_equal(_refusal(past), _REFUSAL)
+    var deep = "SELECT " + _rep('("select" + ', 1000) + "1" + _rep(")", 1000)
+    assert_equal(_refusal(deep), _REFUSAL)
+    _accepted_at_the_maximum("SELECT " + _rep("(", 100) + '"case"' + _rep(")", 100))
+    assert_equal(
+        _refusal("SELECT " + _rep("(", 101) + '"case"' + _rep(")", 101)), _REFUSAL
+    )
 
 
 def test_a_statement_nested_a_thousand_deep_is_refused() raises:

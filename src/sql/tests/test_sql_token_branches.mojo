@@ -31,6 +31,10 @@
 #      another character (the mismatch arm).
 #      (mutants caught: any arm's kind or width changed; `~~*` / `!~~*`
 #      flavours swapped)
+#   5b. Quoted identifiers: `"..."` is one TK_IDENT flagged `_IDENT_QUOTED`,
+#      with its case and its bytes kept and `""` read as one `"`; an unquoted
+#      identifier is not flagged; adjacent tokens (`"a".b`, `"a""b"`) lex as
+#      written; an unterminated or an empty one is refused by name.
 #   8. The refusals: `|`, `:` and an unexpected character, each with its own
 #      message, mid-input and at the end.
 #      (mutant caught: a refusal message changed, or a refusal that lexes)
@@ -70,6 +74,7 @@ from sql.sql_token import (
     TK_LIKE_SYM,
     TK_TILDE,
     TK_NTILDE,
+    _IDENT_QUOTED,
 )
 
 
@@ -223,6 +228,79 @@ def test_like_family_flavours() raises:
     # A three-character operator does not swallow what follows it.
     _assert_kinds("~~*a", [Int(TK_LIKE_SYM), Int(TK_IDENT), Int(TK_EOF)])
     _assert_kinds("!~~*a", [Int(TK_LIKE_SYM), Int(TK_IDENT), Int(TK_EOF)])
+
+
+def test_quoted_identifiers_keep_case_bytes_and_flag() raises:
+    var toks = tokenize('"Total Amount" "select" "a""b" "x"')
+    assert_equal(len(toks), 5)
+    var want: List[String] = ["Total Amount", "select", 'a"b', "x"]
+    for i in range(4):
+        assert_equal(Int(toks[i].kind), Int(TK_IDENT))
+        assert_equal(toks[i].text, want[i])
+        assert_equal(toks[i].int_val, _IDENT_QUOTED)
+    # An unquoted identifier is folded and carries no flag.
+    var bare = tokenize("Total")
+    assert_equal(bare[0].text, "total")
+    assert_equal(bare[0].int_val, Int64(0))
+    # Non-ASCII bytes survive as bytes, as in a string literal.
+    var wide = tokenize('"Straße"')
+    assert_equal(wide[0].text, "Straße")
+    assert_equal(len(wide[0].text.as_bytes()), 7)
+    assert_equal(wide[0].int_val, _IDENT_QUOTED)
+
+
+def test_quoted_identifiers_beside_other_tokens() raises:
+    _assert_kinds('"a".b', [Int(TK_IDENT), Int(TK_DOT), Int(TK_IDENT), Int(TK_EOF)])
+    _assert_kinds('a."b"', [Int(TK_IDENT), Int(TK_DOT), Int(TK_IDENT), Int(TK_EOF)])
+    _assert_kinds('"a""b"', [Int(TK_IDENT), Int(TK_EOF)])
+    # Two quoted words with a space between them are two tokens; with no space
+    # `""` is the escape, so the pair is ONE token holding a quote.
+    _assert_kinds('"a" "b"', [Int(TK_IDENT), Int(TK_IDENT), Int(TK_EOF)])
+    var joined = tokenize('"a""b"')
+    assert_equal(joined[0].text, 'a"b')
+    # A quoted word holds characters the bare scanner would split on.
+    var odd = tokenize('"a.b,c(d) e;f"')
+    assert_equal(len(odd), 2)
+    assert_equal(odd[0].text, "a.b,c(d) e;f")
+    # An escape at the very end of the word.
+    var tail = tokenize('"a"""')
+    assert_equal(tail[0].text, 'a"')
+    assert_equal(len(tail), 2)
+
+
+def test_quoted_identifier_refusals_name_what_is_wrong() raises:
+    assert_equal(
+        _error_of('select "a'),
+        "SQL syntax error: unterminated quoted identifier",
+    )
+    assert_equal(
+        _error_of('"'), "SQL syntax error: unterminated quoted identifier"
+    )
+    # `"a""` ends inside the escape: the last `"` is an escape's first half.
+    assert_equal(
+        _error_of('"a""'), "SQL syntax error: unterminated quoted identifier"
+    )
+    assert_equal(
+        _error_of('select "" from t'),
+        "SQL syntax error: zero-length quoted identifier",
+    )
+    assert_equal(
+        _error_of('select a as ""'),
+        "SQL syntax error: zero-length quoted identifier",
+    )
+    # A `#` anywhere in a quoted name is refused, whole message; a `#` only
+    # in a string literal is not an identifier and lexes as before.
+    var hash_msg = String(
+        "SQL not supported: a double-quoted identifier containing '#'. This"
+        " SQL front end names the derived tables it makes with a '#', so a"
+        " name holding one could stand for one of them; rename it without"
+        " the '#'."
+    )
+    assert_equal(_error_of('select 1 as "#union"'), hash_msg)
+    assert_equal(_error_of('select * from "t#0"'), hash_msg)
+    assert_equal(_error_of('"ab#"'), hash_msg)
+    var lit = tokenize("'a#b'")
+    assert_equal(lit[0].text, "a#b")
 
 
 def test_refusals_name_what_they_refuse() raises:

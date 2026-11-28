@@ -226,6 +226,24 @@ def test_value_window_refusals() raises:
     _refuses("lag(v", "SQL syntax error: expected ')'")
 
 
+def test_quoted_names_in_a_window_keep_their_case() raises:
+    var w = _win('sum("V") OVER (PARTITION BY "G", "a"."K" ORDER BY "O" DESC)')
+    assert_equal(w.arg_col, "V")
+    assert_equal(w.partition_by[0], "G")
+    assert_equal(w.partition_by[1], "K")
+    assert_equal(w.partition_qual[1], "a")
+    assert_equal(w.order_by[0], "O")
+    assert_true(w.descending[0])
+    # A quoted `"partition"` opens no PARTITION BY: it is a window name.
+    _refuses(
+        'sum(v) OVER ("partition" BY k)',
+        "a named window reference `OVER (partition ...)`",
+    )
+    _refuses('sum(v) OVER ("w")', "a named window reference `OVER (w ...)`")
+    var rows = _win("sum(v) OVER (ROWS UNBOUNDED PRECEDING)")
+    assert_true(rows.has_frame)
+
+
 def test_window_order_keys_record_nulls_placement_per_key() raises:
     var w = _win("rank() OVER (ORDER BY a DESC NULLS FIRST, b NULLS LAST, c)")
     assert_equal(len(w.nulls_first), 3)

@@ -308,6 +308,26 @@ def test_names_outer_and_extract_aggs_descend_every_node_kind() raises:
     )
 
 
+def test_inner_predicates_bind_null_safe_tests() raises:
+    _inner_has(
+        "SELECT k FROM t WHERE v > (SELECT max(w) FROM u WHERE u.k = t.k AND u.w IS DISTINCT FROM u.g)",
+        ["UnaryOp(NOT, BinaryOp(OR", "UnaryOp(IS_NULL, ColRef(w))", "BinaryOp(EQ, ColRef(w), ColRef(g))"],
+    )
+    _inner_has(
+        "SELECT k FROM t WHERE v > (SELECT max(w) FROM u WHERE u.k = t.k AND u.w > 1 IS NOT TRUE)",
+        ["BinaryOp(OR, UnaryOp(IS_NULL, BinaryOp(GT, ColRef(w)", "UnaryOp(NOT, BinaryOp(GT, ColRef(w)"],
+    )
+    _refused(
+        "SELECT k FROM t WHERE v > (SELECT max(w) FROM u WHERE u.k = t.k AND u.w IS TRUE)",
+        "SQL not supported: `IS [NOT] TRUE` / `IS [NOT] FALSE` over an operand that"
+        " is not a BOOLEAN. DuckDB casts the operand to BOOLEAN first (`1 IS TRUE`"
+        " is true), and this engine has no cast to BOOLEAN, so only a BOOLEAN"
+        " operand is served; a column of another type can be compared instead"
+        " (`i <> 0`). An operand whose type is not known here, such as an"
+        " outer-query column inside a subquery, is refused too.",
+    )
+
+
 def test_unserved_bodies_are_refused_by_name() raises:
     var shape = _CORR + "with GROUP BY, HAVING, DISTINCT, ORDER BY, LIMIT or OFFSET in its body"
     _refused("SELECT k FROM t WHERE v > (SELECT max(w) FROM u WHERE u.k = t.k GROUP BY g)", shape)

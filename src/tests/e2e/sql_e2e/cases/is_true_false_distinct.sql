@@ -1,0 +1,2 @@
+-- IS [NOT] TRUE / FALSE over a boolean column with NULLs are never NULL; IS [NOT] DISTINCT FROM counts two NULLs as equal; the right operand may be a NULL literal.
+SELECT id, b1 IS TRUE AS t, b1 IS NOT TRUE AS nt, b1 IS FALSE AS f, b1 IS NOT FALSE AS nf, b1 IS NOT DISTINCT FROM b2 AS same_b, i32 IS DISTINCT FROM 0 AS i_not_0, k IS NOT DISTINCT FROM NULL AS k_null FROM nulls WHERE id < 200 AND k IS DISTINCT FROM 1 ORDER BY id ASC NULLS LAST

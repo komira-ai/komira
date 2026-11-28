@@ -57,6 +57,12 @@ def _catalog() -> SqlCatalog:
     u.add_field(Field(String("k"), ArrowType.INT64, False))
     u.add_field(Field(String("w"), ArrowType.INT64, True))
     cat.add_parquet(String("u"), String("u.parquet"), u.build())
+    # Column names that are keywords or hold upper case and spaces.
+    var q = SchemaBuilder()
+    q.add_field(Field(String("order"), ArrowType.INT64, False))
+    q.add_field(Field(String("From"), ArrowType.STRING, True))
+    q.add_field(Field(String("Mixed Case"), ArrowType.FLOAT64, True))
+    cat.add_parquet(String("q"), String("q.parquet"), q.build())
     return cat^
 
 
@@ -281,6 +287,51 @@ def test_hand_built_statements_without_a_target_are_refused() raises:
         raise Error("bound a SELECT with no FROM tables")
     except e:
         assert_equal(String(e), "SQL bind error: FROM clause has no tables")
+
+
+def test_quoted_names_resolve_case_insensitively_and_keep_alias_case() raises:
+    # A column resolves against the table's spelling whatever the quoted
+    # case, and the output keeps the table's spelling; an alias keeps the
+    # case it was written in, an inner "" read as one quote.
+    assert_equal(
+        _plan('SELECT "K", "V" AS "Total Amount", s AS "say ""hi""" FROM "T"'),
+        "Project(exprs=[ColRef(k), Alias(ColRef(v), \"Total Amount\"),"
+        " Alias(ColRef(s), \"say \\\"hi\\\"\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n",
+    )
+    # An alias differing from the column only in case is still an alias.
+    assert_equal(
+        _plan('SELECT v AS "V" FROM t'),
+        "Project(exprs=[Alias(ColRef(v), \"V\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n",
+    )
+    # Qualifiers resolve the same way, bare or quoted, in either case.
+    assert_equal(
+        _plan('SELECT "T"."K", t."k", "t".k FROM t'),
+        "Project(exprs=[ColRef(k), ColRef(k), ColRef(k)])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n",
+    )
+    assert_equal(
+        _err('SELECT "Zzz" FROM t'), "SQL bind error: unknown column 'Zzz'"
+    )
+
+
+def test_quoted_keywords_are_columns_and_aliases_end_to_end() raises:
+    assert_equal(
+        _plan('SELECT "order", "from" AS "Select", "MIXED CASE" FROM q'),
+        "Project(exprs=[ColRef(order), Alias(ColRef(From), \"Select\"),"
+        " ColRef(Mixed Case)])\n"
+        "  Scan(path=\"q.parquet\", type=PARQUET, source_kind=COLUMNAR)\n",
+    )
+    # A quoted keyword is a sort key, a filter operand and an implicit alias.
+    assert_equal(
+        _plan('SELECT "order" "where" FROM q WHERE "ORDER" > 1 ORDER BY "where"'),
+        "Sort(keys=[where ASC])\n"
+        "  Project(exprs=[Alias(ColRef(order), \"where\")])\n"
+        "    Filter(predicate=BinaryOp(GT, ColRef(order),"
+        " Literal(ScalarValue(int64, 1))))\n"
+        "      Scan(path=\"q.parquet\", type=PARQUET, source_kind=COLUMNAR)\n",
+    )
 
 
 def main() raises:

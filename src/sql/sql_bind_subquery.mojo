@@ -30,7 +30,7 @@ from sql.sql_ast import (
 )
 from sql.sql_bind_fn_args import _date_diff_days
 from sql.sql_bind_ops import (
-    _map_unop, _bind_sql_operator, _bind_like, _BARE_NULL_REFUSAL, _sx_is_big_int,
+    _bind_sql_unary, _lower_null_safe, _bind_sql_operator, _bind_like, _BARE_NULL_REFUSAL, _sx_is_big_int,
     _big_int_literal_refusal, _big_int_cmp_serves, _bind_big_int_uint64,
     _is_null_comparison, _null_comparison,
 )
@@ -224,6 +224,9 @@ def _bind_corr_scalar(
         raise Error(_BARE_NULL_REFUSAL)
     if sx.tag == SX_INTERVAL:
         raise Error(INTERVAL_STANDALONE_REFUSAL)
+    var null_safe = _lower_null_safe(sx)
+    if null_safe:
+        return _bind_corr_scalar(null_safe.take(), inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound)
     if sx.tag == SX_BINARY:
         var ivl_side = interval_operand_side(sx)
         if ivl_side == 2:
@@ -249,9 +252,10 @@ def _bind_corr_scalar(
     if sx.tag == SX_BOOL:
         return Expr.literal(ScalarValue.from_bool(sx.int_val != Int64(0)))
     if sx.tag == SX_UNARY:
-        return Expr.unary(
-            _map_unop(sx.op),
+        return _bind_sql_unary(
+            sx.op,
             _bind_corr_scalar(sx._agg.value().arg[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound),
+            inner_schema,
         )
     if sx.tag == SX_LIKE:
         var child = _bind_corr_scalar(sx._agg.value().arg[], inner_schema, inner_aliases, outer, outer_refs, catalog, cte_scope, prebound)

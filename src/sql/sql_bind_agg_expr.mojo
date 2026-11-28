@@ -36,7 +36,7 @@ from sql.sql_bind_expr import _bind_scalar
 from sql.sql_bind_fn_args import _fn_arity_msg
 from sql.sql_bind_names import _group_has
 from sql.sql_bind_ops import (
-    _map_unop, _bind_sql_operator, _bind_like, _post_agg_typing_schema,
+    _bind_sql_unary, _lower_null_safe, _bind_sql_operator, _bind_like, _post_agg_typing_schema,
     _BARE_NULL_REFUSAL, _sx_is_big_int, _big_int_literal_refusal, _is_null_comparison,
     _null_comparison, _map_aggfunc,
 )
@@ -585,6 +585,11 @@ def _extract_and_bind_post_agg(
         raise Error(_BARE_NULL_REFUSAL)
     if sx.tag == SX_INTERVAL:
         raise Error(INTERVAL_STANDALONE_REFUSAL)
+    var null_safe = _lower_null_safe(sx)
+    if null_safe:
+        return _extract_and_bind_post_agg(
+            null_safe.take(), input_schema, scope, group_names, agg_out_names, agg_exprs, agg_counter, catalog, cte_scope, prebound
+        )
     if sx.tag == SX_BINARY:
         var ivl_side = interval_operand_side(sx)
         if ivl_side == 2:
@@ -634,11 +639,11 @@ def _extract_and_bind_post_agg(
                 String("unary minus"), String("`-sum(v)`, `ORDER BY -count(*)`"),
                 String("`sum(v) * -1` is served"),
             ))
-        return Expr.unary(
-            _map_unop(sx.op),
-            _extract_and_bind_post_agg(
-                sx._agg.value().arg[], input_schema, scope, group_names, agg_out_names, agg_exprs, agg_counter, catalog, cte_scope, prebound
-            ),
+        var post_child = _extract_and_bind_post_agg(
+            sx._agg.value().arg[], input_schema, scope, group_names, agg_out_names, agg_exprs, agg_counter, catalog, cte_scope, prebound
+        )
+        return _bind_sql_unary(
+            sx.op, post_child^, _post_agg_typing_schema(input_schema, agg_exprs)
         )
     if sx.tag == SX_LIKE:
         if sx.op == SXLIKE_ILIKE:

@@ -1,6 +1,7 @@
 # =============================================================================
 # sql/sql_bind_expr.mojo
-#   Scalar expression binding (`_bind_scalar`) and CASE.
+#   Scalar expression binding (`_bind_scalar`) and CASE, and the unification
+#   of integer CASE arms of different widths (`_unify_integer_arms`).
 # =============================================================================
 
 from arrow.arrow_types import ArrowType
@@ -28,7 +29,7 @@ from sql.sql_bind_decimal import (
     bind_decimal_comparison, swap_decimal_comparison,
 )
 from sql.sql_bind_ops import (
-    _map_unop, _bind_sql_operator, _bind_like, _BARE_NULL_REFUSAL, _sx_is_big_int,
+    _bind_sql_unary, _lower_null_safe, _bind_sql_operator, _bind_like, _BARE_NULL_REFUSAL, _sx_is_big_int,
     _big_int_literal_refusal, _big_int_cmp_serves, _bind_big_int_uint64,
     _int_cast_base_column, _int_cast_arith_cmp, _int_cast_cmp_side, _is_null_comparison,
     _null_comparison,
@@ -89,7 +90,8 @@ def _bind_case(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCatalo
     SQL common-type rule: if any THEN result or the ELSE default is
     float-typed, every integer-literal branch is promoted to a float literal,
     so all branches share the float dtype (`then l_disc_price else 0` binds to
-    an all-float CASE)."""
+    an all-float CASE). Otherwise integer arms of different widths are
+    unified by `_unify_integer_arms`."""
     ref cd = sx._case.value()
     var n = len(cd.conds)
     if n == 0:
@@ -203,10 +205,186 @@ def _bind_case(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCatalo
         results = promoted^
         default_expr = _promote_int_literal_to_float(default_expr^)
 
+    # Integer arms of different widths share INT64 (see `_unify_integer_arms`).
+    var narrow_to_int32 = False
+    if not any_float:
+        var arms = List[Expr]()
+        for i in range(len(results)):
+            arms.append(results[i].copy())
+        arms.append(default_expr.copy())
+        var unified = _unify_integer_arms(arms^, schema, narrow_to_int32)
+        default_expr = unified.pop()
+        results = unified^
+
     var cases = List[WhenCaseData]()
     for i in range(len(results)):
         cases.append(WhenCaseData(conds[i].copy(), results[i].copy()))
-    return Expr.when(cases^, default_expr^)
+    var built = Expr.when(cases^, default_expr^)
+    if narrow_to_int32:
+        return Expr.cast(built^, DType.int32)
+    return built^
+
+
+# `_arm_int_code` answers: an INT64 literal or a NULL (the binders pass an
+# INT64 NULL), which add no type ...
+comptime _ARM_WILDCARD = 0
+# ... and an arm that is no integer this unification serves.
+comptime _ARM_UNSERVED = 1
+
+
+def _int_code(t: ArrowType) -> Int:
+    """The integer type `t` as a code: its bit width, negated for an unsigned
+    type, and `_ARM_UNSERVED` for a type that is no integer this unification
+    serves (UINT64 is among them: it has no common signed type with INT64)."""
+    if t == ArrowType.INT8:
+        return 8
+    if t == ArrowType.INT16:
+        return 16
+    if t == ArrowType.INT32:
+        return 32
+    if t == ArrowType.INT64:
+        return 64
+    if t == ArrowType.UINT8:
+        return -8
+    if t == ArrowType.UINT16:
+        return -16
+    if t == ArrowType.UINT32:
+        return -32
+    return _ARM_UNSERVED
+
+
+def _arm_int_code(arm: Expr, schema: Schema) -> Int:
+    """The code of the CASE arm `arm` (`_int_code`), `_ARM_WILDCARD` for an
+    INT64 integer literal or a NULL, and `_ARM_UNSERVED` for an arm the walk
+    cannot type."""
+    if arm.tag == EXPR_LITERAL:
+        var lv = arm.literal_value()
+        if lv.is_null() or (lv.is_int() and lv.dtype == DType.int64):
+            return _ARM_WILDCARD
+    var missing = String("")
+    var t = walk_expr_field[PlanColRefFields](arm, schema, missing).arrow_type
+    if missing.byte_length() != 0:
+        return _ARM_UNSERVED
+    return _int_code(t)
+
+
+def _common_int_code(a: Int, b: Int) -> Int:
+    """DuckDB's common type of two integer codes: two signed types give the
+    wider, two unsigned the wider, and a signed with an unsigned one the
+    smallest signed type that holds both."""
+    if a > 0 and b > 0:
+        return max(a, b)
+    if a < 0 and b < 0:
+        return min(a, b)
+    var signed = max(a, b)
+    var unsigned = -min(a, b)
+    if signed > unsigned:
+        return signed
+    return 2 * unsigned
+
+
+def _int_literal_fits(v: Int64, code: Int) -> Bool:
+    """True iff the integer `v` is a value of the integer type `code`."""
+    if code > 0:
+        if code == 64:
+            return True
+        var half = Int64(1) << Int64(code - 1)
+        return v >= -half and v < half
+    return v >= 0 and v < (Int64(1) << Int64(-code))
+
+
+def _int_type_name(code: Int) -> String:
+    """DuckDB's name of the integer type `code` (`_int_code`) that the CASE
+    cannot produce: one narrower than INTEGER, or UINTEGER."""
+    if code == 8:
+        return "TINYINT"
+    if code == 16:
+        return "SMALLINT"
+    if code == -8:
+        return "UTINYINT"
+    if code == -16:
+        return "USMALLINT"
+    return "UINTEGER"
+
+
+def _narrow_int_refusal(code: Int) -> String:
+    """The refusal of a CASE whose integer arms have DuckDB's common type
+    `code`, a type this engine's CASE cannot produce."""
+    return (
+        "SQL not supported: a CASE, coalesce, ifnull, nullif, greatest or"
+        " least whose integer arms have the common type "
+        + _int_type_name(code)
+        + " in DuckDB. This engine computes such a CASE in BIGINT and casts"
+        " an answer back to INTEGER only, so the result would have another"
+        " type than DuckDB's. CAST an argument to INTEGER or BIGINT to pick"
+        " the result type."
+    )
+
+
+def _unify_integer_arms(
+    var arms: List[Expr], schema: Schema, mut narrow_to_int32: Bool
+) raises -> List[Expr]:
+    """Unify the value arms of a CASE built from `coalesce`, `ifnull`,
+    `nullif`, `greatest`, `least` or a written CASE when they are integers of
+    different widths. The engine's CASE takes one dtype from its ELSE and
+    wants every arm to share it, so each integer arm narrower than INT64 is
+    cast to INT64 and the CASE is built in INT64. `arms` are the arms the
+    result type is drawn from, a NULL arm among them is an INT64 NULL.
+
+    Returns the arms, and sets `narrow_to_int32`. The arms come back as given
+    and `narrow_to_int32` is False unless every arm is an integer literal, an INT64 NULL or an expression
+    typed INT8, INT16, INT32, INT64, UINT8, UINT16 or UINT32, and at least
+    one of the expression arms is narrower than INT64. A float, string, date,
+    decimal or UINT64 arm leaves the call to the other rules.
+
+    DuckDB's type for such a CASE is the common type of the arms: the common
+    type of the expression arms (`_common_int_code`), widened by each integer
+    literal that is not a value of it, which counts as INTEGER, or BIGINT when
+    it is not an INTEGER value. `narrow_to_int32` is True when that type is
+    INTEGER, and the caller then wraps the CASE in a CAST to INT32. When it is
+    BIGINT the CASE already has the type. Any other common type (TINYINT,
+    SMALLINT, UTINYINT, USMALLINT, UINTEGER) is refused by name
+    (`_narrow_int_refusal`): the engine casts INT64 down to INT32 only
+    (`project_cast._project_cast`), so the CASE could not have DuckDB's
+    type."""
+    var codes = List[Int]()
+    var common = 0
+    var n_typed = 0
+    var n_wide = 0
+    var served = True
+    for i in range(len(arms)):
+        var code = _arm_int_code(arms[i], schema)
+        codes.append(code)
+        if code == _ARM_UNSERVED:
+            served = False
+        elif code != _ARM_WILDCARD:
+            common = code if n_typed == 0 else _common_int_code(common, code)
+            n_typed += 1
+            if code == 64:
+                n_wide += 1
+    if not served or n_typed == n_wide:
+        narrow_to_int32 = False
+        return arms^
+
+    var result = common
+    var out = List[Expr]()
+    for i in range(len(arms)):
+        if codes[i] == _ARM_WILDCARD:
+            out.append(arms[i].copy())
+            if not arms[i].literal_value().is_null():
+                var v = arms[i].literal_value().int_val
+                if not _int_literal_fits(v, common):
+                    result = _common_int_code(
+                        result, 32 if _int_literal_fits(v, 32) else 64
+                    )
+        elif codes[i] == 64:
+            out.append(arms[i].copy())
+        else:
+            out.append(Expr.cast(arms[i].copy(), DType.int64))
+    if result != 32 and result != 64:
+        raise Error(_narrow_int_refusal(result))
+    narrow_to_int32 = result == 32
+    return out^
 
 
 def _case_arm_is_int64(e: Expr, schema: Schema) -> Bool:
@@ -247,6 +425,9 @@ def _bind_scalar(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCata
         )
     if sx.tag == SX_INTERVAL:
         raise Error(INTERVAL_STANDALONE_REFUSAL)
+    var null_safe = _lower_null_safe(sx)
+    if null_safe:
+        return _bind_scalar(null_safe.take(), schema, scope, catalog, cte_scope, prebound)
     if sx.tag == SX_BINARY:
         var ivl_side = interval_operand_side(sx)
         if ivl_side == 2:
@@ -294,9 +475,10 @@ def _bind_scalar(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCata
     if sx.tag == SX_NULL:
         raise Error(_BARE_NULL_REFUSAL)
     if sx.tag == SX_UNARY:
-        return Expr.unary(
-            _map_unop(sx.op),
+        return _bind_sql_unary(
+            sx.op,
             _bind_scalar(sx._agg.value().arg[], schema, scope, catalog, cte_scope, prebound),
+            schema,
         )
     if sx.tag == SX_LIKE:
         var child = _bind_scalar(sx._agg.value().arg[], schema, scope, catalog, cte_scope, prebound)

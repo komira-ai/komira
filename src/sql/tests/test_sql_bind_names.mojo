@@ -17,6 +17,10 @@
 #      internal call, aggregates by their source token (`mean`, not `avg`),
 #      `count(*)` as `count_star()`; a window prints `?column?`, a subquery
 #      `(SELECT ...)`.
+#   4. Quoted identifiers print as written (`sum("A")` is `sum(A)`), in
+#      double quotes with an inner quote doubled when they hold anything but
+#      letters, digits and `_` or start with a digit; a quoted function name
+#      prints folded to lower case (`"SUM"(a)` is `sum(a)`).
 
 from std.testing import TestSuite, assert_equal
 
@@ -74,6 +78,16 @@ def test_operators() raises:
     _n("s NOT ILIKE 'x%'", "(s !~~* 'x%')")
     _n("k IS NULL", "(k IS NULL)")
     _n("k IS NOT NULL", "(k IS NOT NULL)")
+    _n("k IS DISTINCT FROM 0", "(k IS DISTINCT FROM 0)")
+    _n("k IS NOT DISTINCT FROM g", "(k IS NOT DISTINCT FROM g)")
+    _n("k IS DISTINCT FROM NULL", "(k IS DISTINCT FROM NULL)")
+    _n("NULL IS NOT DISTINCT FROM NULL", "(NULL IS NOT DISTINCT FROM NULL)")
+    _n("k + 1 IS DISTINCT FROM 0 + 1", "((k + 1) IS DISTINCT FROM (0 + 1))")
+    _n("b IS TRUE", "(CAST(b AS BOOLEAN) IS NOT DISTINCT FROM true)")
+    _n("b IS NOT TRUE", "(CAST(b AS BOOLEAN) IS DISTINCT FROM true)")
+    _n("b IS FALSE", "(CAST(b AS BOOLEAN) IS NOT DISTINCT FROM false)")
+    _n("b IS NOT FALSE", "(CAST(b AS BOOLEAN) IS DISTINCT FROM false)")
+    _n("k > 1 IS TRUE", "(CAST((k > 1) AS BOOLEAN) IS NOT DISTINCT FROM true)")
     _n("-k", "-(k)")
     _n("-(k + 1)", "-((k + 1))")
     _n("@k", "@(k)")
@@ -97,6 +111,22 @@ def test_calls_aggregates_and_fallbacks() raises:
     _n("CASE WHEN k > 1 THEN 1 END", "CASE  WHEN ((k > 1)) THEN (1) END")
     _n("(SELECT max(w) FROM u)", "(SELECT ...)")
     _n("rank() OVER (ORDER BY k)", "?column?")
+
+
+def test_quoted_identifiers() raises:
+    _n('"A"', "A")
+    _n('sum("A")', "sum(A)")
+    _n('"A" + 1', "(A + 1)")
+    _n('t."A"', "t.A")
+    _n('"_x9"', "_x9")
+    _n('sum("Total Amount")', 'sum("Total Amount")')
+    _n('"a""b" + 1', '("a""b" + 1)')
+    _n('"1a"', '"1a"')
+    _n('"a-b"', '"a-b"')
+    _n('"Straße"', '"Straße"')
+    _n('"T x"."a b"', '"T x"."a b"')
+    _n('"SUM"(a)', "sum(a)")
+    _n('"Abs"(a)', "abs(a)")
 
 
 def main() raises:

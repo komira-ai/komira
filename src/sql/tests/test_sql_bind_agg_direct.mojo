@@ -872,6 +872,42 @@ def test_having_null_comparisons_and_literals() raises:
     )
 
 
+def test_having_null_safe_tests() raises:
+    # `IS DISTINCT FROM` over an aggregate hoists the aggregate once and
+    # lowers to the NULL tests and `=`; a boolean test types its operand
+    # against the aggregate outputs.
+    _check(
+        "SELECT k FROM t GROUP BY k HAVING max(v) IS NOT DISTINCT FROM NULL",
+        "Project(exprs=[ColRef(k)])\n"
+        "  Filter(predicate=UnaryOp(IS_NULL, ColRef(_agg_x0)))\n"
+        "    Aggregate(group_by=[ColRef(k)], aggs=[MAX(ColRef(v)).alias(\"_agg_x0\")])\n"
+        "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT k FROM t GROUP BY k HAVING max(v) IS DISTINCT FROM min(v)",
+        "Project(exprs=[ColRef(k)])\n"
+        "  Filter(predicate=UnaryOp(NOT, BinaryOp(OR, BinaryOp(AND, UnaryOp(IS_NULL, ColRef(_agg_x0)), UnaryOp(IS_NULL, ColRef(_agg_x1))), BinaryOp(AND, BinaryOp(AND, UnaryOp(IS_NOT_NULL, ColRef(_agg_x0)), UnaryOp(IS_NOT_NULL, ColRef(_agg_x1))), BinaryOp(EQ, ColRef(_agg_x0), ColRef(_agg_x1))))))\n"
+        "    Aggregate(group_by=[ColRef(k)], aggs=[MAX(ColRef(v)).alias(\"_agg_x0\"), MIN(ColRef(v)).alias(\"_agg_x1\")])\n"
+        "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT k FROM t GROUP BY k HAVING max(v) > 1 IS NOT FALSE",
+        "Project(exprs=[ColRef(k)])\n"
+        "  Filter(predicate=BinaryOp(OR, UnaryOp(IS_NULL, BinaryOp(GT, ColRef(_agg_x0), Literal(ScalarValue(int64, 1)))), BinaryOp(GT, ColRef(_agg_x0), Literal(ScalarValue(int64, 1)))))\n"
+        "    Aggregate(group_by=[ColRef(k)], aggs=[MAX(ColRef(v)).alias(\"_agg_x0\")])\n"
+        "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT k FROM t GROUP BY k HAVING max(v) IS TRUE",
+        "ERR: SQL not supported: `IS [NOT] TRUE` / `IS [NOT] FALSE` over an operand that"
+        " is not a BOOLEAN. DuckDB casts the operand to BOOLEAN first (`1 IS TRUE`"
+        " is true), and this engine has no cast to BOOLEAN, so only a BOOLEAN"
+        " operand is served; a column of another type can be compared instead"
+        " (`i <> 0`). An operand whose type is not known here, such as an"
+        " outer-query column inside a subquery, is refused too."
+    )
+
+
 def _types(sql: String) raises -> String:
     """The bound plan's output columns as `name:type` pairs (a decimal with its
     precision and scale), or `ERR: ` and the binder's message."""

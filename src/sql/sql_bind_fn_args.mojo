@@ -21,6 +21,7 @@ from sql.sql_ast import (
 from sql.sql_bind_call import _regexp_literal_string
 from sql.sql_bind_expr import (
     _bound_expr_is_float, _promote_int_literal_to_float, _bind_scalar,
+    _unify_integer_arms,
 )
 from sql.sql_bind_ops import _BARE_NULL_REFUSAL
 from sql.sql_bind_scope import (
@@ -98,7 +99,9 @@ def _bind_greatest_least(sx: SqlExpr, dsg: UInt8, schema: Schema, scope: BindSco
 
     Type unification is the CASE rule again (see `_bind_coalesce`): any float
     argument promotes the integer-literal ones, since every arm must share one
-    dtype.
+    dtype. Integer arguments of different widths are cast to INT64 and the CASE
+    takes DuckDB's type for the pair when that is INTEGER
+    (`sql_bind_expr._unify_integer_arms`): `greatest(i16, i32)` is an INTEGER.
 
     Over floats the tree is `_greatest_least_float`: DuckDB orders floats
     totally (NaN above +inf, `-0.0 = 0.0`) and a tie keeps the first
@@ -121,9 +124,22 @@ def _bind_greatest_least(sx: SqlExpr, dsg: UInt8, schema: Schema, scope: BindSco
         var a_float = _bound_expr_is_float(ga, schema)
         var b_float = _bound_expr_is_float(gb, schema)
         return _greatest_least_float(dsg == DSG_GREATEST, ga^, gb^, a_float, b_float)
+
+    # Integer arms of different widths share INT64 (`_unify_integer_arms`).
+    var pair = List[Expr]()
+    pair.append(ga^)
+    pair.append(gb^)
+    var narrow_to_int32 = False
+    var unified = _unify_integer_arms(pair^, schema, narrow_to_int32)
+    gb = unified.pop()
+    ga = unified.pop()
+
     # The tree is `scalar_desugar.greatest_least_of`, the builder the
     # dataframe `greatest` / `least` use too.
-    return greatest_least_of(dsg == DSG_GREATEST, ga^, gb^)
+    var tree = greatest_least_of(dsg == DSG_GREATEST, ga^, gb^)
+    if narrow_to_int32:
+        return Expr.cast(tree^, DType.int32)
+    return tree^
 
 
 def _greatest_least_float(
@@ -185,7 +201,10 @@ def _bind_coalesce(sx: SqlExpr, dsg: UInt8, schema: Schema, scope: BindScope, ca
 
     Type unification is the CASE rule: if any argument is float-typed, the
     integer-literal ones are promoted to float literals, so `coalesce(f, 0)`
-    binds to an all-float CASE, DuckDB's common type for that pair.
+    binds to an all-float CASE, DuckDB's common type for that pair. Integer
+    arguments of different widths are cast to INT64 and the CASE takes DuckDB's
+    type for them when that is INTEGER (`sql_bind_expr._unify_integer_arms`):
+    `coalesce(i32, -100)` is an INTEGER.
     """
     ref cargs = sx._call.value().args
     var n = len(cargs)
@@ -224,10 +243,17 @@ def _bind_coalesce(sx: SqlExpr, dsg: UInt8, schema: Schema, scope: BindScope, ca
         for i in range(len(bound)):
             promoted.append(_promote_int_literal_to_float(bound[i].copy()))
         bound = promoted^
+        return coalesce_of(bound^)
 
+    # Integer arms of different widths share INT64 (`_unify_integer_arms`).
+    var narrow_to_int32 = False
+    var unified = _unify_integer_arms(bound^, schema, narrow_to_int32)
     # The tree is `scalar_desugar.coalesce_of`, the builder the dataframe
     # `coalesce` uses too.
-    return coalesce_of(bound^)
+    var tree = coalesce_of(unified^)
+    if narrow_to_int32:
+        return Expr.cast(tree^, DType.int32)
+    return tree^
 
 
 def _unit_literal_text(sx: SqlExpr, fn_name: String) raises -> String:

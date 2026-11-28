@@ -22,7 +22,7 @@
 #      list strips one cast level only.
 #   7. Literals of every kind, DATE validation (day of month, leap years,
 #      malformed text), CASE typing (float promotion, typed NULL arms and
-#      defaults), and the scalar-position refusals (aggregate in WHERE,
+#      defaults, integer arms of different widths), and the scalar-position refusals (aggregate in WHERE,
 #      window nested in an expression).
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -30,8 +30,9 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 from arrow.arrow_types import ArrowType
 from arrow.schema import Field, Schema, SchemaBuilder
 from plan_expr.expr import Expr
+from plan_expr.scalar_value import ScalarValue
 
-from sql.sql_bind_expr import _bind_scalar
+from sql.sql_bind_expr import _bind_scalar, _unify_integer_arms
 from sql.sql_bind_parquet import ParquetFacts
 from sql.sql_bind_scope import CteScope, _build_bind_scope
 from sql.sql_catalog import SqlCatalog
@@ -55,9 +56,9 @@ def _two(
 
 
 def _catalog() raises -> SqlCatalog:
-    """t(k, v, s, g, d, ts, i32, dc, b, f32, u64, j), u(k, w, s), kk(k, a),
-    mm(k, b), up(K, B), kk2(k, k_right): parquet tables with given schemas
-    (no file is opened)."""
+    """t(k, v, s, g, d, ts, i32, dc, b, f32, u64, j), u(k, w, s),
+    iw(i8, i16, i32, i64, u8, u16, u32, u64, s), kk(k, a), mm(k, b), up(K, B),
+    kk2(k, k_right): parquet tables with given schemas (no file is opened)."""
     var cat = SqlCatalog()
     var t = SchemaBuilder()
     t.add_field(Field(String("k"), ArrowType.INT64, False))
@@ -78,6 +79,17 @@ def _catalog() raises -> SqlCatalog:
     u.add_field(Field(String("w"), ArrowType.INT64, True))
     u.add_field(Field(String("s"), ArrowType.STRING, True))
     cat.add_parquet(String("u"), String("u.parquet"), u.build())
+    var iw = SchemaBuilder()
+    iw.add_field(Field(String("i8"), ArrowType.INT8, True))
+    iw.add_field(Field(String("i16"), ArrowType.INT16, True))
+    iw.add_field(Field(String("i32"), ArrowType.INT32, True))
+    iw.add_field(Field(String("i64"), ArrowType.INT64, True))
+    iw.add_field(Field(String("u8"), ArrowType.UINT8, True))
+    iw.add_field(Field(String("u16"), ArrowType.UINT16, True))
+    iw.add_field(Field(String("u32"), ArrowType.UINT32, True))
+    iw.add_field(Field(String("u64"), ArrowType.UINT64, True))
+    iw.add_field(Field(String("s"), ArrowType.STRING, True))
+    cat.add_parquet(String("iw"), String("iw.parquet"), iw.build())
     _two(cat, "kk", "k", ArrowType.INT64, "a", ArrowType.INT64)
     _two(cat, "mm", "k", ArrowType.INT64, "b", ArrowType.INT64)
     _two(cat, "up", "K", ArrowType.INT64, "B", ArrowType.INT64)
@@ -195,6 +207,107 @@ def test_null_comparisons() raises:
     _check(
         "SELECT k FROM t WHERE NULL = NULL",
         "ERR: SQL not supported: a NULL literal is served as a comparison operand (`x = NULL`, `x <> NULL`) and as an IN-list member (`x IN (1, NULL)`, `x NOT IN (1, NULL)`), as a CASE's `ELSE NULL`, as a CASE `THEN NULL` beside INT64 or FLOAT64 arms, and as a COALESCE / IFNULL argument beside a typed one; anywhere else (a projected NULL, `NOT NULL`, `NULL = NULL`, any other function argument, arithmetic, a CASE or COALESCE whose EVERY value is NULL) it needs a typed NULL value this engine's plan does not carry"
+    )
+
+
+def _predicate_of(sql: String) raises -> String:
+    """The text of the Filter predicate `_got` binds for `sql`."""
+    var text = _got(sql)
+    var key = String("Filter(predicate=")
+    var at = text.find(key)
+    assert_true(at >= 0, text)
+    var rest = String(text[byte = at + key.byte_length():])
+    var nl = rest.find("\n")
+    return String(rest[byte = 0:nl - 1])
+
+
+def test_boolean_tests() raises:
+    _check(
+        "SELECT b IS TRUE AS a, b IS FALSE AS c, b IS NOT TRUE AS d, b IS NOT FALSE AS e FROM t",
+        "Project(exprs=[Alias(BinaryOp(AND, UnaryOp(IS_NOT_NULL, ColRef(b)), ColRef(b)), \"a\"), Alias(BinaryOp(AND, UnaryOp(IS_NOT_NULL, ColRef(b)), UnaryOp(NOT, ColRef(b))), \"c\"), Alias(BinaryOp(OR, UnaryOp(IS_NULL, ColRef(b)), UnaryOp(NOT, ColRef(b))), \"d\"), Alias(BinaryOp(OR, UnaryOp(IS_NULL, ColRef(b)), ColRef(b)), \"e\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    # A comparison is a BOOLEAN operand; a boolean test is itself one.
+    _check(
+        "SELECT k FROM t WHERE k > 1 IS NOT TRUE",
+        "Project(exprs=[ColRef(k)])\n"
+        "  Filter(predicate=BinaryOp(OR, UnaryOp(IS_NULL, BinaryOp(GT, ColRef(k), Literal(ScalarValue(int64, 1)))), UnaryOp(NOT, BinaryOp(GT, ColRef(k), Literal(ScalarValue(int64, 1))))))\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT b IS TRUE IS NOT NULL AS x FROM t",
+        "Project(exprs=[Alias(UnaryOp(IS_NOT_NULL, BinaryOp(AND, UnaryOp(IS_NOT_NULL, ColRef(b)), ColRef(b))), \"x\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    # A NULL literal tests to a constant.
+    _check(
+        "SELECT NULL IS TRUE AS a, NULL IS FALSE AS b, NULL IS NOT TRUE AS c, NULL IS NOT FALSE AS d FROM t",
+        "Project(exprs=[Alias(Literal(ScalarValue(bool, false)), \"a\"), Alias(Literal(ScalarValue(bool, false)), \"b\"), Alias(Literal(ScalarValue(bool, true)), \"c\"), Alias(Literal(ScalarValue(bool, true)), \"d\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    var refusal = (
+        "ERR: SQL not supported: `IS [NOT] TRUE` / `IS [NOT] FALSE` over an operand that"
+        " is not a BOOLEAN. DuckDB casts the operand to BOOLEAN first (`1 IS TRUE`"
+        " is true), and this engine has no cast to BOOLEAN, so only a BOOLEAN"
+        " operand is served; a column of another type can be compared instead"
+        " (`i <> 0`). An operand whose type is not known here, such as an"
+        " outer-query column inside a subquery, is refused too."
+    )
+    _check("SELECT k IS TRUE FROM t", refusal)
+    _check("SELECT s IS NOT FALSE FROM t", refusal)
+    _check("SELECT k FROM t WHERE k + 1 IS NOT TRUE", refusal)
+
+
+def test_is_distinct_from() raises:
+    var same = "BinaryOp(OR, BinaryOp(AND, UnaryOp(IS_NULL, ColRef(k)), UnaryOp(IS_NULL, ColRef(g))), BinaryOp(AND, BinaryOp(AND, UnaryOp(IS_NOT_NULL, ColRef(k)), UnaryOp(IS_NOT_NULL, ColRef(g))), BinaryOp(EQ, ColRef(k), ColRef(g))))"
+    _check(
+        "SELECT k FROM t WHERE k IS NOT DISTINCT FROM g",
+        "Project(exprs=[ColRef(k)])\n"
+        "  Filter(predicate=" + same + ")\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT k FROM t WHERE k IS DISTINCT FROM g",
+        "Project(exprs=[ColRef(k)])\n"
+        "  Filter(predicate=UnaryOp(NOT, " + same + "))\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    # The comparison inside is the ordinary `=` for the operand types: an
+    # INT32 column against an integer literal, a DECIMAL against a float.
+    var i32_eq = _predicate_of("SELECT k FROM t WHERE i32 = 0")
+    assert_true(i32_eq in _predicate_of("SELECT k FROM t WHERE i32 IS NOT DISTINCT FROM 0"))
+    var dc_eq = _predicate_of("SELECT k FROM t WHERE dc = v")
+    assert_true(dc_eq in _predicate_of("SELECT k FROM t WHERE dc IS DISTINCT FROM v"))
+    var s_eq = _predicate_of("SELECT k FROM t WHERE s = 'x'")
+    assert_true(s_eq in _predicate_of("SELECT k FROM t WHERE s IS DISTINCT FROM 'x'"))
+    # A NULL literal on either side folds to the NULL test of the other side.
+    _check(
+        "SELECT k IS DISTINCT FROM NULL AS a, NULL IS DISTINCT FROM k AS b, k IS NOT DISTINCT FROM NULL AS c, NULL IS NOT DISTINCT FROM k AS d FROM t",
+        "Project(exprs=[Alias(UnaryOp(IS_NOT_NULL, ColRef(k)), \"a\"), Alias(UnaryOp(IS_NOT_NULL, ColRef(k)), \"b\"), Alias(UnaryOp(IS_NULL, ColRef(k)), \"c\"), Alias(UnaryOp(IS_NULL, ColRef(k)), \"d\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT NULL IS DISTINCT FROM NULL AS a, NULL IS NOT DISTINCT FROM NULL AS b FROM t",
+        "Project(exprs=[Alias(Literal(ScalarValue(bool, false)), \"a\"), Alias(Literal(ScalarValue(bool, true)), \"b\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def test_boolean_equality_binds_through_boolean_operators() raises:
+    # Two boolean operands of = / <> bind as AND / OR / NOT; the plan has no
+    # boolean column-vs-column comparison.
+    var eq = "BinaryOp(OR, BinaryOp(AND, ColRef(b), ColRef(b)), BinaryOp(AND, UnaryOp(NOT, ColRef(b)), UnaryOp(NOT, ColRef(b))))"
+    assert_equal(_predicate_of("SELECT k FROM t WHERE b = b"), eq)
+    assert_equal(_predicate_of("SELECT k FROM t WHERE b <> b"), "UnaryOp(NOT, " + eq + ")")
+    # IS NOT DISTINCT FROM over two booleans reaches the same `=`.
+    assert_true(eq in _predicate_of("SELECT k FROM t WHERE b IS NOT DISTINCT FROM b"))
+    # A boolean against a constant, and an ordered comparison, stay plain.
+    assert_equal(
+        _predicate_of("SELECT k FROM t WHERE b = TRUE"),
+        "BinaryOp(EQ, ColRef(b), Literal(ScalarValue(bool, true)))",
+    )
+    assert_equal(
+        _predicate_of("SELECT k FROM t WHERE b < b"), "BinaryOp(LT, ColRef(b), ColRef(b))"
     )
 
 
@@ -431,6 +544,124 @@ def test_case_without_else_over_non_numeric_arms() raises:
         "SELECT CASE WHEN k > 1 THEN 1 WHEN k > 2 THEN i32 END AS c FROM t",
         "ERR: SQL not supported: a CASE with no ELSE whose THEN arms are neither INT64 nor FLOAT64 (a string, a date, a boolean or a narrower integer). The omitted ELSE is a NULL of the arms' type, the typed NULL values this engine's plan can carry are INT64 and FLOAT64 only, and every CASE arm must share one type. Write an explicit ELSE of the same type."
     )
+
+
+def _case_proj(item: String) -> String:
+    return (
+        "Project(exprs=[" + item + "])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def _c64(col: String) -> String:
+    return "Cast(ColRef(" + col + "), int64)"
+
+
+def _gt(col: String, v: String) -> String:
+    return "BinaryOp(GT, ColRef(" + col + "), Literal(ScalarValue(int64, " + v + ")))"
+
+
+def test_case_over_mixed_integer_widths() raises:
+    # INT8 and INT64 arms: both share INT64, the CASE is BIGINT (no cast back).
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN i8 ELSE i64 END AS c FROM iw",
+        _case_proj(
+            "Alias(When(WHEN " + _gt("i64", "1") + " THEN " + _c64("i8")
+            + ", ELSE ColRef(i64)), \"c\")"
+        ),
+    )
+    # INT16 and INT32 arms: INTEGER, the CASE is cast back to INT32.
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN i16 ELSE i32 END AS c FROM iw",
+        _case_proj(
+            "Alias(Cast(When(WHEN " + _gt("i64", "1") + " THEN " + _c64("i16")
+            + ", ELSE " + _c64("i32") + "), int32), \"c\")"
+        ),
+    )
+    # Several arms and a literal ELSE that fits INTEGER; an INT64 arm with a
+    # literal ELSE; a THEN NULL arm beside INT64 arms.
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN i32 WHEN i64 > 2 THEN u8 ELSE -1 END AS c FROM iw",
+        _case_proj(
+            "Alias(Cast(When(WHEN " + _gt("i64", "1") + " THEN " + _c64("i32")
+            + ", WHEN " + _gt("i64", "2") + " THEN " + _c64("u8")
+            + ", ELSE Literal(ScalarValue(int64, -1))), int32), \"c\")"
+        ),
+    )
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN i8 WHEN i64 > 2 THEN i64 ELSE 5 END AS c FROM iw",
+        _case_proj(
+            "Alias(When(WHEN " + _gt("i64", "1") + " THEN " + _c64("i8")
+            + ", WHEN " + _gt("i64", "2") + " THEN ColRef(i64)"
+            + ", ELSE Literal(ScalarValue(int64, 5))), \"c\")"
+        ),
+    )
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN NULL ELSE i64 END AS c FROM iw",
+        _case_proj(
+            "Alias(When(WHEN " + _gt("i64", "1")
+            + " THEN Literal(ScalarValue(null, int64)), ELSE ColRef(i64)), \"c\")"
+        ),
+    )
+    # A NULL arm or an omitted ELSE beside a narrower integer stays refused.
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN NULL ELSE i32 END AS c FROM iw",
+        "ERR: SQL not supported: a CASE arm `THEN NULL` beside arms that are neither INT64 nor FLOAT64 (a string, a date, a boolean or a narrower integer). DuckDB types the NULL as its sibling arms; the typed NULL values this engine's plan can carry are INT64 and FLOAT64 only, and every CASE arm must share one type. A NULL beside INT64 or FLOAT64 arms is served; so is an omitted ELSE.",
+    )
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN i8 WHEN i64 > 2 THEN i64 END AS c FROM iw",
+        "ERR: SQL not supported: a CASE with no ELSE whose THEN arms are neither INT64 nor FLOAT64 (a string, a date, a boolean or a narrower integer). The omitted ELSE is a NULL of the arms' type, the typed NULL values this engine's plan can carry are INT64 and FLOAT64 only, and every CASE arm must share one type. Write an explicit ELSE of the same type.",
+    )
+
+
+def _iw_schema() raises -> Schema:
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("i8"), ArrowType.INT8, True))
+    sb.add_field(Field(String("u64"), ArrowType.UINT64, True))
+    return sb.build()
+
+
+def test_unify_integer_arms_directly() raises:
+    var sch = _iw_schema()
+    var null64 = Expr.literal(ScalarValue.null(DType.int64))
+    var narrow = False
+    # A NULL arm adds no type: INT8 beside it stays TINYINT, a type the CASE
+    # cannot produce, so the unification refuses it by name.
+    var a = List[Expr]()
+    a.append(Expr.col_ref("i8"))
+    a.append(null64.copy())
+    var refused = String("")
+    try:
+        _ = _unify_integer_arms(a^, sch, narrow)
+    except e:
+        refused = String(e)
+    assert_equal(
+        refused,
+        "SQL not supported: a CASE, coalesce, ifnull, nullif, greatest or least whose integer arms have the common type TINYINT in DuckDB. This engine computes such a CASE in BIGINT and casts an answer back to INTEGER only, so the result would have another type than DuckDB's. CAST an argument to INTEGER or BIGINT to pick the result type.",
+    )
+    # A column the schema lacks, and a UINT64 column, leave the arms as given.
+    var b = List[Expr]()
+    b.append(Expr.col_ref("i8"))
+    b.append(Expr.col_ref("zz"))
+    narrow = True
+    var ub = _unify_integer_arms(b^, sch, narrow)
+    assert_equal(String(ub[0]), "ColRef(i8)")
+    assert_false(narrow)
+    var c = List[Expr]()
+    c.append(Expr.col_ref("i8"))
+    c.append(Expr.col_ref("u64"))
+    narrow = True
+    var uc = _unify_integer_arms(c^, sch, narrow)
+    assert_equal(String(uc[0]), "ColRef(i8)")
+    assert_false(narrow)
+    # Literals and NULLs alone are not touched.
+    var d = List[Expr]()
+    d.append(Expr.literal(ScalarValue.from_int64(1)))
+    d.append(null64.copy())
+    narrow = True
+    var ud = _unify_integer_arms(d^, sch, narrow)
+    assert_equal(String(ud[0]), "Literal(ScalarValue(int64, 1))")
+    assert_false(narrow)
 
 
 def test_scalar_position_refusals() raises:

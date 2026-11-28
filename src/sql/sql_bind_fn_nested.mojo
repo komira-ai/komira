@@ -22,6 +22,7 @@ from sql.sql_ast import (
 from sql.sql_bind_cast import _bound_expr_is_string
 from sql.sql_bind_expr import (
     _bound_expr_is_float, _promote_int_literal_to_float, _bind_scalar,
+    _unify_integer_arms,
 )
 from sql.sql_bind_fn_args import _date_diff_days
 from sql.sql_bind_scope import (
@@ -473,6 +474,10 @@ def _bind_nullif(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCata
     this IR has no string-typed NULL literal, so `nullif('a', 'a')` has no
     expressible answer.
 
+    An integer `a` of a type narrower than INT64 is the exception to the
+    INT64 NULL: its ELSE is cast to INT64, and the CASE is cast back to INT32
+    when `a` is an INT32 (`_unify_integer_arms`).
+
     `nullif(NULL, 1)`: the comparison is NULL, so no branch fires and the ELSE
     returns `a`, which is NULL, as in DuckDB.
     """
@@ -499,14 +504,27 @@ def _bind_nullif(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCata
         na = _promote_int_literal_to_float(na^)
         nb = _promote_int_literal_to_float(nb^)
     var null_dt = DType.float64 if is_f else DType.int64
+    # The ELSE is `a`: an integer `a` narrower than INT64 is cast to INT64 to
+    # share the INT64 NULL's type, and the answer has `a`'s type, as DuckDB's
+    # (`sql_bind_expr._unify_integer_arms`). The comparison reads `a` as bound.
+    var else_arm = na.copy()
+    var narrow_to_int32 = False
+    if not is_f:
+        var one = List[Expr]()
+        one.append(na.copy())
+        var unified = _unify_integer_arms(one^, schema, narrow_to_int32)
+        else_arm = unified.pop()
     var ncases = List[WhenCaseData]()
     ncases.append(
         WhenCaseData(
-            Expr.binary(BIN_EQ, na.copy(), nb^),
+            Expr.binary(BIN_EQ, na^, nb^),
             Expr.literal(ScalarValue.null(null_dt)),
         )
     )
-    return Expr.when(ncases^, na^)
+    var tree = Expr.when(ncases^, else_arm^)
+    if narrow_to_int32:
+        return Expr.cast(tree^, DType.int32)
+    return tree^
 
 
 def _bind_days_in_month(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:

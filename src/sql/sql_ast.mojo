@@ -33,7 +33,7 @@ comptime SX_CALL: UInt8 = 9  # scalar fn call `name(args...)` (name in `text`; a
 comptime SX_SUBQUERY: UInt8 = 10  # subquery reference by index (int_val -> SelectStmt.subqueries): the GENERIC subquery-operand node. Scalar `(SELECT ...)` AND the predicate subqueries — `[NOT] EXISTS (...)`, `x [NOT] IN (...)` — all use this node. The referenced `SubqueryDef.kind` (scalar / exists / not-exists / in / not-in) drives how the query binder pre-binds it; the outer binder just looks up `prebound[idx]` regardless of kind (a scalar Expr for SCALAR, a boolean predicate Expr for EXISTS/IN).
 comptime SX_CASE: UInt8 = 11  # `CASE [operand] WHEN cond THEN res ... [ELSE default] END`. Children in `_case`: parallel WHEN-condition / THEN-result Slabs + a 0/1-entry ELSE Slab. A SIMPLE case (`CASE x WHEN v THEN ...`) is DESUGARED at parse time into a searched CASE (each condition becomes `x = v`), so the binder + AST only ever see the searched form. Binds to an `EXPR_WHEN` IR node (`_bind_case`); an omitted ELSE binds to a NULL literal (SQL default). The q8 market-share `sum(CASE WHEN ... THEN ... ELSE 0 END)` routes its CASE through the aggregate-argument binder (`_bind_agg_from_sx` -> `_bind_scalar`).
 comptime SX_WINDOW: UInt8 = 12  # `f(...) OVER (PARTITION BY ... ORDER BY ... [ROWS/RANGE frame])` window function. Metadata in `_window` (a `SqlWindowData`): the SXWIN_* function, the aggregate ARG column (empty for ranking fns), the partition/order column lists + descending flags + written NULLS placement, and the frame bounds. `SqlWindowData` holds NO nested `SqlExpr` (arg + partition/order are plain column NAMES, per the corpus), so the AST stays ACYCLIC through this node (no new recursion cycle / no AOT-wedge risk). Binds to a `LogicalPlan.partition_by` (PLAN_PARTITION_BY) node — the existing engine window operator, no new executor.
-comptime SX_UNARY: UInt8 = 13  # `NOT child` / `child IS [NOT] NULL` — a UNARY predicate. The SXUN_* code is in `op`; the child lives in the `_agg` slot, exactly as SX_LIKE's does. ⚠ THE `_agg` REUSE IS DELIBERATE, NOT A SHORTCUT: a new `Optional[SqlAggData]`-shaped FIELD would add another self-referential storage path for Mojo's AOT whole-program synthesis to walk, and this frontend has already paid for one of those (see SX_SUBQUERY's note on the `_bind_scalar <-> _bind_select` cycle that deadlocks the compiler). One-child nodes share one slot.
+comptime SX_UNARY: UInt8 = 13  # `NOT child` / `child IS [NOT] NULL` / `child IS [NOT] TRUE|FALSE` — a UNARY predicate. The SXUN_* code is in `op`; the child lives in the `_agg` slot, exactly as SX_LIKE's does. ⚠ THE `_agg` REUSE IS DELIBERATE, NOT A SHORTCUT: a new `Optional[SqlAggData]`-shaped FIELD would add another self-referential storage path for Mojo's AOT whole-program synthesis to walk, and this frontend has already paid for one of those (see SX_SUBQUERY's note on the `_bind_scalar <-> _bind_select` cycle that deadlocks the compiler). One-child nodes share one slot.
 comptime SX_BOOL: UInt8 = 14  # `TRUE` / `FALSE`, value in `int_val` (0/1). ⚠ NOT folded into SX_INT: `flag = 1` and `flag = true` are different queries, only the second type-checks against a BOOL column, and binding a bool literal as an integer would push the type error down into a comparison kernel instead of raising in the binder.
 
 # ★ TEMPORAL LITERALS (2026-09-21). `timestamp 'YYYY-MM-DD HH:MM:SS[.f]'` /
@@ -162,8 +162,8 @@ comptime SUBQ_UNION: UInt8 = 9
 # The qualifier the parser gives the derived table it wraps a whole UNION ALL in
 # when the last branch carries ORDER BY / LIMIT / OFFSET (the clauses belong to
 # the union, so the parser rewrites it to `SELECT * FROM (<union>) <alias>
-# ORDER BY ... LIMIT ...`). A `#` cannot occur in a lower-folded identifier, so
-# no query can name it. The relation key is `<alias>#<subquery index>`.
+# ORDER BY ... LIMIT ...`). A `#` cannot occur in an identifier (the tokenizer
+# refuses it in a double-quoted one), so no query can name it. The relation key is `<alias>#<subquery index>`.
 comptime _UNION_RESULT_ALIAS: String = "#union"
 
 # --- FROM join-kind codes (on `JoinClause.kind`, one per FROM relation after the
@@ -212,6 +212,12 @@ comptime SXOP_MOD: UInt8 = 13  # `%`  — DuckDB's modulo = `mod()`
 comptime SXOP_POW: UInt8 = 14  # `^`  — power = `pow()`: DOUBLE, left-assoc, tighter than `*`
 comptime SXOP_CONCAT: UInt8 = 15  # `||` — NULL-PROPAGATING concatenation (NOT `concat()`, which SKIPS a NULL)
 comptime SXOP_STARTS_WITH: UInt8 = 16  # `^@` — `starts_with()`
+# `a IS [NOT] DISTINCT FROM b`: a comparison that is never NULL (two NULLs are
+# the same, a NULL and a value differ). Kept as its own code, not rewritten by
+# the parser, so the unaliased column is named `(a IS DISTINCT FROM b)` as
+# DuckDB names it; the binder lowers it to `=` / IS NULL / AND / OR.
+comptime SXOP_DISTINCT: UInt8 = 17  # `a IS DISTINCT FROM b`
+comptime SXOP_NOT_DISTINCT: UInt8 = 18  # `a IS NOT DISTINCT FROM b`
 
 # --- SQL unary operator codes (in `SqlExpr.op` for SX_UNARY; mapped to UN_* by
 # the binder's `_map_unop`, which RAISES on a code it does not know rather than
@@ -227,6 +233,15 @@ comptime SXUN_IS_NOT_NULL: UInt8 = 2  # `x IS NOT NULL`
 # not lex at all (`@`).
 comptime SXUN_NEGATE: UInt8 = 3  # `-x`  -> UN_NEGATE (type-preserving)
 comptime SXUN_ABS: UInt8 = 4  # `@x`  -> UN_ABS (type-preserving) = `abs()`
+# The four boolean tests. Each is never NULL: `IS TRUE` / `IS FALSE` answer
+# false for a NULL operand, `IS NOT TRUE` / `IS NOT FALSE` answer true. Kept as
+# their own codes so the unaliased column is named the way DuckDB names it.
+# The binder's `_bind_sql_unary` builds them from AND / OR / NOT / IS NULL
+# (`_map_unop` has no single IR node for them).
+comptime SXUN_IS_TRUE: UInt8 = 5  # `x IS TRUE`
+comptime SXUN_IS_NOT_TRUE: UInt8 = 6  # `x IS NOT TRUE`
+comptime SXUN_IS_FALSE: UInt8 = 7  # `x IS FALSE`
+comptime SXUN_IS_NOT_FALSE: UInt8 = 8  # `x IS NOT FALSE`
 
 # --- SX_LIKE flavours (in `SqlExpr.op` for SX_LIKE) ----------------------------
 comptime SXLIKE_LIKE: UInt8 = 0  # `x [NOT] LIKE 'p'`

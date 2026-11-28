@@ -3,7 +3,10 @@
 The analytical SQL front end: a tokenizer, a parser and a binder. `sql.sql_token` lexes a
 SQL string into a flat `List[Token]` that ends in `TK_EOF`: unquoted
 identifiers are lower-folded (keywords and function names are ordinary
-identifiers that the parser classifies by text), a single-quoted literal keeps
+identifiers that the parser classifies by text), a double-quoted identifier
+(`"Total"`) keeps its case and bytes with `""` read as one `"` and is flagged
+in `Token.int_val`, so the parser never reads it as a keyword (an unterminated
+or an empty one is refused), a single-quoted literal keeps
 its bytes with `''` read as one quote, and an integer past `Int64.MAX` keeps
 its decimal digits in `Token.text`. Bad input raises an `Error` that starts
 with `SQL syntax error` (or `SQL not supported` for an operator this dialect
@@ -93,7 +96,9 @@ The expression binder (`sql_bind_expr`, `sql_bind_call`, `sql_bind_cast`,
 `sql_bind_fn_args`, `sql_bind_fn_nested`, `sql_bind_timestamp`) lowers one
 `SqlExpr` to a plan `Expr` against a schema and a `BindScope`. `sql_bind_expr`
 binds literals, columns, operators, `CASE` and a scalar subquery by index into
-the bodies the caller bound first; `sql_bind_call` resolves a function call
+the bodies the caller bound first, and gives the arms of a `CASE`, `coalesce`,
+`nullif`, `greatest` or `least` that are integers of different widths one type
+(`_unify_integer_arms`); `sql_bind_call` resolves a function call
 through `sql_fn_table` (a declared UDF fills in for a name no row lowers) and
 enforces the arity of each row that does not check its own; the other four hold the desugars: `CAST` and
 `DECIMAL` literals, the argument-shape functions (`greatest`, `coalesce`,

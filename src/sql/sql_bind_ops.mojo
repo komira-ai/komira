@@ -30,10 +30,11 @@ from plan_ir.logical_plan import (
 )
 from sql.sql_ast import (
     SXAGG_AVG, SXAGG_COUNT, SXAGG_MAX, SXAGG_MIN, SXAGG_SUM, SXLIKE_ILIKE, SXOP_ADD,
-    SXOP_AND, SXOP_CONCAT, SXOP_DIV, SXOP_EQ, SXOP_GE, SXOP_GT, SXOP_IDIV, SXOP_LE,
-    SXOP_LT, SXOP_MOD, SXOP_MUL, SXOP_NE, SXOP_OR, SXOP_POW, SXOP_STARTS_WITH, SXOP_SUB,
-    SXUN_ABS, SXUN_IS_NOT_NULL, SXUN_IS_NULL, SXUN_NEGATE, SXUN_NOT, SX_BINARY, SX_CALL,
-    SX_COLUMN, SX_INT, SX_NULL, SX_STRING, SqlExpr,
+    SXOP_AND, SXOP_CONCAT, SXOP_DIV, SXOP_DISTINCT, SXOP_EQ, SXOP_GE, SXOP_GT, SXOP_IDIV, SXOP_LE,
+    SXOP_LT, SXOP_MOD, SXOP_MUL, SXOP_NE, SXOP_NOT_DISTINCT, SXOP_OR, SXOP_POW, SXOP_STARTS_WITH, SXOP_SUB,
+    SXUN_ABS, SXUN_IS_FALSE, SXUN_IS_NOT_FALSE, SXUN_IS_NOT_NULL, SXUN_IS_NOT_TRUE,
+    SXUN_IS_NULL, SXUN_IS_TRUE, SXUN_NEGATE, SXUN_NOT, SX_BINARY, SX_CALL,
+    SX_COLUMN, SX_INT, SX_NULL, SX_STRING, SX_UNARY, SqlExpr,
 )
 from sql.sql_bind_scope import (
     BindScope, _resolve_col,
@@ -63,6 +64,110 @@ def _map_unop(op: UInt8) raises -> UInt8:
     raise Error(
         "SQL internal error: unknown unary operator code " + String(Int(op))
     )
+
+
+comptime _BOOL_TEST_REFUSAL = (
+    "SQL not supported: `IS [NOT] TRUE` / `IS [NOT] FALSE` over an operand that"
+    " is not a BOOLEAN. DuckDB casts the operand to BOOLEAN first (`1 IS TRUE`"
+    " is true), and this engine has no cast to BOOLEAN, so only a BOOLEAN"
+    " operand is served; a column of another type can be compared instead"
+    " (`i <> 0`). An operand whose type is not known here, such as an"
+    " outer-query column inside a subquery, is refused too."
+)
+
+
+def _sxun_is_bool_test(op: UInt8) -> Bool:
+    """`op` is one of `IS [NOT] TRUE` / `IS [NOT] FALSE`."""
+    return (
+        op == SXUN_IS_TRUE or op == SXUN_IS_NOT_TRUE
+        or op == SXUN_IS_FALSE or op == SXUN_IS_NOT_FALSE
+    )
+
+
+def _lower_null_safe(sx: SqlExpr) -> Optional[SqlExpr]:
+    """The SQL tree an `IS [NOT] DISTINCT FROM` node, or a boolean test of a
+    NULL literal, stands for; None for every other node. Every binder site
+    that walks SX_BINARY / SX_UNARY calls this first and binds the result
+    instead, so no later step sees a distinct operator.
+
+    `a IS NOT DISTINCT FROM b` is true when both are NULL, false when exactly
+    one is, and `a = b` when neither is:
+    `(a IS NULL AND b IS NULL) OR ((a IS NOT NULL AND b IS NOT NULL) AND a = b)`.
+    Each disjunct is never NULL (the `=` is only reached beside two non-NULL
+    operands, and Kleene `false AND NULL` is false), so the whole is never
+    NULL. `IS DISTINCT FROM` is its NOT. The comparison is the ordinary `=`,
+    so int-width, DECIMAL and string operands behave as they do under `=`.
+
+    A NULL literal operand is folded here, since a bare NULL cannot be bound:
+    `x IS DISTINCT FROM NULL` (either side) is `x IS NOT NULL` and
+    `x IS NOT DISTINCT FROM NULL` is `x IS NULL`; two NULL literals are the
+    constant false (`IS DISTINCT FROM`) or true (`IS NOT DISTINCT FROM`).
+    `NULL IS TRUE` / `NULL IS FALSE` are the constant false, `NULL IS NOT
+    TRUE` / `NULL IS NOT FALSE` the constant true."""
+    if sx.tag == SX_UNARY:
+        if not _sxun_is_bool_test(sx.op) or sx._agg.value().arg[].tag != SX_NULL:
+            return None
+        return Optional[SqlExpr](
+            SqlExpr.bool_lit(sx.op == SXUN_IS_NOT_TRUE or sx.op == SXUN_IS_NOT_FALSE)
+        )
+    if sx.tag != SX_BINARY or (sx.op != SXOP_DISTINCT and sx.op != SXOP_NOT_DISTINCT):
+        return None
+    var same = sx.op == SXOP_NOT_DISTINCT
+    ref left = sx._binary.value().left[]
+    ref right = sx._binary.value().right[]
+    if left.tag == SX_NULL and right.tag == SX_NULL:
+        return Optional[SqlExpr](SqlExpr.bool_lit(same))
+    if left.tag == SX_NULL or right.tag == SX_NULL:
+        var other = right.copy() if left.tag == SX_NULL else left.copy()
+        return Optional[SqlExpr](
+            SqlExpr.unary(SXUN_IS_NULL if same else SXUN_IS_NOT_NULL, other^)
+        )
+    var both_null = SqlExpr.binary(
+        SXOP_AND,
+        SqlExpr.unary(SXUN_IS_NULL, left.copy()),
+        SqlExpr.unary(SXUN_IS_NULL, right.copy()),
+    )
+    var both_present = SqlExpr.binary(
+        SXOP_AND,
+        SqlExpr.unary(SXUN_IS_NOT_NULL, left.copy()),
+        SqlExpr.unary(SXUN_IS_NOT_NULL, right.copy()),
+    )
+    var values_equal = SqlExpr.binary(
+        SXOP_AND, both_present^, SqlExpr.binary(SXOP_EQ, left.copy(), right.copy())
+    )
+    var is_same = SqlExpr.binary(SXOP_OR, both_null^, values_equal^)
+    if same:
+        return Optional[SqlExpr](is_same^)
+    return Optional[SqlExpr](SqlExpr.unary(SXUN_NOT, is_same^))
+
+
+def _bind_sql_unary(op: UInt8, var child: Expr, typing: Schema) raises -> Expr:
+    """Every SX_UNARY site's LAST step: `child` is already bound by that
+    site's own walker. A boolean test is built from AND / OR / NOT and the NULL
+    tests, with Kleene logic making each never NULL:
+    `x IS TRUE` = `x IS NOT NULL AND x`, `x IS FALSE` = `x IS NOT NULL AND NOT x`,
+    `x IS NOT TRUE` = `x IS NULL OR NOT x`, `x IS NOT FALSE` = `x IS NULL OR x`.
+    Any other operator is its IR node. A boolean test over a non-BOOLEAN
+    operand is refused by name (`_BOOL_TEST_REFUSAL`)."""
+    if not _sxun_is_bool_test(op):
+        return Expr.unary(_map_unop(op), child^)
+    if _operand_type(child, typing) != ArrowType.BOOL:
+        raise Error(_BOOL_TEST_REFUSAL)
+    if op == SXUN_IS_TRUE:
+        return Expr.binary(
+            BIN_AND, Expr.unary(UN_IS_NOT_NULL, child.copy()), child^
+        )
+    if op == SXUN_IS_FALSE:
+        return Expr.binary(
+            BIN_AND,
+            Expr.unary(UN_IS_NOT_NULL, child.copy()),
+            Expr.unary(UN_NOT, child^),
+        )
+    if op == SXUN_IS_NOT_TRUE:
+        return Expr.binary(
+            BIN_OR, Expr.unary(UN_IS_NULL, child.copy()), Expr.unary(UN_NOT, child^)
+        )
+    return Expr.binary(BIN_OR, Expr.unary(UN_IS_NULL, child.copy()), child^)
 
 
 def _map_binop(op: UInt8) raises -> UInt8:
@@ -392,9 +497,29 @@ def _float_dtype(t: ArrowType) -> DType:
 
 def _bind_comparison(op: UInt8, var lhs: Expr, var rhs: Expr, typing: Schema) raises -> Expr:
     """`lhs <op> rhs`, the DECIMAL side cast to the float's type when the other
-    side is a float that is not a constant (see the section header)."""
+    side is a float that is not a constant (see the section header).
+
+    Two non-constant BOOLEAN operands of `=` / `<>` are bound through the
+    boolean operators, since the plan's column-vs-column comparison has no
+    boolean pair: `a = b` is `(a AND b) OR (NOT a AND NOT b)` and `a <> b` its
+    NOT. Under Kleene logic that is NULL exactly when an operand is NULL, as
+    DuckDB's `=` is. `IS [NOT] DISTINCT FROM` over two boolean columns reaches
+    this through its `=`. A boolean against a constant keeps the plain
+    comparison, which the literal kernels serve."""
     var lt = _operand_type(lhs, typing)
     var rt = _operand_type(rhs, typing)
+    if (
+        (op == BIN_EQ or op == BIN_NE) and lt == ArrowType.BOOL and rt == ArrowType.BOOL
+        and not _is_constant(lhs) and not _is_constant(rhs)
+    ):
+        var both_true = Expr.binary(BIN_AND, lhs.copy(), rhs.copy())
+        var both_false = Expr.binary(
+            BIN_AND, Expr.unary(UN_NOT, lhs^), Expr.unary(UN_NOT, rhs^)
+        )
+        var equal = Expr.binary(BIN_OR, both_true^, both_false^)
+        if op == BIN_NE:
+            return Expr.unary(UN_NOT, equal^)
+        return equal^
     # A float constant is left as it is: the optimizer folds it to a literal,
     # and the comparison kernels serve a DECIMAL against a float literal.
     if lt == ArrowType.DECIMAL128 and rt.is_floating() and not _is_constant(rhs):

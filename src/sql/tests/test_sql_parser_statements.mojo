@@ -53,6 +53,13 @@
 #      `SELECT *` over the union parked as a derived table (qualifier `#union`)
 #      after every branch; on any earlier branch each is a syntax error naming
 #      the clause; a derived table may hold a UNION ALL, wrapped the same way.
+#  14. A double-quoted identifier is a name wherever a bare word could be a
+#      keyword: every stop-list word is an alias in the table-alias slot when
+#      quoted; a quoted table, schema-qualified table, CTE, USING column,
+#      derived-table column and COPY source keep their case; a quoted clause
+#      or operator word after a query is a trailing token, not the clause;
+#      COPY option values may be quoted words. (catches: a quoted word read as
+#      the clause it spells)
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -671,6 +678,72 @@ def test_derived_table_column_list() raises:
     _refuses("SELECT * FROM (1)", "expected SELECT in a derived table")
     _refuses("SELECT * FROM (SELECT 1", "')' to close the derived table")
     assert_equal(Int(st.query.select_items[0].expr.tag), Int(SX_COLUMN))
+
+
+def test_a_quoted_stop_list_word_is_a_table_alias() raises:
+    var words: List[String] = [
+        "from", "where", "group", "order", "limit", "offset", "having", "as",
+        "and", "or", "join", "inner", "cross", "on", "left", "right", "full",
+        "outer", "natural", "using", "union", "intersect", "except", "semi",
+        "anti", "asof", "positional", "fetch", "qualify", "window", "pivot",
+        "unpivot", "tablesample", "isnull", "notnull",
+    ]
+    for i in range(len(words)):
+        var st = _parse('SELECT * FROM t "' + words[i] + '"')
+        assert_equal(st.query.from_tables[0].rel_alias, words[i])
+        var st2 = _parse('SELECT * FROM t AS "' + words[i] + '" WHERE k = 1')
+        assert_equal(st2.query.from_tables[0].rel_alias, words[i])
+    # The alias keeps its case.
+    assert_equal(_parse('SELECT * FROM t "Big"').query.from_tables[0].rel_alias, "Big")
+
+
+def test_quoted_table_cte_and_column_list_names() raises:
+    var q = _parse('SELECT * FROM "Order"')
+    assert_equal(q.query.from_tables[0].name, "Order")
+    var s = _parse('SELECT * FROM "Main"."Order" AS "o"')
+    assert_equal(s.query.from_tables[0].name, "Order")
+    assert_equal(s.query.from_tables[0].rel_alias, "o")
+    var w = _parse('WITH "union" AS (SELECT 1 AS a) SELECT * FROM "union"')
+    assert_equal(w.query.ctes[0].name, "union")
+    assert_equal(w.query.from_tables[0].name, "union")
+    _refuses('WITH "union" (SELECT 1) SELECT 1', "expected keyword 'as'")
+    var u = _parse('SELECT * FROM a JOIN b USING ("K", "select")')
+    assert_equal(u.query.joins[0].using_cols[0], "K")
+    assert_equal(u.query.joins[0].using_cols[1], "select")
+    var d = _parse('SELECT x FROM (SELECT 1, 2) AS "D" ("X", "from")')
+    assert_equal(d.query.subqueries[0].col_names[0], "X")
+    assert_equal(d.query.subqueries[0].col_names[1], "from")
+    assert_equal(d.query.from_tables[0].rel_alias, "D")
+    # A quoted table named like a function the grammar serves in FROM stays a
+    # table; the bare spelling is the function call.
+    _refuses("SELECT * FROM lateral (SELECT 1) x", "LATERAL")
+    _refuses('SELECT * FROM "lateral" (SELECT 1) x', "unexpected trailing tokens after query")
+    assert_equal(_parse('SELECT * FROM "lateral"').query.from_tables[0].name, "lateral")
+
+
+def test_a_quoted_clause_word_after_a_query_is_a_trailing_token() raises:
+    _refuses("SELECT * FROM t WHERE k = 1 QUALIFY k", "the QUALIFY clause")
+    _refuses('SELECT * FROM t WHERE k = 1 "qualify" k', "unexpected trailing tokens after query")
+    _refuses('SELECT * FROM t WHERE k = 1 "window" k', "unexpected trailing tokens after query")
+    _ = _parse("SELECT * FROM t WHERE k = 1 UNION ALL SELECT 2")
+    _refuses('SELECT * FROM t WHERE k = 1 "union" SELECT 2', "unexpected trailing tokens after query")
+    _refuses('SELECT * FROM t WHERE k = 1 "limit" 2', "unexpected trailing tokens after query")
+    # `USING SAMPLE` needs the bare word after USING.
+    _refuses("SELECT * FROM t USING SAMPLE 10", "TABLESAMPLE / USING SAMPLE")
+    _refuses('SELECT * FROM t USING "sample" 10', "unexpected trailing tokens after query")
+    # A quoted `"as"` / `"where"` is no clause word after a select list.
+    var from_less = _parse('SELECT 1 "where"')
+    assert_equal(from_less.query.select_items[0].out_alias.value(), "where")
+    _refuses('SELECT 1 "x" FROM t "y" "z"', "unexpected trailing tokens after query")
+
+
+def test_copy_takes_quoted_names_and_option_words() raises:
+    var st = _parse("COPY \"Order\" TO 'out.csv' (FORMAT \"CSV\")")
+    assert_equal(st.query.from_tables[0].name, "Order")
+    assert_equal(Int(st.fmt), Int(WFMT_CSV))
+    _copy_pair("(FORMAT \"PARQUET\", COMPRESSION \"ZSTD\")", WFMT_PARQUET, WCOMP_ZSTD)
+    var ct = _parse('CREATE TABLE "Out" AS SELECT 1')
+    assert_equal(ct.target_table, "Out")
 
 
 def main() raises:

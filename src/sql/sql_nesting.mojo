@@ -16,7 +16,7 @@
 # thread, the Node addon's session thread). 100 levels take at most about
 # 3.5 MiB and leave the rest to the binder, the optimizer and the run.
 
-from .sql_token import TK_IDENT, TK_LPAREN, Token
+from .sql_token import TK_IDENT, TK_LPAREN, Token, _tok_is_kw
 
 
 comptime MAX_SQL_NESTING: Int = 100
@@ -38,17 +38,15 @@ def enter_sql_nesting(mut depth: Int) raises:
 def primary_opens_a_level(tokens: List[Token], pos: Int) -> Bool:
     """Whether the primary expression at `tokens[pos]` is one level of
     nesting: a parenthesised expression (a parenthesised SELECT counts as a
-    subquery instead), a function call or a CASE."""
+    subquery instead), a function call or a CASE. `SELECT` and `CASE` are
+    keywords only unquoted, as the parser reads them: a double-quoted
+    `"select"` or `"case"` is a name."""
     var k = tokens[pos].kind
     var has_next = pos + 1 < len(tokens)
     if k == TK_LPAREN:
-        return not (
-            has_next
-            and tokens[pos + 1].kind == TK_IDENT
-            and tokens[pos + 1].text == "select"
-        )
+        return not (has_next and _tok_is_kw(tokens[pos + 1], "select"))
     if k == TK_IDENT:
-        return tokens[pos].text == "case" or (
+        return _tok_is_kw(tokens[pos], "case") or (
             has_next and tokens[pos + 1].kind == TK_LPAREN
         )
     return False
