@@ -1,7 +1,7 @@
 # lz4
 
-The LZ4 codecs over the system liblz4, in two framings that are not
-interchangeable on the wire:
+The LZ4 codecs over lz4 1.10.0, linked into the program, in two framings that
+are not interchangeable on the wire:
 
 - `lz4.codec`: the raw block. `lz4_compress` and `lz4_decompress`
   take a byte span and return a new `List[UInt8]`; `lz4_compress_into` and
@@ -14,9 +14,10 @@ interchangeable on the wire:
   `lz4_frames_decompress_into` decodes one or more concatenated frames, and
   `Lz4FrameDecoder` keeps one decompression context for reuse across frames.
 
-liblz4 is opened at run time (`liblz4.so.1`, `liblz4.dylib` on macOS) once per
-process, so there is nothing to link, but the library must be installed where
-the program runs. A destination that is too small, a corrupt block or frame,
+The C library is linked statically (`//third_party/lz4`, with every symbol
+renamed `komira_lz4_*`, so the copy can share a process with any other liblz4),
+so nothing is opened at run time and no liblz4 need be installed where the
+program runs. A destination that is too small, a corrupt block or frame,
 and a truncated frame each raise; nothing writes past the destination. The
 package does no streaming compression and exposes no compression level or
 frame preference.
@@ -111,15 +112,17 @@ assert_true(truncated)
 ## Build files
 
 This package is built with buildrules' `mojo_package` and packaged for mopm as `lz4`, version 0.1.0
-(`mopm.toml`). The library is `src/lz4/`, its tests are `tests/`. The package links no native code: it
-opens the system liblz4 when a program first calls it, so `mopm.toml` declares it under `[native-dependencies]`
-with `mode = "load"`, and `mopm pack` writes the conda package that ships liblz4 (`lz4-c`) as a dependency of the
-package, so installing `lz4` installs liblz4. The files that are not sources:
+(`mopm.toml`). The library is `src/lz4/`, its tests are `tests/`. It has one native library: lz4 is
+linked, `[native.komira_lz4]` of `mopm.toml`, whose archive `libkomira_lz4.a` is built by the `native_library`
+target `//third_party/lz4:lz4_native` (lz4 1.10.0 from its pinned archive, C, every symbol renamed
+`komira_lz4_*`) and named in `natives` of `BUCK`; `mopm.toml` declares it `provided = true` (mopm compiles no
+source for it). It is linked into every test of the package and of the packages that depend on it, and `:conda`
+holds it at `lib/libkomira_lz4.a`. The files that are not sources:
 
 | file | what |
 |---|---|
-| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the liblz4 dependency, where the library and its tests are |
-| `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no Mojo dependencies, so it pins the toolchain and, under `system_libs`, the conda package of the library it opens at run time (`lz4-c`, for each platform; mopm 0.0.83 or later writes it, and a lock without it fails `lock_graphs.bxl:check`) |
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the linked lz4, where the library and its tests are |
+| `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no Mojo dependencies and opens no library at run time, so it pins the toolchain only |
 | `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
 | `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
 
@@ -127,7 +130,8 @@ package, so installing `lz4` installs liblz4. The files that are not sources:
 source, a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it
 writes, and build `komira//src/lz4:lib` on the farm.
 
-`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.lz4-0.1.0-mojo1.1.0_0.conda`): the `.mojoc`, requiring
-`lz4-c`. `:lz4` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`); it declares
-`dlopen = ["liblz4.so.1"]`, which `:lz4_conda` (the release set's packaging) turns into the same requirement.
+`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.lz4-0.1.0-mojo1.1.0_0.conda`): the `.mojoc` and
+`lib/libkomira_lz4.a`, requiring nothing. `:lz4` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`); it
+names the older `//third_party/lz4:lz4` in `c_deps` with `native_static`, so `:lz4_conda` (the release set's
+packaging) ships the archive and a dependent's link finds its owner.
 It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.

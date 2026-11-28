@@ -21,6 +21,8 @@ and compared with the rows worked out by hand:
   source rows, plain and gzip;
 - test_to_csv_index_changes_nothing: index=True and index=False write the same
   bytes;
+- test_to_csv_default_sep_and_header_change_nothing: sep="," and header=True
+  write the bytes of the call without them;
 - test_the_verb_chooses_the_format_not_the_extension: `to_csv("x.parquet")`
   writes CSV and `to_json("x.csv")` writes JSON lines;
 - test_a_relative_path_is_resolved_at_the_call: the file lands in the working
@@ -28,7 +30,8 @@ and compared with the rows worked out by hand:
 - test_an_existing_destination_is_replaced: the old file is gone, the new one
   is whole; so is the Parquet file the frame itself reads;
 - test_argument_refusals_leave_no_file: each refusal made before the library is
-  called, by exact type and message, with the directory listing unchanged;
+  called, by exact type and message (among them another `sep`, `header=False`
+  and a list of header names), with the directory listing unchanged;
 - test_engine_refusals_name_their_code_and_step: a URL at bind, a missing
   directory at execute, a binary column and its untouched destination, and
   the session writing again after each;
@@ -330,6 +333,15 @@ def test_to_csv_index_changes_nothing(lib_dir):
         assert all_bytes(p.join("a.csv")) == all_bytes(p.join("b.csv"))
 
 
+def test_to_csv_default_sep_and_header_change_nothing(lib_dir):
+    with workspace() as (s, p):
+        df = frame(s, p).sort_values("id")
+        df.to_csv(p.join("a.csv"))
+        df.to_csv(p.join("b.csv"), sep=",", header=True)
+        assert all_bytes(p.join("b.csv")) == all_bytes(p.join("a.csv"))
+        assert all_bytes(p.join("b.csv")).startswith(HEADER)
+
+
 def test_the_verb_chooses_the_format_not_the_extension(lib_dir):
     with workspace() as (s, p):
         df = frame(s, p).sort_values("id")
@@ -459,13 +471,39 @@ def test_argument_refusals_leave_no_file(lib_dir):
                 "pass compression='gzip', 'zstd' or None",
             ),
             (lambda: df.to_csv(path, index="no"), TypeError, "to_csv index must be a bool, not str"),
+            (
+                lambda: df.to_csv(path, sep=";"),
+                UnsupportedOperation,
+                "to_csv(sep=';') is not supported: komira writes ',' between cells",
+            ),
+            (
+                lambda: df.to_csv(path, sep="\t"),
+                UnsupportedOperation,
+                "to_csv(sep='\\t') is not supported: komira writes ',' between cells",
+            ),
+            (
+                lambda: df.to_csv(path, header=False),
+                UnsupportedOperation,
+                "to_csv(header=False) is not supported: komira always writes the header line",
+            ),
+            (
+                lambda: df.to_csv(path, header=["a", "b", "c", "d", "e"]),
+                UnsupportedOperation,
+                "to_csv(header=['a', 'b', 'c', 'd', 'e']) is not supported: "
+                "komira writes the column names as the header; rename the columns instead",
+            ),
+            (
+                lambda: df.to_csv(path, header=None),
+                TypeError,
+                "to_csv header must be a bool or a list of str, not NoneType",
+            ),
             (lambda: df.to_parquet(3), TypeError, "path must be a str or os.PathLike[str], not int"),
         ]
         for call, cls, message in cases:
             refused(call, cls, message)
             assert sorted(os.listdir(p.out)) == before, message
-        e = raised(lambda: df.to_csv(path, sep=";"))
-        assert type(e) is TypeError and "sep" in str(e), repr(e)
+        e = raised(lambda: df.to_csv(path, lineterminator="\r\n"))
+        assert type(e) is TypeError and "lineterminator" in str(e), repr(e)
         assert sorted(os.listdir(p.out)) == before
         good_write(s, p)
 
@@ -572,6 +610,7 @@ TESTS = [
     test_to_csv_compression_argument_overrides_the_extension,
     test_to_json_lines_rows_and_compression,
     test_to_csv_index_changes_nothing,
+    test_to_csv_default_sep_and_header_change_nothing,
     test_the_verb_chooses_the_format_not_the_extension,
     test_a_relative_path_is_resolved_at_the_call,
     test_an_existing_destination_is_replaced,

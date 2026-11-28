@@ -1064,6 +1064,24 @@ python_binding_test(
     ],
 )
 
+# DataFrame.resample (test_frame_resample_duckdb.py): the duckdb/ family's
+# inputs and the pinned pandas. Each rule over a date and a timestamp column of
+# a file written in the test, at the edges of weeks and months, equals DuckDB's
+# answer to date_trunc with pandas' label, and pandas' own resample of the same
+# file, the buckets with no rows left out.
+python_binding_test(
+    name = "frame_resample_duckdb_test",
+    src = "test_frame_resample_duckdb.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:pandas",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+)
+
 # One pandas session over TPC-H scale factor 1 lineitem and orders
 # (test_pandas_session_tpch.py): a date cut, a two-key group by, the decimal sums,
 # means, least and greatest of TPC-H q1, a computed decimal column, a sorted first

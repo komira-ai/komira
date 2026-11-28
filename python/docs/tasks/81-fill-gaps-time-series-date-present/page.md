@@ -63,10 +63,10 @@ Output:
 - The arguments are literals. A column as an argument (DuckDB's lateral form, one series per row) is refused by name.
 - The series column is named `generate_series` or `range`; `AS t(d)` names it `d`.
 - A `DATE` column joins with the series' `TIMESTAMP` at midnight, as in the example, and so do two `DATE` or two `TIMESTAMP` columns.
-- There is no frame form yet: the pandas-shaped frame has no `reindex`, `asfreq` or `resample`, and the polars-shaped `komira.pl` has no `upsample`. Use the SQL form.
+- There is no frame form yet: the pandas-shaped frame has no `reindex` or `asfreq`, and its `resample` gives a bucket with no rows no row ([rank 38](../38-resample-time-series-daily-weekly-monthly/page.md)); the polars-shaped `komira.pl` has no `upsample`, and its `group_by_dynamic` gives an empty window no row either. Use the SQL form.
 
 ## Related
 
-- [How do I resample a time series to daily, weekly or monthly?](../38-resample-time-series-daily-weekly-monthly/page.md) (rank 38, partial)
+- [How do I resample a time series to daily, weekly or monthly?](../38-resample-time-series-daily-weekly-monthly/page.md) (rank 38, works)
 - [How do I group by month or week?](../80-group-month-week/page.md) (rank 80, partial)
 - [How do I left join and keep unmatched rows?](../36-left-join-keep-unmatched-rows/page.md) (rank 36, works)

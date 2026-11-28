@@ -184,21 +184,30 @@ class Scope:
             raise Broadcast()
         return ColRef(name)
 
-    def arrow_type(self, node: Node) -> str:
-        """The name of the Arrow type the engine derives for `node`: over the
-        frame's columns and the columns gathered for windows, or, in a scope
-        that gathers aggregates, over the aggregates gathered so far, which
-        are all such a node reads."""
+    def _field(self, node: Node):
         from komira._plan import expr_field
         from komira._plan._agg import agg_field
-        from komira._plan._wire import arrow_name
 
         fields = self._fields
         if self._aggregates is not None:
             fields = tuple(agg_field(slot, agg, self._fields) for slot, agg in self._aggregates)
         elif self._windows is not None:
             fields = tuple(self._windows.fields)
-        return arrow_name(expr_field(node, fields).arrow_type_id)
+        return expr_field(node, fields)
+
+    def arrow_type(self, node: Node) -> str:
+        """The name of the Arrow type the engine derives for `node`: over the
+        frame's columns and the columns gathered for windows, or, in a scope
+        that gathers aggregates, over the aggregates gathered so far, which
+        are all such a node reads."""
+        from komira._plan._wire import arrow_name
+
+        return arrow_name(self._field(node).arrow_type_id)
+
+    def zone(self, node: Node) -> str:
+        """The time zone of a timestamp `node`, as `arrow_type` derives its
+        type; '' for none."""
+        return self._field(node).tz
 
     def predicate(self, node: Node, what: str) -> Node:
         """`node` as a predicate: a boolean column or value is compared with

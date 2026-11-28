@@ -592,10 +592,17 @@ def test_floor_refusals_by_message():
         f".dt.floor('2h') cuts to a multiple of a unit, and the plan cuts to one fixed unit: use {listed}",
     )
     refuses(
-        lambda: s.dt.floor("W"),
+        lambda: s.dt.floor("QS"),
         UnsupportedOperation,
-        f".dt.floor('W') is not a unit this release cuts to: use {listed}",
+        f".dt.floor('QS') is not a unit this release cuts to: use {listed}",
     )
+    for freq in ("W", "W-SUN", "MS", "ME", "M"):
+        refuses(
+            lambda: s.dt.floor(freq),
+            UnsupportedOperation,
+            f".dt.floor({freq!r}) cuts to a week or a month, which has no fixed length, and pandas "
+            f"refuses it too: bucket the rows with df.resample({freq!r}, on=column)",
+        )
     refuses(lambda: s.dt.floor(5), TypeError, ".dt.floor() freq must be a str, not int")
     refuses(
         lambda: s.dt.floor("D", ambiguous="NaT"),
