@@ -32,6 +32,14 @@ export_file(
     visibility = ["//python/smoke:"],
 )
 
+# The Node.js install page, whose js and text blocks node/BUCK's
+# quickstart_test holds to the quickstart (node/examples).
+export_file(
+    name = "docs/install_node.md",
+    src = "docs/install_node.md",
+    visibility = ["//node:"],
+)
+
 # The files under .github/, which the root doc_tree's glob skips, at their
 # paths, for the interpreter list (//tools/build/lint:interpreter_budget).
 doc_tree(

@@ -14,6 +14,11 @@ on Apple silicon; CPython 3.11 to 3.14). It registers Parquet files and runs
 SQL over them, with the answers read as pyarrow. See [installing komira for Python](docs/install.md) and the
 [changelog](python/CHANGELOG.md).
 
+**From Node.js** (not on npm yet): the package `@komira-ai/komira` is built
+and tested on every pull request, and runs SQL over Parquet files with the
+answers read as apache-arrow; see
+[installing komira for Node.js](docs/install_node.md).
+
 The build tooling (Mojo rules, a hermetic toolchain, execution platforms,
 examples and end-to-end tests) lives in [`tools/build/`](tools/build/).
 
@@ -44,6 +49,7 @@ remote-execution service, and what to do when something goes wrong.
 | read | for |
 |---|---|
 | [docs/install.md](docs/install.md) | installing the Python package from PyPI: what it needs, the first program, what does not work yet, troubleshooting |
+| [docs/install_node.md](docs/install_node.md) | installing the Node.js package (not on npm yet): what it needs, the first program, what does not work yet, troubleshooting |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | developer setup: `./buck2` and the pinned release, local builds and what they guarantee, running the checks, remote execution for those who run a service, the host floor, caching, troubleshooting |
 | [tools/build/README.md](tools/build/README.md) | a map of the build tooling, and how another repository uses komira, as a git external cell or a submodule |
 | [tools/build/mojo/README.md](tools/build/mojo/README.md) | the Mojo rules: `mojo_library`, `mojo_binary`, `mojo_test` |

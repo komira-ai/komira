@@ -7,6 +7,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 |---|---|
 | What komira is, and the map of its docs | [README.md](../README.md) |
 | Installing the Python package from PyPI: the platforms and what it needs, the first program and what it prints, what does not work yet, troubleshooting | [install.md](install.md) |
+| Installing the Node.js package (not on npm yet): what it needs, the first program and what it prints, what does not work yet, troubleshooting | [install_node.md](install_node.md) |
 | What each release of the Python package added or changed: the sections it keeps, and the entries (one file each) no section holds yet | [python/CHANGELOG.md](../python/CHANGELOG.md), [python/changelog.d/](../python/changelog.d/) |
 | What the Python package's DataFrames can do, one page per feature, with examples | [python/docs/](../python/docs/dataframe/overview.md) |
 | What komira can do for each of the 100 most common data-analysis tasks, ranked, with the issues that block the rest, and a runnable example with its output per task that has one | [tasks/README.md](tasks/README.md) |

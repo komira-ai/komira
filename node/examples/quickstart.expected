@@ -1,0 +1,15 @@
+<version>
+<abi_version>
+[ { Count: 6n } ]
+[ { days: 6n, rain: 9.5 } ]
+city: Utf8
+days: Int64 not null
+mean: Float64
+hottest: Int64
+{ city: 'Lima', days: 2n, mean: 19, hottest: 20n }
+{ city: 'Oslo', days: 3n, mean: 3, hottest: 5n }
+{ city: 'Pune', days: 1n, mean: 31, hottest: 31n }
+[ 'Pune', 'Lima', 'Lima' ]
+parquet footer '<cwd>/no_such_file.parquet': no such file, or it cannot be read
+parse: SQL syntax error: expected keyword 'by' at line 1, column 42
+true
