@@ -25,15 +25,15 @@ src/arrow_ipc/tests/test_c_data_interface_release_nested.mojo	the Arrow C Data I
 src/arrow_ipc/tests/test_ipc_body_compression_edges.mojo	the codec trait's opaque decompression-context ABI, as a stand-in conformer forwarding LZ4's context to Lz4Frame
 src/byte_buffer/src/byte_buffer/mmap_region.mojo	mmap and the komira_open_ro C shim
 src/compression/src/compression/bzip2_buffer.mojo	libbz2's buffer-to-buffer calls
-src/compression/src/compression/codec_libraries.mojo	the process-lifetime handles of libzstd, libbz2 and liblzma
+src/compression/src/compression/codec_libraries.mojo	the process-lifetime handles of libbz2 and liblzma
 src/compression/src/compression/compression_codecs.mojo	the C codec libraries, and memcpy into caller-owned buffers
 src/compression/src/compression/snappy_block.mojo	the snappy C API (statically linked)
 src/compression/src/compression/xz_buffer.mojo	liblzma's single-call buffer encode and decode
-src/compression/src/compression/zstd_frame.mojo	libzstd's one-shot frame calls
+src/compression/src/compression/zstd_frame.mojo	zstd's one-shot frame calls, linked statically
 src/csv/csv_sink.mojo	pwrite into disjoint ranges of the output file
 src/http_client/tests/test_L2_tls_starttls_upgrade.mojo	the socketpair and pthread FFI of the STARTTLS upgrade test: the server thread argument and the PEM buffers it carries
 src/job_supervisor/tests/test_s3_transport_first_byte.mojo	the socket and pthread FFI of its one-shot 127.0.0.1 listener: the listener thread's heap argument and the C NULLs it passes
-src/lz4/src/lz4/frame.mojo	liblz4, loaded once per process
+src/lz4/src/lz4/frame.mojo	lz4's frame calls, linked statically
 src/morsel/tests/test_vtable_source_failure_paths.mojo	the scan vtable C ABI of a stand-in connector: the connector state and scratch buffers it hands the engine through abi("C") thunks
 src/objectstore/local_fs_conditional_store.mojo	the filesystem C shim (komira_fs_enoent, komira_fs_errno_name)
 src/objectstore/tests/test_cov_in_memory_stores.mojo	the pthread_create and pthread_join FFI of its lock-wait case: the reader thread's heap argument and the C NULLs it passes
