@@ -178,9 +178,10 @@ them cannot do yet is the first question at the end. The count of such tasks is 
     document relies only on `komira` running SQL text through the shared library, as Python and
     TypeScript do.
   - The untyped Mojo package `komira` has no linux-arm64 build because the shared library it calls
-    has none, as the Python wheel has none. Whether `komira_physical`, which does not use the
-    shared library, builds there is the Mojo SDK design's to say. This is listed with the gate's
-    exceptions (the question at the end).
+    has none, as the Python wheel has none. This is listed with the gate's exceptions (the question
+    at the end). `komira_physical` is not built for linux-arm64 either: no mopm package is built
+    there, and its closure links `awslc`, which has no linux-arm64 build (the Mojo SDK design). It
+    is outside the gate, so it is not an exception.
 
 ## What each form can show
 
@@ -360,8 +361,8 @@ The Mojo SDK design settles the Mojo printer: `print(result)` writes the table `
 makes (an ASCII box with a row of column names, a row of type labels such as `str` and `i64`, and
 a footer line `N rows`, held exactly by its unit test `test_exact_table_alignment`), after that
 design moves `format_table` into `arrow`. The text is made when `sql` returns, so `print(result)`
-cannot fail. A Mojo physical plan example prints as the Mojo SDK design's section 5 says for
-`komira_physical`, and its `expected_output.txt` holds what that prints. Slice 5 builds the one Mojo
+cannot fail. A Mojo physical plan example prints the same text as a Mojo example, as the Mojo SDK
+design says in its sections 5 and 9, and its `expected_output.txt` holds that text. Slice 5 builds the one Mojo
 runner, `mojo_task_examples`, for both Mojo forms; slice 6 adds the Mojo physical plan tree and its
 examples to it, after the Mojo SDK design's slice 9 builds `komira_physical`.
 
@@ -474,7 +475,7 @@ page shows. Slice 2 fixes their exact text by running them. What they do is fixe
   a statement with `;`, and ends with a line feed. The `sql` profile of the checker refuses an
   `example.sql` whose last line is not a `;`-ended line followed by a line feed. It also refuses,
   by name and line, a string literal that spans lines and a `/* ... */` comment (a SQL example has
-  neither), and a `--` comment line that ends with `;`; those are the places a `;` at a line's end
+  neither), and a `--` comment that ends a line with `;`, whether alone on its line or after code (`... -- note;`); those are the places a `;` at a line's end
   would not end a statement. A `;` that ends a line in the middle of a statement's code cannot be
   told from a statement's end. Such a file splits a statement in two, and both runs fail with the
   engine's parse error, naming the file; it is the author's to avoid.
@@ -643,7 +644,7 @@ has no `files` yet; its examples read files in the SQL text until it does.
 | `sql` | none until slice 2 (then `python/docs/sql_tasks`) | `example.sql` | `probe_<name>.sql` | `sql` | `SQL` |
 | `python` | `python/docs/tasks` | `example.py` | `probe_<name>.py` | `python` | `py` |
 | `typescript` | `node/docs/tasks` | `example.ts` | `probe_<name>.ts` | `typescript` | `ts` |
-| `mojo` | none until `komira` is published (then `src/komira/docs/tasks`) | `example.mojo` | `probe_<name>.mojo` | `mojo` | `Mojo` |
+| `mojo` | none until the Mojo SDK design's slice 1 is done: `komira_error`, `arrow`, `arrow_ipc` and `komira` published, mopm packing a shared library, and the install test finding it (then `src/komira/docs/tasks`) | `example.mojo` | `probe_<name>.mojo` | `mojo` | `Mojo` |
 | `mojo_plan` | added with Mojo physical plan (then `src/komira_physical/docs/tasks`) | `example.mojo` | `probe_<name>.mojo` | `mojo` | `Mojo` |
 
 Every profile has `expected_output.txt` (`text`), `page.md` and `probe_<name>.error.txt`. The
