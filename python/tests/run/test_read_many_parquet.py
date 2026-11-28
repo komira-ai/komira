@@ -21,9 +21,9 @@ runs through komira_plan_stream.
   a glob that matches nothing names the pattern (PARQUET_GLOB_NO_MATCH), as
   does a directory with no `.parquet` file; files whose schemas differ name
   both files (PARQUET_FILES_SCHEMA_MISMATCH);
-- `?`, `{a,b}` and `[...]` are glob characters too; a file that exists is read
-  as one file even when its name holds one (`part[1].parquet`, not
-  `part1.parquet`);
+- `?`, `{a,b}` and `[...]` are glob characters too; a file that exists keeps
+  the one-file route even when its name holds one (`part[1].parquet`): its
+  schema through komira_parquet_schema, a source of that one path;
 - one file is read as before: through komira_parquet_schema, never
   komira_parquet_source, with the same one-path source, and its folders'
   `key=value` names are not columns; a source that is not bytes is a
@@ -325,14 +325,17 @@ def test_the_other_glob_characters_and_a_file_named_with_one():
         assert [r["id"] for r in rows(kpl.scan_parquet(braces, session=s))] == [1, 2, 3]
         brackets = os.path.join(d, "sales_[fm]*.parquet")
         assert [r["id"] for r in rows(komira.read_parquet(brackets, session=s))] == [3, 4, 5]
-        # A file that exists is read as one file, whatever its name holds.
+        # A file that exists keeps the one-file reader route, whatever its
+        # name holds: its schema through komira_parquet_schema and a source
+        # of that one path, as before komira_parquet_source existed.
         literal = write(os.path.join(d, "part[1].parquet"), [6])
         write(os.path.join(d, "part1.parquet"), [7])
         spy = Spy(s._native)
         s._native = spy
-        assert [r["id"] for r in rows(komira.read_parquet(literal, session=s))] == [6]
-        assert [r["id"] for r in rows(kpl.scan_parquet(literal, session=s))] == [6]
-        assert spy.calls.count("parquet_source") == 0, spy.calls
+        df = komira.read_parquet(literal, session=s)
+        lf = kpl.scan_parquet(literal, session=s)
+        assert spy.calls == ["parquet_schema", "parquet_schema"], spy.calls
+        assert paths_of(df, literal) == [literal] and paths_of(lf, literal) == [literal]
 
 
 def test_a_source_is_bytes_of_the_library():
