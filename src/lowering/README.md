@@ -126,6 +126,11 @@ index. Three shapes are cut, each into the IR's `UdfCallSpec`:
   call's result as column `__udf_apply:<i>` (`i` the column's position) for
   the `OP_PROJECT` to read in the call's place.
 
+Of these, the engine runs the projection column's `OP_UDF_APPLY` for the
+`SCALAR` and `MAP_BATCHES_COLUMN` kinds (`pipeline_exec.op_udf_apply`); a `ROW`
+function is refused when its UDFs are bound (`OPTIMIZED_UDF_KIND_UNSUPPORTED`),
+and no driver runs `OP_UDF_FRAME` or `SOURCE_UDF_STEP` yet.
+
 A shared subplan that holds a frame or a step is cut once, never again at
 each reference, so its calls run once.
 

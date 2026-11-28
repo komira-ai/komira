@@ -21,7 +21,8 @@ table the session holds in memory, which SQL on the session reads by name; and
 `WireBoundSource` (a local Parquet path, or Parquet objects of an `s3://` or
 `az://` location read with a credential sealed on the session), replacing a
 table of that name; `komira_sql_stream` reads such a table through the object
-store.
+store; and `komira_udf_runtime_set`, which gives the session the UDF runtime
+library that the UDFs of a plan run on.
 
 - `abi/komira.tsv`: the golden of the C ABI; `komira.h` is made from it.
 - `status.mojo`: the seven status codes, `KOMIRA_MAX_INPUT_BYTES`, the credential
@@ -44,6 +45,10 @@ store.
 - `bindings.mojo`: what `komira_add_sql_binding` does on values (a name, the
   bytes of a `WireBoundSource` and a scope in; a table bound on the session, or
   a raise with the named refusal).
+- `udf_runtime.mojo`: what `komira_udf_runtime_set` does on values
+  (`set_udf_runtime`: a library, a code root, a deadline and the options text
+  in; the runtime opened and held by the `Session`, or a raise with the named
+  refusal) and `bind_udfs`, the admission of a plan's UDF list on it.
 - `_c_abi.mojo`: the exports. It is the only file here that holds pointers, it
   is not part of the Mojo package (it is the source of the `libkomira`
   target), and its header says who owns and frees each pointer.
@@ -100,6 +105,10 @@ int32_t  komira_register_arrow_stream(void *ctx, const char *name,
 int32_t  komira_add_sql_binding(void *ctx, const char *name,
                                 const uint8_t *source, uint64_t source_len,
                                 int32_t scope);
+int32_t  komira_udf_runtime_set(void *ctx, const char *library,
+                                const char *code_root,
+                                int64_t batch_deadline_ms,
+                                const uint8_t *options, uint64_t options_len);
 ```
 
 **Status codes.** Every fallible call returns one: `KOMIRA_OK` (0),
@@ -154,7 +163,7 @@ from so import ABI_MAJOR, ABI_MINOR, abi_version
 from std.testing import assert_equal
 
 assert_equal(abi_version(), ABI_MAJOR * 1000 + ABI_MINOR)
-assert_equal(abi_version(), Int32(1010))
+assert_equal(abi_version(), Int32(1011))
 ```
 
 **The handle.** `komira_ctx_new` returns a context the caller owns until it
@@ -282,9 +291,9 @@ supported: ` is `SQL_NOT_SUPPORTED`; any other reason that starts with an
 upper-case word of two or more underscore-joined parts and `: `
 (`LOWERING_WINDOW_UNSERVED: ...`) has that word; every other reason has no code.
 For a `komira_sql_stream` or `komira_plan_stream` refusal the reason is the
-text after `<step>: `, so an envelope with UDFs has the code
-`PLAN_WIRE_UDFS_DROPPED` and a write to an `s3://` destination has
-`STORAGE_URL_REFUSED` (step `bind`).
+text after `<step>: `, so an envelope whose UDFs the session has no runtime for
+has the code `OPTIMIZED_ENV_RUNTIME_MISSING` (step `bind`) and a write to an
+`s3://` destination has `STORAGE_URL_REFUSED` (step `bind`).
 
 **Sources and render.** Each call below takes the context first and returns a
 status code; on `KOMIRA_ERR_ENGINE` the context's last error holds the engine's
@@ -412,8 +421,11 @@ the plan needs no table registered on the session.
   64 MiB is read, and the decoder then refuses what is above its own 16 MiB
   bound); every other refusal is -3, with the last error `<step>: <reason>`:
   `decode` for bytes that are not a plan this build runs (SQL text among them,
-  a version it does not speak, and an envelope that carries UDFs,
-  `PLAN_WIRE_UDFS_DROPPED`), then `bind` (a write's destination refused before
+  a version it does not speak), then `bind` (the envelope's UDFs admitted on
+  the session's UDF runtime, see `komira_udf_runtime_set`:
+  `OPTIMIZED_ENV_RUNTIME_MISSING` when the session has none,
+  `OPTIMIZED_ENV_CODE_MISSING` for a code object the code root lacks, and the
+  other admission refusals of `udf_host`; a write's destination refused before
   the plan runs: a path with `://`, `STORAGE_URL_REFUSED`; CSV or JSON with
   `lz4`, `COPY_COMPRESSION_UNSUPPORTED`), then `optimize`, `lower` or
   `execute` (a destination directory that does not exist,
@@ -694,6 +706,38 @@ replaced on a refusal.
 
 On values, the call is `add_sql_binding` over the source's bytes (`so.bindings`).
 
+**A UDF runtime.** `komira_udf_runtime_set(ctx, library, code_root,
+batch_deadline_ms, options, options_len)` (ABI 1.11) gives the session the UDF
+runtime library `library` (a path; komira's Python runtime is
+`libkomira_udf_python.so`), opens it now and keeps it for the session's later
+runs, replacing the one it held. `code_root` is the directory of the code
+objects a plan's UDFs name, one file per hex sha256 digest. `batch_deadline_ms`
+bounds each batch of a UDF call (0 is the engine's default, 600000); a
+negative value is refused. `options` is `options_len` bytes of UTF-8 text,
+one `key=value` option of the runtime per line, passed on unread; empty lines
+are skipped, and `options` may be NULL when `options_len` is 0. The bytes are
+copied before they are read. A run already holding the old runtime keeps it
+until it ends.
+
+`komira_plan_stream` then runs an envelope that carries UDFs: it admits each
+UDF on the runtime at step `bind`, before any row is read, and calls them in
+workers the runtime forks, a batch at a time. A UDF failure in a batch is a -3
+at step `execute` whose reason starts with its code (`UDF_RAISED`, ...; the
+table is in `udf_host`).
+
+Refusals are -1 for a NULL `ctx`, -2 for a NULL `library` or `code_root`, or
+NULL `options` with a non-zero `options_len` (the last error
+`komira_udf_runtime_set: library, code_root or options is NULL`), -5 for an
+`options_len` above `KOMIRA_MAX_INPUT_BYTES` (the last error
+`komira_udf_runtime_set: options_len is above 67108864 bytes`; no byte of
+`options` is read), and -3 at step `bind` for an empty library or code root or a
+negative deadline (`UDF_RUNTIME_CONFIG_INVALID`), options that are not UTF-8,
+and what opening the runtime refuses (`UDF_RUNTIME_OPEN_FAILED`,
+`UDF_RUNTIME_MISSING_SYMBOL`, `UDF_RUNTIME_ABI_MISMATCH`,
+`UDF_RUNTIME_OPTION_INVALID`, `UDF_RUNTIME_INIT_REFUSED`). The session keeps
+the runtime it held on a refusal. On values, the call is `set_udf_runtime` and
+the plan door's admission is `bind_udfs` (`so.udf_runtime`).
+
 ## Building and testing
 
 ```sh
@@ -702,10 +746,10 @@ On values, the call is `add_sql_binding` over the source's bytes (`so.bindings`)
 ```
 
 The library is published only if the gate passes: the exports check, then
-nineteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
-foreign host would. Seven cover the skeleton: the version (1010, which is 1.10),
+twenty drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
+foreign host would. Seven cover the skeleton: the version (1011, which is 1.11),
 create and free (distinct handles, separate sessions), no symbol beyond the
-twenty-six, a fresh session's empty error, the two-call protocol (zero capacity, one
+twenty-seven, a fresh session's empty error, the two-call protocol (zero capacity, one
 byte short, exact, larger), a NULL context, and a NULL `out_len`. `gate_error_code_step`
 checks that `komira_last_error_code` and `komira_last_error_step` exist and, on a
 fresh session, give an empty code and step 0, and that a NULL context is -1 and
@@ -733,12 +777,18 @@ plus one (-5 with its last error), and each -3 word for word with step `bind`
 and its code: a scope other than 1, an empty name, a name that is not UTF-8, a
 one-byte source, a zero-length source and a missing file; a good call after a
 refusal leaves no error.
-`exports_exact` makes the twenty-six names above the whole dynamic symbol table.
+`gate_udf_runtime_set` holds the C surface of `komira_udf_runtime_set`: a NULL
+context is -1, a NULL library or code root (or NULL options with a length) -2, an
+`options_len` of 64 MiB plus one -5 with the options unread, and a library
+that is not there, a negative deadline and options that are not UTF-8 are -3 at
+step `bind`, each with its named last error. That a set runtime runs a plan's UDFs is
+the welded test `test_plan_result_udfs`.
+`exports_exact` makes the twenty-seven names above the whole dynamic symbol table.
 On Linux the eleven C owners in the library's closure (async, async_api,
 compression, crypto, fs, http_core, libc, metrics, objectstore, parquet_codec,
 scan_source) are linked as their own shared libraries (`native_owners`), not
 embedded; on macOS arm64 there are none, and the C archives are linked
-statically into `libkomira.dylib`. On Linux the nineteenth driver, `gate_native_owners`,
+statically into `libkomira.dylib`. On Linux the driver `gate_native_owners`,
 reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
 the SONAME of each of the eleven (`libkomira_<owner>_native.so.1`); an owner
 dropped from `native_owners` leaves its C embedded, and that driver fails.
@@ -882,7 +932,7 @@ the extra `$ORIGIN/../../lib` finds the one `lib/` of the variants directory fro
 
 ## The header and the golden
 
-`abi/komira.tsv` is the golden of the ABI: the version (1.10), one row per export
+`abi/komira.tsv` is the golden of the ABI: the version (1.11), one row per export
 with its return type, argument types and the version that added it, and one row
 per status code, limit and credential kind, field and scope (`constant`). `komira_abi_golden` checks it on every
 build against the `@export abi("C")` functions of `_c_abi.mojo` (names, return and
@@ -906,7 +956,7 @@ headers. The golden does not check that its version was raised when
 a row changed: that compares with the previous release.
 
 `tests/c/abi_driver.c` is a C program that includes `komira.h` and nothing of
-ours. It opens `./libkomira.so`, binds each of the twenty-six functions to a pointer
+ours. It opens `./libkomira.so`, binds each of the twenty-seven functions to a pointer
 declared with the header's own prototype, and checks the version in the header
 against `komira_abi_version()`, the status codes, the input bound
 (`KOMIRA_MAX_INPUT_BYTES` plus one is -5), and the last-error round trip (NULL
@@ -1051,8 +1101,9 @@ No release-over-release version check and no packaged header yet; the session
 holds an engine, and `komira_sql_stream` runs SQL on it (cancelled and
 watched through a run handle with `komira_sql_stream_run`) and
 `komira_plan_stream` a plan, and writes it to a file when its envelope carries a
-write target, but no call runs a UDF yet (the plan door refuses an envelope
-with UDFs); no session
+write target; an envelope with UDFs runs when the session holds a UDF runtime
+(`komira_udf_runtime_set`), for the scalar and `map_batches_column` UDFs in a
+projection, and is refused by name when it holds none; no session
 options beyond the worker count and the memory budget (no spill directory); the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).
 The calls that run a query, ported from the earlier SDK, their result as an Arrow
 C stream, and the abort-prone paths the library does not refuse yet are described in

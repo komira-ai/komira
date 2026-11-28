@@ -190,7 +190,7 @@ Fixed before this design, and not reopened here:
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.10, with twenty-six exports
+- **EXISTS** `libkomira` is at ABI 1.11, with twenty-seven exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
   - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream.
     `komira_sql_stream_run` (1.6) runs it under a run handle that another thread cancels
@@ -206,6 +206,8 @@ Fixed before this design, and not reopened here:
     memory and registers it by name, replacing a table of that name; it releases the stream.
   - `komira_add_sql_binding` (1.10) binds a table name to the protobuf bytes of a
     `WireBoundSource` (a Parquet location), replacing a table of that name.
+  - `komira_udf_runtime_set` (1.11) gives the session a UDF runtime library to run the UDFs of a
+    plan on; the addon does not bind it.
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,
@@ -388,7 +390,9 @@ session's thread, so it is not offered.
 - **The Excel SDK** (§6).
 - **UDFs written in TypeScript.** They run in Node worker processes, the `komira/node` runtime of
   [udf_runtime_interface.md](udf_runtime_interface.md), never in the engine's process or in an
-  isolate. The plan door refuses an envelope with UDFs by name until then.
+  isolate. The plan door runs the UDFs of an envelope on the session's UDF runtime
+  (`komira_udf_runtime_set`, ABI 1.11) and refuses one by name when the session holds none;
+  no `komira/node` runtime exists yet, so none could be set.
 - **Remote jobs.** These submit an `OptimizedPlan` to a job manager, after its codec exists
   ([optimized_plan.md](optimized_plan.md)).
 - **Also later:** object stores and credentials, bound as in every SDK

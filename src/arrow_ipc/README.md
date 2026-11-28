@@ -87,6 +87,14 @@ variable-length (utf8, binary and their large forms), nested or union column
 with a non-zero offset. A stream with no
 batch can hold no nested column, whose child types only a batch carries.
 
+`arrow_ipc.c_data_column` (`FFI-BOUNDARY`) is the same layout one batch or
+column at a time, for a host that calls a UDF runtime (`udf_host`):
+`export_struct_array` and `export_struct_schema` give a batch as a struct
+array and its schema, `export_field_schema` one field's schema, and
+`import_c_column` reads the array a runtime returns at the type its schema
+declares, copying every buffer so nothing points into the producer's memory
+afterwards. The producer's array is released by its owner, not by the import.
+
 `build_record_batch_stream` checks only the column types; anything else that
 cannot cross surfaces later, as EIO from the consumer's `get_schema` or
 `get_next`. A caller that must refuse before the stream exists (a C entry

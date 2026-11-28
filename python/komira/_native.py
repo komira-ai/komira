@@ -2,7 +2,7 @@
 
 `load` opens the library from a directory, once per process, checks that its
 ABI major version is the one this package was written for, and binds the
-calls of `_FUNCTIONS` (the newest from ABI 1.10); every failure is a `LibraryLoadError` that says which
+calls of `_FUNCTIONS` (the newest from ABI 1.11); every failure is a `LibraryLoadError` that says which
 library and why. `Native` holds the bound calls and turns their status codes
 into `KomiraError`, with the context's last error, read with the two-call
 protocol, as the message, and, from ABI 1.7, its code and step as the error's
@@ -64,7 +64,9 @@ held in memory, which `Session.register` hands it from a frame or any object
 with the Arrow PyCapsule stream interface.
 `add_sql_binding` (ABI 1.10) binds a SQL name to the bytes of a
 `WireBoundSource`, which `Session.add_sql_binding` makes of a `komira.files`
-source after it seals the source's credential.
+source after it seals the source's credential. `udf_runtime_set` (ABI 1.11)
+opens a UDF runtime library on the context, which a plan carrying UDFs
+(`WirePlanEnvelope.udfs`) runs through (komira/_udf_runtime.py).
 """
 
 from __future__ import annotations
@@ -176,6 +178,11 @@ _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
         10,
         ctypes.c_int32,
         [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint64, ctypes.c_int32],
+    ),
+    "komira_udf_runtime_set": (
+        11,
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int64, ctypes.c_char_p, ctypes.c_uint64],
     ),
 }
 
@@ -721,6 +728,23 @@ class Native:
         if not isinstance(source, bytes):
             raise TypeError("source must be bytes, not {}".format(type(source).__name__))
         self._check(op, ctx, fn(ctx, _c_string("name", name), source, len(source), scope))
+
+    def udf_runtime_set(
+        self, ctx: int, library: str | os.PathLike[str], code_root: str | os.PathLike[str], batch_deadline_ms: int, options: list[str]
+    ) -> None:
+        """Opens the UDF runtime library `library` on the context (replacing
+        the session's runtime), with the code objects of `code_root` (files
+        named by the hex sha256 of their bytes), a bound of `batch_deadline_ms`
+        for one batch's call (0 is the engine's default) and the runtime's own
+        `options` (`key=value` lines). Needs ABI 1.11; the engine's refusal
+        (`bind: UDF_RUNTIME_OPEN_FAILED: ...`) raises KomiraError."""
+        op = "komira_udf_runtime_set"
+        fn = self._fn(op)
+        for option in options:
+            if "\n" in option or "\0" in option:
+                raise ValueError("a runtime option holds a newline or NUL: {!r}".format(option))
+        blob = "\n".join(options).encode("utf-8")
+        self._check(op, ctx, fn(ctx, _c_path(library), _c_path(code_root), batch_deadline_ms, blob, len(blob)))
 
     def _out(self, op: str, ctx: int, call: Callable[[ctypes._CFuncPtr, object, int, object], int]) -> bytes:
         """The bytes of the two-call `op`, or its KomiraError."""

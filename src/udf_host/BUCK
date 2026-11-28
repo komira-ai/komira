@@ -1,0 +1,74 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The engine's host of UDF runtimes (docs/design/udf_runtime_interface.md
+# section 4): a runtime library opened through the C ABI of
+# //src/udf_abi:komira_udf_runtime.h, the UDFs of one plan admitted and
+# loaded on it, and one worker's calls of a column-kind UDF with the host's
+# null propagation and post-conditions (README.md). Pure Mojo: _abi.mojo, the
+# one file that holds pointers, mirrors the header's structs and calls the
+# runtime's table.
+#
+# The welded tests run every path on komira-test/echo, the reference runtime
+# of the conformance suite (staged as echo.so), and on echo_variant.so, the
+# same runtime with one thing wrong in its table or answers, named by
+# KOMIRA_UDF_ECHO_VARIANT (the fixture library's own selector). The real
+# Python runtime is driven end to end by //python:udf_installed_test.
+#   test_udf_host_runtime  opening a runtime and admitting a plan's UDFs:
+#                          each refusal by its code (a library that does not
+#                          load, an init that refuses, a table of another
+#                          major or too short, a describe that fails, a UDF
+#                          of another runtime or kind, without a return type,
+#                          with a code object missing from the code root, or
+#                          that validate or load refuses), and a bound UDF's
+#                          spec in the ABI's numbering.
+#   test_udf_host_calls    one worker's calls: rows in equal rows out, NULLs
+#                          under MANUAL and PROPAGATE (the runtime sees no
+#                          NULL row; an all-NULL batch makes no call), a zero
+#                          argument call, an empty batch, the row ceiling, a
+#                          raise with its row mapped back through the
+#                          compaction, a lost context and the calls after
+#                          it, each post-condition and each ABI fault of the
+#                          output, and the contexts and instances a variant
+#                          refuses.
+_ECHO_VARIANT = {
+    "echo.so": "//src/tests/helpers/komira_udf_spike_abi:echo",
+    "echo_variant.so": "//src/tests/helpers/komira_udf_spike_abi:echo_variant",
+}
+
+mojo_library(
+    name = "udf_host",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package imports.
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_api:async_api",
+        "//src/atomic_alias:atomic_alias",
+        "//src/byte_buffer:byte_buffer",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/containers:containers",
+        "//src/counters:counters",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/libc:libc",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_source:scan_source",
+        "//src/simd_ops:simd_ops",
+    ],
+    test_srcs = [
+        "tests/test_udf_host_calls.mojo",
+        "tests/test_udf_host_runtime.mojo",
+    ],
+    test_deps = [
+        "//src/tests/helpers/komira_test_udf_host:komira_test_udf_host",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    test_data = {
+        "tests/test_udf_host_calls.mojo": _ECHO_VARIANT,
+        "tests/test_udf_host_runtime.mojo": _ECHO_VARIANT,
+    },
+    visibility = ["PUBLIC"],
+)

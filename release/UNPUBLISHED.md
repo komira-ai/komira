@@ -35,7 +35,7 @@ superseded" are read from the code by hand, and no library has either today. In 
 
 | Reason | Libraries |
 |---|---|
-| no README example | 40 |
+| no README example | 41 |
 | test-only | 5 |
 | internal | 0 |
 | native dependency pending | 8 |
@@ -242,5 +242,6 @@ superseded" are read from the code by hand, and no library has either today. In 
 | [`telemetry_store`](../src/telemetry_store/) | no README example | its README.md holds no mojo example, which the release README gate refuses |
 | [`tpch_answers`](../src/tpch_answers/) | test-only | the reference answers komira's benchmark queries are checked against |
 | [`udf`](../src/udf/) | no README example | its README.md holds no mojo example, which the release README gate refuses |
+| [`udf_host`](../src/udf_host/) | no README example | its README.md holds no mojo example, which the release README gate refuses |
 | [`viewport`](../src/viewport/) | depends on an unpublished library | imports `plan_expr` |
 | [`webpush`](../src/webpush/) | none | every library it imports is published, and its README.md holds 4 examples |

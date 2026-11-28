@@ -1,9 +1,11 @@
 # Design: user code in an `OptimizedPlan`, part 2 (host execution, the environment image, compatibility)
 
-Status: proposed, not built. This is §10.10-§10.14 of [`optimized_plan.md`](optimized_plan.md), split from
+Status: proposed; the host of the column kinds is built (below). This is §10.10-§10.14 of [`optimized_plan.md`](optimized_plan.md), split from
 [`optimized_plan_udfs.md`](optimized_plan_udfs.md) (§10.1-§10.9) so each file stays under 1,000 lines. Section numbers
 continue those documents': `§10.10`-`§10.14` are here, `§10.1`-`§10.9` are in `optimized_plan_udfs.md`, and every
 other `§n` is in `optimized_plan.md`.
+
+Built so far: libkomira runs the UDFs of an envelope of kind `SCALAR` or `MAP_BATCHES_COLUMN` in a projection on a UDF runtime the session was given (`komira_udf_runtime_set`), admitting each against the runtime and the code root before any row is read, as [`src/udf_host`](../../src/udf_host/README.md) describes. The environment image, the other kinds and the bounds on a runtime's start-up and shutdown are not built.
 
 Citations follow `optimized_plan_udfs.md`: komira `main` as merged by komira-ai/komira#977 unless marked otherwise.
 Statements marked *(inferred)* are my reading, not facts taken from the code. Nothing was built or run to write this

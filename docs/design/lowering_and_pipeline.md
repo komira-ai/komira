@@ -245,8 +245,9 @@ slice 1b has no arm for `EXCHANGE` and refuses it by name, which is safe and is 
 paragraph. A `STEP` is cut as a `SOURCE_UDF_STEP` source, an ungrouped `MAP_BATCHES` as an `OP_UDF_FRAME` operator over its read
 set, and a projection column that is wholly a `UdfRef` call (`EXPR_UDF_APPLY`) as an `OP_UDF_APPLY` before the projection (IR
 version 17); a read outside a `ROW` or frame function's declared read set is refused (`LOWERING_UDF_UNDECLARED_READ`), and a
-grouped frame or a call anywhere else is refused by name (`LOWERING_UDF_UNSERVED`, src/lowering/README.md). No driver runs
-those kinds yet. A top-n, and a limit
+grouped frame or a call anywhere else is refused by name (`LOWERING_UDF_UNSERVED`, src/lowering/README.md). The pipeline serves `OP_UDF_APPLY` (`src/pipeline_exec/op_udf_apply.mojo`, through
+`sdk_exec`'s overloads that take a UDF binding); no driver runs `OP_UDF_FRAME` or
+`SOURCE_UDF_STEP` yet. A top-n, and a limit
 that reads a sort or a top-n through nothing but projections and other limits, is cut as one `SINK_TOPN` segment
 keeping that range of the sort's order (src/lowering/README.md). A limit with a filter between it and the sort, and a
 limit with an offset over rows in no stated order, are refused (`LOWERING_UNCUTTABLE_NODE`): no segment records an

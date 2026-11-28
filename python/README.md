@@ -44,8 +44,9 @@ under Modular's licence. The wheel carries libkomira in `komira/_lib/` and, in `
 its native owner libraries (Linux only: on macOS they are linked into the
 dylib) and those three Mojo runtime libraries, with Modular's licence and
 third-party notices beside komira's own. The Linux wheel also carries, beside
-libkomira, `libkomira_udf_python.so`, the runtime that will run Python UDFs in
-worker processes; no query opens it yet. It requires two other
+libkomira, `libkomira_udf_python.so`, the runtime that runs Python UDFs in
+worker processes; the engine opens it the first time a plan with UDFs runs on a
+session, and no public verb builds such a plan yet. It requires two other
 distributions, which `pip install komira` installs: `pyarrow>=25.0.1`, which a
 result is read as, and `protobuf>=5.29.1,<8`, which a DataFrame's plan is
 encoded with (the generated plan modules are in the wheel, at
@@ -70,7 +71,7 @@ import pyarrow.parquet as pq
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1010 is 1.10
+print(komira.abi_version())   # the engine's C ABI version: 1011 is 1.11
 
 # A small Parquet file to query: six days of weather in three cities.
 weather = pa.table({
@@ -117,7 +118,7 @@ It prints:
 
 ```text
 0.1.1623
-1010
+1011
 [{'days': 6, 'rain': 9.5}]
 city: string
 days: int64 not null
@@ -381,7 +382,7 @@ by `import komira`.
   a URL written in the SQL text (`FROM 's3://...'`), the DataFrame readers
   on a URL, `COPY ... TO` a URL, the process's own identity (`AMBIENT`), and
   `ANONYMOUS` or `AwsProfile` on `s3://` (komira-ai/komira#2337).
-- Python user functions: no verb takes one and no query runs one yet.
+- Python user functions: no verb takes one. The engine runs a plan that carries one (private `komira/_capture/` and `komira/_udf_runtime.py`), but no public call builds it.
 
 The DataFrame verbs not built yet come in later releases of this same package.
 
@@ -406,12 +407,12 @@ The package's layout and API are designed in
 | `komira/_accessors.py` | `s.str` and `s.dt`: each method one expression node (`StringFn`, `StringOp`, `StringFnN`, `Substring`, `Regexp`, `Extract`) over the Series' node |
 | `komira/_write.py` | the write terminals' shared path: the destination (`None` refused, a URL passed on for the engine to refuse by name, any other path made absolute at the call with `~` expanded), each verb's `compression` to the engine's codec (`'infer'` from the extension), `unsupported`, the refusal of an argument at a value komira does not write, and `write`, which encodes the frame's plan under a `WriteTarget` and runs it through the session's `_plan_write` |
 | `komira/_refusals.py` | the refusal tables of the frame, the GroupBy, the Series, the `.str` and `.dt` accessors and the module ([docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md)) |
-| `komira/_capture/` | the capture of Python user functions (private; no query runs them yet): `udf`, the decorator that records a function's call shape (`scalar`, `map_batches_column`, `row`, `map_batches_frame`), its return type (`return_dtype=`, `schema=` or the type hints) and, for `row` and `map_batches_frame`, its read set (`columns=`, a `TypedDict` or dataclass annotation, or for `row` a scan of the function's bytecode, refused with `UDF_READ_SET_REQUIRED` when the reads are not bounded); `Udf.spec()`, the `UdfSpec` the plan encodes, with the function's code as a bundle named by its sha256 or as a reference into an installed distribution; and `write_code`, which writes each code object under its digest. Calling a decorated function calls the function, which is how the komira/python worker runs it. It imports no `ctypes` |
+| `komira/_capture/` | the capture of Python user functions (private; no public verb takes one, though the engine runs a plan that carries one): `udf`, the decorator that records a function's call shape (`scalar`, `map_batches_column`, `row`, `map_batches_frame`), its return type (`return_dtype=`, `schema=` or the type hints) and, for `row` and `map_batches_frame`, its read set (`columns=`, a `TypedDict` or dataclass annotation, or for `row` a scan of the function's bytecode, refused with `UDF_READ_SET_REQUIRED` when the reads are not bounded); `Udf.spec()`, the `UdfSpec` the plan encodes, with the function's code as a bundle named by its sha256 or as a reference into an installed distribution; and `write_code`, which writes each code object under its digest. Calling a decorated function calls the function, which is how the komira/python worker runs it. It imports no `ctypes` |
 | `komira/_credentials.py` | the credential objects, which `komira.files` takes (public: those a file source takes; `BearerToken` and `OAuth2ClientCredentials`, for a catalog, stay private): `AwsKeys`, `AwsProfile`, `GcpServiceAccount`, `GcpToken`, `AzureKey`, `AzureSas`, `BearerToken` and `OAuth2ClientCredentials`, each a name and its fields, checked when built (the name's grammar and reserved names; each value a non-empty `str` of at most 4096 bytes of UTF-8), with every secret shown as `<set>` by `repr` and no pickle or copy; and the built-in `AMBIENT` and `ANONYMOUS` ([docs/design/credentials_and_writes.md](https://github.com/komira-ai/komira/blob/main/docs/design/credentials_and_writes.md), decision 1) |
 | `komira/_iceberg.py` | the Iceberg sources (private; nothing public takes one yet): `iceberg(uri, *, warehouse=None, credential=AMBIENT, signing=None, access_delegation="vended-credentials")`, an `IcebergCatalog`; `catalog.table(name)`, an `IcebergTable`, with `name` as `"namespace.table"` or a tuple of namespace levels and the table; and `SigV4(region, service)`. Each is checked when built (an http or https URI with a host and no user, password, query or fragment; a credential that fits the catalog: `AMBIENT` or `AwsKeys` with SigV4, and `AMBIENT`, `ANONYMOUS`, `BearerToken` or `OAuth2ClientCredentials` without; `access_delegation` `vended-credentials` or `none`), does no I/O and loads no library; a catalog or a table shows its credential's secrets as `<set>` and refuses pickle and copy ([docs/design/iceberg_tables.md](https://github.com/komira-ai/komira/blob/main/docs/design/iceberg_tables.md), "What the user sees") |
 | `komira/_arrow.py` | the Arrow C stream of a query: `ArrowArrayStream`, the C struct for `ctypes`, and `import_stream`, which hands a filled stream to pyarrow's public `RecordBatchReader.from_stream` through a PyCapsule with no destructor, and releases it itself if pyarrow did not take it |
 | `komira/_errors.py` | `KomiraError`, its subclasses, and `error_class`, which picks one from an engine refusal's code and step |
-| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.10 (`sql_stream`, `register_csv`, `register_json`, `register_arrow_stream` of 1.9, the run handle calls `run_new`, `run_cancel`, `run_progress` and `sql_stream_run` of 1.6, the last error's code and step, `plan_stream`, the plan door of 1.8, and `add_sql_binding` of 1.10 among them) |
+| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.11 (`sql_stream`, `register_csv`, `register_json`, `register_arrow_stream` of 1.9, the run handle calls `run_new`, `run_cancel`, `run_progress` and `sql_stream_run` of 1.6, the last error's code and step, `plan_stream`, the plan door of 1.8, `add_sql_binding` of 1.10 and `udf_runtime_set` of 1.11 among them) |
 | `komira/_run.py` | `run_sql`, which `Session.sql` runs a query with on ABI 1.6: the call `komira_sql_stream_run` on a helper thread under a run handle of its own, while the calling thread waits, reads the handle's progress for the `progress` callback, and cancels the handle when anything is raised on it (a Ctrl-C's `KeyboardInterrupt`, the callback's exception) |
 | `komira/_plan/` | the plan encoder: `encode_plan`, a plan of `komira/_ops` as the `komira.plan.v1` `WirePlanEnvelope` the plan door takes, every node with the output schema the engine derives for it and every scan reading a source libkomira described (`parquet_source`, `binding_source`); calls of user functions (`UdfCall`, `MapBatches`) as `WireUdfApply` and `WireMapBatchesNode` over the envelope's `UdfRef` list, one per distinct function, each with the komira/python descriptor; `encode_expr`, an expression node as a `WireExpr`; and `expr_field`, the output field the engine derives for it. It writes no SQL text. It imports the generated plan modules, which the wheel ships at `komira/plan/v1/`; `import komira` does not import it |
 | `komira/pl/` | `komira.pl`, the polars-shaped DataFrame surface ([docs/design/dataframe_surface.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface.md)): lazy frames and expressions over a plan of `komira/_ops`; `collect()` encodes it with `komira/_plan` and runs it through `komira_plan_stream`, and `sink_csv`, `sink_parquet` and `sink_ndjson` run it there with a write target through `komira/_write.py`, their polars arguments checked in `komira/pl/_sink.py`. It writes no SQL text and imports no polars. A name it does not define raises `AttributeError`, with the refusal tables' message for theirs. Its verbs are described, one page each, in `python/docs/pl/` |
@@ -633,8 +634,9 @@ The Linux wheel is `./buck2 build //python:komira_wheel`: the package and, in
 native owner libraries and the three Mojo runtime libraries, taken from the
 toolchain's Mojo package so that runtime and compiler are one build; beside
 `libkomira.so`, the komira/python UDF runtime `libkomira_udf_python.so`
-(`//src/udf_python:komira_udf_python`), which no query opens yet
-(`//python:udf_installed_test` runs a UDF through it from the installed wheel). It is
+(`//src/udf_python:komira_udf_python`), which the engine opens when a plan with UDFs
+runs (`//python:udf_installed_test` runs a UDF through it from the installed wheel and
+checks the engine's answer against a Python loop). It is
 tagged `py3-none-manylinux_2_35_x86_64`, declares the `Requires-Dist` lines
 `pyarrow>=25.0.1` and `protobuf>=5.29.1,<8` (`PYARROW_REQUIREMENT` and
 `PROTOBUF_REQUIREMENT`, `dependencies.bzl`), carries the generated plan

@@ -30,6 +30,8 @@
 # its segments into the control's progress. Without one, the run has a token
 # of its own that nothing cancels.
 
+from std.memory import ArcPointer
+
 from arrow.concat import concat_record_batches_nway_ref
 from arrow.schema import RecordBatch
 from column_kernels.compiler_helpers import empty_batch_like_schema
@@ -53,6 +55,7 @@ from pipeline_exec.run_plan import run_plan
 from pipeline_exec.source_parquet import LocalOnlyScanFs
 from plan_expr.expr_pool import ExprPool
 from scan_source.in_memory_source import InMemorySource
+from udf_host.runtime import UdfBinding
 
 from .engine_context import EngineContext
 from .run_control import RunControl
@@ -112,6 +115,26 @@ def run_lowered_plan_with[
         cancelled: <reason>`) when the control is cancelled before the run's
         last check; otherwise what the form without a control raises.
     """
+    return run_lowered_plan_with(ctx, lowered^, opener^, control, ArcPointer(UdfBinding()))
+
+
+def run_lowered_plan_with[
+    R: ScanFsOpener
+](
+    mut ctx: EngineContext,
+    var lowered: LoweredPlan,
+    var opener: R,
+    control: RunControl,
+    udfs: ArcPointer[UdfBinding],
+) raises -> RecordBatch:
+    """`run_lowered_plan_with` under `control`, with the plan's UDFs loaded
+    in `udfs`: each OP_UDF_APPLY calls the UDF of the binding its call
+    names (`RealBuilder.set_udfs`).
+
+    Raises:
+        What the form without `udfs` raises, and a UDF call's refusal
+        (`udf_host.instance`: `UDF_RAISED`, `UDF_WORKER_CRASHED`, ...).
+    """
     var t_setup = pt_now()
     var cache = ParquetMetadataCache()
     var pool = ExprPool()
@@ -120,6 +143,7 @@ def run_lowered_plan_with[
         origin_of(cache), origin_of(pool), origin_of(placeholder), R
     ](cache, pool, opener^)
     builder.set_memory_budget(ctx.host_profile.memory_budget_bytes)
+    builder.set_udfs(udfs)
     if ctx.spill_directory:
         builder.set_spill_directory(ctx.spill_directory.value())
     # A fresh builder holds no resident batch, so the i-th `add_resident` is

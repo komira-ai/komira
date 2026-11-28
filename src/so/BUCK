@@ -63,9 +63,15 @@ NATIVE_OWNERS = [
 # statement, an envelope with a write target writes its file (Parquet, CSV
 # and JSON lines, byte-equal to the SQL door's COPY) and answers the rows
 # written as `Count`, and every refusal is `<step>: <reason>` (`decode` for
-# bytes that are not a plan, SQL text among them, and for an envelope with
-# UDFs; `bind` for a destination URL or CSV/JSON with lz4; `lower` and
-# `execute` from run_plan and the write); test_credentials holds the three steps of a definition, each
+# bytes that are not a plan, SQL text among them; `bind` for a destination
+# URL or CSV/JSON with lz4; `lower` and `execute` from run_plan and the
+# write); test_plan_result_udfs holds an envelope that carries UDFs, on the
+# reference runtime echo.so: refused at `bind` by name on a session with no
+# UDF runtime, run once komira_udf_runtime_set gave it one (k and 2 * k row
+# for row, again on a second run, and through a write target), a raise and a
+# lost worker refused at `execute` by their codes with the session usable
+# after, a UDF the runtime cannot load refused at `bind`, and each refusal of
+# setting a runtime; test_credentials holds the three steps of a definition, each
 # kind's fields and every named refusal, word for word, and the generations of
 # a name; test_credentials_reveal reads sealed values through sdk_exec's
 # SecretCapability and reads an object of a fake S3 with them, where a wrong
@@ -181,6 +187,7 @@ mojo_library(
         "//src/sync:sync",
         "//src/trace:trace",
         "//src/udf:udf",
+        "//src/udf_host:udf_host",
         "//src/uuid:uuid",
         "//src/xml:xml",
         "//src/zlib:zlib",
@@ -191,6 +198,7 @@ mojo_library(
         "tests/test_credentials.mojo",
         "tests/test_credentials_reveal.mojo",
         "tests/test_plan_result.mojo",
+        "tests/test_plan_result_udfs.mojo",
         "tests/test_register_arrow.mojo",
         "tests/test_register_text.mojo",
         "tests/test_session.mojo",
@@ -202,9 +210,11 @@ mojo_library(
     test_deps = [
         "//src/tests/helpers/komira_test_fake_azure:komira_test_fake_azure",
         "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
+        "//src/tests/helpers/komira_test_udf_host:komira_test_udf_host",
     ],
     test_data = {
         "tests/test_plan_result.mojo": ["tests/fixtures/two_columns.parquet"],
+        "tests/test_plan_result_udfs.mojo": {"echo.so": "//src/tests/helpers/komira_udf_spike_abi:echo"},
         "tests/test_register_arrow.mojo": ["tests/fixtures/two_columns.parquet"],
         "tests/test_register_text.mojo": ["tests/fixtures/two_columns.parquet"],
         "tests/test_sources.mojo": ["tests/fixtures/two_columns.parquet"],
@@ -212,7 +222,7 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): twenty-six exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): twenty-seven exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). Every context it creates owns
 # an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
 # komira_sql_stream runs SQL on that engine and answers an Arrow C stream; the
@@ -228,9 +238,11 @@ mojo_library(
 # a local Parquet path, or Parquet objects of an s3:// or az:// location read
 # with a credential sealed on the session; komira_sql_stream then reads them
 # through the object store.
+# komira_udf_runtime_set gives the session the UDF runtime library a plan's
+# UDFs run on, opened now with its options.
 # It is published only if every gate driver passes, each of which dlopens it
 # with RTLD_NOW and calls it as a foreign host would:
-#   gate_version       the version is 1010 (1.10);
+#   gate_version       the version is 1011 (1.11);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op, and a context (with its
 #                      engine's workers) is created and freed again;
@@ -280,6 +292,10 @@ mojo_library(
 #                      one-byte source, a zero-length source and a missing file
 #                      -3 with the named error, step bind and code; a good call
 #                      afterwards leaves no error.
+#   gate_udf_runtime_set  NULL ctx -1, NULL library, code root or options (length
+#                      non-zero) -2 with the named last error, options_len 64 MiB
+#                      plus one -5, a missing library, a negative deadline and
+#                      options that are not UTF-8 -3 at step bind with the code.
 #   gate_credentials  a credential added, set and sealed is 0 at each step;
 #                      one sealed without its secret, a field of another
 #                      kind, an empty value, a 4097-byte value, an unknown
@@ -318,6 +334,7 @@ _LIBKOMIRA = dict(
         "komira_plan_stream",
         "komira_register_arrow_stream",
         "komira_add_sql_binding",
+        "komira_udf_runtime_set",
     ],
     exports_exact = True,
     gate_srcs = [
@@ -338,6 +355,7 @@ _LIBKOMIRA = dict(
         "tests/gate/gate_register_json.mojo",
         "tests/gate/gate_register_parquet.mojo",
         "tests/gate/gate_two_call.mojo",
+        "tests/gate/gate_udf_runtime_set.mojo",
         "tests/gate/gate_version.mojo",
     ] + select({
         "DEFAULT": ["tests/gate/gate_native_owners.mojo"],

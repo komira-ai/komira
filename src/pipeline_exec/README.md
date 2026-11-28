@@ -105,6 +105,14 @@ Import each module by name; the package root exports nothing.
   each, a `.jsonl.gz`/`.zst`/`.lz4` (and `.ndjson`, `.json`) file decompressed
   whole. The batches are served as a `BatchSource`; a file of no row is one
   empty batch at the schema. A read that fails names the file.
+- `op_udf_apply`: OP_UDF_APPLY, one column-kind UDF call (`SCALAR` or
+  `MAP_BATCHES_COLUMN`) that lowering cuts ahead of a projection. It evaluates
+  the call's argument expressions, calls the UDF the plan's `UdfRef` list names
+  through `udf_host`'s instance (one per worker, opened on its first batch with
+  rows and closed with the operator), and appends the answer as the column
+  `__udf_apply:<i>`, every input column kept. A batch with a selection mask is
+  made dense first; a batch of no rows passes on without a call. A `ROW` call is
+  refused by name before any worker starts.
 - `op_filter`, `op_project`, `op_limit`: the operators. A filter evaluates its
   predicate and records the rows it keeps as the batch's selection mask instead
   of gathering them; all rows kept leaves no mask, none kept is FILTERED_EMPTY,
@@ -387,7 +395,9 @@ Import each module by name; the package root exports nothing.
   spec's order into one batch it serves as a `SinkOutputSource`, with each
   column nullable when any producer's is; a concatenation of no segment is
   refused), OP_FILTER,
-  OP_PROJECT, OP_LIMIT, OP_JOIN_PROBE (a `HashProbeOp`, whose index
+  OP_PROJECT, OP_LIMIT, OP_UDF_APPLY (an `op_udf_apply` over the UDFs of the
+  run's `UdfBinding`, which `set_udfs` gives the builder; a plan with the
+  operator and no binding is refused), OP_JOIN_PROBE (a `HashProbeOp`, whose index
   `build_source` makes from the rows the build segment published; a build
   segment that is not among the segment's dependencies is refused; for a RIGHT
   or FULL probe `op_tail` gives the unmatched build rows, probe columns NULL at

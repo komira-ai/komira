@@ -47,6 +47,7 @@ mojo_library(
         "tests/test_arrow_ipc_flatbuf_writer_primitives.mojo",
         "tests/test_arrow_ipc_pyarrow_parity.mojo",
         "tests/test_arrow_ipc_type_census.mojo",
+        "tests/test_c_data_column.mojo",
         "tests/test_c_data_interface_release.mojo",
         "tests/test_c_data_interface_release_nested.mojo",
         "tests/test_c_data_release_callback_is_fn_ptr.mojo",

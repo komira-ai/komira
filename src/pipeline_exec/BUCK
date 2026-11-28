@@ -353,10 +353,12 @@ mojo_library(
         "//src/sync:sync",
         "//src/trace:trace",
         "//src/udf:udf",
+        "//src/udf_host:udf_host",
         "//src/zlib:zlib",
     ],
     test_deps = [
         "//src/parquet_writer:parquet_writer",
+        "//src/tests/helpers/komira_test_udf_host:komira_test_udf_host",
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
@@ -373,6 +375,7 @@ mojo_library(
         "tests/test_op_filter.mojo",
         "tests/test_op_limit_concurrent.mojo",
         "tests/test_op_project_limit.mojo",
+        "tests/test_op_udf_apply.mojo",
         "tests/test_real_concat.mojo",
         "tests/test_real_plan.mojo",
         "tests/test_real_plan_concurrent.mojo",
@@ -424,6 +427,7 @@ mojo_library(
     # Declared data is staged at the path given, and the test opens it by that
     # path: DuckDB's answer to each case of the agg_float_ungrouped corpus.
     test_data = {
+        "tests/test_op_udf_apply.mojo": {"echo.so": "//src/tests/helpers/komira_udf_spike_abi:echo"},
         "tests/test_sink_float_agg_duckdb.mojo": {
             "duckdb/" + c + ".tsv": "//src/tests/conformance/komira_sql_conformance:agg_float_ungrouped/" + c
             for c in _FLOAT_AGG_CASES

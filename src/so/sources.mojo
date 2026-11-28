@@ -47,9 +47,11 @@ from compression.codec_libraries import probe_codec_libraries
 from csv.csv_options import QUOTE_STYLE_TAG_RFC4180
 from http_core.transport.io_stream import Connector
 from parquet_footers.parquet_files import resolve_parquet_source
+from std.memory import ArcPointer
+
 from plan_ir.logical_plan import LogicalPlan
+from plan_ir.udf_ref import UdfRef
 from plan_wire import (
-    PLAN_WIRE_UDFS_DROPPED,
     binding_to_bytes,
     plan_envelope_from_bytes,
     plan_from_bytes,
@@ -66,10 +68,12 @@ from sdk_exec.engine_sql import STEP_BIND, STEP_EXECUTE, run_sql_with
 from sdk_exec.run_control import RunControl
 from sql.sql_ast import HIVE_PARTITIONING_AUTO, TvfOptions
 from sql.sql_tvf_bind import csv_tvf_schema, json_tvf_schema
+from udf_host.runtime import UdfBinding
 
 from .bindings import forget_table, store_opener
 from .session import Session, step_number
 from .store_fs import StoreConnectors, StoreScanFs, kernel_store_connectors
+from .udf_runtime import bind_udfs
 
 comptime TABLE_TYPE_UNSUPPORTED = "TABLE_TYPE_UNSUPPORTED"
 """Refusal of `register_arrow`: a column of a nested type (list, large list,
@@ -426,7 +430,10 @@ def plan_result(mut session: Session, var plan_bytes: List[UInt8]) raises -> Arr
     does: every batch checked to cross the Arrow C Stream Interface whole.
 
     The envelope is decoded with `plan_wire.plan_envelope_from_bytes` (the
-    wire's admission, value and UDF checks) and then optimized, lowered and run
+    wire's admission, value and UDF checks); its UDFs, when it carries any,
+    are bound on the session's UDF runtime (`udf_runtime.bind_udfs`: admitted,
+    validated and loaded before any row is read), and each UDF call of the
+    plan runs on them (`OP_UDF_APPLY`); the plan is then optimized, lowered and run
     in-process (`sdk_exec.engine_plan.run_plan`); it is never turned into SQL
     text, and the SQL front end does not run. A scan carries its own source, so
     the plan needs no table registered on the session. The result owns its
@@ -444,9 +451,11 @@ def plan_result(mut session: Session, var plan_bytes: List[UInt8]) raises -> Arr
         library cannot be loaded, before the plan is decoded.
 
         Error `<step>: <reason>`, where `<step>` is `decode` when the bytes are
-        not a plan this build runs (among them an envelope that carries UDFs,
-        `PLAN_WIRE_UDFS_DROPPED`: the plan door runs no user function yet),
-        `bind` when a write's destination or compression is refused
+        not a plan this build runs, `bind` when the envelope's UDFs are not
+        admitted on the session's UDF runtime (`udf_runtime.bind_udfs`: no
+        runtime, `OPTIMIZED_ENV_RUNTIME_MISSING`; a code object missing,
+        `OPTIMIZED_ENV_CODE_MISSING`; a kind, descriptor or code the runtime
+        refuses) or when a write's destination or compression is refused
         (`STORAGE_URL_REFUSED`, `COPY_COMPRESSION_UNSUPPORTED`), and otherwise
         the step of `run_plan` that refused (`optimize`, `lower` or `execute`;
         a destination that cannot be written, `STORAGE_NOT_FOUND`, is refused
@@ -460,28 +469,30 @@ def plan_result(mut session: Session, var plan_bytes: List[UInt8]) raises -> Arr
     probe_codec_libraries()
     var plan: LogicalPlan
     var target: Optional[WriteTarget]
+    var udfs: List[UdfRef]
     try:
         var decoded = plan_envelope_from_bytes(plan_bytes^)
-        if len(decoded.udfs) > 0:
-            raise Error(
-                String(PLAN_WIRE_UDFS_DROPPED)
-                + ": these bytes carry "
-                + String(len(decoded.udfs))
-                + " UdfRef entries (`WirePlanEnvelope.udfs`), and the plan"
-                " door runs no user function yet"
-            )
         target = decoded.write_target.copy()
+        udfs = List[UdfRef](capacity=len(decoded.udfs))
+        for i in range(len(decoded.udfs)):
+            udfs.append(decoded.udfs[i].copy())
         plan = decoded.take_plan()
     except e:
         # `decode` is no `KOMIRA_STEP_*` step: `step_number` gives it
         # `KOMIRA_STEP_NONE`, and the code is the decoder's.
         session.set_refusal(String(STEP_DECODE), String(e))
         raise Error(session.last_error())
+    var binding: ArcPointer[UdfBinding]
+    try:
+        binding = bind_udfs(session, udfs)
+    except e:
+        session.set_refusal(String(STEP_BIND), String(e))
+        raise Error(session.last_error())
     var outcome: SqlOutcome
     if target:
-        outcome = run_plan_write(session.engine, plan^, target.value())
+        outcome = run_plan_write(session.engine, plan^, target.value(), binding)
     else:
-        outcome = run_plan(session.engine, plan^)
+        outcome = run_plan(session.engine, plan^, binding)
     if outcome.refusal:
         ref refusal = outcome.refusal.value()
         session.set_refusal(refusal.step, refusal.reason.copy())

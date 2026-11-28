@@ -93,6 +93,7 @@ DECLARE(komira_sql_stream_run);
 DECLARE(komira_plan_stream);
 DECLARE(komira_register_arrow_stream);
 DECLARE(komira_add_sql_binding);
+DECLARE(komira_udf_runtime_set);
 
 static int bind_all(void *lib) {
     int missing = 0;
@@ -131,6 +132,7 @@ static int bind_all(void *lib) {
     BIND(komira_plan_stream);
     BIND(komira_register_arrow_stream);
     BIND(komira_add_sql_binding);
+    BIND(komira_udf_runtime_set);
 #undef BIND
     return missing;
 }

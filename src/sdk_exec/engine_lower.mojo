@@ -61,6 +61,8 @@ from scan_source.source_variant import (
     SOURCE_VARIANT_PARQUET,
 )
 
+from udf_host.runtime import UdfBinding
+
 from .engine_context import EngineContext
 
 
@@ -164,4 +166,16 @@ def lower_for_context(
     """`lower(plan, ctx.host_profile, inputs)`, with the inputs built from the
     context's footers."""
     var inputs = lowering_inputs(plan, ctx)
+    return lower(plan, ctx.host_profile, inputs)
+
+
+def lower_for_context(
+    plan: LogicalPlan, ctx: EngineContext, ref udfs: UdfBinding
+) raises -> LoweredPlan:
+    """`lower_for_context(plan, ctx)` with the plan's UDFs: the `UdfRef` of
+    each, in the binding's index order, which is the index the plan's calls
+    name (`LoweringInputs.add_udf`)."""
+    var inputs = lowering_inputs(plan, ctx)
+    for i in range(udfs.count()):
+        inputs.add_udf(udfs.ref_at(i).copy())
     return lower(plan, ctx.host_profile, inputs)
