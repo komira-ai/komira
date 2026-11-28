@@ -123,4 +123,4 @@ UnsupportedOperation STORAGE_URL_REFUSED
 
 - [How do I read a Parquet file?](../15-read-parquet-file/page.md) (rank 15, works)
 - [How do I read many files matching a pattern into one table?](../19-read-many-files-matching-pattern-table/page.md) (rank 19, partial)
-- [How do I run SQL on a CSV or Parquet file (or a DataFrame)?](../37-run-sql-csv-parquet-file/page.md) (rank 37, partial)
+- [How do I run SQL on a CSV or Parquet file (or a DataFrame)?](../37-run-sql-csv-parquet-file/page.md) (rank 37, works)

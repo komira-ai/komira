@@ -70,7 +70,7 @@ Output:
 
 - The first query lists each duplicated key with how many rows share it. The second keeps every row of a duplicated group; the third numbers the rows of a group with `row_number()` and keeps only the later copies, so the first row of each group is not reported.
 - Name the columns of the key in `GROUP BY` / `PARTITION BY`: `email` alone finds rows 1 and 3 as duplicates, while `name, email` together does not.
-- The pandas-shaped frame has no `duplicated()` yet, so the example counts each row's group with `df.groupby("email")["id"].transform("count")` and filters on it. The polars-shaped frame has no `is_duplicated()`, so it uses `pl.len().over("email")`.
+- The pandas-shaped example counts each row's group with `df.groupby("email")["id"].transform("count")` and filters on it; `df[df.duplicated("email", keep=False)]` keeps the same rows. The polars-shaped frame has no `is_duplicated()`, so it uses `pl.len().over("email")`.
 - Rows come back in no promised order unless the query sorts them: add `ORDER BY` or `sort_values` / `sort`.
 
 ## Related

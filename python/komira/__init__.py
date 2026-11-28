@@ -1,7 +1,8 @@
 """komira: SQL over local files, with libkomira, the komira query engine, in process.
 
 This is an early release: a `Session` registers Parquet, CSV and
-newline-delimited JSON files and runs SQL over them, and each `Result` reads
+newline-delimited JSON files, and frames and Arrow data in memory
+(`Session.register`), and runs SQL over them, and each `Result` reads
 as Arrow (pyarrow). `Session.add_sql_binding` binds a SQL name to a
 `files` source: Parquet objects of `s3://` or Azure, read with a named
 credential (`AwsKeys`, `AzureKey`, `AzureSas`, ...). The pandas-shaped `DataFrame` reads the same files
