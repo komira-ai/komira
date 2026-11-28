@@ -27,6 +27,16 @@ from std.builtin.swap import swap
 from containers.slab import Slab
 
 from .sql_copy_format import copy_codec_from_path, copy_format_from_path
+from .sql_copy_options import (
+    COPY_VALUE_INT,
+    COPY_VALUE_STRING,
+    COPY_VALUE_WORD,
+    CopyOptionValue,
+    CopyOptions,
+    CopyTarget,
+    copy_option_list,
+)
+from csv.csv_write_dialect import CsvWriteDialect
 from .sql_interval_parse import interval_literal_starts, parse_interval_literal
 from .sql_nesting import enter_sql_nesting, primary_opens_a_level
 from .sql_token import (
@@ -71,11 +81,7 @@ from .sql_ast import (
 # crosses `komira.plan.v1.WirePlanEnvelope.write_target`, and a
 # wire vocabulary declared outside the codec's `arrow` import closure is
 # one the plan-wire coverage lint structurally cannot see.
-from arrow.write_target import (
-    WFMT_PARQUET, WFMT_CSV, WFMT_JSONL,
-    WCOMP_SNAPPY, WCOMP_UNCOMPRESSED, WCOMP_ZSTD, WCOMP_GZIP, WCOMP_LZ4,
-    write_format_name, write_codec_name, write_target_supported,
-)
+from arrow.write_target import WFMT_PARQUET, WCOMP_SNAPPY
 
 
 comptime INNER_ON_BEFORE_OUTER_REFUSAL = (
@@ -370,151 +376,61 @@ struct _Parser(Movable):
             raise Error("SQL syntax error: COPY ... TO expects a string path")
         var dest = String(self.tokens[self.pos].text)
         self._advance()
-        var opts = self._parse_copy_options(dest)
-        return SqlStatement(STMT_COPY, source^, dest, String(""), opts[0], opts[1], False)
+        var target = self._parse_copy_options(dest)
+        return SqlStatement(
+            STMT_COPY, source^, dest, String(""), target.fmt, target.codec,
+            False, target.csv.copy(),
+        )
 
-    def _parse_copy_options(mut self, dest: String) raises -> Tuple[UInt8, UInt8]:
-        """Parse the parenthesized COPY option list, if any -> (fmt, codec).
-        With no FORMAT the format comes from `dest`'s extension, and with no
-        COMPRESSION the codec from the format and `dest`
-        (`sql_copy_format`).
-
-        Grammar (the subset the DuckDB parity corpus writes, and no more):
-
-            FORMAT <parquet|csv|json>       value: quoted OR bareword, lower-folded
-            COMPRESSION <codec-word>
-            COMPRESSION_LEVEL <int>
-            HEADER <true|false>             csv only
-            ARRAY <true|false>              json only
-
-        TWO PASSES, deliberately. Every option is COLLECTED first and validated
-        only once the list is closed, because the meaning of HEADER / ARRAY /
-        COMPRESSION_LEVEL depends on the FORMAT and DuckDB does not require
-        FORMAT to come first. Validating in stream order would make
-        `(HEADER true, FORMAT 'csv')` behave differently from
-        `(FORMAT 'csv', HEADER true)`.
-
-        AN OPTION IS NEVER ACCEPTED-AND-IGNORED. An ignored option produces a
-        file that is not what the SQL asked for, and no row-count or
-        wall-clock gate can see that. So an option we cannot honour — `HEADER
-        false` (our CSV sink always emits the header row), `ARRAY true` (the
-        JSONL sink is newline-delimited by construction), a COMPRESSION_LEVEL
-        other than the one the wired sink is parameterized on — is a clean
-        raise naming what we would have done instead."""
+    def _parse_copy_options(mut self, dest: String) raises -> CopyTarget:
+        """Parse the parenthesized COPY option list, if any, into its
+        `CopyTarget` (format, codec, CSV dialect). Each `<name> <value>` is
+        handed to `sql_copy_options.CopyOptions`, which validates them
+        together once the list is closed (its header lists the options and
+        why the validation waits for FORMAT). With no list the format comes
+        from `dest`'s extension and the codec from the format and `dest`
+        (`sql_copy_format`)."""
         if self._kind() != TK_LPAREN:
             var inferred = copy_format_from_path(dest)
-            return (inferred, copy_codec_from_path(inferred, dest))
+            return CopyTarget(
+                inferred, copy_codec_from_path(inferred, dest), CsvWriteDialect()
+            )
         self._expect(TK_LPAREN, "'(' to open COPY options")
-        # --- pass 1: collect ---------------------------------------------------
-        var fmt = WFMT_PARQUET
-        var saw_format = False
-        var codec_word = String("")
-        var saw_codec = False
-        var level = 0
-        var saw_level = False
-        var header = True
-        var saw_header = False
-        var array_opt = False
-        var saw_array = False
+        var opts = CopyOptions()
         while True:
             if self._kind() != TK_IDENT:
                 raise Error(
-                    "SQL syntax error: expected a COPY option (FORMAT / COMPRESSION /"
-                    " COMPRESSION_LEVEL / HEADER / ARRAY)"
+                    "SQL syntax error: expected a COPY option ("
+                    + copy_option_list() + ")"
                 )
             var opt = String(self.tokens[self.pos].text)
             self._advance()
-            if opt == "format":
-                fmt = _format_word(self._copy_option_word())
-                saw_format = True
-            elif opt == "compression" or opt == "codec":
-                codec_word = self._copy_option_word()
-                saw_codec = True
-            elif opt == "compression_level":
-                level = self._copy_option_int()
-                saw_level = True
-            elif opt == "header":
-                header = self._copy_option_bool(String("HEADER"))
-                saw_header = True
-            elif opt == "array":
-                array_opt = self._copy_option_bool(String("ARRAY"))
-                saw_array = True
-            else:
-                raise Error(
-                    "SQL not supported: COPY option '" + opt + "' (FORMAT /"
-                    " COMPRESSION / COMPRESSION_LEVEL / HEADER / ARRAY)"
-                )
+            opts.add(opt, self._copy_option_value())
             if self._kind() == TK_COMMA:
                 self._advance()
                 continue
             break
         self._expect(TK_RPAREN, "')' to close COPY options")
-        # --- pass 2: validate, now that FORMAT is known ------------------------
-        if not saw_format:
-            fmt = copy_format_from_path(dest)
-        var codec = copy_codec_from_path(fmt, dest)
-        if saw_codec:
-            codec = _codec_word(codec_word)
-        if not write_target_supported(fmt, codec):
-            raise Error(
-                "SQL not supported: COPY ... (FORMAT '" + write_format_name(fmt)
-                + "', COMPRESSION '" + write_codec_name(codec)
-                + "') — no wired write sink for that pair"
-            )
-        if saw_header:
-            if fmt != WFMT_CSV:
-                raise Error(
-                    "SQL not supported: COPY option HEADER applies to FORMAT 'csv',"
-                    " not '" + write_format_name(fmt) + "'"
-                )
-            if not header:
-                raise Error(
-                    "SQL not supported: COPY ... (HEADER false) — the CSV sink"
-                    " always emits the header row; suppressing it would write a"
-                    " file the SQL did not ask for"
-                )
-        if saw_array:
-            if fmt != WFMT_JSONL:
-                raise Error(
-                    "SQL not supported: COPY option ARRAY applies to FORMAT 'json',"
-                    " not '" + write_format_name(fmt) + "'"
-                )
-            if array_opt:
-                raise Error(
-                    "SQL not supported: COPY ... (ARRAY true) — the JSONL sink"
-                    " writes newline-delimited objects (DuckDB's ARRAY false); it"
-                    " cannot emit a single JSON array"
-                )
-        if saw_level:
-            var want = _codec_fixed_level(codec)
-            if want < 0:
-                raise Error(
-                    "SQL not supported: COPY ... (COMPRESSION_LEVEL "
-                    + String(level) + ") — codec '" + write_codec_name(codec)
-                    + "' takes no level"
-                )
-            if level != want:
-                raise Error(
-                    "SQL not supported: COPY ... (COMPRESSION '"
-                    + write_codec_name(codec) + "', COMPRESSION_LEVEL "
-                    + String(level) + ") — the wired sink is parameterized on"
-                    " level " + String(want) + "; writing a different level"
-                    " silently would not be the file the SQL asked for"
-                )
-        return (fmt, codec)
+        return opts.finish(dest)
 
-    def _copy_option_word(mut self) raises -> String:
-        """Read a COPY option VALUE — a quoted string ('parquet') or a bareword
-        (parquet) — lower-folded, and advance past it."""
-        if self._kind() == TK_STRING:
-            var s = String(self.tokens[self.pos].text).lower()
-            self._advance()
-            return s
-        if self._kind() == TK_IDENT:
-            var s = String(self.tokens[self.pos].text)  # already lower-folded
-            self._advance()
-            return s
-        raise Error("SQL syntax error: expected a COPY option value")
+    def _copy_option_value(mut self) raises -> CopyOptionValue:
+        """Read a COPY option VALUE -- a quoted string (as written), a bare
+        word (lower-folded) or an integer -- and advance past it."""
+        var k = self._kind()
+        var v: CopyOptionValue
+        if k == TK_STRING:
+            v = CopyOptionValue(COPY_VALUE_STRING, self.tokens[self.pos].text, 0)
+        elif k == TK_IDENT:
+            v = CopyOptionValue(COPY_VALUE_WORD, self.tokens[self.pos].text, 0)
+        elif k == TK_INT:
+            v = CopyOptionValue(
+                COPY_VALUE_INT, String(""),
+                Int(self._small_int_tok("COPY option value")),
+            )
+        else:
+            raise Error("SQL syntax error: expected a COPY option value")
+        self._advance()
+        return v^
 
     def _small_int_tok(
         self,
@@ -541,27 +457,6 @@ struct _Parser(Movable):
                 " for BIGINT (" + duck + ")"
             )
         return t.int_val
-
-    def _copy_option_int(mut self) raises -> Int:
-        """Read an INTEGER COPY option value (`COMPRESSION_LEVEL 3`)."""
-        if self._kind() != TK_INT:
-            raise Error("SQL syntax error: expected an integer COPY option value")
-        var v = Int(self._small_int_tok("COPY option value"))
-        self._advance()
-        return v
-
-    def _copy_option_bool(mut self, opt: String) raises -> Bool:
-        """Read a BOOLEAN COPY option value (`HEADER true` / `ARRAY false`),
-        accepting the bareword and the quoted spellings DuckDB accepts."""
-        var w = self._copy_option_word()
-        if w == "true" or w == "1" or w == "on":
-            return True
-        if w == "false" or w == "0" or w == "off":
-            return False
-        raise Error(
-            "SQL syntax error: COPY option " + opt + " expects true/false, got '"
-            + w + "'"
-        )
 
     def _parse_create_table_as(mut self) raises -> SqlStatement:
         """Parse `CREATE [OR REPLACE] TABLE [IF NOT EXISTS] <name> AS <select>`.
@@ -3489,58 +3384,6 @@ def _select_star_from(name: String) raises -> SelectStmt:
     stmt.select_items.append(SelectItem(SqlExpr.star(), Optional[String](), True))
     stmt.from_tables.append(FromRelation.named(name, String("")))
     return stmt^
-
-
-def _format_word(w: String) raises -> UInt8:
-    """Map a COPY `FORMAT <word>` to a WFMT_* code (raises on a format with no
-    wired sink — negative-corpus contract). DuckDB spells newline-delimited JSON
-    `FORMAT 'json'` + `ARRAY false`; `jsonl`/`ndjson` are accepted as the same
-    thing because that is what the sink writes."""
-    if w == "parquet":
-        return WFMT_PARQUET
-    if w == "csv":
-        return WFMT_CSV
-    if w == "json" or w == "jsonl" or w == "ndjson":
-        return WFMT_JSONL
-    raise Error(
-        "SQL not supported: COPY ... (FORMAT '" + w + "') — wired write sinks are"
-        " parquet / csv / json"
-    )
-
-
-def _codec_word(w: String) raises -> UInt8:
-    """Map a COPY `COMPRESSION <word>` to a WCOMP_* code (raises on an unknown
-    codec — negative-corpus contract). Whether the codec is legal for the chosen
-    FORMAT is a SEPARATE check (`write_target_supported`): snappy is a Parquet
-    page codec and has no whole-file CSV/JSONL arm."""
-    if w == "uncompressed" or w == "none":
-        return WCOMP_UNCOMPRESSED
-    if w == "snappy":
-        return WCOMP_SNAPPY
-    if w == "zstd":
-        return WCOMP_ZSTD
-    if w == "gzip" or w == "gz":
-        return WCOMP_GZIP
-    # `lz4_raw` is the Parquet codec id 7 spelling; `lz4` is what DuckDB's CSV /
-    # JSONL COPY calls the same whole-file wrapper. One WCOMP code, because the
-    # sink arm each one resolves to is chosen by the FORMAT.
-    if w == "lz4" or w == "lz4_raw":
-        return WCOMP_LZ4
-    raise Error(
-        "SQL not supported: COPY compression '" + w + "' (uncompressed / snappy /"
-        " zstd / gzip / lz4_raw)"
-    )
-
-
-def _codec_fixed_level(codec: UInt8) -> Int:
-    """The compression LEVEL the wired sink for `codec` is parameterized on, or
-    -1 for a codec that takes no level. `COMPRESSION_LEVEL` is honoured only by
-    AGREEING with it — see `_parse_copy_options`."""
-    if codec == WCOMP_ZSTD:
-        return 3      # WholeFileCompressed[..., Zstd[3]] / Parquet[Zstd[3]]
-    if codec == WCOMP_GZIP:
-        return 6      # Gzip[6] — zlib's default level
-    return -1
 
 
 def parse_sql(var tokens: List[Token]) raises -> SqlStatement:

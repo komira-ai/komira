@@ -76,7 +76,6 @@
     "question": "How do I write a table to a CSV file?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2374",
       "komira-ai/komira#2322"
     ]
   },

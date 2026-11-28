@@ -16,6 +16,15 @@ with komira.Session() as s:
 print("rows written:", written.column("Count")[0].as_py())
 print(Path("out.csv").read_text(), end="")
 
+# The CSV options DuckDB's COPY takes: a delimiter, no header line, a NULL text.
+with komira.Session() as s:
+    s.register_csv("sales", "sales.csv")
+    s.sql(
+        "COPY (SELECT id, region, amount FROM sales WHERE region <> 'east' ORDER BY id)"
+        " TO 'out_semicolon.csv' (FORMAT csv, DELIMITER ';', HEADER false, NULL 'NA')"
+    ).to_arrow()
+print(Path("out_semicolon.csv").read_text(), end="")
+
 # The pandas-shaped frame: run it, then write the Arrow table with pyarrow.
 df = komira.read_csv("sales.csv")
 totals = df.groupby("region", as_index=False)["qty"].sum().sort_values("region")

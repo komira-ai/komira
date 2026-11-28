@@ -36,7 +36,13 @@
 #     TIMESTAMP, TIMESTAMP_MS, TIMESTAMP_NS and TIMESTAMPTZ columns (the
 #     epoch, a tick before it, fractions, BC years, each unit's extremes,
 #     infinity and -infinity) and TINYINT, SMALLINT, UTINYINT, USMALLINT,
-#     UINTEGER and UBIGINT at their extremes, to Parquet, CSV and JSON.
+#     UINTEGER and UBIGINT at their extremes, to Parquet, CSV and JSON; and
+#     CSV files written with DuckDB's CSV options: DELIMITER ';' with NULL
+#     'NA', DELIM '\t' with HEADER false and NULLSTR 'NA', QUOTE "'" with
+#     ESCAPE '\' (a quote, a comma and a line break inside cells), SEP '.'
+#     with DATEFORMAT (dates and doubles holding the delimiter, quoted) and
+#     TIMESTAMPFORMAT over TIMESTAMP, TIMESTAMP_NS and TIMESTAMPTZ columns
+#     (each read back with the same options, every column as VARCHAR).
 #     Catches a file DuckDB cannot open, a column it reads as another type
 #     (a string without its UTF8 annotation reads as BLOB, a DATE without its
 #     annotation as INTEGER, a CSV date written as a day count as BIGINT, a
@@ -45,7 +51,8 @@
 #     signed one), a timestamp whose footer unit is off by 1000 (other
 #     instants), a value or NULL lost (the empty string written unquoted
 #     reads as NULL), a cell quoted, escaped or formatted otherwise than
-#     DuckDB does it, and a `Count` that is not the rows written.
+#     DuckDB does it, a CSV option ignored or applied otherwise than DuckDB
+#     applies it, and a `Count` that is not the rows written.
 #   * test_the_readers_of_the_files: `case_files` keeps only `COPY (` lines
 #     and ends a file name at its quote, `case_name` ends a name at its first
 #     `.` (or keeps a name with none), `tsv_row` of a header alone is empty
@@ -65,7 +72,7 @@ def _uncompressed_text(file: String) -> Bool:
 
 def test_duckdb_reads_each_file_as_its_own() raises:
     var files = case_files(read_data("cases.sql"))
-    assert_equal(len(files), 22)
+    assert_equal(len(files), 27)
     var counts = tsv_pairs(read_data("counts.tsv"))
     assert_equal(len(counts), len(files))
     var same_bytes = 0
@@ -83,7 +90,7 @@ def test_duckdb_reads_each_file_as_its_own() raises:
         assert_equal(row["differing_rows"], "0", c)
         assert_equal(row["komira_rows"], row["duckdb_rows"], c)
         assert_equal(counts[c], row["duckdb_rows"], c + ": Count")
-    assert_equal(same_bytes, 10)
+    assert_equal(same_bytes, 15)
     assert_equal(tsv_row(read_data("empty.check.tsv"))["komira_rows"], "0")
     assert_equal(tsv_row(read_data("empty_csv.check.tsv"))["komira_rows"], "0")
 

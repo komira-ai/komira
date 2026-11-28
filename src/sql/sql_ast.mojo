@@ -269,6 +269,7 @@ comptime STMT_CREATE_TABLE_AS: UInt8 = 2  # CREATE [OR REPLACE] TABLE <name> AS 
 # a second import path for one declaration, which is how "where is this
 # declared" stops having an answer.
 from arrow.write_target import WFMT_PARQUET, WCOMP_SNAPPY
+from csv.csv_write_dialect import CsvWriteDialect
 
 
 @always_inline
@@ -1653,6 +1654,9 @@ struct SqlStatement(Movable):
                         pair is validated at parse time against
                         `write_target_supported`.
         replace       — STMT_CREATE_TABLE_AS: True for `CREATE OR REPLACE TABLE`.
+        csv           — STMT_COPY to CSV: the delimiter, quoting, NULL text,
+                        header and date formats its options give
+                        (`CsvWriteDialect`; DuckDB's defaults otherwise).
 
     Move-only (holds a move-only `SelectStmt`)."""
 
@@ -1663,6 +1667,7 @@ struct SqlStatement(Movable):
     var fmt: UInt8
     var codec: UInt8
     var replace: Bool
+    var csv: CsvWriteDialect
 
     def __init__(
         out self,
@@ -1673,6 +1678,7 @@ struct SqlStatement(Movable):
         fmt: UInt8 = WFMT_PARQUET,
         codec: UInt8 = WCOMP_SNAPPY,
         replace: Bool = False,
+        var csv: CsvWriteDialect = CsvWriteDialect(),
     ):
         self.kind = kind
         self.query = query^
@@ -1681,3 +1687,4 @@ struct SqlStatement(Movable):
         self.fmt = fmt
         self.codec = codec
         self.replace = replace
+        self.csv = csv^

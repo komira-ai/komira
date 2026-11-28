@@ -920,10 +920,14 @@ catalog, with `write_table`. There is no
 - **`COPY` options.**
   - Accepted: `FORMAT`, `COMPRESSION`, `COMPRESSION_LEVEL`, `HEADER true` and `ARRAY false`, as the
     parser accepts them today. The pairs are `write_target_supported`'s 13.
+  - SQL `COPY` to CSV also takes DuckDB's CSV options: `DELIMITER` (`DELIM`, `SEP`), `QUOTE`,
+    `ESCAPE`, `NULL` (`NULLSTR`), `HEADER false`, `DATEFORMAT` and `TIMESTAMPFORMAT`
+    (`sql_copy_options`, `csv.csv_write_dialect`). They are not fields of `WireWriteTarget`: the plan
+    door writes DuckDB's default CSV dialect.
   - Every other DuckDB option is refused by name with `COPY_OPTION_UNSUPPORTED`: `PARTITION_BY`,
     `OVERWRITE`, `OVERWRITE_OR_IGNORE`, `APPEND`, `FILE_SIZE_BYTES`, `PER_THREAD_OUTPUT`,
-    `USE_TMP_FILE`, `RETURN_FILES`, `DELIMITER`, `HEADER false` and `ARRAY true`. Each can later become
-    an optional field of `WireWriteTarget` (rule B8).
+    `USE_TMP_FILE`, `RETURN_FILES` and `ARRAY true`. Each can later become an optional field of
+    `WireWriteTarget` (rule B8).
   - The Python write terminals take `compression=`, and the CSV terminals also the keywords of the
     options the CSV writer has one value of (`to_csv`'s `sep` and `header`; `sink_csv`'s `separator`,
     `include_header`, `quote_char`, `null_value`, `line_terminator` and `include_bom`), at that value.
