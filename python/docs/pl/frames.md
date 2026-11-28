@@ -35,8 +35,8 @@ imports polars.
 
 The expressions are on [their own page](expressions.md). Not built yet:
 
-- `.dt`
 - `from_arrow`
 - `join_asof`
 - `shift`
+- in `.dt`, everything but `truncate(every)`
 - regular expressions

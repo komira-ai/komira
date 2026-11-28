@@ -244,6 +244,7 @@ pandas-shaped (`km`):
 - `.size()`
 - `.sum()`
 - `df.groupby(keys).agg(...)`
+- `df.resample(rule, on=column)` with `D`, `W` (`W-SUN`), `MS` and `ME` (`M`) groups by the bucket of a date column, labelled as pandas labels it (komira/_resample.py), with no row order and no empty buckets
 - the others (rules section 8, ruling 4)
 
 polars-shaped (`kpl`):
@@ -251,6 +252,7 @@ polars-shaped (`kpl`):
 - `.len()`
 - `.sum()` and the others
 - `lf.group_by(keys).agg(...)`
+- `lf.group_by_dynamic(index, every="1d"|"1w"|"1mo", group_by=...)` groups by `col(index).dt.truncate(every)` with polars' default windows
 
 ### `in_list`
 
@@ -764,7 +766,7 @@ pandas-shaped (`km`):
 - `s.dt.day`
 - `s.dt.dayofweek`
 - `s.dt.dayofyear`
-- `s.dt.floor(freq)` for one fixed unit
+- `s.dt.floor(freq)` for one fixed unit; `floor("W")` and the other calendar rules refused, as pandas refuses them (use `df.resample`)
 - `s.dt.hour`
 - `s.dt.microsecond`
 - `s.dt.minute`
@@ -775,19 +777,20 @@ pandas-shaped (`km`):
 
 polars-shaped (`kpl`):
 
-- `expr.dt.day` (not built) (the skin has no `expr.dt`)
-- `expr.dt.hour` (not built) (the skin has no `expr.dt`)
-- `expr.dt.microsecond` (not built) (the skin has no `expr.dt`)
-- `expr.dt.millisecond` (not built) (the skin has no `expr.dt`)
-- `expr.dt.minute` (not built) (the skin has no `expr.dt`)
-- `expr.dt.month` (not built) (the skin has no `expr.dt`)
-- `expr.dt.ordinal_day` (not built) (the skin has no `expr.dt`)
-- `expr.dt.quarter` (not built) (the skin has no `expr.dt`)
-- `expr.dt.second` (not built) (the skin has no `expr.dt`)
-- `expr.dt.truncate(every)` for one fixed unit (not built) (the skin has no `expr.dt`)
-- `expr.dt.week` (not built) (the skin has no `expr.dt`)
-- `expr.dt.weekday` (not built) (the skin has no `expr.dt`)
-- `expr.dt.year` (not built) (the skin has no `expr.dt`)
+- `expr.dt.day` (not built)
+- `expr.dt.hour` (not built)
+- `expr.dt.microsecond` (not built)
+- `expr.dt.millisecond` (not built)
+- `expr.dt.minute` (not built)
+- `expr.dt.month` (not built)
+- `expr.dt.ordinal_day` (not built)
+- `expr.dt.quarter` (not built)
+- `expr.dt.second` (not built)
+- `expr.dt.truncate(every)` for `"1d"`, `"1w"` (from Monday) and `"1mo"`
+- `expr.dt.week` (not built)
+- `expr.dt.weekday` (not built)
+- `expr.dt.year` (not built)
+- a multiple of a unit (not built)
 
 ### `topn`
 
@@ -1118,24 +1121,33 @@ In the `read_*` message, `<format>` is the format of the name looked up (`parque
 | `ngroups` | `.<name> needs a query to run; aggregate with .size() and materialize()` |
 | `nth` | `.<name>() is not supported yet; use min() or max() of an ordered key` |
 | `ohlc` | `.<name>() is not supported: komira has no time index` |
-| `resample` | `.<name>() is not supported: komira has no time index` |
+| `resample` | `GroupBy.resample() is not supported yet: resample the frame with df.resample(rule, on=column), which groups by the bucket alone` |
 
-### `LazyFrame`, `LazyGroupBy` and `Expr`
+### `LazyFrame`, `LazyGroupBy`, `Expr` and `ExprDateTimeNameSpace`
 
 | name | on | message |
 |---|---|---|
 | `apply` | `Expr` | `Expr.apply is not a polars verb; use map_elements(f, return_dtype=...)` |
 | `cache` | `LazyFrame` | `.<name>() is not supported: komira runs a plan only at .collect()` |
 | `collect_async` | `LazyFrame` | `.<name>() is not supported: komira runs a plan only at .collect()` |
+| `day` | `ExprDateTimeNameSpace` | `.dt.<name>() is not supported yet: komira.pl's dt has truncate(every); the pandas-shaped frame's .dt has the date parts` |
 | `explode` | `LazyFrame` | `.<name>() is not supported yet: the plan has no node for it` |
 | `fetch` | `LazyFrame` | `a LazyFrame is a plan: run it with .collect(), then convert the Result` |
 | `first` | `Expr`, `LazyGroupBy` | `.<name>() is not supported yet; use .min() or .max() of an ordered key` |
+| `hour` | `ExprDateTimeNameSpace` | `.dt.<name>() is not supported yet: komira.pl's dt has truncate(every); the pandas-shaped frame's .dt has the date parts` |
 | `last` | `Expr`, `LazyGroupBy` | `.<name>() is not supported yet; use .min() or .max() of an ordered key` |
 | `materialize` | `LazyFrame` | `.materialize() is the pandas-shaped skin's word; this frame runs at .collect()` |
+| `minute` | `ExprDateTimeNameSpace` | `.dt.<name>() is not supported yet: komira.pl's dt has truncate(every); the pandas-shaped frame's .dt has the date parts` |
+| `month` | `ExprDateTimeNameSpace` | `.dt.<name>() is not supported yet: komira.pl's dt has truncate(every); the pandas-shaped frame's .dt has the date parts` |
+| `ordinal_day` | `ExprDateTimeNameSpace` | `.dt.<name>() is not supported yet: komira.pl's dt has truncate(every); the pandas-shaped frame's .dt has the date parts` |
 | `profile` | `LazyFrame` | `.<name>() is not supported: komira runs a plan only at .collect()` |
+| `quarter` | `ExprDateTimeNameSpace` | `.dt.<name>() is not supported yet: komira.pl's dt has truncate(every); the pandas-shaped frame's .dt has the date parts` |
+| `second` | `ExprDateTimeNameSpace` | `.dt.<name>() is not supported yet: komira.pl's dt has truncate(every); the pandas-shaped frame's .dt has the date parts` |
 | `sort_by` | `Expr` | `Expr.sort_by() is not supported: the plan carries no order inside an expression; sort the frame instead` |
 | `to_arrow` | `LazyFrame` | `a LazyFrame is a plan: run it with .collect(), then convert the Result` |
 | `to_pandas` | `LazyFrame` | `a LazyFrame is a plan: run it with .collect(), then convert the Result` |
 | `to_polars` | `LazyFrame` | `a LazyFrame is a plan: run it with .collect(), then convert the Result` |
 | `unpivot` | `LazyFrame` | `.<name>() is not supported yet: the plan has no node for it` |
+| `weekday` | `ExprDateTimeNameSpace` | `.dt.<name>() is not supported yet: komira.pl's dt has truncate(every); the pandas-shaped frame's .dt has the date parts` |
 | `with_column` | `LazyFrame` | `with_column() is not a polars verb; use with_columns()` |
+| `year` | `ExprDateTimeNameSpace` | `.dt.<name>() is not supported yet: komira.pl's dt has truncate(every); the pandas-shaped frame's .dt has the date parts` |

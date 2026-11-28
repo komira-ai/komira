@@ -940,6 +940,7 @@ FRAME_MODULES = (
     "_merge.py",
     "_missing.py",
     "_refusals.py",
+    "_resample.py",
     "_series.py",
     "_verbs.py",
     "_windows.py",
@@ -955,6 +956,7 @@ ALLOWED_IMPORTS = {
     ".:_ops",
     ".:_plan",
     ".:_refusals",
+    ".:_resample",  # komira/_resample.py: DataFrame.resample builds the bucket and a GroupBy
     ".:_verbs",
     ".:_windows",
     ".:_write",
