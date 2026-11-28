@@ -147,7 +147,11 @@ def join(left, other, on, how, left_on, right_on, suffix, validate, nulls_equal,
     plan = Join(left._plan, right_plan, how, lk, tuple(inner.get(k, k) for k in rk))
     sources = dict(left._sources)
     for path, src in other._sources.items():
-        sources.setdefault(path, src)
+        if sources.setdefault(path, src) != src:
+            raise UnsupportedOperation(
+                f"join: the two frames read {path!r} in two ways (other reader options, or files that "
+                "changed between the reads): read it once, and take both frames from that one"
+            )
 
     if how == "right":
         items = [(c, ColRef(c)) for c in L if c not in lk] + [(c, ColRef(inner[c])) for c in R]

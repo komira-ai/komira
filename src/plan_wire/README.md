@@ -11,7 +11,9 @@ same; `plan_round_trip` does both directions in one call.
 and `plan_wire_supported_versions` is the set this build reads.
 `schema_to_bytes` and `binding_to_bytes` let a frontend in another language
 write the schema of a Parquet scan or a whole scan binding without computing
-the engine's codes itself.
+the engine's codes itself; `parquet_source_to_bytes` gives it the whole
+`WireParquetSource` of a source the engine resolved from a glob or a
+directory (its sorted files, schema and Hive partition columns).
 
 Decoding treats the bytes as untrusted. Before parsing, `plan_wire_admit`
 refuses a message over `PLAN_WIRE_MAX_BYTES` (16 MiB), a version this build
@@ -121,6 +123,40 @@ assert_true(PLAN_WIRE_UNRESOLVED_COLUMN in decode_error(unknown_column^))
 # Field 1 claims 127 bytes and one follows.
 var truncated: List[UInt8] = [0x0A, 0x7F, 0x00]
 assert_true(decode_error(truncated^) != "decoded")
+```
+
+`parquet_source_to_bytes` writes a whole source, the way a frontend in
+another language takes the files a glob or a directory resolved to: its paths,
+the files' schema, and the Hive partition columns with one value row per
+file, which a scan reads after the files' columns.
+
+```mojo
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, SchemaBuilder
+from plan_proto.plan import WireParquetSource
+from plan_wire import parquet_source_to_bytes
+from proto_codec import decode_proto
+from scan_source.parquet_source import ParquetSource
+from std.testing import assert_equal
+
+var data = SchemaBuilder()
+data.add_field(Field("id", ArrowType.INT64, False))
+var keys = List[Field]()
+keys.append(Field("year", ArrowType.INT64, False))
+var values = List[List[String]]()
+values.append([String("2026")])
+values.append([String("2027")])
+var files = ParquetSource.partitioned(
+    [String("/sales/year=2026/a.parquet"), String("/sales/year=2027/b.parquet")],
+    data.build(),
+    keys^,
+    values^,
+)
+var source = decode_proto[WireParquetSource](parquet_source_to_bytes(files))
+assert_equal(len(source.paths), 2)
+assert_equal(source.schema.value().fields[0].name, "id")
+assert_equal(source.partition_cols[0].name, "year")
+assert_equal(source.partition_values[1].values[0], "2027")
 ```
 
 ## User code: `UdfRef` and the UDF arms

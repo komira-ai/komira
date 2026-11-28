@@ -333,6 +333,14 @@ class Session:
         with self._held():
             return self._native.parquet_schema(self._live(), path)
 
+    def _parquet_source(self, path: str, hive_partitioning: int) -> bytes:
+        """The `WireParquetSource` bytes of the local Parquet files the
+        absolute `path` names (one file, a glob or a directory), resolved now
+        (`komira_parquet_source`, ABI 1.11), with the Hive partition columns
+        of the `KOMIRA_HIVE_*` mode `hive_partitioning`."""
+        with self._held():
+            return self._native.parquet_source(self._live(), path, hive_partitioning)
+
     def _csv_binding(self, path: str, *, delimiter: str, header: bool) -> bytes:
         """The `WireScanBinding` bytes of the local CSV file at the absolute
         `path` (`komira_csv_binding`), its columns inferred now."""
@@ -535,6 +543,28 @@ def _check_name(name: object) -> None:
         raise TypeError("name must be a str, not {}".format(type(name).__name__))
     if not name:
         raise ValueError("name is empty")
+
+
+# The Hive partitioning modes `Session._parquet_source` takes (the
+# KOMIRA_HIVE_* constants of komira_parquet_source).
+_HIVE_AUTO = _native.KOMIRA_HIVE_AUTO
+_HIVE_ON = _native.KOMIRA_HIVE_ON
+_HIVE_OFF = _native.KOMIRA_HIVE_OFF
+
+# The characters that make a path a glob for the engine (`has_glob`,
+# src/fs/glob.mojo): `*`, `?`, `[` and `{`.
+_GLOB_CHARACTERS = frozenset("*?[{")
+
+
+def _names_many_files(path: str) -> bool:
+    """Whether the absolute `path` is a glob or a directory, which the engine
+    resolves into the files it names (`komira_parquet_source`), rather than
+    one file. A file that exists takes the one-file route, as it did before
+    `komira_parquet_source`, even when its name holds a glob character
+    (`part[1].parquet`)."""
+    if os.path.isfile(path):
+        return False
+    return not _GLOB_CHARACTERS.isdisjoint(path) or os.path.isdir(path)
 
 
 def _local_path(path: object) -> str:

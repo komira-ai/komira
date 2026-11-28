@@ -31,6 +31,7 @@ mojo_library(
         "tests/test_plan_wire_hostile_values.mojo",
         "tests/test_plan_wire_optimized_context.mojo",
         "tests/test_plan_wire_optimizer_decisions.mojo",
+        "tests/test_plan_wire_parquet_source.mojo",
         "tests/test_plan_wire_rel_goldens.mojo",
         "tests/test_plan_wire_rel_goldens_join.mojo",
         "tests/test_plan_wire_round_trip_ir.mojo",

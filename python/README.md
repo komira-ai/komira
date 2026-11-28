@@ -70,7 +70,7 @@ import pyarrow.parquet as pq
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1010 is 1.10
+print(komira.abi_version())   # the engine's C ABI version: 1011 is 1.11
 
 # A small Parquet file to query: six days of weather in three cities.
 weather = pa.table({
@@ -117,7 +117,7 @@ It prints:
 
 ```text
 0.1.1623
-1010
+1011
 [{'days': 6, 'rain': 9.5}]
 city: string
 days: int64 not null
@@ -411,7 +411,7 @@ The package's layout and API are designed in
 | `komira/_iceberg.py` | the Iceberg sources (private; nothing public takes one yet): `iceberg(uri, *, warehouse=None, credential=AMBIENT, signing=None, access_delegation="vended-credentials")`, an `IcebergCatalog`; `catalog.table(name)`, an `IcebergTable`, with `name` as `"namespace.table"` or a tuple of namespace levels and the table; and `SigV4(region, service)`. Each is checked when built (an http or https URI with a host and no user, password, query or fragment; a credential that fits the catalog: `AMBIENT` or `AwsKeys` with SigV4, and `AMBIENT`, `ANONYMOUS`, `BearerToken` or `OAuth2ClientCredentials` without; `access_delegation` `vended-credentials` or `none`), does no I/O and loads no library; a catalog or a table shows its credential's secrets as `<set>` and refuses pickle and copy ([docs/design/iceberg_tables.md](https://github.com/komira-ai/komira/blob/main/docs/design/iceberg_tables.md), "What the user sees") |
 | `komira/_arrow.py` | the Arrow C stream of a query: `ArrowArrayStream`, the C struct for `ctypes`, and `import_stream`, which hands a filled stream to pyarrow's public `RecordBatchReader.from_stream` through a PyCapsule with no destructor, and releases it itself if pyarrow did not take it |
 | `komira/_errors.py` | `KomiraError`, its subclasses, and `error_class`, which picks one from an engine refusal's code and step |
-| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.10 (`sql_stream`, `register_csv`, `register_json`, `register_arrow_stream` of 1.9, the run handle calls `run_new`, `run_cancel`, `run_progress` and `sql_stream_run` of 1.6, the last error's code and step, `plan_stream`, the plan door of 1.8, and `add_sql_binding` of 1.10 among them) |
+| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.11 (`sql_stream`, `register_csv`, `register_json`, `register_arrow_stream` of 1.9, the run handle calls `run_new`, `run_cancel`, `run_progress` and `sql_stream_run` of 1.6, the last error's code and step, `plan_stream`, the plan door of 1.8, `add_sql_binding` of 1.10 and `parquet_source` of 1.11 among them) |
 | `komira/_run.py` | `run_sql`, which `Session.sql` runs a query with on ABI 1.6: the call `komira_sql_stream_run` on a helper thread under a run handle of its own, while the calling thread waits, reads the handle's progress for the `progress` callback, and cancels the handle when anything is raised on it (a Ctrl-C's `KeyboardInterrupt`, the callback's exception) |
 | `komira/_plan/` | the plan encoder: `encode_plan`, a plan of `komira/_ops` as the `komira.plan.v1` `WirePlanEnvelope` the plan door takes, every node with the output schema the engine derives for it and every scan reading a source libkomira described (`parquet_source`, `binding_source`); calls of user functions (`UdfCall`, `MapBatches`) as `WireUdfApply` and `WireMapBatchesNode` over the envelope's `UdfRef` list, one per distinct function, each with the komira/python descriptor; `encode_expr`, an expression node as a `WireExpr`; and `expr_field`, the output field the engine derives for it. It writes no SQL text. It imports the generated plan modules, which the wheel ships at `komira/plan/v1/`; `import komira` does not import it |
 | `komira/pl/` | `komira.pl`, the polars-shaped DataFrame surface ([docs/design/dataframe_surface.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface.md)): lazy frames and expressions over a plan of `komira/_ops`; `collect()` encodes it with `komira/_plan` and runs it through `komira_plan_stream`, and `sink_csv`, `sink_parquet` and `sink_ndjson` run it there with a write target through `komira/_write.py`, their polars arguments checked in `komira/pl/_sink.py`. It writes no SQL text and imports no polars. A name it does not define raises `AttributeError`, with the refusal tables' message for theirs. Its verbs are described, one page each, in `python/docs/pl/` |
@@ -584,7 +584,7 @@ How the loader behaves:
   own default (`CredentialsError` for the credential calls, which a library
   older than 1.7 answers only with `CREDENTIALS_INVALID`). The package never
   parses the message to choose the class.
-- **Private calls.** `parquet_schema`, `csv_binding`, `json_binding`,
+- **Private calls.** `parquet_schema`, `parquet_source`, `csv_binding`, `json_binding`,
   `plan_render`, `plan_stream`, `credential_add`, `credential_set` and
   `credential_seal` exist only on `_native.Native`, and so does
   `Native.add_sql_binding`, which the public `Session.add_sql_binding` makes. They have no public API and no stability

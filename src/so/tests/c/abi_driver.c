@@ -76,6 +76,7 @@ DECLARE(komira_last_error_code);
 DECLARE(komira_last_error_step);
 DECLARE(komira_register_parquet);
 DECLARE(komira_parquet_schema);
+DECLARE(komira_parquet_source);
 DECLARE(komira_csv_binding);
 DECLARE(komira_json_binding);
 DECLARE(komira_plan_render);
@@ -114,6 +115,7 @@ static int bind_all(void *lib) {
     BIND(komira_last_error_step);
     BIND(komira_register_parquet);
     BIND(komira_parquet_schema);
+    BIND(komira_parquet_source);
     BIND(komira_csv_binding);
     BIND(komira_json_binding);
     BIND(komira_plan_render);
@@ -1136,6 +1138,9 @@ int main(void) {
     uint8_t out[16];
     uint64_t out_len = 0;
     CHECK(p_komira_parquet_schema(ctx, "no_such_file.parquet", out, sizeof out, &out_len) == KOMIRA_ERR_ENGINE);
+    CHECK(p_komira_parquet_source(ctx, "no_such_dir/*.parquet", KOMIRA_HIVE_AUTO, out, sizeof out, &out_len) == KOMIRA_ERR_ENGINE);
+    CHECK(p_komira_parquet_source(ctx, "no_such_file.parquet", KOMIRA_HIVE_OFF, out, sizeof out, &out_len) == KOMIRA_ERR_ENGINE);
+    CHECK(p_komira_parquet_source(ctx, "no_such_file.parquet", KOMIRA_HIVE_ON, out, sizeof out, &out_len) == KOMIRA_ERR_ENGINE);
     CHECK(p_komira_csv_binding(ctx, "no_such_file.csv", ',', 1, 0, out, sizeof out, &out_len) == KOMIRA_ERR_ENGINE);
     CHECK(p_komira_json_binding(ctx, "no_such_file.json", out, sizeof out, &out_len) == KOMIRA_ERR_ENGINE);
 

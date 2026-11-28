@@ -59,6 +59,14 @@ def main(args):
                     assert "needs libkomira ABI version 1.1; the library at {} is 1.0".format(path) in str(e), str(e)
                 else:
                     raise AssertionError("a 1.0 library ran a 1.1 call")
+            # The source of a glob or a directory needs 1.11.
+            want = "komira_parquet_source needs libkomira ABI version 1.11; the library at {} is 1.0".format(path)
+            try:
+                native.parquet_source(ctx, "p/*.parquet", _native.KOMIRA_HIVE_AUTO)
+            except KomiraError as e:
+                assert type(e) is KomiraError and str(e) == want and e.status is None, repr(e)
+            else:
+                raise AssertionError("a 1.0 library ran komira_parquet_source")
             native.ctx_free(ctx)
             # Sealing a credential needs the calls of 1.2; a built-in one
             # calls nothing, so it needs none.

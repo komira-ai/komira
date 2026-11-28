@@ -2,7 +2,7 @@
 
 `load` opens the library from a directory, once per process, checks that its
 ABI major version is the one this package was written for, and binds the
-calls of `_FUNCTIONS` (the newest from ABI 1.10); every failure is a `LibraryLoadError` that says which
+calls of `_FUNCTIONS` (the newest from ABI 1.11); every failure is a `LibraryLoadError` that says which
 library and why. `Native` holds the bound calls and turns their status codes
 into `KomiraError`, with the context's last error, read with the two-call
 protocol, as the message, and, from ABI 1.7, its code and step as the error's
@@ -97,6 +97,13 @@ KOMIRA_ERR_CANCELLED = -6
 # (src/so/abi/komira.tsv).
 KOMIRA_BIND_SESSION = 1
 
+# The Hive partitioning modes of komira_parquet_source (the KOMIRA_HIVE_*
+# constants of src/so/abi/komira.tsv): partition columns when every file has
+# the same keys, partition columns with files whose keys differ refused, none.
+KOMIRA_HIVE_AUTO = 0
+KOMIRA_HIVE_ON = 1
+KOMIRA_HIVE_OFF = 2
+
 # The step of a refusal, komira_last_error_step's answer, as the name the
 # error's `step` carries (the KOMIRA_STEP_* constants of src/so/abi/komira.tsv).
 # KOMIRA_STEP_NONE, and a number a later library adds, have no name.
@@ -124,6 +131,7 @@ _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
     "komira_last_error_step": (7, ctypes.c_int32, [ctypes.c_void_p]),
     "komira_register_parquet": (1, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]),
     "komira_parquet_schema": (1, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p] + _Out),
+    "komira_parquet_source": (11, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int32] + _Out),
     "komira_csv_binding": (
         1,
         ctypes.c_int32,
@@ -587,6 +595,15 @@ class Native:
         """The `WireSchema` bytes of the Parquet file at `path`."""
         c_path = _c_path(path)
         return self._out("komira_parquet_schema", ctx, lambda fn, b, c, n: fn(ctx, c_path, b, c, n))
+
+    def parquet_source(self, ctx: int, path: str | os.PathLike[str], hive_partitioning: int) -> bytes:
+        """The `WireParquetSource` bytes of the Parquet files at `path` (one
+        file, a glob or a directory), with the Hive partition columns the
+        `KOMIRA_HIVE_*` mode `hive_partitioning` asks for. Needs ABI 1.11."""
+        c_path = _c_path(path)
+        return self._out(
+            "komira_parquet_source", ctx, lambda fn, b, c, n: fn(ctx, c_path, hive_partitioning, b, c, n)
+        )
 
     def csv_binding(
         self, ctx: int, path: str | os.PathLike[str], *, delimiter: str, has_header: bool, all_varchar: bool

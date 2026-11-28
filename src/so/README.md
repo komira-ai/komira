@@ -6,7 +6,8 @@ one library and its flat C surface: no Mojo type crosses it. This package holds
 the surface's skeleton (the status codes, the version, the context handle and
 the last-error call), the session options (the engine's worker count and
 memory budget, as arguments of `komira_ctx_new_with_options`) and the source and render calls: registering a Parquet,
-CSV or newline-delimited JSON file as a table, the schema and scan bindings of Parquet, CSV and JSON files, and a plan
+CSV or newline-delimited JSON file as a table, the schema and scan bindings of Parquet, CSV and JSON files, the
+source of the Parquet files a glob or a directory names, and a plan
 rendered as text; the credential calls, which define a credential on the
 session by name and hold its values in the session's secret store; and
 `komira_sql_stream`, which runs one SQL statement on the session and hands its
@@ -24,7 +25,7 @@ table of that name; `komira_sql_stream` reads such a table through the object
 store.
 
 - `abi/komira.tsv`: the golden of the C ABI; `komira.h` is made from it.
-- `status.mojo`: the seven status codes, `KOMIRA_MAX_INPUT_BYTES`, the credential
+- `status.mojo`: the seven status codes, `KOMIRA_MAX_INPUT_BYTES`, the Hive modes of `komira_parquet_source`, the credential
   kinds, fields and scope, `abi_version`, `buffer_status`, `input_length_status`.
 - `session.mojo`: `Session`, the state a context handle stands for: the last
   error, the engine (`sdk_exec`'s `EngineContext`), whose catalog holds the
@@ -64,6 +65,9 @@ int32_t  komira_last_error_step(void *ctx);
 int32_t  komira_register_parquet(void *ctx, const char *name,
                                  const char *path);
 int32_t  komira_parquet_schema(void *ctx, const char *path, uint8_t *out_buf,
+                               uint64_t out_cap, uint64_t *out_len);
+int32_t  komira_parquet_source(void *ctx, const char *path,
+                               int32_t hive_partitioning, uint8_t *out_buf,
                                uint64_t out_cap, uint64_t *out_len);
 int32_t  komira_csv_binding(void *ctx, const char *path, uint8_t delimiter,
                             int32_t has_header, int32_t all_varchar,
@@ -154,7 +158,7 @@ from so import ABI_MAJOR, ABI_MINOR, abi_version
 from std.testing import assert_equal
 
 assert_equal(abi_version(), ABI_MAJOR * 1000 + ABI_MINOR)
-assert_equal(abi_version(), Int32(1010))
+assert_equal(abi_version(), Int32(1011))
 ```
 
 **The handle.** `komira_ctx_new` returns a context the caller owns until it
@@ -272,8 +276,8 @@ The step of an error: an engine refusal of `komira_sql_stream` has the step
 that refused, and so does one of `komira_plan_stream` at `bind` (a write's
 destination), `optimize`, `lower` or `execute` (one at `decode` has `KOMIRA_STEP_NONE`, as `decode` is no step
 of the SQL pipeline); a `KOMIRA_ERR_ENGINE` of `komira_register_parquet`,
-`komira_parquet_schema`, `komira_csv_binding`, `komira_json_binding` or a
-credential call has `KOMIRA_STEP_BIND`; every other error (a NULL argument, a
+`komira_parquet_schema`, `komira_parquet_source`, `komira_csv_binding`,
+`komira_json_binding` or a credential call has `KOMIRA_STEP_BIND`; every other error (a NULL argument, a
 too-long input, a text that is not UTF-8 for `komira_sql_stream`, a column the
 stream cannot carry, `komira_plan_render`) has `KOMIRA_STEP_NONE`. The code is
 computed from the reason by `error_code` (`session.mojo`): `SQL syntax error: `
@@ -297,16 +301,17 @@ refused (-3, with a last error) before it is used.
 |---|---|---|
 | `komira_register_parquet(ctx, name, path)` | reads the footers of the Parquet files at `path` (one file, a glob or a directory) through the engine's footer reader and binds them into the engine's catalog as the table `name` (found without regard to case) | NULL `name` or `path`: -2. A missing, unreadable or nested file, a glob that matches nothing, or files whose schemas differ: -3 |
 | `komira_parquet_schema(ctx, path, out_buf, out_cap, out_len)` | the file's Arrow schema as `komira.plan.v1` `WireSchema` bytes, for a plan author to splice into a Parquet scan | NULL `path` or `out_len`: -2. A file that cannot be read: -3 |
+| `komira_parquet_source(ctx, path, hive_partitioning, out_buf, out_cap, out_len)` | the Parquet files at `path`, resolved as `komira_register_parquet` resolves them (one file, a glob's matches sorted byte-wise, or the `.parquet` files under a directory), as `komira.plan.v1` `WireParquetSource` bytes: the files, their schema and the Hive partition columns of their `key=value` folders, which a scan reads after the files' columns, with each file's values. `hive_partitioning` is `KOMIRA_HIVE_AUTO` (0: the columns when every file has the same keys, else none), `KOMIRA_HIVE_ON` (1: the columns; files whose keys differ are refused) or `KOMIRA_HIVE_OFF` (2: none) | NULL `path` or `out_len`: -2. A file that cannot be read, a glob that matches nothing (`PARQUET_GLOB_NO_MATCH`, naming it), files whose schemas differ (`PARQUET_FILES_SCHEMA_MISMATCH`), the Hive refusals of `komira_register_parquet` and another mode (`HIVE_PARTITIONING_UNKNOWN`): -3 |
 | `komira_csv_binding(ctx, path, delimiter, has_header, all_varchar, out_buf, out_cap, out_len)` | the whole `WireScanBinding` of a CSV file, schema inferred from a bounded prefix of an uncompressed file (a compressed file is read whole). `has_header` and `all_varchar` are `int32_t`; any non-zero value is true | as `komira_parquet_schema` |
 | `komira_json_binding(ctx, path, out_buf, out_cap, out_len)` | the same for a newline-delimited JSON file; the schema comes from the leading records | as `komira_parquet_schema` |
 | `komira_register_csv(ctx, name, path, delimiter, has_header, all_varchar)` | infers the schema of the CSV file at `path` now (a bounded prefix of an uncompressed file; a compressed file is read whole) and binds the file into the engine's catalog as the table `name` (found without regard to case). The table is the scan `read_csv` builds for the same file and dialect: `delimiter` and `has_header` are what the file is read with, `all_varchar` makes every column a string; `has_header` and `all_varchar` are `int32_t`, any non-zero value is true. Every later query reads the file at the schema inferred here. A table registered with `has_header` 0 is refused when a query reads it, at `lower`, naming `header=false`, as `read_csv(..., header=false)` is, until the reader names the columns as DuckDB does | NULL `name` or `path`: -2. A file that cannot be read or has no column: -3. An empty name: -3, `TABLE_NAME_EMPTY: a table name must not be empty`. A name the session already holds, of any kind and in any case: -3, `TABLE_ALREADY_REGISTERED: the session already has a table named '<name>'`. Nothing is registered on a refusal |
 | `komira_register_json(ctx, name, path)` | the same for a newline-delimited JSON file, the scan `read_json` builds; the schema comes from the leading records | as `komira_register_csv` |
 | `komira_plan_render(ctx, plan, plan_len, out_buf, out_cap, out_len)` | decodes the serialized plan `plan[0..plan_len]` (a `WirePlanEnvelope`) and writes its text as authored, before any optimizer rule; the plan is not run | NULL `plan` or `out_len`: -2. `plan_len` above 64 MiB (`KOMIRA_MAX_INPUT_BYTES`): -5, checked before the plan is read or anything is allocated; exactly 64 MiB is accepted. Bytes that are not an admissible plan: -3 |
 
-The four calls with an `out_buf` follow the two-call protocol above. The
-binding and schema bytes are what a plan author splices into a scan leaf: the
+The five calls with an `out_buf` follow the two-call protocol above. The
+binding, schema and source bytes are what a plan author splices into a scan leaf: the
 fingerprint, kind id and snapshot fields come from the engine and are not
-computed by the caller. A NULL `ctx` is -1 for all seven.
+computed by the caller. A NULL `ctx` is -1 for all eight.
 
 `komira_register_csv` and `komira_register_json` refuse a taken name.
 `komira_register_parquet` replaces the table of a taken name (any kind, any
@@ -339,6 +344,51 @@ try:
 except e:
     refused = String(e)
 assert_true(refused.startswith("TABLE_ALREADY_REGISTERED: "))
+```
+
+`parquet_source_bytes` is `komira_parquet_source` on values: the session, the
+path (one file, a glob or a directory) and a `KOMIRA_HIVE_*` mode in, the
+`WireParquetSource` bytes out, or a raise with the engine's named error.
+
+```mojo
+from std.os import makedirs
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.primitive_array import PrimitiveArray
+from arrow.schema import Field, RecordBatchBuilder, SchemaBuilder
+from parquet_writer.record_batch_writer import write_record_batch_to_parquet_bytes
+from plan_proto.plan import WireParquetSource
+from proto_codec import decode_proto
+from runtime_paths import test_tmpdir
+from so import KOMIRA_HIVE_AUTO, KOMIRA_HIVE_OFF, Session, parquet_source_bytes
+from std.testing import assert_equal, assert_true
+
+var root = test_tmpdir() + "/readme_by_year"
+for year in ["2026", "2027"]:
+    makedirs(root + "/year=" + year, exist_ok=True)
+    var ids = PrimitiveArray[DType.int64].allocate(1)
+    ids.set(0, Scalar[DType.int64](1))
+    var columns = SchemaBuilder()
+    columns.add_field(Field("id", ArrowType.INT64, False))
+    var rows = RecordBatchBuilder()
+    rows.add_column(Column.from_primitive[DType.int64](ids^))
+    var bytes = write_record_batch_to_parquet_bytes(rows.build(columns.build()))
+    with open(root + "/year=" + year + "/part.parquet", "w") as f:
+        f.write_bytes(Span(bytes))
+
+var session = Session()
+var keyed = decode_proto[WireParquetSource](parquet_source_bytes(session, root, KOMIRA_HIVE_AUTO))
+assert_equal(len(keyed.paths), 2)
+assert_equal(keyed.partition_cols[0].name, "year")
+assert_equal(keyed.partition_values[0].values[0], "2026")
+var plain = decode_proto[WireParquetSource](parquet_source_bytes(session, root + "/*/*.parquet", KOMIRA_HIVE_OFF))
+assert_equal(len(plain.partition_cols), 0)
+var no_match = String()
+try:
+    _ = parquet_source_bytes(session, root + "/*.csv", KOMIRA_HIVE_AUTO)
+except e:
+    no_match = String(e)
+assert_true(no_match.startswith("PARQUET_GLOB_NO_MATCH: "))
 ```
 
 **Running SQL.** `komira_sql_stream(ctx, sql, out)` runs the one SQL statement
@@ -702,18 +752,24 @@ On values, the call is `add_sql_binding` over the source's bytes (`so.bindings`)
 ```
 
 The library is published only if the gate passes: the exports check, then
-nineteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
-foreign host would. Seven cover the skeleton: the version (1010, which is 1.10),
+twenty drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
+foreign host would. Seven cover the skeleton: the version (1011, which is 1.11),
 create and free (distinct handles, separate sessions), no symbol beyond the
-twenty-six, a fresh session's empty error, the two-call protocol (zero capacity, one
+twenty-seven, a fresh session's empty error, the two-call protocol (zero capacity, one
 byte short, exact, larger), a NULL context, and a NULL `out_len`. `gate_error_code_step`
 checks that `komira_last_error_code` and `komira_last_error_step` exist and, on a
 fresh session, give an empty code and step 0, and that a NULL context is -1 and
 step 0. One driver per
 new call writes its input file under `$TEST_TMPDIR` and checks a good input,
 NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
-with the message as the last error) and, for the four calls with an output, the
+with the message as the last error) and, for the five calls with an output, the
 two-call protocol; a good call after a refusal leaves no error.
+`gate_parquet_source` checks a glob over two files (both paths, the one that
+sorts first first) and a directory of `k=1/` and `k=2/` folders (more bytes
+with `KOMIRA_HIVE_AUTO` than with `KOMIRA_HIVE_OFF`) through the two-call
+protocol, the NULL cases, and a glob that matches nothing and an unknown mode
+(-3, naming `PARQUET_GLOB_NO_MATCH` and the pattern, and
+`HIVE_PARTITIONING_UNKNOWN`).
 `gate_credentials` defines a credential through the three calls and checks each
 named refusal word for word, the NULL and length cases, and that `*out_id` is
 untouched on a refusal.
@@ -733,7 +789,7 @@ plus one (-5 with its last error), and each -3 word for word with step `bind`
 and its code: a scope other than 1, an empty name, a name that is not UTF-8, a
 one-byte source, a zero-length source and a missing file; a good call after a
 refusal leaves no error.
-`exports_exact` makes the twenty-six names above the whole dynamic symbol table.
+`exports_exact` makes the twenty-seven names above the whole dynamic symbol table.
 On Linux the eleven C owners in the library's closure (async, async_api,
 compression, crypto, fs, http_core, libc, metrics, objectstore, parquet_codec,
 scan_source) are linked as their own shared libraries (`native_owners`), not
@@ -882,7 +938,7 @@ the extra `$ORIGIN/../../lib` finds the one `lib/` of the variants directory fro
 
 ## The header and the golden
 
-`abi/komira.tsv` is the golden of the ABI: the version (1.10), one row per export
+`abi/komira.tsv` is the golden of the ABI: the version (1.11), one row per export
 with its return type, argument types and the version that added it, and one row
 per status code, limit and credential kind, field and scope (`constant`). `komira_abi_golden` checks it on every
 build against the `@export abi("C")` functions of `_c_abi.mojo` (names, return and
@@ -906,7 +962,7 @@ headers. The golden does not check that its version was raised when
 a row changed: that compares with the previous release.
 
 `tests/c/abi_driver.c` is a C program that includes `komira.h` and nothing of
-ours. It opens `./libkomira.so`, binds each of the twenty-six functions to a pointer
+ours. It opens `./libkomira.so`, binds each of the twenty-seven functions to a pointer
 declared with the header's own prototype, and checks the version in the header
 against `komira_abi_version()`, the status codes, the input bound
 (`KOMIRA_MAX_INPUT_BYTES` plus one is -5), and the last-error round trip (NULL

@@ -102,13 +102,23 @@ comptime KOMIRA_STEP_LOWER: Int32 = 4
 comptime KOMIRA_STEP_EXECUTE: Int32 = 5
 """The pipeline was refused or failed while it ran."""
 
+# The Hive partitioning mode of `komira_parquet_source`, which columns a
+# path's `key=value` directory names give the files it names: the values of
+# the engine's `HIVE_PARTITIONING_*` modes.
+comptime KOMIRA_HIVE_AUTO: Int32 = 0
+"""A partition column per key when every file has the same keys, else none."""
+comptime KOMIRA_HIVE_ON: Int32 = 1
+"""A partition column per key; files whose keys differ are refused."""
+comptime KOMIRA_HIVE_OFF: Int32 = 2
+"""No partition column."""
+
 # The ABI version is `ABI_MAJOR * 1000 + ABI_MINOR`: 1000 is 1.0 and 2003 is
 # 2.3. A new symbol raises the minor version; changing or removing a symbol
 # raises the major version and resets the minor to 0. The minor version stays
 # below 1000 so that the integer decodes uniquely.
 comptime ABI_MAJOR: Int32 = 1
 """The major version: raised by a change that breaks an existing caller."""
-comptime ABI_MINOR: Int32 = 10
+comptime ABI_MINOR: Int32 = 11
 """The minor version: raised by an addition that breaks no caller."""
 comptime _ABI_MINOR_LIMIT: Int32 = 1000
 
