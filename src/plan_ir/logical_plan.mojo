@@ -570,7 +570,7 @@ from plan_ir.plan_decisions import (
 # column. `by=[]` → single-group
 # semantics (O(N*M)); `tolerance=AsofTolerance.none()` → unbounded match.
 
-comptime ASOF_BACKWARD: UInt8 = 0   # last right row with right.ts <= left.ts
+comptime ASOF_BACKWARD: UInt8 = 0   # greatest right.ts <= left.ts (first of ties)
 comptime ASOF_FORWARD: UInt8 = 1    # first right row with right.ts >= left.ts
 comptime ASOF_NEAREST: UInt8 = 2    # smallest |left.ts - right.ts|; tie → backward
 

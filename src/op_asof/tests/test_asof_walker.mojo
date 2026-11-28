@@ -723,7 +723,8 @@ def test_walker_tolerance_respected() raises:
 
 
 def test_walker_backward_duplicate_right_ts() raises:
-    # Right ts has duplicates: [20, 20, 20]. Backward of 20 picks LAST.
+    # Right ts has duplicates: [20, 20, 20]. Backward of 20 picks the FIRST,
+    # the tied row DuckDB v1.5.6 returns.
     var left = _batch_i64_2("k", [0], "ts", [20])
     var right = _batch_i64_2("k", [0, 0, 0], "ts", [20, 20, 20])
     var left_b = Slab[RecordBatch]()
@@ -741,7 +742,7 @@ def test_walker_backward_duplicate_right_ts() raises:
         left_b, right_b, lkc, rkc, 1, 1,
         AsofTolerance.none(), lb, lr, rb, rr,
     )
-    assert_equal(rr[0], 2, "Backward of 20 in [20,20,20] -> LAST (idx 2)")
+    assert_equal(rr[0], 0, "Backward of 20 in [20,20,20] -> FIRST (idx 0)")
 
 
 def test_walker_forward_duplicate_right_ts() raises:

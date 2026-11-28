@@ -33,25 +33,29 @@
 #
 # A PLAN_JOIN is both: its build child's pipeline ends in a SINK_HASH_BUILD
 # segment, and its probe child's pipeline stays open with an OP_JOIN_PROBE
-# fused onto it and an E3 edge to the build segment (`cut_join`). In a plan
-# that holds a shared-subplan reference its right child is walked first, the
-# order the plan's producer visits a join in (`cut_shared`); the scan count
-# is set for each child, so its scans keep their pre-order indices.
+# fused onto it and an E3 edge to the build segment (`cut_join`). A
+# PLAN_ASOF_JOIN is a breaker over two children: its right child's pipeline
+# ends in a SINK_COLLECT segment, its left child's in a SINK_ASOF_JOIN segment
+# with an E3 edge to it, and a pipeline opens that reads the join's rows
+# (`cut_asof`). In a plan that holds a shared-subplan reference the right
+# child of either is walked first, the order the plan's producer visits a join
+# in (`cut_shared`); the scan count is set for each child, so its scans keep
+# their pre-order indices.
 #
 # This module is the dispatch on the node's tag (`_walk_node`) and, around it,
 # the resolution of shared subplans (`_walk`, `_resolve`). Each arm is its own
 # module: `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
 # `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_topn`, `cut_window`,
-# `cut_union`, `cut_join`, `cut_map_batches`, `cut_step` and `cut_shared`; what
-# they share (the open pipeline, the cutter's state and the close and reopen of
-# a breaker) is `cut_state`, and what a user-function call is held to is
-# `udf_check`. The filter, project, limit, top-n, aggregate, distinct, frame,
-# join and window arms have two halves: the first holds every check that
-# refuses the node itself and runs before the child (or the children) is
-# walked; the second fuses onto, or closes, the child's pipeline. The sort arm
-# has only the second. The union arm checks its branches' schemas before it
-# walks them, walks them in order, ends each in a segment and opens the
-# concatenation.
+# `cut_union`, `cut_join`, `cut_asof`, `cut_map_batches`, `cut_step` and
+# `cut_shared`; what they share (the open pipeline, the cutter's state and the
+# close and reopen of a breaker) is `cut_state`, and what a user-function call
+# is held to is `udf_check`. The filter, project, limit, top-n, aggregate,
+# distinct, frame, join, as-of join and window arms have two halves: the first
+# holds every check that refuses the node itself and runs before the child (or
+# the children) is walked; the second fuses onto, or closes, the child's
+# pipeline. The sort arm has only the second. The union arm checks its
+# branches' schemas before it walks them, walks them in order, ends each in a
+# segment and opens the concatenation.
 #
 # The root is a SINK_COLLECT segment, unless the plan's top node is a breaker:
 # then that breaker's segment is the result and nothing is appended.
@@ -62,6 +66,7 @@
 # replaces a node it cannot cut by a resident batch or a generic collect.
 # =============================================================================
 
+from lowering.cut_asof import check_asof, _close_asof
 from lowering.cut_aggregate import _aggregate_exprs, _close_aggregate
 from lowering.cut_distinct import _distinct_keys, _close_distinct
 from lowering.cut_filter import _filter_op, _fuse_filter
@@ -108,6 +113,7 @@ from plan_ir.logical_plan import (
     PLAN_LIMIT,
     PLAN_TOPN,
     PLAN_JOIN,
+    PLAN_ASOF_JOIN,
     PLAN_UNION,
     PLAN_PARTITION_BY,
     PLAN_CSE_REF,
@@ -237,6 +243,23 @@ def _walk_node(
         var left = _walk(cutter, jd.left[], inputs)
         cutter.scans_seen = end
         return _close_join(cutter, node, shape^, left^, right^, inputs)
+    if tag == PLAN_ASOF_JOIN:
+        var asof_dtype = check_asof(node)
+        ref ad = node.asof_join_data_ref()
+        if len(cutter.referenced) == 0:
+            var left = _walk(cutter, ad.left[], inputs)
+            var right = _walk(cutter, ad.right[], inputs)
+            return _close_asof(cutter, node, asof_dtype, left^, right^, inputs)
+        # As a join: the right child first, each child's scans at their
+        # pre-order indices.
+        var start = cutter.scans_seen
+        cutter.scans_seen = start + _scan_count(ad.left[])
+        var right = _walk(cutter, ad.right[], inputs)
+        var end = cutter.scans_seen
+        cutter.scans_seen = start
+        var left = _walk(cutter, ad.left[], inputs)
+        cutter.scans_seen = end
+        return _close_asof(cutter, node, asof_dtype, left^, right^, inputs)
     if tag == PLAN_UNION:
         _check_union(node)
         ref ud = node.union_data_ref()

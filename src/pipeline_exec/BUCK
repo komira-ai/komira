@@ -47,8 +47,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 as the position-order fold over Parquet and a
 #                                 resident batch, 1e16, 1, -1e16, 1 exactly 1.0,
 #                                 the cursor-grain route's refusal.
+# test_asof_plan                  a SINK_ASOF_JOIN segment over the rows of the
+#                                 right segment it depends on: the as-of join
+#                                 on 1 to 7 workers, ties, a left side with no
+#                                 row, a run twice, and each refusal.
 # test_variants                   each variant slot forwards to its member, the
-#                                 fourth operator and sink slots included.
+#                                 fourth operator and sink slots and the fifth
+#                                 sink slot included.
 # test_run_segment                every row once, the end of input once per
 #                                 worker, the operator chain, combine once
 #                                 after every worker, a worker count of one to
@@ -321,6 +326,7 @@ mojo_library(
         "//src/join_assembly:join_assembly",
         "//src/json:json",
         "//src/jsonl:jsonl",
+        "//src/kernels:kernels",
         "//src/libc:libc",
         "//src/log:log",
         "//src/lz4:lz4",
@@ -328,6 +334,7 @@ mojo_library(
         "//src/morsel:morsel",
         "//src/name_registry:name_registry",
         "//src/objectstore:objectstore",
+        "//src/op_asof:op_asof",
         "//src/op_sort:op_sort",
         "//src/op_window:op_window",
         "//src/op_join_probe:op_join_probe",
@@ -360,6 +367,7 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
+        "tests/test_asof_plan.mojo",
         "tests/test_count_distinct_state.mojo",
         "tests/test_edge_policy_and_ready_set.mojo",
         "tests/test_float_sum_workers_concurrent.mojo",

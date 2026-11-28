@@ -75,6 +75,7 @@ from plan_ir.logical_plan import (
     PLAN_LIMIT,
     PLAN_UNION,
     PLAN_JOIN,
+    PLAN_ASOF_JOIN,
     PLAN_CSE_REF,
     PLAN_MAP_BATCHES,
 )
@@ -115,6 +116,10 @@ def _referenced_hashes(plan: LogicalPlan, mut out: List[UInt64]):
         ref jd = plan.join_data_ref()
         _referenced_hashes(jd.left[], out)
         _referenced_hashes(jd.right[], out)
+    elif tag == PLAN_ASOF_JOIN:
+        ref ad = plan.asof_join_data_ref()
+        _referenced_hashes(ad.left[], out)
+        _referenced_hashes(ad.right[], out)
 
 
 def _scan_count(plan: LogicalPlan) -> Int:
@@ -150,6 +155,9 @@ def _scan_count(plan: LogicalPlan) -> Int:
     if tag == PLAN_JOIN:
         ref jd = plan.join_data_ref()
         return _scan_count(jd.left[]) + _scan_count(jd.right[])
+    if tag == PLAN_ASOF_JOIN:
+        ref ad = plan.asof_join_data_ref()
+        return _scan_count(ad.left[]) + _scan_count(ad.right[])
     return 0
 
 
@@ -223,6 +231,9 @@ def _expand_inplace(mut plan: LogicalPlan, cutter: _Cutter):
     elif tag == PLAN_JOIN:
         _expand_inplace(plan._join.value()[].left[], cutter)
         _expand_inplace(plan._join.value()[].right[], cutter)
+    elif tag == PLAN_ASOF_JOIN:
+        _expand_inplace(plan._asof_join.value()[].left[], cutter)
+        _expand_inplace(plan._asof_join.value()[].right[], cutter)
 
 
 def _expanded(cutter: _Cutter, node: LogicalPlan) -> LogicalPlan:

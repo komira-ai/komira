@@ -304,6 +304,18 @@ def _tolerance_exceeds[dtype: DType](
         ) > tolerance.int_val.cast[DType.uint64]()
 
 
+@always_inline
+def _first_of_run[dtype: DType](values: List[Scalar[dtype]], i: Int) -> Int:
+    """The first index of the run of values equal to `values[i]` that ends
+    at `i` (ascending `values`), searching back from `i`: one step when the
+    value is not repeated.
+
+    PERF-CRITICAL: called once per matched left row in the BACKWARD and
+    NEAREST loops.
+    """
+    return _lower_bound_with_hint[dtype](values, i + 1, values[i], i)
+
+
 # =============================================================================
 # _find_best_asof -- one body, a monomorph per (strategy, dtype)
 # =============================================================================
@@ -326,11 +338,16 @@ def _find_best_asof[strategy: UInt8, dtype: DType](
     0 at a new group).
 
       * ASOF_BACKWARD (DuckDB `left.t >= right.t`): the last value at or
-        before `left_ts`; among equal values the last one.
+        before `left_ts`; among equal values the first one.
       * ASOF_FORWARD (DuckDB `left.t <= right.t`): the first value at or after
         `left_ts`; among equal values the first one.
       * ASOF_NEAREST: the nearer of those two candidates (the module header's
         distance); a tie takes the backward one.
+
+    Among equal values the first one is the one DuckDB v1.5.6 returns: the
+    group is in the right side's input order within a value (the sort before
+    the walk is stable), and DuckDB pairs a left row with the first of the
+    tied right rows it reads, in both directions.
 
     Then the tolerance (inclusive) may reject the match.
 
@@ -348,7 +365,7 @@ def _find_best_asof[strategy: UInt8, dtype: DType](
         if lo == 0:
             best_idx = -1
             return
-        var cand = lo - 1
+        var cand = _first_of_run[dtype](right_asof, lo - 1)
         if _tolerance_exceeds[dtype](left_ts, right_asof[cand], tolerance):
             best_idx = -1
             return
@@ -383,11 +400,12 @@ def _find_best_asof[strategy: UInt8, dtype: DType](
             if _diff_le[dtype](
                 left_ts, right_asof[lo - 1], right_asof[lo], left_ts
             ):
-                cand = lo - 1  # a tie takes the backward candidate
+                # A tie takes the backward candidate.
+                cand = _first_of_run[dtype](right_asof, lo - 1)
             else:
                 cand = lo
         elif have_left:
-            cand = lo - 1
+            cand = _first_of_run[dtype](right_asof, lo - 1)
         else:
             cand = lo
         if _tolerance_exceeds[dtype](left_ts, right_asof[cand], tolerance):

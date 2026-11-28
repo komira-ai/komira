@@ -14,8 +14,9 @@ r.t` FORWARD):
   (`op_sort.sort.sort_key_lt`): NaN equals NaN and sorts above +inf,
   and -0.0 equals +0.0;
 - an equal ASOF value matches. Among right rows with equal key and ASOF
-  value, BACKWARD takes the last in input order and FORWARD the first (DuckDB
-  leaves that choice unspecified).
+  value, every strategy takes the first in the right side's input order: the
+  row DuckDB v1.5.6 returns in both directions (measured; its documentation
+  leaves the choice unspecified).
 
 NEAREST and the tolerance are the engine's own (DuckDB has neither). NEAREST
 breaks a distance tie toward the backward row; the tolerance is inclusive; a

@@ -341,7 +341,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** An ASOF join's equality keys are equi-join keys: a left row whose equality key holds a NULL matches nothing (§3.1), and so does a NULL ASOF key (§3.6). In a LEFT ASOF join such a row appears once with the right columns NULL. The plan's ASOF equality keys are `=` only: DuckDB also accepts `IS NOT DISTINCT FROM` keys, which do match NULL to NULL, but the plan has no such key (§1.6), so a frontend refuses one by name.
 - **DuckDB.** The conditions other than the inequality "must be equalities (or NOT DISTINCT)"; an equality with NULL is not TRUE (§1.2), so it does not match (DuckDB documentation, "FROM and JOIN").
-- **Current behaviour.** The IR carries `left_keys` / `right_keys` as equi-keys (`src/plan_ir/logical_plan.mojo:1472-1474`); no ASOF operator is in this repository.
+- **Current behaviour.** The IR carries `left_keys` / `right_keys` as equi-keys; `op_asof`'s walker matches nothing for a NULL key on either side or a NULL ASOF value, and `run_plan` runs the node (`lowering.cut_asof`), held to DuckDB's ASOF LEFT JOIN by `sdk_exec`'s `test_run_plan_asof`.
 - **Mark.** MATCHES.
 
 ### 3.18 ASOF without equality keys
@@ -353,9 +353,9 @@ The rulings that settled each item once open or departing, the table of parity g
 
 ### 3.19 Right rows tied on the ASOF key
 
-- **Rule.** When two or more right rows in one group have the same ASOF key and that key is the best match, the row returned is the one DuckDB returns, measured with the oracle. If the measurement shows DuckDB's choice depends on input order, any one of the tied rows is a correct answer and a test compares such rows as either answer; komira's answer must still not depend on its own worker count. Until the oracle has measured it, oracle cases keep ASOF keys unique within each equality group.
-- **DuckDB.** "ASOF joins each left side row with at most one right side row"; which of several tied rows is not documented.
-- **Current behaviour.** BACKWARD is described as "last right row with right.ts <= left.ts" (`src/plan_ir/logical_plan.mojo:502`), which does not say which of two tied rows is last.
+- **Rule.** When two or more right rows in one group have the same ASOF key and that key is the best match, the row returned is the one DuckDB returns, measured with the oracle. If the measurement shows DuckDB's choice depends on input order, any one of the tied rows is a correct answer and a test compares such rows as either answer; komira's answer must still not depend on its own worker count. komira returns the first of the tied rows in the right side's input order, which is the row DuckDB returns in the measurement below, so the tests compare that row exactly; a DuckDB pin that chose another tied row would fail them by name (`test_tied_right_rows_match_duckdb` checks the oracle's own answer).
+- **DuckDB.** "ASOF joins each left side row with at most one right side row"; which of several tied rows is not documented. Measured on v1.5.6 (one thread): with `>=` and with `<=`, in ASOF JOIN and ASOF LEFT JOIN, a left row is paired with the first of the tied right rows in the order the right side was read, and swapping two tied rows in the input swaps the answer (`sdk_exec`'s `tests/asof`, cases `*_ties_reordered`). The choice depends on input order.
+- **Current behaviour.** `op_asof`'s kernel takes the first of the tied rows in every direction: the walker reads each right group in input order within a value (the sort before it is stable, and the sink collects in source position order), so the answer is the same on every worker count.
 - **Mark.** MATCHES.
 
 ## 4. Sort order and floating-point order

@@ -195,7 +195,7 @@ join are cut by the same classification of each node into one of three roles:
 |---|---|---|
 | **Source** (a leaf; starts a pipeline) | `PLAN_SCAN` (Parquet, in-memory, CSV, an Iceberg table), `PLAN_STEP` | `SOURCE_PARQUET`, `SOURCE_BATCH`, `SOURCE_CSV` or `SOURCE_ICEBERG` (the files the host planned, carried in `ScanFacts.iceberg`); `SOURCE_UDF_STEP` |
 | **Streaming operator** (fused into the pipeline below it) | `PLAN_FILTER`, `PLAN_PROJECT` (with an `OP_UDF_APPLY` before it per column that is a `UdfRef` call), `PLAN_LIMIT`, an ungrouped `PLAN_MAP_BATCHES`, and a join's probe side | `OP_FILTER`, `OP_PROJECT`, `OP_UDF_APPLY`, `OP_LIMIT`, `OP_UDF_FRAME`, `OP_JOIN_PROBE` appended to `ops` |
-| **Breaker** (ends a pipeline; its output is the next pipeline's source) | `PLAN_AGGREGATE`, `PLAN_SORT`, `PLAN_TOPN`, `PLAN_DISTINCT`, `PLAN_PARTITION_BY`, `PLAN_PARTITION_TOPN`, a join's build side, the root | `SINK_AGG` (also for `PLAN_DISTINCT`, grouped by every column), `SINK_SORT`, `SINK_TOPN`, `SINK_PARTITION_BY`, `SINK_PARTITION_TOPN`, `SINK_HASH_BUILD`, `SINK_COLLECT` (the root) |
+| **Breaker** (ends a pipeline; its output is the next pipeline's source) | `PLAN_AGGREGATE`, `PLAN_SORT`, `PLAN_TOPN`, `PLAN_DISTINCT`, `PLAN_PARTITION_BY`, `PLAN_PARTITION_TOPN`, a join's build side, `PLAN_ASOF_JOIN` (its right child ends in a `SINK_COLLECT`, its left in the `SINK_ASOF_JOIN` breaker), the root | `SINK_AGG` (also for `PLAN_DISTINCT`, grouped by every column), `SINK_SORT`, `SINK_TOPN`, `SINK_PARTITION_BY`, `SINK_PARTITION_TOPN`, `SINK_HASH_BUILD`, `SINK_COLLECT` (the root) |
 
 A breaker ends the pipeline below it and starts one whose source is `SOURCE_SINK_OUTPUT` over the breaker's segment.
 A join is two edges: the build side is a segment ending in `SINK_HASH_BUILD`, and the probe side's pipeline gains an
@@ -230,14 +230,16 @@ first slices set `ORDER_NONE` only; step 9 sets `ORDER_ROW_RANGE` on the ungroup
 on the grouped one. What `ORDER_ROW_RANGE`
 asks of the driver is in §3.3 and open point O1, and what step 9 built is after the table of §7.3.
 
-**What the cutter refuses.** An `ASOF` join (`SINK_ASOF_JOIN`), a sort-merge join (`SINK_SMJ_BUILD`), the IR's
+**What the cutter refuses.** A sort-merge join (`SINK_SMJ_BUILD`), the IR's
 `SINK_JOIN_PROBE` (a second, sink-form probe the cutter does not emit; the probe is `OP_JOIN_PROBE`, §3.6), a view reference, a partition top-n (`PLAN_PARTITION_TOPN`) and
 a cast to string in a pipeline's spine are not cut yet: the IR has the tags and the cutter does not emit them. A union is cut: each branch ends in a
 segment of its own and the union's pipeline reads their outputs through a `SOURCE_CONCAT` in branch order (src/lowering/README.md). A shared-subplan
 reference (`PLAN_CSE_REF`) is cut: a canonical subtree with a breaker or a limit ends in a segment of its own that every reference reads over an `E3`
 edge, the driver handing each reader the same rows, and one of scans, filters, projections and unions is cut again at each reference over the same
 scans (src/lowering/README.md, `cut_shared`). The cutter raises a named refusal
-(`LOWERING_UNCUTTABLE_NODE`, naming the node tag), and does not produce a segment that reads "some batch". A resident
+(`LOWERING_UNCUTTABLE_NODE`, naming the node tag), and does not produce a segment that reads "some batch". An `ASOF` join is cut (`cut_asof`, step 7 of §7.3): its right child ends in a `SINK_COLLECT` segment, its left
+child in a `SINK_ASOF_JOIN` segment whose `ParamTable.asof` row names that segment, joined to it by an `E3` edge; the
+sink sorts both sides and runs `op_asof`'s walker over them, and what it refuses is `LOWERING_ASOF_UNSERVED`. A resident
 batch standing in for a subtree discards the subtree's meaning and gives a well-formed plan that computes something
 else; "not yet cut" must stay visible as a refusal. The same holds for a plan with an `EXCHANGE` node when there is one
 host: the cutter elides the exchange ([the optimized plan](optimized_plan.md) §8.2) once the exchange slice exists;
@@ -282,7 +284,7 @@ A host that has to re-optimize to lower is a bug in the optimizer, not a thing f
 | `lowered_plan` | `LoweredPlan`, `LoweringInputs`, `ParamTable` and the refusal tokens |
 | `cut_walk` | the three-role walk of §2.3: the dispatch on the node's tag, one branch per arm |
 | `cut_state` | what the arms share: the open pipeline, the cutter's segments and `ParamTable`, the close of a pipeline in a sink and the reopen over an `E3` edge |
-| `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_sort`, `cut_window`, `cut_join` | one arm each: the checks that refuse the node, run before its child is walked, and the fuse or close onto the child's pipeline |
+| `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_sort`, `cut_window`, `cut_join`, `cut_asof` | one arm each: the checks that refuse the node, run before its child is walked, and the fuse or close onto the child's pipeline |
 | `sink_capability` | the table of sink triples a host serves (§4.2): data, no operator |
 | `render` | the deterministic text render of a `LoweredPlan` the corpus compares |
 
