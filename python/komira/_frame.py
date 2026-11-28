@@ -32,13 +32,15 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
   is NULL, or NaN in a float column (komira/_missing.py): `fillna` replaces it
   with a literal of the column's type, `dropna` filters on it, and `isna` and
   `notna` (aliases `isnull` and `notnull`) mark it in a frame of booleans of
-  the same columns. `astype` casts through
+  the same columns. `replace` puts a value of the column's type, or a NULL,
+  where a listed value is, one CASE per changed column (komira/_replace.py).
+  `astype` casts through
   komira/_cast.py. `tail` takes the last rows of a sorted frame as a TOPN by
   the reversed keys, sorted back. `komira.concat` is a union of frames of one
   schema, checked in komira/_verbs.py before it is built.
 - Row order (section 7): a sort makes a frame ordered; a filter, a projection
-  that keeps the sort keys, an `assign`, `fillna`, `astype` or `rename` that
-  changes none of them, a `dropna` and `head`
+  that keeps the sort keys, an `assign`, `fillna`, `replace`, `astype` or
+  `rename` that changes none of them, a `dropna` and `head`
   keep it ordered, the builder placing filters and projections under the sort
   and a limit above it, and a sort above a limit when a verb comes after one.
   `tail` of a sorted frame is sorted. A reduction, `isna`, `notna`,
@@ -63,7 +65,7 @@ from collections.abc import Callable
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
-from . import _display, _groupby, _merge, _ops, _refusals, _verbs, _windows, _write
+from . import _display, _groupby, _merge, _ops, _refusals, _replace, _verbs, _windows, _write
 from ._errors import UnsupportedOperation
 from ._groupby import GroupBy
 from ._missing import present
@@ -467,6 +469,35 @@ class DataFrame:
         filled = {name for name, _ in items}
         plan = _ops.with_columns(self._plan, items)
         return self._ordered(plan, lambda keys: not any(k.column in filled for k in keys))
+
+    def replace(
+        self,
+        to_replace: object = None,
+        value: object = _replace.UNSET,
+        *,
+        inplace: bool = False,
+        regex: object = False,
+    ) -> DataFrame:
+        """A frame with the values `to_replace` names replaced, read as
+        pandas reads them (komira/_replace.py): a value or a list with a
+        value, a list of the same length or `{column: value}`;
+        `{column: old}` with a value or `{column: value}`; and, with no value,
+        `{old: new}` or `{column: {old: new}}`. `value=None` is a NULL of the
+        column's type. Matching is exact, by the column's type; a column no
+        value can be in is unchanged. Builds one projection."""
+        _replace.check_args("frame", inplace, regex)
+        columns = self._plan.columns
+        by_column, every = _replace.column_pairs(to_replace, value, columns)
+        dtypes = self.dtypes
+        items = []
+        for name in columns:
+            if name in by_column:
+                node = _replace.replaced(_ops.ColRef(name), dtypes[name], by_column[name], name, every)
+                if node is not None:
+                    items.append((name, node))
+        changed = {name for name, _ in items}
+        plan = _ops.with_columns(self._plan, tuple(items))
+        return self._ordered(plan, lambda keys: not any(k.column in changed for k in keys))
 
     def dropna(
         self,
