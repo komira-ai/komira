@@ -8,7 +8,8 @@
 # stays with its owner; the source is built over a copy, because the morsel
 # source consumes what it is given and a plan may read one batch twice. A
 # SOURCE_JSONL segment serves the batches its file was read into the same way
-# (`source_jsonl`), one cursor over all of them.
+# (`source_jsonl`), one cursor over all of them, and a SOURCE_AVRO segment the
+# batch its file was decoded into (`source_avro`).
 
 from arrow.schema import RecordBatch, Schema
 from containers.slab import Slab

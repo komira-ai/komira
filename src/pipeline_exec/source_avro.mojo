@@ -11,7 +11,8 @@
 # a resident batch (`BatchSource`). No other decoder is involved and nothing
 # is inferred: an Avro file states its own schema.
 #
-# The type envelope (§13.5 of the scan semantics, rulings 25 and 29) is
+# The type envelope (docs/design/query_semantics_scans.md §13.5, and items 25
+# and 29 of docs/design/query_semantics_rulings.md) is
 # checked on the writer schema before any block is decoded, so a file of no
 # row is refused like a file of many, and every refusal names the column:
 #
