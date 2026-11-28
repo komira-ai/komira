@@ -45,6 +45,19 @@ The verbs, each of one column but the last, and what each builds:
   itself, as float64, as pandas gives it; a missing value has a missing rank
   (`na_option="keep"`), or ranks after every value (`"bottom"`) or before
   every value (`"top"`).
+- `shift(periods=1)` of a column: the value `periods` rows before this one in
+  the frame's sort order (LAG), or `-periods` rows after it when `periods` is
+  negative (LEAD), the column itself for 0; missing where there is no such
+  row. The column keeps its type. LAG and LEAD read int64, float64 and string
+  columns; another type is refused.
+- `diff(periods=1)` of a number column: the column less its `shift(periods)`,
+  computed in the column's type and given as float64, as pandas gives it.
+- `pct_change(periods=1)` of a number column: the column over its
+  `shift(periods)`, less 1, as float64. Over a previous value of 0 the answer
+  is pandas' division by zero: inf for a positive value, -inf for a negative
+  one and NaN for 0 or NaN (the engine's division answers NULL there, so a
+  CASE gives these). A previous value of -0.0 is taken as 0, where pandas'
+  division by -0.0 flips the sign of the infinity.
 - `df.duplicated(subset, keep)`: `ROW_NUMBER() > 1` over the rows of each
   value of the subset (keep "first" or "last"; the row numbered 1 is any one
   of them, as a plan has no row order), or `COUNT(*) > 1` (keep=False), the
@@ -65,6 +78,7 @@ from typing import TYPE_CHECKING
 
 from . import _ops
 from ._errors import UnsupportedOperation
+from ._missing import not_nan
 
 if TYPE_CHECKING:
     from ._frame import DataFrame
@@ -74,11 +88,14 @@ __all__ = [
     "Rolling",
     "Windows",
     "cumulative",
+    "diff",
     "duplicates",
     "filter_plan",
     "merged",
     "project_plan",
+    "pct_change",
     "rank",
+    "shift",
     "transform",
     "unique_rows",
 ]
@@ -96,6 +113,8 @@ _NUMBERS = frozenset(
     {"int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float16", "float32", "float64"}
 )
 _CASE_NULLS = frozenset({"int64", "float64"})
+# The types the engine's LAG and LEAD read.
+_SHIFTED = frozenset({"int64", "float64", "string"})
 # The argument of a count window that counts every row of its partition, NULLs
 # and all: `_computed` reads it from a column of the literal 1.
 _EVERY_ROW = "__komira_every_row"
@@ -346,6 +365,85 @@ def rank(
         return ranked
 
     return _build(frame, (win,), value, keys, dropna)
+
+
+def _periods(periods: object, verb: str) -> int:
+    if isinstance(periods, bool) or not isinstance(periods, int):
+        raise TypeError(f"{verb} periods must be an int, the number of rows, not a {type(periods).__name__}")
+    return periods
+
+
+def _previous(frame: DataFrame, column: str, periods: int, verb: str) -> tuple[_ops.Node, Windows]:
+    """The value of `column` `periods` rows before each row in the frame's
+    sort order (after it when `periods` is negative), missing where there is
+    no such row, and the windows it reads."""
+    dtype = frame.dtypes[column]
+    if dtype not in _SHIFTED:
+        raise UnsupportedOperation(
+            f"{verb} reads the column {column!r} of type {dtype}, and the window reads int64, float64 and "
+            f'string columns: assign it as one of those first, as df.assign({column}=df["{column}"].astype("int64"))'
+        )
+    order = _order(frame, verb)
+    if periods == 0:
+        return _ops.ColRef(column), ()
+    func = "lag" if periods > 0 else "lead"
+    win = _ops.WindowExpr(func, column, offset=abs(periods), order_by=order)
+    built = _build(frame, (win,), lambda w: w, (), False)
+    return built.node, built.windows
+
+
+def shift(frame: DataFrame, column: str, periods: object) -> _Built:
+    """`shift(periods)` of `column`."""
+    n = _periods(periods, "shift()")
+    node, windows = _previous(frame, column, n, f"shift({n})")
+    return _Built(node, windows)
+
+
+def _as_float(frame: DataFrame, column: str, verb: str) -> bool:
+    """Whether `column`, a number column `verb` reads, is cast to float64."""
+    _need_number(frame, column, verb)
+    return frame.dtypes[column] != "float64"
+
+
+def diff(frame: DataFrame, column: str, periods: object) -> _Built:
+    """`diff(periods)` of `column`: pandas subtracts in the column's type and
+    stores the answer as float64."""
+    n = _periods(periods, "diff()")
+    verb = f"diff({n})"
+    cast = _as_float(frame, column, verb)
+    before, windows = _previous(frame, column, n, verb)
+    node = _ops.Arith("sub", _ops.ColRef(column), before)
+    return _Built(_ops.Cast(node, "float64") if cast else node, windows)
+
+
+def pct_change(frame: DataFrame, column: str, periods: object) -> _Built:
+    """`pct_change(periods)` of `column`: `x / x.shift(periods) - 1` as
+    float64, with pandas' answer where the previous value is 0."""
+    n = _periods(periods, "pct_change()")
+    verb = f"pct_change({n})"
+    cast = _as_float(frame, column, verb)
+    before, windows = _previous(frame, column, n, verb)
+    x = _ops.ColRef(column)
+    if cast:
+        x, before = _ops.Cast(x, "float64"), _ops.Cast(before, "float64")
+    zero = _ops.Lit(0.0)
+    at_zero = _ops.Compare("eq", before, zero)
+    ratio = _ops.Arith("sub", _ops.Arith("div", x, before), _ops.Lit(1.0))
+    # The engine may order NaN above every value, as DuckDB does, so `x > 0`
+    # is checked with `x` not NaN (komira/_missing.py); `x < 0` does not hold
+    # for a NaN in either order, and a NaN over 0 is NaN.
+    positive = _ops.and_all((at_zero, not_nan(x, "float64"), _ops.Compare("gt", x, zero)))
+    negative = _ops.and_all((at_zero, _ops.Compare("lt", x, zero)))
+    other = _ops.and_all((at_zero, _ops.Unary("is_not_null", x)))
+    node = _ops.When(
+        (
+            (positive, _ops.Lit(float("inf"))),
+            (negative, _ops.Lit(float("-inf"))),
+            (other, _ops.Lit(float("nan"))),
+        ),
+        ratio,
+    )
+    return _Built(node, windows)
 
 
 def duplicates(names: tuple[str, ...], keep: object) -> _Built:

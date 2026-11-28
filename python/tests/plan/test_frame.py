@@ -692,6 +692,8 @@ def test_every_name_in_the_frame_table_raises_its_message_on_a_frame():
                   "then call .to_pandas() on the Result", "frame")
     check_refused(df, "join", "DataFrame.join joins on the index, which komira frames do not have; "
                   "use merge(other, on=...)", "frame")
+    check_refused(df, "shift", 'DataFrame.shift() of every column is not supported yet: take one column, '
+                  'as df["column"].shift()', "frame")
 
 
 def test_every_name_in_the_series_table_raises_its_message_on_a_series():
@@ -703,6 +705,9 @@ def test_every_name_in_the_series_table_raises_its_message_on_a_series():
     check_refused(s, "values", ".values needs the rows: run the frame with materialize(), "
                   "then convert the Result with to_pandas()", "series")
     assert "join" not in _refusals.SERIES
+    for name in ("shift", "diff", "pct_change"):
+        assert name not in _refusals.SERIES and callable(getattr(s, name)), name
+    check_refused(s, "ffill", ".ffill() is not supported yet", "series")
 
 
 def test_every_name_in_the_module_table_raises_its_message_on_the_module():
@@ -942,7 +947,7 @@ ALLOWED_IMPORTS = {
     "._plan:_wire", ".plan.v1:plan_pb2", "._frame:DataFrame", "os", ".:_groupby", "._groupby:GroupBy",
     ".:_merge", ".:_windows", "._series:_Membership", "._windows:Windows", "._windows:merged",
     "._plan._window:window_field", "hashlib",
-    ".:_verbs", ".:_cast", ".:_accessors", "._missing:present", "._series:_fits",
+    ".:_verbs", ".:_cast", ".:_accessors", "._missing:present", "._missing:not_nan", "._series:_fits",
     "typing:Any", "re",
     # The notebook display (komira/_display.py): it escapes HTML and formats
     # a result's rows with pyarrow, and reads no stream.

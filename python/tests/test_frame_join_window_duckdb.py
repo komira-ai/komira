@@ -36,8 +36,17 @@ those of `duckdb/test_frame_duckdb.py`, staged beside this file
   and dense, ascending and descending, `na_option` keep, bottom and top, a running sum down a frame sorted with
   its missing keys first, over a column
   and a group, rolling of 1, 2 and 3 rows with `min_periods` of 1 and 2 (missing
-  when fewer than `min_periods` rows of the window hold a value), a window inside
-  an expression, a filter by a window, and two windows in one assign;
+  when fewer than `min_periods` rows of the window hold a value), shift as LAG
+  and LEAD (NULL on the first or last rows, over an int column with NULLs, a
+  float, a string, a period of 0 and a frame sorted descending), diff (an int
+  column's as a double, a float's two rows ahead) and pct_change where no
+  previous value is 0, a filter by a diff, a window inside an expression, a
+  filter by a window, and two windows in one assign;
+- shift, diff and pct_change held to pandas itself over a file written in the
+  test, sorted by t: an int64 column without NULLs (pandas' diff and
+  pct_change of it are float64) and a float64 one with NULL, NaN, zeros and
+  negatives, so a previous value of 0 meets a positive, a negative, a 0 and a
+  NaN value; the frames are equal, dtypes included;
 - each answer is equal by column names and order, the Arrow type names, and the
   values (floats to a relative 1e-12), in the order of the sort keys for a sorted
   frame, else as a multiset;
@@ -878,6 +887,75 @@ ROLLINGS = [
     ),
 ]
 
+def offset_sql(expr, direction="ASC", where=""):
+    """`SELECT *, expr AS r FROM t`, the rows in the order of n."""
+    return "SELECT *, {} AS r FROM t{} ORDER BY n {}".format(expr, where, direction)
+
+
+SHIFTS = [
+    Case(
+        "shift 1 of an int column with NULLs is LAG, NULL on the first row",
+        lambda d, o: column_of(sorted_by_n(d), "r", lambda s: s["k"].shift(1)),
+        offset_sql("LAG(k) OVER (ORDER BY n)"),
+        ("n",),
+    ),
+    Case(
+        "shift -1 is LEAD, NULL on the last row",
+        lambda d, o: column_of(sorted_by_n(d), "r", lambda s: s["k"].shift(-1)),
+        offset_sql("LEAD(k) OVER (ORDER BY n)"),
+        ("n",),
+    ),
+    Case(
+        "shift 3 of a float column with NULLs",
+        lambda d, o: column_of(sorted_by_n(d), "r", lambda s: s["v"].shift(3)),
+        offset_sql("LAG(v, 3) OVER (ORDER BY n)"),
+        ("n",),
+    ),
+    Case(
+        "shift 2 of a string column",
+        lambda d, o: column_of(sorted_by_n(d), "r", lambda s: s["s"].shift(2)),
+        offset_sql("LAG(s, 2) OVER (ORDER BY n)"),
+        ("n",),
+    ),
+    Case(
+        "shift 0 is the column",
+        lambda d, o: column_of(sorted_by_n(d), "r", lambda s: s["k"].shift(0)),
+        offset_sql("k"),
+        ("n",),
+    ),
+    Case(
+        "shift 1 down the frame sorted by n descending",
+        lambda d, o: column_of(d.sort_values("n", ascending=False), "r", lambda s: s["k"].shift(1)),
+        offset_sql("LAG(k) OVER (ORDER BY n DESC)", "DESC"),
+        ("n",),
+    ),
+    Case(
+        "diff of an int column is the change from the row before as a double",
+        lambda d, o: column_of(sorted_by_n(d), "r", lambda s: s["k"].diff()),
+        offset_sql("CAST(k - LAG(k) OVER (ORDER BY n) AS DOUBLE)"),
+        ("n",),
+    ),
+    Case(
+        "diff -2 of a float column is the change to the row two after",
+        lambda d, o: column_of(sorted_by_n(d), "r", lambda s: s["v"].diff(-2)),
+        offset_sql("v - LEAD(v, 2) OVER (ORDER BY n)"),
+        ("n",),
+    ),
+    Case(
+        "pct_change of a float column where no previous value is 0",
+        lambda d, o: on(sorted_by_n(d), lambda s: s[s["v"] != 0].assign(r=lambda f: f["v"].pct_change())),
+        "SELECT *, v / LAG(v) OVER (ORDER BY n) - 1 AS r FROM t WHERE v <> 0 ORDER BY n",
+        ("n",),
+    ),
+    Case(
+        "a filter by diff keeps the rows that rose",
+        lambda d, o: on(sorted_by_n(d), lambda s: s[s["k"].diff() > 0]),
+        "SELECT k, v, s, flag, n FROM (SELECT *, k - LAG(k) OVER (ORDER BY n) AS dk FROM t) WHERE dk > 0 ORDER BY n",
+        ("n",),
+    ),
+]
+
+
 IN_EXPRESSIONS = [
     Case(
         "a value minus its group's mean",
@@ -1031,6 +1109,80 @@ def test_rolling_equals_duckdb_row_frames(left, right):
     run_programs(left, right, ROLLINGS)
 
 
+def test_shift_diff_and_pct_change_equal_duckdb_lag_and_lead(left, right):
+    run_programs(left, right, SHIFTS)
+
+
+# The rows of the pandas oracle, written out of order: t, then i (int64, no
+# NULL, with zeros: pandas keeps a numpy int64 and its diff is float64), f
+# (float64 with NULL, NaN, zeros and negatives). In the order of t the
+# previous value is 0 before a positive, a negative, a 0 and a NaN value.
+ORACLE_ROWS = [
+    (5, -2, None),
+    (1, 3, 2.0),
+    (12, 3, 0.0),
+    (4, 4, 1.5),
+    (2, 0, 0.0),
+    (13, 4, float("nan")),
+    (6, 0, -0.5),
+    (3, 0, 0.0),
+    (8, 5, -2.5),
+    (7, -6, 0.0),
+    (11, 2, 3.0),
+    (9, 9, float("nan")),
+    (10, 1, 0.0),
+]
+
+
+def oracle_columns(frame):
+    """The columns the oracle compares, of a frame sorted by t: each verb of
+    the pandas-shaped frame and of pandas itself."""
+    return {
+        "s1": frame["i"].shift(1),
+        "sm1": frame["i"].shift(-1),
+        "sf2": frame["f"].shift(2),
+        "d": frame["i"].diff(),
+        "dm1": frame["i"].diff(-1),
+        "df2": frame["f"].diff(2),
+        "p": frame["i"].pct_change(),
+        "pf": frame["f"].pct_change(),
+        "pfm1": frame["f"].pct_change(-1),
+        "pi3": frame["i"].pct_change(3),
+    }
+
+
+def test_shift_diff_and_pct_change_equal_pandas_own(left, right):
+    """pandas itself is the oracle: over the rows above, sorted by t, every
+    column equals pandas' own shift, diff and pct_change, a previous value of
+    0 giving inf, -inf or NaN as pandas divides."""
+    import pandas as pd
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    with tempfile.TemporaryDirectory() as work:
+        path = os.path.join(work, "oracle.parquet")
+        t, i, f = zip(*ORACLE_ROWS)
+        pq.write_table(
+            pa.table({"t": pa.array(t, pa.int32()), "i": pa.array(i, pa.int64()), "f": pa.array(f, pa.float64())}),
+            path,
+        )
+        want = pq.read_table(path).to_pandas().sort_values("t").reset_index(drop=True)
+        assert str(want["i"].dtype) == "int64" and str(want["f"].dtype) == "float64"
+        want = want.assign(**oracle_columns(want))
+        with komira.Session() as session:
+            ordered = komira.read_parquet(path, session=session).sort_values("t")
+            got = ordered.assign(**oracle_columns(ordered)).materialize().to_pandas()
+    assert list(got.columns) == list(want.columns), list(got.columns)
+    for name in ("d", "dm1", "df2", "p", "pf", "pfm1", "pi3"):
+        assert str(got[name].dtype) == "float64", (name, got[name].dtype)
+    pd.testing.assert_frame_equal(got, want, check_dtype=True)
+    # The cases the oracle relies on are in the rows: a previous 0 before a
+    # positive, a negative, a 0 and a NaN value.
+    p = want["p"].tolist()
+    assert float("inf") in p and float("-inf") in p and any(x != x for x in p[1:])
+    assert want["pf"].isna().sum() > want["f"].isna().sum()
+
+
 def test_windows_inside_expressions_and_filters_equal_duckdb(left, right):
     run_programs(left, right, IN_EXPRESSIONS)
 
@@ -1122,6 +1274,8 @@ WITH_FILES = [
     test_cumulative_windows_equal_duckdb_running_frames,
     test_rank_equals_duckdb_rank_and_dense_rank,
     test_rolling_equals_duckdb_row_frames,
+    test_shift_diff_and_pct_change_equal_duckdb_lag_and_lead,
+    test_shift_diff_and_pct_change_equal_pandas_own,
     test_windows_inside_expressions_and_filters_equal_duckdb,
     test_filters_by_a_window_under_a_case_equal_duckdb,
 ]
@@ -1132,7 +1286,9 @@ PURE = [
     test_report_raises_once_naming_every_problem_and_passes_none,
 ]
 
-ALL_CASES = (MERGES, NULL_KEYS, SEMI_ANTI, TRANSFORMS, CUMULATIVES, RANKS, ROLLINGS, IN_EXPRESSIONS, CASE_FILTERS)
+ALL_CASES = (
+    MERGES, NULL_KEYS, SEMI_ANTI, TRANSFORMS, CUMULATIVES, RANKS, ROLLINGS, SHIFTS, IN_EXPRESSIONS, CASE_FILTERS
+)
 
 
 def main(args):

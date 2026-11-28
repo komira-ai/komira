@@ -309,7 +309,8 @@ The rules that follow from this:
   - pandas: the frame's sort (`df.sort_values(o).groupby(k)[c].cumsum()`).
 
   With no order, they raise `UnsupportedOperation`. The verbs are `cumsum` and `cum_sum`, `cum_count`,
-  `cummin`/`cum_min`, `cummax`/`cum_max`, `rolling`, and `rolling_*`.
+  `cummin`/`cum_min`, `cummax`/`cum_max`, `rolling`, `rolling_*`, `shift` (both), `diff` (both) and
+  `pct_change` (pandas).
 - `rank` orders by the ranked values. `method="min"` and `method="dense"` are supported. `method="first"`
   (pandas) and `method="ordinal"` (polars) break ties by row order, so they are refused. pandas'
   default `method="average"` and `method="max"` have no plan function yet, so the pandas skin refuses

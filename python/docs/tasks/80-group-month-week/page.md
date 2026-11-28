@@ -62,5 +62,5 @@ Output:
 ## Related
 
 - How do I compute a rolling average? (rank 76, works)
-- How do I compare each row with the previous row (lag, lead, change)? (rank 77, partial)
+- How do I compare each row with the previous row (lag, lead, change)? (rank 77, works)
 - How do I add days to a date or take the difference between dates? (rank 79, partial)
