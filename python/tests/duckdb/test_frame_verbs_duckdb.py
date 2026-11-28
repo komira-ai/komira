@@ -27,6 +27,15 @@ below is a copy of its own, since a test file cannot import another.
 - dropna: how="any" over the whole frame and over a subset, how="all" over two
   float columns (NaN counts as missing), a subset given as one name, dropna on a
   sorted frame, dropna then fillna;
+- isna, notna, isnull and notnull: of one column of each kind (NULL in int64,
+  NULL and NaN in float64, float32, an int32 with no NULL, which is all false),
+  of the whole frame, then sum() (and sum(min_count=1)) counting per column;
+  a Series of each as a filter and as an assigned column, of an expression,
+  the aliases agreeing, no row both isna and notna and none neither, an
+  infinity (not missing) beside NaN and NULL, a float32 NaN made by a cast, a
+  sorted frame (isna leaves a multiset, a filter by it keeps the order); the
+  sum of a bool column that is all NULL, whole and by group, is 0, and missing
+  with min_count=1;
 - rename with a dict, with a callable, with a name the frame does not have
   (skipped), then a filter on the new name, on a sorted frame (a renamed sort
   key leaves a multiset), add_prefix and add_suffix; column names are compared;
@@ -470,6 +479,136 @@ DROPS = [
         "SELECT * FROM t WHERE n > 1000",
         None,
         True,
+    ),
+]
+
+
+# ---- isna, notna, isnull, notnull --------------------------------------------
+# pandas marks NULL, and NaN in a float column, as missing: a float column's SQL
+# is IS NULL OR isnan, any other column's IS NULL.
+
+FLOAT_COLUMNS = ("v", "w")
+
+
+def missing(column):
+    if column in FLOAT_COLUMNS:
+        return "({c} IS NULL OR isnan({c}))".format(c=column)
+    return "({} IS NULL)".format(column)
+
+
+def select_each(test):
+    """Every column of the file replaced by `test` of it, under its own name."""
+    return "SELECT " + ", ".join('{} AS "{}"'.format(test(c), c) for c in FILE_COLUMNS) + " FROM t"
+
+
+MISSING = [
+    Case("isna marks NULL", lambda d: d[["k"]].isna(), "SELECT k IS NULL AS k FROM t"),
+    Case(
+        "isna marks NaN in a float column as NULL is",
+        lambda d: d[["v"]].isna(),
+        "SELECT (v IS NULL OR isnan(v)) AS v FROM t",
+    ),
+    Case(
+        "isna of a float32 column",
+        lambda d: d[["w"]].isna(),
+        "SELECT (w IS NULL OR isnan(w)) AS w FROM t",
+    ),
+    Case("isna on an integer column with no NULL is all false", lambda d: d[["n"]].isna(), "SELECT false AS n FROM t"),
+    Case("isna of every column of the frame", lambda d: d.isna(), select_each(missing)),
+    Case("notna of every column of the frame", lambda d: d.notna(), select_each(lambda c: "NOT " + missing(c))),
+    Case("isnull is isna", lambda d: d.isnull(), select_each(missing)),
+    Case("notnull is notna", lambda d: d.notnull(), select_each(lambda c: "NOT " + missing(c))),
+    Case(
+        "isna().sum() counts the missing values of each column",
+        lambda d: d.isna().sum(),
+        "SELECT " + ", ".join('CAST(count_if({}) AS BIGINT) AS "{}"'.format(missing(c), c) for c in FILE_COLUMNS) + " FROM t",
+    ),
+    Case(
+        "isna().sum(min_count=1) counts the missing values of each column",
+        lambda d: d.isna().sum(min_count=1),
+        "SELECT " + ", ".join('CAST(count_if({}) AS BIGINT) AS "{}"'.format(missing(c), c) for c in FILE_COLUMNS) + " FROM t",
+    ),
+    Case(
+        "notna().sum() counts the values of each column",
+        lambda d: d[["k", "v", "s"]].notna().sum(),
+        "SELECT CAST(count_if(NOT {}) AS BIGINT) AS k, CAST(count_if(NOT {}) AS BIGINT) AS v, "
+        "CAST(count_if(NOT {}) AS BIGINT) AS s FROM t".format(
+            missing("k"), missing("v"), missing("s")
+        ),
+    ),
+    Case(
+        "Series isna as a filter keeps the NULL and NaN rows",
+        lambda d: d[d["v"].isna()],
+        "SELECT * FROM t WHERE " + missing("v"),
+    ),
+    Case(
+        "Series notna as a filter keeps the rows with a value",
+        lambda d: d[d["v"].notna()],
+        "SELECT * FROM t WHERE NOT " + missing("v"),
+    ),
+    Case(
+        "Series isnull and notnull as filters",
+        lambda d: d[d["s"].isnull() | d["flag"].notnull()],
+        "SELECT * FROM t WHERE {} OR NOT {}".format(missing("s"), missing("flag")),
+    ),
+    Case(
+        "no row is both isna and notna",
+        lambda d: d[d["v"].isna() & d["v"].notna()],
+        "SELECT * FROM t WHERE false",
+        None,
+        True,
+    ),
+    Case(
+        "every row is isna or notna",
+        lambda d: d[d["v"].isna() | d["v"].notna()],
+        "SELECT * FROM t",
+    ),
+    Case(
+        "assign of notna is a bool column beside the others",
+        lambda d: d.assign(m=d["v"].notna(), e=d["k"].isna()),
+        "SELECT *, NOT {} AS m, {} AS e FROM t".format(missing("v"), missing("k")),
+    ),
+    Case(
+        "isna of an expression over a float column",
+        lambda d: d.assign(m=(d["v"] * 2).isna())[["m"]],
+        "SELECT ((v * 2) IS NULL OR isnan(v * 2)) AS m FROM t",
+    ),
+    Case(
+        "isna of a float column is false for an infinity and true for NaN and NULL",
+        lambda d: d.assign(i=d["v"] * 0 + float("inf"))[["i"]].isna(),
+        "SELECT ((v * 0 + 'inf'::DOUBLE) IS NULL OR isnan(v * 0 + 'inf'::DOUBLE)) AS i FROM t",
+    ),
+    Case(
+        "isna marks NaN in a float32 column",
+        lambda d: d.assign(z=d["v"].astype("float32"))[["z"]].isna(),
+        "SELECT (CAST(v AS FLOAT) IS NULL OR isnan(CAST(v AS FLOAT))) AS z FROM t",
+    ),
+    Case(
+        "sum() of a bool column that is all NULL is 0",
+        lambda d: d[d["flag"].isna()][["flag"]].sum(),
+        "SELECT CAST(0 AS BIGINT) AS flag",
+    ),
+    Case(
+        "sum(min_count=1) of a bool column that is all NULL is missing",
+        lambda d: d[d["flag"].isna()][["flag"]].sum(min_count=1),
+        "SELECT CAST(NULL AS BIGINT) AS flag",
+    ),
+    Case(
+        "a group's sum() of a bool column that is all NULL is 0",
+        lambda d: d[d["flag"].isna()].groupby("k")["flag"].sum(),
+        "SELECT k, CAST(0 AS BIGINT) AS flag FROM t WHERE flag IS NULL AND k IS NOT NULL GROUP BY k ORDER BY k",
+        ("k",),
+    ),
+    Case(
+        "isna of a sorted frame leaves a multiset",
+        lambda d: d.sort_values("n").isna(),
+        select_each(missing),
+    ),
+    Case(
+        "a filter by isna keeps the order of a sorted frame",
+        lambda d: on(d.sort_values("n"), lambda f: f[f["k"].isna()]),
+        "SELECT * FROM t WHERE {} ORDER BY n".format(missing("k")),
+        ("n",),
     ),
 ]
 
@@ -1208,6 +1347,10 @@ def test_replace_equals_duckdb_case_when(path):
     run_cases(path, REPLACES)
 
 
+def test_isna_and_notna_equal_duckdb_is_null_or_isnan(path):
+    run_cases(path, MISSING)
+
+
 def test_rename_and_affixes_equal_duckdb_aliases(path):
     run_cases(path, RENAMES)
 
@@ -1391,6 +1534,7 @@ WITH_FILE = [
     test_fillna_equals_duckdb_coalesce,
     test_replace_equals_duckdb_case_when,
     test_dropna_equals_duckdb_where_not_null_and_not_nan,
+    test_isna_and_notna_equal_duckdb_is_null_or_isnan,
     test_rename_and_affixes_equal_duckdb_aliases,
     test_astype_equals_duckdb_cast,
     test_tail_equals_the_last_rows_of_duckdb_order_by,
@@ -1427,7 +1571,7 @@ def main(args):
         for test in WITH_FILE:
             test(path)
     assert not FAILED, "{} cases failed:\n".format(len(FAILED)) + "\n".join(FAILED)
-    lists = (TYPES, FILLS, REPLACES, DROPS, RENAMES, CASTS, TAILS, CONCATS, COUNTS_BY_GROUP, STRS, DTS)
+    lists = (TYPES, FILLS, REPLACES, DROPS, MISSING, RENAMES, CASTS, TAILS, CONCATS, COUNTS_BY_GROUP, STRS, DTS)
     print("frame verbs duckdb: {} cases".format(sum(len(c) for c in lists)))
 
 

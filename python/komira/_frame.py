@@ -20,18 +20,21 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
 - `groupby` gives a `GroupBy`, and `agg`, `sum`, `mean`, `median`, `std`,
   `var`, `min`, `max`, `count` and `nunique` reduce the whole frame to one
   row; each builds one aggregate node (komira/_groupby.py).
-  `drop_duplicates` builds a distinct over every column.
+  `drop_duplicates` builds a distinct over every column, and over a `subset`
+  of them, as `duplicated` does, a window per value (komira/_windows.py).
 - `merge` joins two frames with one join node, and `df[df["k"].isin(o["k"])]`
   (`~` for its negation) is a semi (anti) join (komira/_merge.py).
 - A Series may read windows (`cumsum`, `rank`, `rolling`, a group's
   `transform`, komira/_windows.py): `assign`, `df["x"] = ...` and `df[cond]`
   compute them in a projection of their own first.
-- `fillna`, `dropna`, `rename`, `add_prefix`, `add_suffix` and `astype` each
-  build one projection or filter. A value is missing when it is NULL, or NaN
-  in a float column (komira/_missing.py): `fillna` replaces it with a literal
-  of the column's type, and `dropna` filters on it. `replace` puts a value
-  of the column's type, or a NULL, where a listed value is, one CASE per
-  changed column (komira/_replace.py). `astype` casts through
+- `fillna`, `dropna`, `isna`, `notna`, `rename`, `add_prefix`, `add_suffix`
+  and `astype` each build one projection or filter. A value is missing when it
+  is NULL, or NaN in a float column (komira/_missing.py): `fillna` replaces it
+  with a literal of the column's type, `dropna` filters on it, and `isna` and
+  `notna` (aliases `isnull` and `notnull`) mark it in a frame of booleans of
+  the same columns. `replace` puts a value of the column's type, or a NULL,
+  where a listed value is, one CASE per changed column (komira/_replace.py).
+  `astype` casts through
   komira/_cast.py. `tail` takes the last rows of a sorted frame as a TOPN by
   the reversed keys, sorted back. `komira.concat` is a union of frames of one
   schema, checked in komira/_verbs.py before it is built.
@@ -40,8 +43,8 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
   `rename` that changes none of them, a `dropna` and `head`
   keep it ordered, the builder placing filters and projections under the sort
   and a limit above it, and a sort above a limit when a verb comes after one.
-  `tail` of a sorted frame is sorted. A reduction, `drop_duplicates`,
-  `concat` and `merge` give an unordered frame, except that
+  `tail` of a sorted frame is sorted. A reduction, `isna`, `notna`,
+  `drop_duplicates`, `concat` and `merge` give an unordered frame, except that
   `groupby(sort=True)` and `merge(sort=True)` sort by their keys; a semi or
   anti join keeps the order, as a filter does.
 - The write terminals `to_parquet`, `to_csv` and `to_json(orient="records",
@@ -559,6 +562,32 @@ class DataFrame:
         predicate = _ops.and_all(tests) if how == "any" else _ops.or_all(tests)
         return self._ordered(_ops.filter_(self._plan, predicate), lambda keys: True)
 
+    def isna(self) -> DataFrame:
+        """A frame of the same columns, each True where its value is missing
+        (NULL, and NaN in a float column) and False elsewhere, never NULL; so
+        `df.isna().sum()` counts the missing values of each column. Builds one
+        projection; every column is replaced, a sort key too, so the frame
+        is unordered. `isnull` is the same method."""
+        return self._marked(missing=True)
+
+    def notna(self) -> DataFrame:
+        """A frame of the same columns, each True where its value is present
+        and False where it is missing: the negation of `isna`, column by
+        column. `notnull` is the same method."""
+        return self._marked(missing=False)
+
+    isnull = isna
+    notnull = notna
+
+    def _marked(self, missing: bool) -> DataFrame:
+        dtypes = self.dtypes
+        items = []
+        for name in self._plan.columns:
+            test = present(_ops.ColRef(name), dtypes[name])
+            items.append((name, _ops.Unary("not", test) if missing else test))
+        plan = _ops.with_columns(self._plan, tuple(items))
+        return self._ordered(plan, lambda keys: False)
+
     def rename(
         self,
         mapper: object = None,
@@ -787,11 +816,16 @@ class DataFrame:
         inplace: bool = False,
         ignore_index: bool = False,
     ) -> DataFrame:
-        """The rows with duplicates removed. Equal rows are the same row, so
-        `keep="first"` and `keep="last"` give one of each; `keep=False` gives
-        only the rows no other row equals. `subset` must name every column (in
-        any order); `ignore_index` is accepted and does nothing, since a frame
-        has no index. The answer has no row order."""
+        """The rows with duplicates removed: rows are duplicates when they are
+        equal on the columns `subset` (a name or a list of names; every column
+        when None), a NULL equal to a NULL. `keep="first"` and `keep="last"`
+        keep one whole row of each value of `subset`; `keep=False` keeps only
+        the rows whose value no other row has. A plan has no row order, so the
+        row kept of a value is any one of its rows, not the first or the last
+        (docs/design/dataframe_surface.md, section 7); over every column equal
+        rows are the same row, so it makes no difference. `ignore_index` is
+        accepted and does nothing, since a frame has no index. The answer has
+        no row order."""
         if inplace is not False:
             raise UnsupportedOperation(
                 "drop_duplicates(inplace=True) changes the frame in place, and komira frames do not change: "
@@ -800,6 +834,21 @@ class DataFrame:
         if not isinstance(ignore_index, bool):
             raise TypeError(f"drop_duplicates ignore_index must be a bool, not {type(ignore_index).__name__}")
         return _groupby.drop_duplicates(self, subset, keep)
+
+    def duplicated(self, subset: str | list[str] | tuple[str, ...] | None = None, keep: str | bool = "first") -> Series:
+        """A bool Series of the frame, true for a row that repeats the values
+        of the columns `subset` (every column when None) of another row: for
+        `keep="first"` and `keep="last"` every row of a value but one, for
+        `keep=False` every row of a value that more than one row has. A plan
+        has no row order, so the row left false of a value is any one of its
+        rows, not the first or the last (docs/design/dataframe_surface.md,
+        section 7): `df[~df.duplicated(subset)]` keeps one row of each value,
+        as `drop_duplicates(subset)` does, but each plan picks its own row.
+        It reads a window (komira/_windows.py), as `cumsum` does."""
+        names = _groupby.subset_of(self, subset, "duplicated")
+        keep = _groupby.check_keep(keep)
+        built = _windows.duplicates(names, keep)
+        return Series._of(self, built.node, built.windows)
 
     # ---- joins (komira/_merge.py) ------------------------------------------
 
@@ -847,6 +896,10 @@ class DataFrame:
         the plan again. A plan the engine refuses raises its error here."""
         return self._session._plan_stream(self._plan_bytes())
 
+    def _komira_rows(self) -> Result:
+        """The frame's rows, run now: what `Session.register` registers."""
+        return self.materialize()
+
     def to_parquet(self, path: str | os.PathLike[str], *, compression: str | None = "snappy") -> None:
         """Runs the frame's plan and writes all its rows to the Parquet file
         `path`, in the frame's order when it is ordered. `compression` is
@@ -865,18 +918,32 @@ class DataFrame:
         self,
         path_or_buf: str | os.PathLike[str] | None = None,
         *,
+        sep: str = ",",
+        header: bool | list[str] = True,
         compression: str | dict | None = "infer",
         index: bool = True,
     ) -> None:
         """Runs the frame's plan and writes all its rows to the CSV file
         `path_or_buf`: a header line of the column names, then a line per row,
         in the frame's order when it is ordered. The format is CSV whatever the
-        file's extension. `compression` is "infer" (gzip for `.gz`, zstd for
-        `.zst`, else none), "gzip", "zstd" or None. `index` is accepted and
-        changes nothing, since a frame has no index. Path, replacement,
-        refusals and the return are as for `to_parquet`; there is no string
-        result: a `path_or_buf` of None is refused."""
+        file's extension. `sep` is "," and `header` is True, what the writer
+        writes; another `sep`, `header=False` and a list of header names are
+        refused with `UnsupportedOperation`. `compression` is "infer" (gzip
+        for `.gz`, zstd for `.zst`, else none), "gzip", "zstd" or None.
+        `index` is accepted and changes nothing, since a frame has no index.
+        Path, replacement, refusals and the return are as for `to_parquet`;
+        there is no string result: a `path_or_buf` of None is refused."""
         dest = _write.destination(path_or_buf, "to_csv")
+        if sep != ",":
+            raise _write.unsupported("to_csv", "sep", sep, _write.COMMA)
+        if isinstance(header, (list, tuple)):
+            raise _write.unsupported(
+                "to_csv", "header", header, "komira writes the column names as the header; rename the columns instead"
+            )
+        if not isinstance(header, bool):
+            raise TypeError(f"to_csv header must be a bool or a list of str, not {type(header).__name__}")
+        if not header:
+            raise _write.unsupported("to_csv", "header", False, _write.ALWAYS_HEADER)
         if not isinstance(index, bool):
             raise TypeError(f"to_csv index must be a bool, not {type(index).__name__}")
         codec = _write.text_codec(compression, dest, "to_csv")

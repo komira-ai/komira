@@ -1,0 +1,220 @@
+load("@komira//tools/build/one_definition:libraries.bzl", "THIRD_PARTY_OWNERS")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@buildrules//rules/native:defs.bzl", "native_library")
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/native:defs.bzl", "checked_cxx_library", "prefix_header", "prefixed_archive_check")
+
+# facebook/zstd 1.5.7, the release tarball, dual-licensed BSD-3-Clause or
+# GPL-2.0; komira takes it under BSD-3-Clause (LICENSE in the archive).
+# The archive is fetched at build time, checked against its sha256, and the
+# files below extracted from it; the one file of it committed here is
+# zstd_common.c, six of upstream's functions rebuilt so the prefix renames
+# them (the file says why).
+pinned_file(
+    name = "zstd-1.5.7.tar.gz",
+    url = "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz",
+    sha256 = "eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3",
+    size_bytes = 2434947,
+)
+
+# The library's C sources: the frame format's common code, the compressor
+# and the decompressor. The dictionary builder (lib/dictBuilder), the legacy
+# formats (lib/legacy) and the x86-64 assembly decoder
+# (lib/decompress/huf_decompress_amd64.S) are left out, and so is
+# lib/common/zstd_common.c: zstd_common.c of this package defines its six
+# functions in its place (that file says why).
+_SRCS = ["lib/common/{}.c".format(s) for s in [
+    "debug",
+    "entropy_common",
+    "error_private",
+    "fse_decompress",
+    "pool",
+    "threading",
+    "xxhash",
+]] + ["lib/compress/{}.c".format(s) for s in [
+    "fse_compress",
+    "hist",
+    "huf_compress",
+    "zstd_compress",
+    "zstd_compress_literals",
+    "zstd_compress_sequences",
+    "zstd_compress_superblock",
+    "zstd_double_fast",
+    "zstd_fast",
+    "zstd_lazy",
+    "zstd_ldm",
+    "zstd_opt",
+    "zstd_preSplit",
+    "zstdmt_compress",
+]] + ["lib/decompress/{}.c".format(s) for s in [
+    "huf_decompress",
+    "zstd_ddict",
+    "zstd_decompress",
+    "zstd_decompress_block",
+]]
+
+# The headers the sources include, by their path from the including source
+# ("../common/mem.h", "../zstd.h").
+_PRIVATE_HEADERS = ["lib/common/{}.h".format(h) for h in [
+    "allocations",
+    "bits",
+    "bitstream",
+    "compiler",
+    "cpu",
+    "debug",
+    "error_private",
+    "fse",
+    "huf",
+    "mem",
+    "pool",
+    "portability_macros",
+    "threading",
+    "xxhash",
+    "zstd_deps",
+    "zstd_internal",
+    "zstd_trace",
+]] + ["lib/compress/{}.h".format(h) for h in [
+    "clevels",
+    "hist",
+    "zstd_compress_internal",
+    "zstd_compress_literals",
+    "zstd_compress_sequences",
+    "zstd_compress_superblock",
+    "zstd_cwksp",
+    "zstd_double_fast",
+    "zstd_fast",
+    "zstd_lazy",
+    "zstd_ldm",
+    "zstd_ldm_geartab",
+    "zstd_opt",
+    "zstd_preSplit",
+    "zstdmt_compress",
+]] + ["lib/decompress/{}.h".format(h) for h in [
+    "zstd_ddict",
+    "zstd_decompress_block",
+    "zstd_decompress_internal",
+]] + [
+    "lib/zstd.h",
+    "lib/zstd_errors.h",
+]
+
+archive_files(
+    name = "src",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":zstd-1.5.7.tar.gz",
+    one_tree = True,
+    files = ["LICENSE"] + _SRCS + _PRIVATE_HEADERS,
+    strip_prefix = "zstd-1.5.7",
+    tree_dirs = ["lib"],
+    visibility = ["PUBLIC"],
+)
+
+# What upstream's own builds (lib/libzstd.mk, build/cmake) define, and the
+# three choices this copy makes on top: no assembly (ZSTD_DISABLE_ASM: the C
+# Huffman decoder on every CPU, so linux and macOS compile the same sources),
+# no tracing hooks (ZSTD_TRACE=0: with them the library refers to weak
+# ZSTD_trace_* functions it does not define, which no prefix can rename) and
+# no legacy formats. xxhash's names are namespaced ZSTD_, as upstream builds
+# them, so the prefix below renames them with the rest.
+_DEFINES = [
+    "-DNDEBUG",
+    "-DXXH_NAMESPACE=ZSTD_",
+    "-DZSTD_DISABLE_ASM=1",
+    "-DZSTD_LEGACY_SUPPORT=0",
+    "-DZSTD_TRACE=0",
+]
+
+# Every argument of the zstd compile but the prefix (below): the library,
+# static, with its C API <zstd.h>. The sources include each other by their
+# path from the including source, found at their real paths in :src
+# (one_tree, raw_headers).
+_ZSTD = dict(
+    srcs = [":src[{}]".format(s) for s in _SRCS] + ["zstd_common.c"],
+    raw_headers = [":src[{}]".format(h) for h in _PRIVATE_HEADERS],
+    compiler_flags = ["-O2"] + _DEFINES,
+    # zstd_common.c includes "common/error_private.h" and "zstd.h" from lib/.
+    preprocessor_flags = ["-I$(location :src[lib])"],
+    exported_headers = {
+        "zstd.h": ":src[lib/zstd.h]",
+        "zstd_errors.h": ":src[lib/zstd_errors.h]",
+    },
+    header_namespace = "",
+)
+
+# zstd with upstream's names. Nothing links it: its archive's symbol table is
+# the list of names :prefix_symbols renames.
+cxx_library(
+    name = "zstd_unprefixed",
+    **_ZSTD
+)
+
+# Every global symbol renamed komira_zstd_*: ZSTD_X becomes komira_zstd_X
+# (ZSTD_compress is komira_zstd_compress), any other global X
+# komira_zstd__X (HUF_*, FSE_*, POOL_*, ...). An unprefixed exported
+# ZSTD_* would interpose on, or be interposed by, another libzstd in the same
+# process (a Python process that imports pyarrow holds one).
+prefix_header(
+    name = "prefix_symbols",
+    archive = ":zstd_unprefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    header = "zstd_prefix_symbols.h",
+    min_symbols = 100,
+    prefix = "komira_zstd_",
+    strip = "ZSTD_",
+    style = "strip",
+)
+
+cxx_library(
+    name = "zstd_prefixed",
+    exported_preprocessor_flags = ["-include", "$(location :prefix_symbols)"],
+    **_ZSTD
+)
+
+# Every symbol :zstd_prefixed defines is komira_zstd_*, and it references
+# none of the library's unprefixed names.
+prefixed_archive_check(
+    name = "zstd_symbols",
+    archive = ":zstd_prefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    min_defined = 100,
+    original_names = [":prefix_symbols[symbols]"],
+    prefix = THIRD_PARTY_OWNERS["third_party/zstd"].prefix,
+)
+
+# zstd as its users take it: the C API is komira_zstd_compress,
+# komira_zstd_decompress, ... (C callers that include <zstd.h> get the
+# renamed names), and :zstd_symbols gates every build holding it.
+checked_cxx_library(
+    name = "zstd",
+    checks = [":zstd_symbols"],
+    lib = ":zstd_prefixed",
+    visibility = ["PUBLIC"],
+)
+
+# zstd as buildrules' native_library builds it, for the mopm package
+# compression (`natives = {"libkomira_zstd.a": ...}`): `libkomira_zstd.a`,
+# the same sources, flags and renaming as :zstd above, for linux and macOS
+# alike (the sources are C only and assume nothing of the CPU). :zstd is what
+# the packages still on the older rules link.
+native_library(
+    name = "zstd_native",
+    upstream = {
+        "url": "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz",
+        "sha256": "eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3",
+        "size": 2434947,
+        "strip": "zstd-1.5.7",
+        "files": ["LICENSE"] + _SRCS + _PRIVATE_HEADERS,
+    },
+    srcs = _SRCS + ["zstd_common.c"],
+    includes = ["lib"],
+    exported_includes = ["lib"],
+    cflags = _DEFINES,
+    prefix = {"name": "komira_zstd_", "strip": "ZSTD_", "min": 100},
+    soname = "libkomira_zstd.a",
+    # Undefined in the macOS archive and provided by libSystem: clang turns a
+    # fill loop into a call to memset_pattern16 when it compiles for Darwin,
+    # and the archive check's list of libSystem names lacks it. The linux
+    # archive never refers to it.
+    allow = ["memset_pattern16"],
+)

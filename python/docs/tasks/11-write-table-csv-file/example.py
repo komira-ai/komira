@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import komira
+import komira.pl as pl
 import pyarrow.csv as pacsv
 
 Path("sales.csv").write_text("id,region,qty,amount\n1,north,2,2.5\n2,south,5,\n3,north,3,4.5\n4,east,1,1.0\n")
@@ -20,3 +21,8 @@ df = komira.read_csv("sales.csv")
 totals = df.groupby("region", as_index=False)["qty"].sum().sort_values("region")
 pacsv.write_csv(totals.materialize().to_arrow(), "totals.csv")
 print(Path("totals.csv").read_text(), end="")
+
+# The polars-shaped frame writes its own rows: sink_csv runs the plan in the engine.
+lf = pl.scan_csv("sales.csv")
+lf.filter(pl.col("region") != "east").select("id", "region", "amount").sort("id").sink_csv("sunk.csv")
+print(Path("sunk.csv").read_text(), end="")

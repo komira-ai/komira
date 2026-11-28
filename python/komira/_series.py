@@ -18,6 +18,9 @@ nothing. It is used inside its own frame's verbs: `df[s]` filters by it and
   takes).
 - `replace(to_replace, value)` puts a value of the Series' type, or a NULL,
   where a listed value is (komira/_replace.py).
+- `isna()` and `notna()` (and their aliases `isnull()` and `notnull()`) say
+  whether each value is missing, a boolean Series that is never NULL: a value
+  is missing when it is NULL, or NaN in a float Series (komira/_missing.py).
 - `astype(dtype)` casts to one Arrow type (komira/_cast.py). `s.str` gives the
   string methods of a string Series and `s.dt` the date and time methods of a
   timestamp or date32 Series (komira/_accessors.py); on a Series of another
@@ -45,6 +48,7 @@ from typing import TYPE_CHECKING, Any
 
 from . import _accessors, _cast, _ops, _refusals, _windows
 from ._errors import UnsupportedOperation
+from ._missing import present
 from ._windows import Windows, merged
 
 if TYPE_CHECKING:
@@ -300,6 +304,27 @@ class Series:
         pairs = _replace.series_pairs(to_replace, value)
         node = _replace.replaced(self._node, self._type, pairs, None, False)
         return self._derive(self._node if node is None else node)
+
+    # ---- missing values (komira/_missing.py) ----------------------------
+
+    def isna(self) -> Series:
+        """Whether each value is missing: NULL, or NaN in a float Series
+        (rules section 8, ruling 6). A boolean Series that is never NULL, the
+        negation of `notna`; `isnull` is the same method."""
+        return self._derive(_ops.Unary("not", self._present()))
+
+    def notna(self) -> Series:
+        """Whether each value is present: not NULL, and in a float Series not
+        NaN either. A boolean Series that is never NULL, the negation of
+        `isna`; `notnull` is the same method."""
+        return self._derive(self._present())
+
+    isnull = isna
+    notnull = notna
+
+    def _present(self) -> _ops.Node:
+        self._check_current()
+        return present(self._node, self._type)
 
     # ---- windows (komira/_windows.py) -----------------------------------
 
@@ -655,3 +680,4 @@ class _Membership(Series):
 
     _bound = _predicate = _compare = _arith = _refuse
     __neg__ = isin = astype = cumsum = cummin = cummax = rank = rolling = _refuse
+    isna = notna = isnull = notnull = _refuse
