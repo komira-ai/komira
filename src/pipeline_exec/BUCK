@@ -13,6 +13,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # member is a new line in its sorted place), with what each serves:
 #
 #   source  `source_batch`
+#   source  SOURCE_CONCAT            the outputs of the producers a spec names,
+#                                    concatenated into one batch; built in
+#                                    `real_builder`, with no module of its own
 #   source  `source_csv`             a CSV file decoded at its bound column
 #                                    types, served as a resident batch
 #   source  `source_iceberg`         the planned files of an Iceberg snapshot,
