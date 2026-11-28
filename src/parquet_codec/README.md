@@ -72,11 +72,14 @@ runs the code:
 | codec | library | through |
 |---|---|---|
 | SNAPPY | linked | `compression.snappy_block` |
-| LZ4_RAW, LZ4 | `liblz4.so.1` (`liblz4.dylib`) | `compression.lz4` |
+| LZ4_RAW, LZ4 | linked | `compression.lz4` |
 | GZIP | `libz.so.1` (`libz.dylib`) | `compression.zlib` |
-| ZSTD | `libzstd.so.1` (`libzstd.dylib`) | `compression.zstd_frame` |
+| ZSTD | linked | `compression.zstd_frame` |
 
-A missing library aborts the process at the first call that needs it.
+snappy, lz4 and zstd are linked into the program (lz4 and zstd from
+`//third_party/lz4` and `//third_party/zstd`, every symbol renamed
+`komira_lz4_*` and `komira_zstd_*`); libz is opened at run time, and a missing
+libz aborts the process at the first call that needs it.
 
 ## Tests
 

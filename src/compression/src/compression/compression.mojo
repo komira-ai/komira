@@ -346,7 +346,7 @@ trait ArrowIpcCompression(Compression):
         For LZ4-Frame: a heap-boxed `lz4.frame.Lz4FrameDecoder`,
         which owns one `LZ4F_dctx`.
         For Zstd: a heap-boxed `_ZstdDCtx`, the `ZSTD_createDCtx` context
-        with the libzstd handle that made it.
+        (freed with `ZSTD_freeDCtx`).
         For Uncompressed: returns a null sentinel (memcpy path requires
         no dctx state).
 
