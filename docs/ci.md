@@ -856,8 +856,9 @@ then-current `main`. Nothing is half-done, because the replaced run never starte
 
 kci, the build and deploy CLI the repository once had, was retired and removed: no workflow runs it.
 The `kci_*` libraries are not release members: `release/artifacts.textproto` and the release set list none and their
-source is deleted. Their names stay reserved on the prod registry (`release/prod_claimed_names.txt`) as global
-(flat) names: the prune of the flat names kept them, and prod has no `komira-ai/kci_*` package.
+source is deleted. Their names are reserved in `release/prod_claimed_names.txt` only: the prod registry serves no
+`kci_*` package. Their global (flat) names were taken down like the other flat names, prod refuses a new flat name,
+and prod has no `komira-ai/kci_*` package, which only a member of the `komira-ai` namespace can create.
 
 ### The mopm jobs
 
@@ -960,9 +961,9 @@ release/prod_claimed_names.txt: claim it on the prod registry first, then add it
 A maintainer adds a name to the file only after claiming it on the prod registry, in the pull request that adds the
 member or ahead of it: names claimed for libraries not published yet (each with its row in `release/UNPUBLISHED.md`)
 are listed too, and the check accepts a name no member has. The file keeps the names of deleted packages (the
-`kci_*` libraries), whose names stay reserved as flat names, and refuses the dropping of one of them, an unsorted or repeated line, and an empty file. It is a
-committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
-last word.
+`kci_*` libraries), whose names are reserved in the file only, and refuses the dropping of one of them, an unsorted
+or repeated line, and an empty file. It is a committed claim, not a live read: it does not notice a claim the
+registry lost, and `prod-stage` stays the last word.
 
 **Every library not published says why.** Every Mojo library under `src/` (a directory with a `BUCK` file and a
 `.mojo` file outside its `tests/`) is either a member or has a row in

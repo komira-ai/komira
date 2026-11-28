@@ -1,4 +1,5 @@
-# The package names claimed on the prod registry: one per line, sorted.
+# The package names claimed on the prod registry, and the 16 kci_* names reserved in this file only:
+# one per line, sorted.
 #
 # release.yml publishes every member of the release (each src/<name> with a mopm.toml,
 # //release/readme_e2e:packages.bzl) to the prod registry on every push to main, and the
@@ -11,9 +12,10 @@
 # the check accepts a name no member has.
 #
 # A line stays when its package leaves the release: the 16 kci_* names (kci is retired and its
-# libraries are deleted) stay reserved so nobody else can take them. They are not in the
-# komira-ai namespace: on prod each is a global (flat) name, `kci_<name>`, which the prune of the
-# flat names kept, and there is no komira-ai/kci_<name>.
+# libraries are deleted) stay, and this file is the only place they are reserved. The prod
+# registry serves none of them: their global (flat) names, `kci_<name>`, were taken down like the
+# other flat names, prod refuses a new flat name, and there is no komira-ai/kci_<name>, which only
+# a member of the komira-ai namespace can create.
 # The check refuses a dropped line of that set, and a member whose name is not claimed.
 anomaly
 arrow
