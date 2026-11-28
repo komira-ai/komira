@@ -3,8 +3,8 @@
 # =============================================================================
 #
 # LZ4 FRAME compression / decompression for the page codec and `.lz4` text
-# files: compression's lz4 module (lz4's frame API, which owns
-# liblz4: its soname, its process-lifetime handle and its FFI).
+# files: compression's lz4 module (lz4's frame API, which owns lz4, linked
+# statically as komira_lz4_*, and its FFI).
 #
 # Kafka's LZ4 producer compression (KIP-57, since Kafka 0.10) emits LZ4-FRAME
 # bytes (magic 0x184D2204 + frame descriptor + block headers), NOT raw

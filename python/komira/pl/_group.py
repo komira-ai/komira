@@ -20,7 +20,7 @@ reduce every column that is not a key, each under its own name. `sum`,
 from __future__ import annotations
 
 from komira._errors import UnsupportedOperation
-from komira._ops import Aggregate, ColRef, Project, Sort
+from komira._ops import Aggregate, Cast, ColRef, Project, Sort, with_columns
 
 from . import _names
 from ._expr import Expr, col
@@ -85,11 +85,15 @@ class LazyGroupBy:
     """The groups of a `LazyFrame` by its key columns, before they are
     aggregated with `agg(...)` or one of the reductions."""
 
-    __slots__ = ("_frame", "_keys")
+    __slots__ = ("_frame", "_keys", "_restore")
 
-    def __init__(self, frame, keys: tuple[str, ...]) -> None:
+    def __init__(self, frame, keys: tuple[str, ...], restore: tuple[tuple[str, str], ...] = ()) -> None:
         object.__setattr__(self, "_frame", frame)
         object.__setattr__(self, "_keys", keys)
+        # (key, Arrow type) of each key grouped as its integer count and cast
+        # back to its type above the aggregate: the engine has no group key
+        # sink for a timestamp (LazyFrame.group_by_dynamic).
+        object.__setattr__(self, "_restore", restore)
 
     def __getattr__(self, name: str):
         raise _names.missing("LazyGroupBy", name)
@@ -128,6 +132,9 @@ class LazyGroupBy:
                 Aggregate(child, keys, aggregates),
                 tuple((k, ColRef(k)) for k in keys) + tuple(zip(names, nodes)),
             )
+        if self._restore:
+            back = tuple((key, Cast(ColRef(key), None, arrow=arrow)) for key, arrow in self._restore)
+            plan = with_columns(plan, back)
         return frame._with(plan, None)
 
     def len(self, name: str | None = None):

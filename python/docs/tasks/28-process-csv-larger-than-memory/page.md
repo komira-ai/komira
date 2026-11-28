@@ -54,13 +54,13 @@ Pune 1333 39317
 - `register_csv` and `komira.read_csv` do not load the file: they read the start of it to infer the columns, and every query reads the file again. Put the filter and the aggregate in the query, so that only the answer reaches Python.
 - `to_arrow()` and `to_pandas()` hold the whole answer in memory; `to_reader()` gives a `pyarrow.RecordBatchReader` that reads batches as they are asked for. A result is read once.
 - `komira.Session(memory_limit=<bytes>)` caps what a query may use: a query that needs more raises `MemoryLimitError` instead of exhausting the machine, and one the engine can run in less (a `GROUP BY` that spills) does not raise.
-- The loop pandas spells `pd.read_csv(path, chunksize=n)` is not there: `komira.read_csv` has no `chunksize` (komira-ai/komira#2369). `probe_chunksize.py` beside this page tries it and must fail with the line in `probe_chunksize.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it. Today the way to work through a file piece by piece is the query, or `to_reader()` on its answer.
+- The loop pandas spells `pd.read_csv(path, chunksize=n)` is not there: `komira.read_csv` refuses `chunksize` and `iterator=True` by name, since chunked reading waits for the engine to hand out batches as it makes them (komira-ai/komira#2369). `probe_chunksize.py` beside this page tries it and must fail with the line in `probe_chunksize.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it. Today the way to work through a file piece by piece is the query, or `to_reader()` on its answer.
 - The example writes a 5000-row file so that it runs in the check; the same code is what you would write for a larger file.
 
 ## Related
 
 - [How do I read a CSV file?](../1-read-csv-file/page.md) (rank 1, works)
 - [How do I write a table to a CSV file?](../11-write-table-csv-file/page.md) (rank 11, partial)
-- [How do I write a table to Parquet?](../27-write-table-parquet/page.md) (rank 27, partial)
-- [How do I run SQL on a CSV or Parquet file (or a DataFrame)?](../37-run-sql-csv-parquet-file/page.md) (rank 37, partial)
+- [How do I write a table to Parquet?](../27-write-table-parquet/page.md) (rank 27, works)
+- [How do I run SQL on a CSV or Parquet file (or a DataFrame)?](../37-run-sql-csv-parquet-file/page.md) (rank 37, works)
 - [How do I convert a folder of CSV files to Parquet?](../99-convert-folder-csv-files-parquet/page.md) (rank 99, works)

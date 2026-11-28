@@ -7,7 +7,9 @@ stand-in that records the plan bytes it is given. Checked:
   expression `fillna` puts over each filled column (a CASE, computed in
   int64 or float64 and cast back for an int32 or float32 column, and boolean
   logic with no CASE for a bool column), the filter of `dropna` (any and all,
-  subset), the projection of `rename`, `add_prefix` and `add_suffix`, the
+  subset), the projection of `isna` and `notna` (and their aliases `isnull`
+  and `notnull`) over a frame and the node of each over a Series, the
+  projection of `rename`, `add_prefix` and `add_suffix`, the
   casts of `astype`, and the TOPN by the reversed keys under the sort of
   `tail`;
 - how a float column's missing value is tested: not NULL and not NaN, built
@@ -454,6 +456,135 @@ def test_dropna_refuses_what_it_cannot_honour_by_its_full_message():
     refuses(lambda: df.dropna(subset=[1]), TypeError, "dropna subset takes column names, which are str, not int")
     refuses(lambda: df.dropna(ignore_index="x"), TypeError, "dropna ignore_index must be a bool, not str")
     assert df.dropna(thresh=None)._plan == df.dropna()._plan
+
+
+# --- isna, notna, isnull, notnull --------------------------------------------
+
+KINDS = (("a", "int64"), ("x", "float64"), ("f", "float32"), ("s", "string"), ("ok", "bool"))
+MEMBERSHIP = (
+    "isin() with another Series is a semi join, which is a condition of df[...] and nothing else: "
+    'filter with it alone, as df[df["k"].isin(other["k"])], and filter that frame by the other conditions'
+)
+
+
+def missing(name, dtype):
+    """The test that the column `name` of type `dtype` holds no value."""
+    return Unary("not", present(name, dtype))
+
+
+def test_series_isna_of_an_integer_column_tests_null_only():
+    df = Env(KINDS).df
+    got = df["a"].isna()
+    assert got._node == Unary("not", Unary("is_not_null", ColRef("a")))
+    assert got.dtype == "bool"
+
+
+def test_series_isna_of_a_float_column_tests_null_and_nan():
+    df = Env(KINDS).df
+    x = ColRef("x")
+    assert df["x"].isna()._node == Unary("not", BoolOp("and", Unary("is_not_null", x), not_nan(x)))
+    f = ColRef("f")
+    assert df["f"].isna()._node == Unary(
+        "not", BoolOp("and", Unary("is_not_null", f), not_nan(Cast(f, "float64")))
+    )
+
+
+def test_series_notna_is_the_exact_negation_of_isna_for_every_kind_of_column():
+    df = Env(KINDS).df
+    for name, dtype in KINDS:
+        assert df[name].notna()._node == present(name, dtype), name
+        assert df[name].isna()._node == Unary("not", df[name].notna()._node), name
+        assert df[name].isna().dtype == df[name].notna().dtype == "bool", name
+
+
+def test_series_isnull_and_notnull_are_isna_and_notna():
+    df = Env(KINDS).df
+    for name, dtype in KINDS:
+        assert df[name].isnull()._node == missing(name, dtype), name
+        assert df[name].notnull()._node == present(name, dtype), name
+
+
+def test_series_isna_of_an_expression_tests_the_expression_by_its_type():
+    df = Env(KINDS).df
+    doubled = df["x"] * 2
+    e = doubled._node
+    assert doubled.isna()._node == Unary("not", BoolOp("and", Unary("is_not_null", e), not_nan(e)))
+    sum_ = (df["a"] + 1)._node
+    assert (df["a"] + 1).isna()._node == Unary("not", Unary("is_not_null", sum_))
+
+
+def test_series_isna_of_a_window_keeps_the_windows_it_reads():
+    df = Env().df.sort_values("n")
+    running = df["a"].cumsum()
+    got = running.isna()
+    assert got._windows == running._windows and got._windows
+    assert got._node == Unary("not", Unary("is_not_null", running._node))
+    assert df.assign(m=got).dtypes["m"] == "bool"
+
+
+def test_series_isna_of_a_float16_column_compares_it_as_float64():
+    df = Env((("h", "float16"),)).df
+    h = ColRef("h")
+    assert df["h"].isna()._node == Unary(
+        "not", BoolOp("and", Unary("is_not_null", h), not_nan(Cast(h, "float64")))
+    )
+
+
+def test_series_isna_filters_rows_and_notna_assigns_a_bool_column():
+    df = Env().df
+    assert df[df["x"].isna()]._plan == _ops.Filter(SCAN, missing("x", "float64"))
+    assert df[df["s"].notna()]._plan == _ops.Filter(SCAN, present("s", "string"))
+    got = df.assign(m=df["x"].notna())
+    assert got._plan == _ops.Project(SCAN, tuple((n, ColRef(n)) for n in COLS) + (("m", present("x", "float64")),))
+    assert got.dtypes["m"] == "bool"
+
+
+def test_frame_isna_is_one_projection_of_every_column_under_its_own_name():
+    df = Env(KINDS).df
+    got = df.isna()
+    assert got._plan == _ops.Project(df._plan, tuple((n, missing(n, t)) for n, t in KINDS))
+    assert got.columns == [n for n, _ in KINDS]
+    assert got.dtypes == {n: "bool" for n, _ in KINDS}
+    assert df.isnull()._plan == got._plan
+
+
+def test_frame_notna_is_the_exact_negation_of_isna_column_by_column():
+    df = Env(KINDS).df
+    got = df.notna()
+    assert got._plan == _ops.Project(df._plan, tuple((n, present(n, t)) for n, t in KINDS))
+    assert got.dtypes == {n: "bool" for n, _ in KINDS}
+    assert df.notnull()._plan == got._plan
+    negated = tuple((n, Unary("not", node)) for n, node in got._plan.items)
+    assert df.isna()._plan.items == negated
+
+
+def test_frame_isna_sum_counts_per_column_as_int64():
+    df = Env(KINDS).df
+    got = df.isna().sum()
+    assert got.columns == [n for n, _ in KINDS]
+    assert got.dtypes == {n: "int64" for n, _ in KINDS}
+    assert df.isna().sum()._plan == got._plan
+
+
+def test_frame_isna_of_a_sorted_frame_is_unordered_and_a_filter_by_isna_keeps_the_order():
+    df = Env().df.sort_values("a")
+    assert df.isna()._order() is None
+    assert df.notna()._order() is None
+    kept = df[df["x"].isna()]
+    assert kept._plan == _ops.Sort(_ops.Filter(SCAN, missing("x", "float64")), (SortKey("a"),))
+
+
+def test_isna_and_notna_of_a_stale_series_or_of_isin_by_a_series_are_refused_by_their_full_message():
+    df = Env().df
+    stale = df["a"]
+    df["b"] = df["a"]
+    stale_message = (
+        'this Series was taken from its frame before df["name"] = ... replaced the frame\'s columns: '
+        "take it from the frame again"
+    )
+    for verb in ("isna", "notna", "isnull", "notnull"):
+        refuses(getattr(stale, verb), UnsupportedOperation, stale_message)
+        refuses(getattr(df["a"].isin(df["b"]), verb), UnsupportedOperation, MEMBERSHIP)
 
 
 # --- rename, add_prefix, add_suffix ----------------------------------------------

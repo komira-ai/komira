@@ -29,8 +29,10 @@ rows are compared with the rows worked out by hand:
   KomiraError "the session is closed" at each reader and at the terminal of a
   frame made before the close; the readers without `session=` share the
   process's default session; a Series of another frame is refused in a verb;
-- an ABI 1.7 stand-in (in a new interpreter) refuses the plan door with the
-  message that names the call, the version it needs and the library;
+- an ABI 1.7 stand-in (in a new interpreter) refuses the plan door, and
+  `Session.register` of Arrow data (ABI 1.9), with the message that names the
+  call, the version it needs and the library; the refused registration has
+  not read the reader it was given;
 - importing komira imports no protobuf; the first reader does.
 
 The test is of the `run/` family (python/tests/BUCK): `frame_run_test` runs
@@ -218,6 +220,17 @@ def stand_in(args):
     native.ctx_free(ctx)
     with komira.Session() as s:
         check(lambda: s._plan_stream(b"plan"))
+        # Registering Arrow data needs 1.9, and is refused before the data is read.
+        table = pa.table({"x": [1, 2]})
+        reader = pa.RecordBatchReader.from_batches(table.schema, table.to_batches())
+        refused(
+            lambda: s.register("t", reader),
+            KomiraError,
+            "komira_register_arrow_stream needs libkomira ABI version 1.9; the library at {} is 1.7".format(
+                os.path.join(directory, _native._LIB_NAME)
+            ),
+        )
+        assert reader.read_all().num_rows == 2
         # Only the plan door is refused: the 1.7 call that renders a plan still answers.
         s.register_parquet("ok", "f.parquet")
         assert s._plan_render(b"abc") == "plan:3:616263"
@@ -925,7 +938,7 @@ def test_series_of_another_frame_refused(lib_dir):
 
 
 def test_stand_in_refuses_plan_stream(lib_dir):
-    """On an ABI 1.7 library the plan door refuses with the version message, and nothing else is refused."""
+    """On an ABI 1.7 library the plan door and register refuse with the version message, and nothing else is refused."""
     assert child("stand_in", lib_dir) == "stand-in: done\n"
 
 

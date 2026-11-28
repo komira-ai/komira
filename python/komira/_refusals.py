@@ -84,6 +84,12 @@ SERIES = _BOTH | _rows(
         ".{name}() gives a Series indexed by the values in pandas, and a komira Series has no index: "
         'count the rows per value with df.groupby(column).size(), and sort them with sort_values("size", ascending=False)',
     ),
+    (
+        ("unique",),
+        ".{name}() gives the distinct values as an array in pandas, which needs the rows, and a komira Series is "
+        "part of a plan: select the column as a frame and drop its duplicates, as "
+        "df[[column]].drop_duplicates(), then run it with materialize()",
+    ),
 )
 
 GROUPBY = _rows(
@@ -93,7 +99,12 @@ GROUPBY = _rows(
         ("ngroups", "groups", "indices", "get_group"),
         ".{name} needs a query to run; aggregate with .size() and materialize()",
     ),
-    (("ohlc", "resample"), ".{name}() is not supported: komira has no time index"),
+    (("ohlc",), ".{name}() is not supported: komira has no time index"),
+    (
+        ("resample",),
+        "GroupBy.resample() is not supported yet: resample the frame with df.resample(rule, on=column), "
+        "which groups by the bucket alone",
+    ),
 )
 
 MODULE = _rows(

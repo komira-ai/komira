@@ -1,7 +1,8 @@
 # Series
 
 Comparisons, `+ - * /` (true division, as Python's), unary `-`,
-`& | ~` over boolean Series, `isin([...])` with at most 64 values (and
+`& | ~` over boolean Series, `isna()` and `notna()` (and `isnull()`,
+`notnull()`, newer than 0.1.1623; [missing values](missing_values.md)), `isin([...])` with at most 64 values (and
 `isin(other["k"])`, a [semi join](merge.md), newer than 0.1.1623), the
 [window verbs](windows.md) (newer than 0.1.1623), `dtype` and `astype(dtype)`
 (newer than 0.1.1623) ([names and types](names_and_types.md)). The

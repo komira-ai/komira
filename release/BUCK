@@ -41,10 +41,14 @@ plan_expectation_cases()
 RELEASE_NATIVES = {
     "async_api": {"komira_concurrency_pool_depth": "//src/async_api:native_komira_concurrency_pool_depth"},
     "awslc": {"awslc": "//src/awslc:awslc_native"},
-    "compression": {"snappy": "//third_party/snappy:snappy_native"},
+    "compression": {
+        "komira_zstd": "//third_party/zstd:zstd_native",
+        "snappy": "//third_party/snappy:snappy_native",
+    },
     "crypto": {"komira_crypto_sha256_hw": "//src/crypto:native_komira_crypto_sha256_hw"},
     "libc": {"komira_libc_posix": "//src/libc:native_komira_libc_posix"},
     "log": {"komira_log_holder": "//src/log:native_komira_log_holder"},
+    "lz4": {"komira_lz4": "//third_party/lz4:lz4_native"},
     "metrics": {"komira_metrics_ea_flag": "//src/metrics:native_komira_metrics_ea_flag"},
 }
 

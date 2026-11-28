@@ -12,6 +12,8 @@ process can hold komira's copy of a library and any other copy (a system
 | snappy | `//third_party/snappy:snappy` | `komira_snappy_` on its C API (`komira_snappy_compress`); its C++ names stay |
 | brotli (the decoder) | `//third_party/brotli:brotlidec` | `komira_brotli_` (`BrotliDecoderDecompress` becomes `komira_brotli_DecoderDecompress`; any other global `X`, `komira_brotli__X`) |
 | SQLite | `//third_party/sqlite:sqlite3` | `komira_sqlite3_` (`sqlite3_open_v2` becomes `komira_sqlite3_open_v2`) |
+| zstd | `//third_party/zstd:zstd` | `komira_zstd_` (`ZSTD_compress` becomes `komira_zstd_compress`; any other global `X`, `komira_zstd__X`) |
+| lz4 | `//third_party/lz4:lz4` | `komira_lz4_` (`LZ4_compress_default` becomes `komira_lz4_compress_default`; any other global `X`, such as `LZ4F_compressFrame`, `komira_lz4__X`) |
 
 Mojo code calls the prefixed names: `external_call["komira_awslc_SHA256", ...]`.
 A C caller that includes the library's headers gets them without writing

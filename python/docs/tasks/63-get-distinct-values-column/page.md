@@ -53,8 +53,8 @@ Output:
 ## Notes
 
 - A distinct has no promised row order: add `ORDER BY`, `sort_values` or `sort` before you rely on the order, as the example does.
-- `drop_duplicates(subset=[...])` must name every column of the frame today. Select the column first, as `df[["region"]].drop_duplicates()`, to get the distinct values of one column or of a few.
-- `Series.unique()` and `Series.nunique()` do not exist: a column is not a list of values until it runs. Select it as a one-column frame (`df[["region"]]`) instead, and use `DataFrame.nunique()` or `agg(name=(column, "nunique"))` to count.
+- `drop_duplicates(subset=[...])` keeps whole rows, one for each value of the named columns. Select the column first, as `df[["region"]].drop_duplicates()`, to get the distinct values of one column or of a few.
+- `Series.unique()` is refused by name and `Series.nunique()` does not exist: a column is not a list of values until it runs. Select it as a one-column frame (`df[["region"]]`) instead, and use `DataFrame.nunique()` or `agg(name=(column, "nunique"))` to count.
 - `nunique` and `count(DISTINCT ...)` do not count NULL; polars-shaped `n_unique` counts a NULL as one value, as polars does. `nunique(dropna=False)` is refused.
 - On the polars-shaped frame, `unique(keep="first")`, `keep="last"` and `maintain_order=True` are refused, since a plan has no row order; sort the result instead.
 

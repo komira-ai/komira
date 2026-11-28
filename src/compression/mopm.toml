@@ -1,7 +1,7 @@
 [package]
 name = "komira-ai/compression"
 version = "0.1.0"
-description = "Byte-stream codec trait and the codecs behind it: snappy linked statically, zstd, bzip2 and xz opened at run time, gzip and lz4 through zlib and lz4."
+description = "Byte-stream codec trait and the codecs behind it: snappy and zstd linked statically, bzip2 and xz opened at run time, gzip and lz4 through zlib and lz4."
 license = "Apache-2.0"
 repository = "https://github.com/komira-ai/komira"
 readme = "README.md"
@@ -14,7 +14,6 @@ mojo = ["1.1.0"]
 [native-dependencies]
 bz2 = { version = ">=1.0.8,<2", kind = "shared", mode = "load" }
 lzma = { version = ">=5.2.5,<6", kind = "shared", mode = "load" }
-zstd = { version = ">=1.5.2,<2", kind = "shared", mode = "load" }
 
 # libsnappy.a is built by the `native_library` target //third_party/snappy:snappy_native, which BUCK's
 # `natives = {...}` names: an archive of the build, not compiled from sources by mopm. snappy is C++, so every
@@ -23,6 +22,12 @@ zstd = { version = ">=1.5.2,<2", kind = "shared", mode = "load" }
 kind = "static"
 provided = true
 link = ["c++"]
+
+# libkomira_zstd.a is built by the `native_library` target //third_party/zstd:zstd_native (zstd 1.5.7, C, every
+# symbol renamed komira_zstd_*), which BUCK's `natives = {...}` names, as snappy's is.
+[native.komira_zstd]
+kind = "static"
+provided = true
 
 [targets]
 lib = { path = "src/compression" }
