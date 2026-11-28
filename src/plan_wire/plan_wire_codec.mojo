@@ -200,9 +200,9 @@
 #   Which leg fires is a property of the render, and the only way to know which
 #   is to drive it; see the falsification record in the round-trip test.
 #
-#   ⚠ EXTRACT'S UNIT SPACE IS THE SPARSEST IN THE FORMAT: two disjoint runs,
-#   0..14 (fields) and 16..28 (truncations, then epoch counts), with 15
-#   DECLARED BY NOTHING. So
+#   ⚠ EXTRACT'S UNIT SPACE IS THE SPARSEST IN THE FORMAT: disjoint runs,
+#   0..14 (fields), 16..25 (truncations) and 28..30 (epoch counts), with 15,
+#   26 and 27 DECLARED BY NOTHING. So
 #   both directions go through `extract_field_{to,from}_wire`, which test
 #   MEMBERSHIP rather than a bound — exactly the distinction the ArrowType
 #   narrowing turns on. A hole value narrows into a `UInt8` losslessly and is
@@ -1670,7 +1670,7 @@ def _expr_to_wire(e: Expr, optimized: Bool) raises -> WireExpr:
         # Arm ordinal, not field number — `extract` is field 13 and arm 12.
         arm = 12
         # ⚠ THE UNIT GOES THROUGH `extract_field_to_wire`, WHICH IS A
-        # MEMBERSHIP TEST OVER TWO DISJOINT RUNS (0..14 and 16..28), not a
+        # MEMBERSHIP TEST OVER DISJOINT RUNS (0..14, 16..25, 28..30), not a
         # bound. An `ExtractData` built with unit 15 — reachable, because
         # `Expr.extract(unit, child)` and `Expr.date_trunc(unit, child)` both
         # take a raw `UInt8` — is REFUSED at encode rather than written as a

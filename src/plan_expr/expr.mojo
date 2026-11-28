@@ -582,7 +582,8 @@ comptime EXTRACT_SECOND: UInt8 = 6
 # -- the DAY-INDEX family ------------
 #
 # ⚠ THE FIELD RUN IS 0..14, THE TRUNCATION RUN IS 16..25 AND THE EPOCH RUN
-# IS 26..28. The engine tells "date_trunc" from every other unit with the
+# IS 28..30 (26 and 27 are held for the weekday and month name units). The
+# engine tells "date_trunc" from every other unit with the
 # single BOUNDED predicate `_is_trunc_unit` below — one function, delegated by
 # `expr_walk` and by the column evaluator rather than restated. 15 is
 # deliberately left free: `test_an_extract_unit_in_the_sparse_hole_is_refused`
@@ -662,9 +663,9 @@ comptime EXTRACT_TRUNC_MICROSECOND: UInt8 = 25
 # A TIMESTAMP is first brought to microseconds (TIMESTAMP_NS truncates toward
 # zero, TIMESTAMP_S / _MS multiply with an overflow check), then EPOCH divides
 # by 1e6 in DOUBLE and EPOCH_MS divides by 1000 truncating toward zero.
-comptime EXTRACT_EPOCH: UInt8 = 26
-comptime EXTRACT_EPOCH_MS: UInt8 = 27
-comptime EXTRACT_EPOCH_US: UInt8 = 28
+comptime EXTRACT_EPOCH: UInt8 = 28
+comptime EXTRACT_EPOCH_MS: UInt8 = 29
+comptime EXTRACT_EPOCH_US: UInt8 = 30
 
 @always_inline
 def _is_trunc_unit(unit: UInt8) -> Bool:

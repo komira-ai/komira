@@ -2800,7 +2800,7 @@ def math_fn2_wire_name(wire: Int32) -> String:
 # ==========================================================================
 # ExtractField — engine prefix `EXTRACT_`
 # Temporal field extraction / truncation / epoch-count unit. Sparse:
-# extraction 0-14, truncation 16-25, epoch count 26-28 — 15 is a RESERVED
+# extraction 0-14, truncation 16-25, epoch count 28-30 — 15 is a RESERVED
 # HOLE, and the membership test consults this vocabulary rather than
 # range-checking so a unit landing in it is REFUSED at encode.
 # Declared in: src/plan_expr/expr.mojo
@@ -2808,17 +2808,19 @@ def math_fn2_wire_name(wire: Int32) -> String:
 
 comptime EXTRACT_FIELD_WIRE_MEMBERS: Int = 28
 comptime EXTRACT_FIELD_ENGINE_MIN: UInt8 = 0
-comptime EXTRACT_FIELD_ENGINE_MAX: UInt8 = 28
+comptime EXTRACT_FIELD_ENGINE_MAX: UInt8 = 30
 comptime EXTRACT_FIELD_WIRE_MIN: Int32 = 1
-comptime EXTRACT_FIELD_WIRE_MAX: Int32 = 29
+comptime EXTRACT_FIELD_WIRE_MAX: Int32 = 31
 
 
 def extract_field_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this ExtractField value?
 
-    Runs: [(0, 14), (16, 28)]. Total, never raising.
+    Runs: [(0, 14), (16, 25), (28, 30)]. Total, never raising.
     """
-    return engine_tag <= 14 or (engine_tag >= 16 and engine_tag <= 28)
+    return engine_tag <= 14 or (engine_tag >= 16 and engine_tag <= 25) or (
+        engine_tag >= 28 and engine_tag <= 30
+    )
 
 
 def extract_field_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -2944,13 +2946,13 @@ def write_extract_field_wire_name[W: Writer](mut writer: W, wire: Int32):
     if wire == 26:
         writer.write("EXTRACT_TRUNC_MICROSECOND")
         return
-    if wire == 27:
+    if wire == 29:
         writer.write("EXTRACT_EPOCH")
         return
-    if wire == 28:
+    if wire == 30:
         writer.write("EXTRACT_EPOCH_MS")
         return
-    if wire == 29:
+    if wire == 31:
         writer.write("EXTRACT_EPOCH_US")
         return
     writer.write("ExtractField#", Int(wire))

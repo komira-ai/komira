@@ -7,8 +7,8 @@
 # one table's schema; the test compares the bound expression text, or the
 # binder's whole message.
 #   1. A TIMESTAMP (with or without a zone) or DATE operand lowers to
-#      EXPR_EXTRACT with EXTRACT_EPOCH (26), EXTRACT_EPOCH_MS (27) or
-#      EXTRACT_EPOCH_US (28).
+#      EXPR_EXTRACT with EXTRACT_EPOCH (28), EXTRACT_EPOCH_MS (29) or
+#      EXTRACT_EPOCH_US (30).
 #   2. `epoch_ms` of an integer is the other DuckDB overload, the same
 #      lowering as `make_timestamp_ms` (an INT32 is widened first).
 #   3. An integer operand of `epoch` / `epoch_us`, a float, a string, an
@@ -122,16 +122,16 @@ comptime _SCAN = "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)
 
 
 def test_a_timestamp_lowers_to_the_epoch_extract_units() raises:
-    """epoch -> unit 26, epoch_ms -> 27, epoch_us -> 28, over a column and
+    """epoch -> unit 28, epoch_ms -> 29, epoch_us -> 30, over a column and
     over a TIMESTAMP literal."""
     _check(
         "SELECT epoch(ts) AS a, epoch_ms(ts) AS b, epoch_us(ts) AS c FROM t",
-        "Project(exprs=[Alias(Extract(unit=26, ColRef(ts)), \"a\"), Alias(Extract(unit=27, ColRef(ts)), \"b\"), Alias(Extract(unit=28, ColRef(ts)), \"c\")])\n"
+        "Project(exprs=[Alias(Extract(unit=28, ColRef(ts)), \"a\"), Alias(Extract(unit=29, ColRef(ts)), \"b\"), Alias(Extract(unit=30, ColRef(ts)), \"c\")])\n"
         + _SCAN,
     )
     _check(
         "SELECT epoch(TIMESTAMP '2026-09-01 00:00:00.5') FROM t",
-        "Project(exprs=[Extract(unit=26, Literal(ScalarValue(timestamp[us], 1788220800500000)))])\n"
+        "Project(exprs=[Extract(unit=28, Literal(ScalarValue(timestamp[us], 1788220800500000)))])\n"
         + _SCAN,
     )
 
@@ -141,7 +141,7 @@ def test_a_date_and_a_zoned_timestamp_are_counted_too() raises:
     zoned timestamp holds UTC ticks, so its count is the same lowering."""
     _check(
         "SELECT epoch(d) AS a, epoch_ms(tz) AS b FROM t",
-        "Project(exprs=[Alias(Extract(unit=26, ColRef(d)), \"a\"), Alias(Extract(unit=27, ColRef(tz)), \"b\")])\n"
+        "Project(exprs=[Alias(Extract(unit=28, ColRef(d)), \"a\"), Alias(Extract(unit=29, ColRef(tz)), \"b\")])\n"
         + _SCAN,
     )
 
@@ -189,7 +189,7 @@ def test_the_epoch_date_part_is_the_same_unit() raises:
     DuckDB, as epoch(x) is: the same EXTRACT_EPOCH node."""
     _check(
         "SELECT date_part('epoch', ts) AS a, EXTRACT(epoch FROM d) AS b FROM t",
-        "Project(exprs=[Alias(Extract(unit=26, ColRef(ts)), \"a\"), Alias(Extract(unit=26, ColRef(d)), \"b\")])\n"
+        "Project(exprs=[Alias(Extract(unit=28, ColRef(ts)), \"a\"), Alias(Extract(unit=28, ColRef(d)), \"b\")])\n"
         + _SCAN,
     )
 
