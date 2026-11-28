@@ -6,7 +6,7 @@ tables of dataframe_surface_verbs.md), with no library and no plan modules:
 - `komira.pl.__all__` is the module's public names, `dir()` lists exactly
   them, and every one is defined;
 - for every name in each refusal table (the module, `LazyFrame`, `Expr`,
-  `LazyGroupBy`),
+  `LazyGroupBy`, `ExprDateTimeNameSpace`),
   `hasattr` is False and the `AttributeError` message equals the table's text
   word for word;
 - a name in no table raises Python's own message, and a name starting with
@@ -41,6 +41,7 @@ from komira.pl._group import LazyGroupBy  # noqa: E402
 
 PUBLIC = [
     "Expr",
+    "ExprDateTimeNameSpace",
     "ExprStringNameSpace",
     "LazyFrame",
     "col",
@@ -91,6 +92,12 @@ EXPR_TABLE = {
 GROUPBY_TABLE = {
     "first": ".first() is not supported yet; use .min() or .max() of an ordered key",
     "last": ".last() is not supported yet; use .min() or .max() of an ordered key",
+}
+
+DT_TABLE = {
+    name: ".dt.{}() is not supported yet: komira.pl's dt has truncate(every); "
+    "the pandas-shaped frame's .dt has the date parts".format(name)
+    for name in ("year", "quarter", "month", "day", "weekday", "ordinal_day", "hour", "minute", "second")
 }
 
 
@@ -147,6 +154,16 @@ def test_expr_refusal_table_and_python_message():
         refused(lambda: getattr(e, name), AttributeError, message)
     refused(lambda: e.shift, AttributeError, "'Expr' object has no attribute 'shift'")
     refused(lambda: e.str.split, AttributeError, "'ExprStringNameSpace' object has no attribute 'split'")
+    for name, message in DT_TABLE.items():
+        assert not hasattr(e.dt, name), name
+        refused(lambda: getattr(e.dt, name), AttributeError, message)
+    refused(lambda: e.dt.round, AttributeError, "'ExprDateTimeNameSpace' object has no attribute 'round'")
+    refused(lambda: e.dt._unit, AttributeError, "_unit")
+    refused(
+        lambda: setattr(e.dt, "every", "1d"),
+        AttributeError,
+        "cannot set the attribute 'every' of a temporal namespace",
+    )
     refused(lambda: kpl.when(e > 1).else_, AttributeError, "'When' object has no attribute 'else_'")
     refused(lambda: kpl.when(e > 1).then(1).else_, AttributeError, "'Then' object has no attribute 'else_'")
 
