@@ -2,31 +2,21 @@
 # AvroSource — concrete SourceLike for Apache Avro OCF files on disk.
 # =============================================================================
 #
-# Avro row-native READ. Avro OCF is ROW-oriented on disk; the row-native
-# reader (`avro_rowblock_reader.read_avro_path_to_row_block`) decodes each
-# OCF record's fields DIRECTLY into a RowBlock via the same `AvroByteReader`
-# varint/union/string primitives the column path's `ActionTableInterpreter`
-# uses — NOT the col->row shortcut orc/arrow use. This source is the substrate
-# arm so an Avro file can flow through the canonical
-# `LogicalPlan.scan_from_source(SourceVariant(...), source_kind=ROW)` path that
-# the row-streaming segment dispatch serves.
+# The leaf of an Avro file in a plan. Avro OCF is ROW-oriented on disk, and
+# the `komira.avro` binding declares `orientation = ROW`. `read_avro('path')`
+# in SQL builds this source (`sql_tvf_bind._avro_tvf_scan`) with the schema
+# the file's OCF header gives, and lowering cuts the scan into a SOURCE_AVRO
+# segment (`lowering.cut_scan_avro`), whose source decodes the file with the
+# OCF reader (`pipeline_exec.source_avro`). `AvroReader.build_scan_plan`
+# (`op_typed_source_api`) builds the same leaf.
 #
 # Mirrors `JsonSource` (the closest sibling — a single path + caller-supplied
 # schema, no projection). Identity = FNV-1a-64 over the path + folded mtime
 # (same shape as JsonSource / CsvSource / ParquetSource), so the plan-cache
 # invalidates when the underlying file is rewritten (stale-cache contract).
 #
-# Architectural note: UNLIKE JsonSource/OrcSource (which are SOURCE_KIND_COLUMNAR
-# — their decoders emit Arrow batches directly), AvroSource is constructed with
-# an EXPLICIT `source_kind == SOURCE_KIND_ROW` by `ctx.read_avro_row_streaming`
-# so the genuine row-native producer fires. The column path (`ctx.read_avro`)
-# does NOT use this source — it routes through the eager `read_avro_bytes_parallel`
-# direct path into an InMemorySource (mirroring `read_json`).
-#
 # `to_dataframe()` is NOT part of the SourceLike trait (cyclic-dep
-# avoidance). The ergonomic factory `ctx.read_avro_row_streaming(path)`
-# lives on `EngineContext` and roots the plan at a SOURCE_KIND_ROW scan
-# over this source.
+# avoidance).
 #
 # Encapsulation: no `UnsafePointer` in any public sig. Movable+Copyable +
 # Deinitable per SourceLike trait bound.
@@ -85,9 +75,10 @@ struct AvroSource(SourceLike, Movable, Copyable, Deinitable):
     Fields:
         path: Avro OCF file path on disk.
         schema_cached: the Arrow schema derived from the OCF header's embedded
-            Avro schema (identity resolution). `ctx.read_avro_row_streaming`
-            parses the OCF header schema up front and passes it here so the
-            scan leaf's output schema (the RowBlock layout) is authoritative.
+            Avro schema (identity resolution). `read_avro`'s binder
+            (`sql_tvf_bind.avro_tvf_schema`) parses the OCF header schema up
+            front and passes it here, so the scan leaf's output schema is the
+            file's.
         _identity: precomputed FNV-1a-64 hash. Stored so `.fingerprint()` is
             O(1) and stable across `.copy()` and `value^` moves.
         _mtime_ns: file mtime in nanoseconds since unix epoch at ctor. Folded
@@ -147,7 +138,8 @@ struct AvroSource(SourceLike, Movable, Copyable, Deinitable):
     def supports_filter_pushdown(self, predicate: Expr) -> Bool:
         """Return `False` for all predicates — Avro has no equivalent of
         Parquet's row-group zonemap pruning. A predicate over an AvroSource
-        stays as a `Filter` node above the scan, applied row-native by the
-        RowStreamingSegment. Safe degradation per SourceLike trait default."""
+        stays as a `Filter` node above the scan, which lowering cuts into an
+        operator of the SOURCE_AVRO segment. Safe degradation per SourceLike
+        trait default."""
         _ = predicate
         return False

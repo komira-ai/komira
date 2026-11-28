@@ -973,7 +973,7 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         DECLARED `orientation` to a default it could be talked out of.
         Unset means DERIVE; a stated value that contradicts a binding-backed
         kind's declaration RAISES rather than winning silently. Builders over
-        a ROW-declaring kind (`engine_context.read_avro_row_streaming`,
+        a ROW-declaring kind (`sql_tvf_bind._avro_tvf_scan`,
         `AvroReader.build_scan_plan`, the JSONL builders) pass nothing and
         derive it — the declaration REPLACES a ladder rather than sitting
         beside one.

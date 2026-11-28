@@ -220,9 +220,7 @@ struct ScanData(Movable):
 
         ⚠ AN UNSTATED `source_kind` OVER A ROW-DECLARING KIND (AVRO, CSV)
         DERIVES ROW. A ladder keyed on the caller's value would come out
-        COLUMNAR there. Falsifiers `test_scan_binding_avro_arm.mojo
-        :test_an_unstated_source_kind_over_avro_derives_row` and
-        `test_scan_binding_csv_arm.mojo
+        COLUMNAR there. Falsifier `test_scan_binding_csv_arm.mojo
         :test_an_unstated_source_kind_over_csv_derives_row`.
         """
         # Derive legacy caches FIRST (read-only after construction).

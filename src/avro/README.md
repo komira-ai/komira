@@ -26,6 +26,9 @@ batches (`arrow`).
   `write_avro_file` write a container; Arrow types Avro cannot express are
   annotated (`arrow.*`) so they read back as the same Arrow type, unless
   `emit_arrow_logicals` is off.
+- **SQL.** `read_avro('<path>')` reads one local file in a query; the
+  example and the types it refuses are in the README of `sdk_exec`, whose
+  context runs SQL (this package cannot depend on it).
 - **Codecs.** `null`, `deflate`, `snappy`, `bzip2`, `xz` and `zstandard`
   (`AVRO_CODEC_*`), selected by the header's `avro.codec`.
 - **Lower levels.** `decode_ocf_header`, `scan_ocf_blocks`, the zigzag varint
