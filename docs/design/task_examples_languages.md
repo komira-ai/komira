@@ -5,7 +5,8 @@ TypeScript and Mojo examples to the task pages of [docs/tasks/README.md](../task
 uses the framework of [testing the code in our documents](documentation_tests.md): the same
 markers, the same checker and the same kind of targets. Where that framework already has a rule,
 this document applies the rule and does not make a new one. Counts are from main of this
-repository, and each count names how it was taken. *[est]* marks an estimate.
+repository at commit 4371842 (`git rev-parse --short origin/main` when this text was last
+changed), and each count names how it was taken. *[est]* marks an estimate.
 
 It is a separate document, not a section of `documentation_tests.md`. That document's decisions
 are already taken, and a separate page leaves the accepted text alone. `documentation_tests.md`
@@ -52,7 +53,7 @@ them cannot do yet is the first question at the end. The count of such tasks is 
 1. **One tree per form, joined by slug.** A tree sits in the package whose runner runs its
    examples: Python in `python/docs/tasks/` (exists), TypeScript in `node/docs/tasks/`, Mojo in
    `src/komira/docs/tasks/` (the package the Mojo SDK design, komira-ai/komira#2496, proposes),
-   Mojo physical plan in `src/komira/docs/mojo_plan_tasks/`, and SQL in
+   Mojo physical plan in `src/komira_physical/docs/tasks/`, and SQL in
    `python/docs/sql_tasks/`, beside the Python lines that run it. Each task folder keeps exactly `example.<ext>`,
    `expected_output.txt` and `page.md`, as today. The open komira.dev design
    (komira-ai/komira#2352) moves to these names.
@@ -81,7 +82,7 @@ them cannot do yet is the first question at the end. The count of such tasks is 
 
 | Fact (main) | Count, and how it was taken |
 |---|---|
-| Catalogue entries: `works` / `partial` / `gap` | 45 / 35 / 20, counted from `docs/tasks/catalogue.json` |
+| Catalogue entries: `works` / `partial` / `gap` | 47 / 33 / 20, counted from `docs/tasks/catalogue.json` |
 | Python task folders | 80, `ls -d python/docs/tasks/*/`: one per non-gap entry |
 | Python examples that hold SQL text | 79 of the 80, `grep -l "sql(" python/docs/tasks/*/example.py`; rank 60's holds none |
 | Python examples that call no frame API | 16, by a text search of `example.py` for `komira.read_`, `.pl.`, `df.`, pandas and polars (a search, not a run) |
@@ -191,17 +192,23 @@ done | sort -n
 ```
 
 Today it prints 16 `sql-only` lines (the examples that use no frame API), `60 no-sql`, `31 cloud`,
-`93 cloud`, and `22`, `89` and `90 sqlite3`. Those last six are the tasks SQL cannot show for a
-reason other than work not yet done: rank 60's example holds no SQL; ranks 31 and 93 read cloud
-storage with a credential, which SQL text cannot name; ranks 22, 89 and 90 store rows with Python's
-`sqlite3`.
+`93 cloud`, and `22`, `89` and `90 sqlite3`.
+
+- **Cannot be shown in SQL today, for a reason other than work not yet done: 5.** Ranks 31 and 93
+  read cloud storage with a credential, which SQL text cannot name. Ranks 22, 89 and 90 store rows
+  in a database with Python's `sqlite3`, and komira writes to no database.
+- **Rank 60** ("convert column to numbers") has no SQL in its Python example, which uses the
+  polars-shaped `cast(strict=False)`. That is not shown to be impossible in SQL, so it is counted
+  with the tasks whose SQL is written first.
+- **Showable as they stand: 11**, the 16 `sql-only` examples less the 5 above.
+- **SQL to be written first: 64**, the other 80 − 5 − 11.
 
 | Form | Shown today | Not shown when its first examples land, and why |
 |---|---|---|
-| Python | 80 (45 `works`, 35 `partial`) | 0. The 35 `partial` ones do part of their task |
-| SQL | 0 | between 6 and 69. At least the 6 of the search above. At most 69: of the 16 `sql-only` examples, 5 are among those 6 (22, 31, 89, 90, 93), so 11 can be written as SQL as they stand; each of the other 63 must be rewritten to see whether SQL can do it *[est]* |
-| TypeScript | 0 | between 6 and 69, the same 6 today, and the same rewrite for the rest *[est]*. Ranks 31 and 93 leave the 6 once the package passes on credentials to the shared library's binding call |
-| Mojo | 0 | between 6 and 69 today, as SQL: it hands SQL text (or a logical plan) to the shared library, so it can show what SQL and logical plans can show, and reads CSV and JSON through `read_csv('<file>')` as SQL and TypeScript do. As for TypeScript, ranks 31 and 93 leave the 6 once credentials pass through `files`, so its floor is then 4 |
+| Python | 80 (47 `works`, 33 `partial`) | 0. The 33 `partial` ones do part of their task |
+| SQL | 0 | between 5 and 69: at least the 5 above, at most those 5 and the 64 to be written first *[est]* |
+| TypeScript | 0 | between 5 and 69, the same 5 today, and the same 64 to write *[est]*. Ranks 31 and 93 leave the 5 once the package passes on credentials to the shared library's binding call |
+| Mojo | 0 | between 5 and 69 today, as SQL: it hands SQL text (or a logical plan) to the shared library, so it can show what SQL and logical plans can show, and reads CSV and JSON through `read_csv('<file>')` as SQL and TypeScript do. Ranks 31 and 93 leave the 5 once `files` names a credential (the Mojo SDK design's slice 4), so its floor is then 3 |
 | Mojo physical plan | 0 | all 80 until that surface exists (the Mojo SDK design) |
 
 Rank 75 reads two CSV files. Its Mojo example reads them with `read_csv('<file>')` in the
@@ -219,7 +226,7 @@ node/docs/tasks/<rank>-<slug>/               form typescript
     example.ts    expected_output.txt  page.md  [probe_<name>.ts    probe_<name>.error.txt]
 src/komira/docs/tasks/<rank>-<slug>/         form mojo (Mojo)
     example.mojo  expected_output.txt  page.md  [probe_<name>.mojo  probe_<name>.error.txt]
-src/komira/docs/mojo_plan_tasks/<rank>-<slug>/   form mojo_plan (Mojo physical plan)
+src/komira_physical/docs/tasks/<rank>-<slug>/ form mojo_plan (Mojo physical plan)
     example.mojo  expected_output.txt  page.md  [probe_<name>.mojo  probe_<name>.error.txt]
 python/docs/sql_tasks/<rank>-<slug>/         form sql
     example.sql   expected_output.txt  page.md  [probe_<name>.sql   probe_<name>.error.txt]
@@ -245,9 +252,8 @@ Where each tree sits:
   working name the Mojo SDK design (komira-ai/komira#2496) uses. If that name
   changes, the path follows it. If `//:src_layout` reads the nested package as one of its own, the
   slice that adds the tree adds its row to [docs/architecture.md](../architecture.md).
-- **The `mojo_plan` tree** (Mojo physical plan, section 7) sits in the package of that surface,
-  with its own tab. The Mojo SDK design names that package; `src/komira/docs/mojo_plan_tasks/` is
-  the path agreed with it so far, and the tree follows the package if it differs.
+- **The `mojo_plan` tree** (Mojo physical plan, section 7) is `src/komira_physical/docs/tasks/`, in
+  the package `komira_physical` that owns that surface (the Mojo SDK design), with its own tab.
 - **The SQL tree** is `python/docs/sql_tasks/`, beside `run_sql.py`, the Python lines that run it.
   Its per-task runs install the wheel, which `//:python_closure` allows only under `python/`, and
   they are declared from a glob of the tree's own folders, which only the tree's own BUCK file can
@@ -344,11 +350,11 @@ language would:
 | TypeScript | the values the example reads from the `Table`, with `console.log`. `Result` has no printer. `apache-arrow` gives an Int64 value as a `bigint` *[inferred, not measured here]*. Slice 1 fixes the exact form by running rank 75 |
 | Mojo | `print(result)`, as the Mojo SDK design (komira-ai/komira#2496) proposes: how `Result` prints is that design's (its section on `Result`) |
 
-The only Mojo table printer today is `format_table` (`src/sdk/table_display.mojo`): an ASCII box
-with a row of column names, a row of type labels (`str`, `i64`) and a footer line `N rows`, held
-exactly by its unit test `test_exact_table_alignment`. It is in `sdk`, which `komira` does not
-import, so whether `print(result)` uses it is the Mojo SDK design's open point. Mojo physical plan
-prints as that surface's design says; its runner and printing come with slice 6.
+The Mojo SDK design settles the Mojo printer: `print(result)` writes the table `format_table`
+makes (an ASCII box with a row of column names, a row of type labels such as `str` and `i64`, and
+a footer line `N rows`, held exactly by its unit test `test_exact_table_alignment`), after that
+design moves `format_table` into `arrow`. The text is made when `sql` returns, so `print(result)`
+cannot fail. Mojo physical plan prints the same way; its runner comes with slice 6.
 
 One output file that every form prints byte for byte is not part of this design. It would need a
 printer on Python's and Node's `Result`, an API komira would invent, and every Python output would
@@ -450,14 +456,17 @@ two such files, each kept once for the whole SQL tree:
   s.close();
   ```
 
-Both are sketches until slice 2 runs them; slice 2 fixes their exact text. What they do is fixed
-here:
+These are not a program komira ships: each is the SDK's own `sql()` called from the few lines the
+page shows. Slice 2 fixes their exact text by running them. What they do is fixed here:
 
 - **One statement at a time.** `sql()` takes one statement (Python's `Session.sql`, and Node's
   `sql`). The file is split at each `;` that ends a line, and each statement is passed without its
   `;`. So a SQL example ends each statement with `;` at the end of a line, never ends a line inside
   a statement with `;`, and ends with a line feed. The `sql` profile of the checker refuses an
-  `example.sql` whose last line is not a `;`-ended line followed by a line feed.
+  `example.sql` whose last line is not a `;`-ended line followed by a line feed. It does not
+  refuse a `;` that ends a line inside a statement, which it cannot tell from a statement's end;
+  such a file splits a statement in two, both runs fail with the engine's parse error, and the
+  task's run target names the file.
 - **Column names are unique** in each result. Python's `to_pylist()` keeps one of two columns of
   the same name, and JavaScript keeps both, so the two runs would differ and the Node run fails.
 - **Errors.** Neither file catches an error. The run that executes it catches the error and takes its
@@ -483,10 +492,23 @@ here:
     `run_sql.ts`, then for each folder copies `example.sql` and runs it. A failure names the folder's
     `expected_output.txt:<line>`. It reads the SQL tree through a filegroup of its `.sql` and `.txt`
     files, which holds no `.py` file, so `//:python_closure` allows it.
-- **What the page tells a reader.** The SQL page shows `example.sql` and its output, then: "Save
-  the statements as `example.sql` and run them, from that folder, with these lines", followed by
-  the two files, each through the include marker that exists, `<!-- include run_sql.py -->` and
-  `<!-- include run_sql.ts -->`, in a `python` and a `typescript` fence. The `sql` profile names
+- **What the page tells a reader.** The SQL page shows `example.sql` and its output, then these
+  steps, the same on every SQL page:
+  1. Save the statements above as `example.sql` in an empty folder.
+  2. Python: `pip install komira`; save the lines below as `run_sql.py` in that folder; run
+     `python run_sql.py` there.
+  3. TypeScript, on Node 22.18 or later: in that folder run `npm init -y`, then
+     `npm pkg set type=module` (the lines use top-level `await`, which needs an ES module), then
+     `npm install @komira-ai/komira apache-arrow`; save the lines below as `run_sql.ts`; run
+     `node run_sql.ts` there.
+
+  The two sets of lines follow, each through the include marker that exists,
+  `<!-- include run_sql.py -->` and `<!-- include run_sql.ts -->`, in a `python` and a `typescript`
+  fence. The steps' text is spelled once, in the `sql` profile, and the checker holds every SQL
+  page to it. The runs do the same: the Python run runs `python run_sql.py` in the folder, from the
+  installed wheel; the Node run writes a `package.json` with `"type": "module"`, installs the same
+  two packages, and runs `node run_sql.ts` in the folder. The one difference is where npm takes the
+  packages from: the pinned tarballs, offline, instead of the registry. The `sql` profile names
   these two shared files: its `:pages` target is given them as inputs, and an include of either
   name on a SQL page is held to that file byte for byte, as an include of a task's own file is.
   A file name still has no `/`, so no new marker or path form is needed, and every SQL page must
@@ -606,7 +628,7 @@ has no `files` yet; its examples read files in the SQL text until it does.
 | `python` | `python/docs/tasks` | `example.py` | `probe_<name>.py` | `python` | `py` |
 | `typescript` | `node/docs/tasks` | `example.ts` | `probe_<name>.ts` | `typescript` | `ts` |
 | `mojo` | none until `komira` is published (then `src/komira/docs/tasks`) | `example.mojo` | `probe_<name>.mojo` | `mojo` | `Mojo` |
-| `mojo_plan` | added with Mojo physical plan (then `src/komira/docs/mojo_plan_tasks`) | `example.mojo` | `probe_<name>.mojo` | `mojo` | `Mojo` |
+| `mojo_plan` | added with Mojo physical plan (then `src/komira_physical/docs/tasks`) | `example.mojo` | `probe_<name>.mojo` | `mojo` | `Mojo` |
 
 Every profile has `expected_output.txt` (`text`), `page.md` and `probe_<name>.error.txt`. The
 `mojo_plan` row (Mojo physical plan) is the fifth row, with its own tree, the same file names and the same fence word. Two rows
@@ -669,7 +691,7 @@ may share a fence word; no two rows share a tree.
     tree `src/komira/docs/tasks/`.
   - **Mojo physical plan**: the separate, Mojo-only surface whose code writes physical plans. It
     links the engine's Mojo libraries, so it needs them published. Form `mojo_plan`, tree
-    `src/komira/docs/mojo_plan_tasks/`, with the same Mojo runner, once it exists.
+    `src/komira_physical/docs/tasks/`, with the same Mojo runner, once it exists.
 
   A typed Mojo SDK, whose column types are checked when the user's program is compiled, may come
   later; the owner has not ruled on it. It has no form here; its own design would add one, as a
@@ -739,7 +761,7 @@ Every row has a negative case that must go red and name the line or the entry.
 | Profile: files | an example of another form, or a stray file, in a tree | a `.py` in the Node tree; an `example.ts` with no `expected_output.txt` |
 | Profile: fences | an unchecked program on a page | an unmarked `typescript` fence; an unmarked `python` fence on a TypeScript page; an unmarked `sql` fence on a Python page; a `ts` or `SQL` fence |
 | Profile: include | a page that shows another program than the one that ran | one changed byte of `example.ts` in the page |
-| SQL page's run lines | a page that shows other run lines than the ones the tests ran | one changed byte of the `run_sql.py` fence on a SQL page; a SQL page without the `run_sql.ts` include; an `example.sql` that does not end with a `;` line and a line feed |
+| SQL page's run lines | a page that shows other run lines or steps than the ones the tests ran | one changed byte of the `run_sql.py` fence on a SQL page; one changed byte of the steps on one SQL page; a SQL page without the `run_sql.ts` include; an `example.sql` that does not end with a `;` line and a line feed |
 | Catalogue: `forms` | a form left out without a word | a non-gap entry with no `mojo`; a `not-shown` with no reason; a key no profile names |
 | Catalogue: status | an entry whose word disagrees with its forms | `status` `works` with every form `partial`; every form `not-shown` on a non-gap entry |
 | Tree against catalogue | a tab with no tested example, or a tested example the catalogue hides | `typescript` `works` with no folder, the catalogue the only file changed; a folder with `typescript` `not-shown`; `mojo` shown while the profile has no tree |
@@ -752,19 +774,33 @@ Every row has a negative case that must go red and name the line or the entry.
 
 ## Question for the owner
 
-1. **What the gate means for a task a form cannot show yet.** The gate is that the examples work in
+1. **What the gate means for a task a language cannot show yet.** The gate is that the examples work in
    SQL, Python, TypeScript and Mojo.
    - **Option 1:** every task that Python shows, and that the language can show at all, works in
-     that language before the site publishes; the tasks a form can never show are listed by rank
-     with the reason. Today that list is the 6 of [What each form can show](#what-each-form-can-show)
-     (ranks 22, 31, 60, 89, 90 and 93) for SQL; for TypeScript and Mojo, ranks 31 and
-     93 are on it only until each has credentials. Cost: nothing publishes until every other task
-     works in every form. Up to 63 tasks need their SQL written first, and some may need a frame
-     API in TypeScript or Mojo, which has no design yet.
-   - **Option 2:** a task may also be left out of one form when a tracked issue says why. This is an
+     that language before the site publishes; the tasks a language cannot show today are listed by rank
+     with the reason (the list below). Cost: nothing publishes until every other task works in
+     every language. Up to 64 tasks need their SQL written first, and some may need a frame API
+     in TypeScript or Mojo, which has no design yet.
+   - **Option 2:** a task may also be left out of one language when a tracked issue says why. This is an
      exception to the gate. Cost: the site publishes with holes, and you grant each one. The
      checker today would accept any reason; if this is granted, the checker is changed to refuse a
      reason that names no issue.
+
+   The gate counts four languages: SQL, Python, TypeScript and Mojo, where Mojo is the untyped SDK
+   `komira`. The Mojo physical plan tab is outside it.
+
+   The ranks each language cannot show today, for a reason other than work not yet done (counted on
+   main at commit 4371842, [What each form can show](#what-each-form-can-show)):
+
+   | Language | Ranks | Why | Until |
+   |---|---|---|---|
+   | SQL | 22, 89, 90 | the task stores rows in a database: the Python example does it with Python's own `sqlite3`, and komira writes to no database | komira writes to a database |
+   | SQL | 31, 93 | the task reads cloud storage with a credential, which SQL text cannot name | never in SQL text alone |
+   | Python | none | | |
+   | TypeScript | 22, 89, 90 | as for SQL | komira writes to a database |
+   | TypeScript | 31, 93 | the package passes no credential to the shared library yet | it does |
+   | Mojo | 22, 89, 90 | as for SQL | komira writes to a database |
+   | Mojo | 31, 93 | `files` names no credential yet | the Mojo SDK design's slice 4 |
 
    Under either option, the list of exceptions also says that the shared library, and so the Mojo
    `komira` package, is not built for linux-arm64.
