@@ -146,7 +146,7 @@ built is in [Layers still to come](#layers-still-to-come).
 
 | module | what it is |
 |---|---|
-| [`lz4`](../src/lz4/) | the shared LZ4 raw-block codec over liblz4, loaded at run time, with no first-party deps. |
+| [`lz4`](../src/lz4/) | the shared LZ4 raw-block and frame codecs over lz4, linked statically, with no first-party deps. |
 | [`zlib`](../src/zlib/) | a zero-dependency FFI facade over libz, so a consumer that needs only zlib framing does not depend on a file-format reader. |
 | [`protobuf`](../src/protobuf/) | a general-purpose Protocol Buffers wire codec (reader, writer, wire types), not tied to any one message set. |
 | [`xml`](../src/xml/) | a general XML codec: reader, tree, writer and escaping. |

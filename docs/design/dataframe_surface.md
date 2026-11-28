@@ -155,7 +155,7 @@ The frames are immutable, except for one pandas idiom:
   - A write terminal sets the envelope's `write_target` (format version 5). The plan entry writes the file
     and answers the one-row `Count` stream, which the terminal reads and drops, returning `None`
     ([credentials_and_writes.md §10](credentials_and_writes.md#10-writes)). Built for the pandas-shaped
-    skin; the polars-shaped `sink_*` of `komira.pl` are not built.
+    skin, and for the polars-shaped `sink_csv`, `sink_parquet` and `sink_ndjson` of `komira.pl`.
   - protobuf becomes a required dependency of the package with this surface, beside pyarrow, as the
     Python package design says. Its range is `PROTOBUF_REQUIREMENT` in `python/dependencies.bzl`, which
     the wheel of the release that first ships the plan modules declares.
@@ -206,7 +206,10 @@ The frames are immutable, except for one pandas idiom:
   the default session. This is the one SQL binding of every kind of source
   ([credentials_and_writes.md decision 2](credentials_and_writes.md#2-binding-a-sql-name-on-the-session-or-for-one-call)),
   and it replaces the `register_view` of earlier drafts. The readers take objects or paths directly and
-  read no SQL binding.
+  read no SQL binding. This view binding is not built. What is built is `Session.register(name, obj)`,
+  DuckDB's `register`: it runs a frame's plan now, on the frame's own session (which may be another
+  one), and copies the rows into a table the session holds, as it does for any object with the Arrow C
+  stream interface (python_package.md).
 
 ### 5. Attributes never fall through
 

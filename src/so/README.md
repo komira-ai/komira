@@ -1016,13 +1016,17 @@ reach one, so that it comes back as a status:
 - `lpad`, `rpad` and `repeat` whose value for one row would be over 64 MiB
   (`STRING_FN_N_REPEAT_MAX_BYTES`) are refused by name before anything is
   allocated.
-- libzstd, libz and liblz4, which the codec packages open by soname at first
-  use in an initializer that cannot raise, are opened first by a probe that
-  can, at the start of every call that can reach a codec (the Parquet, CSV
+- libz, which the codec packages open by soname at first use in an
+  initializer that cannot raise, is opened first by a probe that can, at the
+  start of every call that can reach a codec (the Parquet, CSV
   and JSON register and describe calls, `komira_sql_stream`,
   `komira_sql_stream_run` and `komira_plan_stream`;
   `komira_register_arrow_stream` reads no file and is not probed). A missing library is `compression: cannot load
   <soname>: <the loader's error>`, not an abort in the middle of a query.
+  zstd and lz4 are not opened at all: their C libraries are linked into
+  libkomira (`//third_party/zstd`, `//third_party/lz4`, every symbol renamed
+  `komira_zstd_*` and `komira_lz4_*`), so a host without libzstd or liblz4,
+  such as macOS, reads and writes zstd and lz4 Parquet.
 
 `tests/c/abort_driver.c` sends each of these inputs from a C host, on its main
 thread, and requires the status and the reason as the last error, `*out`
