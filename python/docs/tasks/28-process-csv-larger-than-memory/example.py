@@ -26,22 +26,6 @@ with komira.Session() as s:
         amount_sum += sum(batch.column("amount").to_pylist())
     print(rows_seen, amount_sum)
 
-# Or the pandas loop: read_csv(chunksize=n) reads the file as it is asked for,
-# each chunk a pyarrow.Table of at most n rows; the totals kept across the
-# chunks are the ones the query above gave.
-chunks = 0
-n = {}
-total = {}
-for chunk in komira.read_csv("sales.csv", chunksize=1000):
-    chunks += 1
-    for city, amount in zip(chunk["city"].to_pylist(), chunk["amount"].to_pylist()):
-        if amount >= 10:
-            n[city] = n.get(city, 0) + 1
-            total[city] = total.get(city, 0) + amount
-print(chunks, "chunks")
-for city in sorted(n):
-    print(city, n[city], total[city])
-
 # The pandas-shaped frame is lazy too: the filter and the group-by are one query.
 df = komira.read_csv("sales.csv")
 by_city = df[df["amount"] >= 10].groupby("city").agg(n=("id", "count")).sort_values("city")

@@ -931,7 +931,7 @@ def test_a_chain_of_verbs_reaches_the_session_only_as_plan_bytes():
 
 FRAME_MODULES = (
     "_frame.py", "_groupby.py", "_series.py", "_refusals.py", "_verbs.py", "_missing.py", "_cast.py", "_accessors.py",
-    "_display.py", "_merge.py", "_windows.py", "_write.py", "_chunks.py",
+    "_display.py", "_merge.py", "_windows.py", "_write.py",
 )
 PRIVATE_SESSION = {"_plan_stream", "_plan_render", "_plan_write", "_parquet_schema", "_csv_binding", "_json_binding"}
 ALLOWED_IMPORTS = {
@@ -947,9 +947,6 @@ ALLOWED_IMPORTS = {
     # a result's rows with pyarrow, and reads no stream.
     ".:_display", "html", "collections.abc:Sequence", "pyarrow", "pyarrow.compute",
     ".:_write", "collections.abc:Mapping",
-    # The chunk reader of read_csv(chunksize=n) (komira/_chunks.py): it reads
-    # the file with pyarrow's CSV reader, never through the library.
-    ".:_chunks", "collections", "._errors:KomiraError", "pyarrow.csv", "datetime",
 }
 
 
@@ -1065,6 +1062,21 @@ def test_read_csv_header_must_be_infer_zero_or_none_before_any_library_call():
     )
     for header in (1, True, False, "first", 2.5):
         refuses(lambda: komira.read_csv(PATH, header=header), UnsupportedOperation, message.format(header))
+
+
+def test_read_csv_refuses_chunked_reading_by_name_before_any_library_call():
+    message = (
+        "read_csv({0}={1!r}) reads the file in chunks: chunked reading waits for the engine "
+        "to hand out batches as it makes them"
+    )
+    for chunksize in (2, 1, 0, -1, 2.0, "2", False):
+        refuses(lambda: komira.read_csv(PATH, chunksize=chunksize), UnsupportedOperation,
+                message.format("chunksize", chunksize))
+    for iterator in (True, 1, 0, None):
+        refuses(lambda: komira.read_csv(PATH, iterator=iterator), UnsupportedOperation,
+                message.format("iterator", iterator))
+    refuses(lambda: komira.read_csv(PATH, chunksize=2, iterator=True), UnsupportedOperation,
+            message.format("chunksize", 2))
 
 
 def test_the_readers_refuse_a_session_that_is_not_a_session_before_any_library_call():

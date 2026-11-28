@@ -239,7 +239,10 @@
     "slug": "process-csv-larger-than-memory",
     "category": "Read",
     "question": "How do I process a CSV that does not fit in memory?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2369"
+    ]
   },
   {
     "rank": 29,

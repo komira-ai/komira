@@ -1,0 +1,1 @@
+UnsupportedOperation: read_csv(chunksize=2) reads the file in chunks: chunked reading waits for the engine to hand out batches as it makes them
