@@ -649,8 +649,8 @@ pub fn check7MachO(alloc: Alloc, so: Shared, weak: []const []const u8, red: *Red
 // ---- what a c_shared_lib leaves to the program that loads it -----------------
 
 /// Whether the undefined symbol `s` is bound to a library `so` loads. ELF:
-/// it needs a version of a NEEDED file (glibc's `GLIBC_2.x`; glibc is the
-/// one library a c_shared_lib links). Mach-O: its two-level ordinal names a
+/// it carries a symbol version (glibc's `GLIBC_2.x`; glibc is the one
+/// library a c_shared_lib links, and its names are the versioned ones). Mach-O: its two-level ordinal names a
 /// loaded dylib. Anything else is left to the program that loads `so`: an
 /// unversioned ELF symbol, or a Mach-O one bound to flat lookup (a
 /// `-undefined dynamic_lookup` link), to the main executable or to the
